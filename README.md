@@ -1,8 +1,16 @@
-# Reviewer Self-Ego — v1.3 Preliminary Candidate Archive
+# Reviewer Self-Ego — v1.4 Preliminary Candidate Archive
 
-[v1.3/](v1.3/) contains the latest dataset in **ten conference/source JSON files and an [index manifest](v1.3/index.json)**, tracked with ordinary Git. Their union preserves **3,724 unique arXiv papers and all 14,086 original versions** from the verified MBZUAI export, created at **`2026-09-11T06:38:05.787685Z`**. **No S2 content assessment, page-count filter or license filter was applied.** Temporal eligibility does not establish substantive revision, scientific improvement or reviewer influence.
+[v1.4/](v1.4/) is the current archived candidate set: **3,692 unique papers and 13,965 original version records**. Starting from v1.3, the only new filter removes an entire unit when **any original-version PDF is strictly larger than 50,000,000 bytes (50 decimal MB)**, including versions skipped by temporal selection. Exactly 50 MB is retained. This removes **32 units**, triggered by **60 oversized PDFs**.
 
-## Scope and selection
+Retained paper objects are unchanged from v1.3. The [PDF metadata supplement](v1.4/pdf_metadata.jsonl) records the newer size/page observations: **13,942 available PDFs**, plus **23 officially unavailable versions in 22 units**, retained as null with evidence. File availability remains separate from size eligibility. No new content, license or page-count filter was applied; the original strict >30-day temporal rule remains in effect.
+
+GitHub contains the frozen [index](v1.4/index.json), ten source shards, [statistics](v1.4/statistics.json), [all-unit size audit](v1.4/size_filter_audit.json) and [excluded-unit records](v1.4/excluded_units.json). Every published file is below GitHub's ordinary file-size limit. The 129,350,612-byte combined `v1.4.json` and complete tar archive remain on MBZUAI and in the local release archive; they are not Git blobs. See [GitHub distribution and exact reconstruction](v1.4/GITHUB.md). Earlier release directories and tags are preserved.
+
+## Parent v1.3 archive
+
+[v1.3/](v1.3/) contains the parent dataset in **ten conference/source JSON files and an [index manifest](v1.3/index.json)**, tracked with ordinary Git. Their union preserves **3,724 unique arXiv papers and all 14,086 original versions** from the verified MBZUAI export, created at **`2026-09-11T06:38:05.787685Z`**. **No S2 content assessment, page-count filter or license filter was applied.** Temporal eligibility does not establish substantive revision, scientific improvement or reviewer influence.
+
+## Parent v1.3 scope and selection
 
 | Raw-input stage | Count |
 | --- | ---: |
@@ -19,7 +27,7 @@ Sources cover ICLR 2026; ICML and ACL 2025–2026; CVPR, EMNLP, ICCV and NeurIPS
 
 Eligibility requires an ordered subsequence of **at least three original versions**, with **every consecutive selected gap strictly greater than 2,592,000 seconds (30 elapsed days)**. For a three-version witness, both gaps must pass. Exactly 30 days fails; intermediates may be skipped (`v1 → v3 → v5`). First-to-last span alone is insufficient. Unknown timestamps must remain null with reasons and cannot establish a passing gap; this frozen confirmed inventory has zero unknown/conflicting dates and zero unresolved temporal outcomes.
 
-## Schema and interpretation
+## Parent v1.3 schema and interpretation
 
 `index.json` uses schema `v1.3-source-package-1`. Its `dataset_metadata` preserves **all original non-record top-level fields unchanged**, including global statistics, provenance and protocol. `source_json` identifies the original combined file and its bytes/hash; `files[]` gives each `source_id`, relative `path`, `record_count`, bytes and SHA-256. `record_order` preserves the original paper order.
 
@@ -42,7 +50,7 @@ Read physical pages from **`versions[].page_count.value`**, with `page_count.sta
 
 Paper-level `license_metadata.license` reports the latest observed work-record license, preserving raw/normalized URIs, name, code, SPDX value where applicable, and observations. Version-level `license_metadata` contains **3,736 latest-record-context observations and 10,350 unknown historical licenses**. Never inherit a latest license into an unknown older version. Manuscript licensing is separate from descriptive-metadata licensing.
 
-## Download and verify
+## Download and verify the parent v1.3 archive
 
 Use an authenticated account with repository access:
 
@@ -173,7 +181,7 @@ PDFs, raw JSONL/XML/HTML sources, unresolved queues and full temporal audits rem
 The current executable pipeline is limited to **one paper unit**:
 
 ```text
-Frozen v1.3 index + original PDF store
+Frozen v1.4 index + original PDF store
   -> fixed maximum-cardinality version sequence (each selected gap >30 days)
   -> adjacent selected PDF pairs
   -> concurrent version uploads; dispatch each pair when both files are processed
