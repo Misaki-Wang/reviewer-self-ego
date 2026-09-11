@@ -27,12 +27,7 @@ def write_json(path, data):
 
 def digest(path):
     with path.open('rb') as stream:
-        if hasattr(hashlib, 'file_digest'):
-            return hashlib.file_digest(stream, 'sha256').hexdigest()
-        result = hashlib.sha256()
-        for block in iter(lambda: stream.read(1024 * 1024), b''):
-            result.update(block)
-        return result.hexdigest()
+        return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 
 def validate_pdf(path, aid, number):

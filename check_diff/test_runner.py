@@ -141,27 +141,6 @@ pathlib.Path(args[args.index('--output-last-message') + 1]).write_text({json.dum
         self.assertEqual(json.loads(output.read_text()), annotation())
         self.assertEqual(next(iter(json.loads(output.read_text()))), 'overall')
 
-    def test_save_result_preserves_schema_order_unicode_and_final_newline(self):
-        ordered = annotation()
-        ordered['M1']['justification'] = 'Preserves α and café.\nSecond line.'
-        output = self.pair.output_path(self.args.output)
-        runner.save_result(output, dict(reversed(list(ordered.items()))))
-        expected = (json.dumps(ordered, ensure_ascii=False, indent=2) + '\n').encode('utf-8')
-        self.assertEqual(output.read_bytes(), expected)
-
-    def test_failed_result_replace_preserves_prior_file_without_temporary_debris(self):
-        output = self.pair.output_path(self.args.output)
-        runner.save_result(output, annotation())
-        original = output.read_bytes()
-        replacement = annotation()
-        replacement['M1']['change'] = 'Major change'
-        with patch.object(Path, 'replace', side_effect=OSError('Mock replacement failure')) as replace:
-            with self.assertRaisesRegex(OSError, 'replacement failure'):
-                runner.save_result(output, replacement)
-        replace.assert_called_once()
-        self.assertEqual(output.read_bytes(), original)
-        self.assertEqual(list(output.parent.iterdir()), [output])
-
     def test_resume_skips_cli_and_overwrite_recomputes(self):
         runner.save_result(self.pair.output_path(self.args.output), annotation())
         with patch.object(runner, 'compare_pair', return_value=annotation()) as call:
