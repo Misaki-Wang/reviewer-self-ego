@@ -3,6 +3,7 @@
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -14,13 +15,16 @@ import sys
 import tempfile
 import threading
 import time
+import uuid
 
 from tqdm import tqdm
 
 if __package__:
     from .schema import SCHEMA, validate_result
+    from . import token_usage
 else:
     from schema import SCHEMA, validate_result
+    import token_usage
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
@@ -95,7 +99,7 @@ def make_prompt(pair):
 
 
 def build_command(args, workdir):
-    return [args.codex, 'exec', '--ignore-user-config', '--ephemeral',
+    return [args.codex, 'exec', '--json', '--ignore-user-config', '--ephemeral',
             '--skip-git-repo-check', '--sandbox', 'workspace-write',
             '--model', args.model, '-c', f'model_reasoning_effort="{args.effort}"',
             '-c', 'project_doc_max_bytes=0', '-c', 'approval_policy="never"',
@@ -153,32 +157,40 @@ def task_environment(state_dir):
     return env
 
 
-def compare_pair(args, pair):
+def compare_pair(args, pair, attempt_record=None):
     """The model reads the two PDFs; all scratch files live in a temporary directory."""
     with tempfile.TemporaryDirectory(prefix='check_diff-') as tmp:
         workdir = Path(tmp) / 'work'
         workdir.mkdir()
         env = task_environment(Path(tmp) / 'cli_state')
         (workdir / 'schema.json').write_text(json.dumps(SCHEMA), encoding='utf-8')
-        with (Path(tmp) / 'codex.log').open('w+', encoding='utf-8') as log:
+        with (Path(tmp) / 'events.jsonl').open('w+', encoding='utf-8') as log, \
+                (Path(tmp) / 'stderr.log').open('w+', encoding='utf-8') as stderr:
             with PROCESS_LOCK:
                 if STOP.is_set():
                     raise RuntimeError('Interrupted')
                 process = subprocess.Popen(build_command(args, workdir), stdin=subprocess.PIPE,
-                                           stdout=log, stderr=log, text=True, start_new_session=True, env=env)
+                                           stdout=log, stderr=stderr, text=True, start_new_session=True, env=env)
                 ACTIVE_PROCESSES.add(process)
             try:
                 process.communicate(make_prompt(pair), timeout=args.timeout)
                 if STOP.is_set():
                     raise RuntimeError('Interrupted')
                 if process.returncode:
-                    log.seek(0)
-                    detail = log.read()[-3000:].strip()
+                    stderr.seek(0)
+                    detail = stderr.read()[-3000:].strip()
+                    if not detail:
+                        log.seek(0)
+                        detail = log.read()[-3000:].strip()
                     raise RuntimeError(f'Codex exited {process.returncode}: {detail}')
             finally:
                 terminate(process)
                 with PROCESS_LOCK:
                     ACTIVE_PROCESSES.discard(process)
+                if attempt_record is not None:
+                    log.flush()
+                    attempt_record['exit_code'] = process.returncode
+                    attempt_record['token_usage'] = token_usage.read_events(log)
         result = json.loads((workdir / 'response.json').read_text(encoding='utf-8'))
         validate_result(result)
         return result
@@ -187,6 +199,10 @@ def compare_pair(args, pair):
 def save_result(path, result):
     validate_result(result)
     result = {key: result[key] for key in SCHEMA['properties']}
+    save_json(path, result)
+
+
+def save_json(path, result):
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
     try:
@@ -212,27 +228,46 @@ def run_pair(args, pair):
         except (ValueError, OSError) as exc:
             tqdm.write(f'REBUILD {pair.name}: {exc}')
     started = time.monotonic()
+    attempts = []
+    receipt = {'arxiv_id': pair.arxiv_id, 'pair': [pair.before, pair.after],
+               'run_id': getattr(args, 'execution_run_id', None),
+               'requested_model': args.model, 'requested_reasoning_effort': args.effort,
+               'started_at_utc': datetime.now(timezone.utc).isoformat(), 'attempts': attempts}
     for attempt in range(args.retries + 1):
         if STOP.is_set():
             return 'stopped'
+        record = {'attempt': attempt + 1, 'status': 'failed',
+                  'started_at_utc': datetime.now(timezone.utc).isoformat()}
+        attempts.append(record)
         try:
             tqdm.write(f'START {pair.name} {args.model}/{args.effort} ({attempt + 1}/{args.retries + 1})')
-            result = compare_pair(args, pair)
+            result = compare_pair(args, pair, record)
             if STOP.is_set():
+                record['status'] = 'stopped'
                 return 'stopped'
             save_result(path, result)
+            record['status'] = 'completed'
             tqdm.write(f'DONE {pair.name} [{time.monotonic() - started:.1f}s]')
             return 'done'
         except Exception as exc:
+            record['error'] = ' '.join(str(exc).split())
             if STOP.is_set():
+                record['status'] = 'stopped'
                 return 'stopped'
             detail = ' '.join(str(exc).split())
             tqdm.write(f'FAILED {pair.name} ({attempt + 1}/{args.retries + 1}): {detail}')
+        finally:
+            record['finished_at_utc'] = datetime.now(timezone.utc).isoformat()
+            receipt.update(status=record['status'], finished_at_utc=record['finished_at_utc'],
+                           elapsed_seconds=round(time.monotonic() - started, 6),
+                           token_usage=token_usage.summarize(attempts))
+            save_json(path.with_suffix('.execution.json'), receipt)
     return 'failed'
 
 
 def run(args, pairs):
     counts = dict(done=0, skipped=0, failed=0, stopped=0)
+    args.execution_run_id = uuid.uuid4().hex
     with tqdm(total=len(pairs), desc='check_diff', unit='pair') as progress:
         with ThreadPoolExecutor(max_workers=args.workers) as pool:
             jobs = [pool.submit(run_pair, args, pair) for pair in pairs]
@@ -241,6 +276,30 @@ def run(args, pairs):
                 progress.set_postfix(counts, refresh=False)
                 progress.update(1)
         tqdm.write(' / '.join(f'{key}={value}' for key, value in counts.items()))
+    attempts, saved_pairs, record_errors = [], [], []
+    for pair in pairs:
+        receipt_path = pair.output_path(args.output).with_suffix('.execution.json')
+        if not receipt_path.is_file():
+            continue
+        try:
+            receipt = json.loads(receipt_path.read_text(encoding='utf-8'))
+            if not isinstance(receipt, dict):
+                raise ValueError('Execution record is not an object')
+        except (OSError, ValueError) as exc:
+            record_errors.append({'pair': pair.name, 'error': str(exc)})
+            continue
+        current = receipt.get('run_id') == args.execution_run_id
+        if current:
+            attempts.extend(receipt['attempts'])
+        saved_pairs.append({'pair': pair.name, 'executed_in_this_run': current,
+                            'execution_path': str(receipt_path),
+                            'token_usage': receipt.get('token_usage', token_usage.summarize([{}]))})
+    save_json(args.output / 'token_usage.json', {
+        'run_id': args.execution_run_id, 'scope': 'Model attempts executed in this runner invocation only',
+        'finished_at_utc': datetime.now(timezone.utc).isoformat(), 'pair_counts': counts,
+        'token_usage': token_usage.summarize(attempts), 'pairs': saved_pairs,
+        'pairs_without_execution_records': len(pairs) - len(saved_pairs),
+        'execution_record_errors': record_errors})
     return 130 if STOP.is_set() else 1 if counts['failed'] else 0
 
 

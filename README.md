@@ -171,3 +171,5 @@ This branch contains only the v1.3 dataset. The [v1.1](https://github.com/Misaki
 ## Code baseline
 
 The `check_diff/` and `utility/` code is restored from [Steve (c-steve-wang), commit a2f0c40](https://github.com/Misaki-Wang/reviewer-self-ego/commit/a2f0c40b63b4696e6c228de6dd85f564bd88a40f). The comparison runner passes two local original-PDF paths and the prompt to Codex, which reads the PDFs using the installed PDF skill. Historical dataset tags remain available without changing the v1.3 files in this branch.
+
+The runner additionally records [actual CLI-reported token usage](check_diff/README.md#actual-token-usage) for each comparison, all retry attempts, and the current batch. This telemetry extension does not change Steve's scientific prompts, judgment schema, or preparation utility.

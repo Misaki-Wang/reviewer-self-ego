@@ -137,7 +137,8 @@ pathlib.Path(args[args.index('--output-last-message') + 1]).write_text({json.dum
         self.assertEqual(list(scratch.iterdir()), [])
         output = self.pair.output_path(self.args.output)
         self.assertEqual(output.relative_to(self.args.output).as_posix(), '2406.03862/diff_v1_v2.json')
-        self.assertEqual(list(p for p in self.args.output.rglob('*') if p.is_file()), [output])
+        self.assertEqual(set(p for p in self.args.output.rglob('*') if p.is_file()),
+                         {output, output.with_suffix('.execution.json')})
         self.assertEqual(json.loads(output.read_text()), annotation())
         self.assertEqual(next(iter(json.loads(output.read_text()))), 'overall')
 
@@ -154,7 +155,7 @@ pathlib.Path(args[args.index('--output-last-message') + 1]).write_text({json.dum
         result = annotation(); result['E1']['change'] = 'invalid'
         self.fake_cli(result)
         self.assertEqual(self.quiet_run(), 'failed')
-        self.assertFalse(self.args.output.exists())
+        self.assertFalse(self.pair.output_path(self.args.output).exists())
         self.args.retries = 1
         with patch.object(runner, 'compare_pair', side_effect=[ValueError('bad JSON'), annotation()]) as call:
             self.assertEqual(self.quiet_run(), 'done')
@@ -173,7 +174,7 @@ pathlib.Path(args[args.index('--output-last-message') + 1]).write_text({json.dum
             self.fake_cli(delay=delay, returncode=code)
             self.args.timeout = 0.1
             self.assertEqual(self.quiet_run(), 'failed')
-            self.assertFalse(self.args.output.exists())
+            self.assertFalse(self.pair.output_path(self.args.output).exists())
             self.assertFalse(runner.ACTIVE_PROCESSES)
 
     def test_stop_keeps_completed_result(self):
