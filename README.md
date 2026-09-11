@@ -1,127 +1,99 @@
-# Reviewer Self-Ego — v1.1 Metadata Archive
+# Reviewer Self-Ego — v1.2 Candidate Archive
 
-This private repository contains **1,437 papers with at least three arXiv versions that can be selected so that both successive gaps exceed 30 days**. The archive consists of only this README and **[v1.1.json](v1.1.json)**, a single JSON document with full metadata.
+This private repository archives **3,724 unique arXiv candidates** with at least three selectable versions and **both successive gaps strictly greater than 30 days**. It contains only this README and [v1.2.json](v1.2.json), retaining complete original candidate records and additive manuscript-license metadata.
 
-**Release naming:** Git tag `v1.1` archives the website view **“Selected: ≥3, >30 days.”** The upstream *screening v1.1* baseline used **>7 days**. This archive is its **>30-day threshold sensitivity view**, preserving `base_screening_release: "v1.1"` and `view_kind: "threshold_sensitivity"`; it does not overwrite the frozen upstream baseline.
+The union is **1,437 original candidates + 2,301 additional-source candidates − 14 overlaps**: **3,738 source-collection entries** and **14,086 distinct paper/version combinations**. **No license filtering was applied.** This is metadata and temporal screening, not evidence of substantive revision, scientific improvement or reviewer-induced changes.
 
-This is a **temporal candidate index**. Inclusion does not establish substantive revision, scientific improvement, or a complete peer-review trajectory. No new full-corpus LLM content screening was performed for this export.
+The unchanged [v1.1 Git tag](https://github.com/Misaki-Wang/reviewer-self-ego/tree/v1.1) preserves the earlier archive. Its 1,437 papers represent the **>30-day sensitivity view** of upstream screening v1.1, whose baseline used **>7 days**. Archive naming does not change either threshold.
 
-## Contents and statistics
+## Sources and coverage
 
-`v1.1.json` is 27,557,269 bytes. Its top-level `records` array contains one record per paper; the file is standard JSON, not JSONL.
+Counts are publication entries. The 14 overlapping papers occur in an original venue and TMLR; the JSON counts each arXiv ID once.
 
-| Venue | Selected papers |
-|---|---:|
-| ICLR 2026 | 706 |
-| ICML 2026 | 529 |
-| ACL 2026 | 202 |
-| **Total** | **1,437** |
+| Collection | Source | Qualifying entries |
+| --- | --- | ---: |
+| Original | ICLR 2026 | 706 |
+| Original | ICML 2026 | 529 |
+| Original | ACL 2026 | 202 |
+| Added | ACL 2025 | 174 |
+| Added | CVPR 2025 | 177 |
+| Added | EMNLP 2025 | 167 |
+| Added | ICCV 2025 | 193 |
+| Added | ICML 2025 | 435 |
+| Added | NeurIPS 2025 | 673 |
+| Added | TMLR, May 2025–September 2026 retrieval | 482 |
+| **Total** | **3,724 unique papers** | **3,738** |
 
-The file contains **1,437 unique arXiv IDs**, **5,434 original version records**, and **2,874 selected edges**: two edges for one example triple per paper. **670 papers have multiple qualifying triples**; the number of valid triples is retained per paper. PDFs, manuscript text, raw XML/HTML caches, the full upstream census, website assets, and human review notes are not included.
+The seven new official frames contain **20,063 entries**, with **15,254 confirmed arXiv matches** and **4,809 unresolved identities**. Every frame entry was processed. Complete official-frame coverage does **not** imply exhaustive arXiv matching recall: unresolved identities are unknowns, not temporal failures.
 
-## How the index was selected
+Conference frames cover current public main-research lists, excluding Findings, position, invited-journal and other tracks where applicable. Program/proceedings differences and historical acceptance-count discrepancies remain documented in source metadata. TMLR dates have **month precision**; September is incomplete as of retrieval.
 
-1. **Collect official conference frames.** The upstream census covered 14,064 official records: ICLR 2026 (5,353), ICML 2026 (6,415), and ACL 2026 (2,296). ICLR combined 5,351 proceedings papers and two program-only papers, reconciling duplicate Oral/Poster entries. ICML used the main-research directory, including proceedings-only papers, after excluding 213 Position papers. ACL included 2,222 main-conference long papers and 74 short papers. These public frames are not claimed to reconstruct every initial acceptance decision. Each selected record retains its official-source URLs and scope.
-2. **Resolve arXiv identities.** Retrieval used normalized titles, followed by rare title words and author surnames for unresolved records. Official identifiers or a DOI could establish identity; title-based matching also required sufficient author overlap. Approximate matches remained candidates until verified. The frozen inventory contained **10,392 matched works and 3,672 unresolved records**. Unknown records were not treated as having no arXiv copy or only one version. Selected records preserve requests, candidates, errors, and matching evidence.
-3. **Freeze original versions and collect dates.** The latest recorded `vN` fixed the original range `1…N`. Dates came from verified cached arXiv Atom responses and HTML histories, supplemented by explicit version-ID requests. Atom `published` supplies the initial date; `updated` supplies the date of the exact version identified by that entry. UTC timestamps and per-date source hashes were retained. Date requests were serial, at least 3.2 seconds apart, with at most 40 explicit IDs per batch. A completion pass obtained the remaining 81 dates, yielding **20,676 known dates across 10,392 matched works**, without expanding the frozen inventory or changing prior releases. The audit is embedded in `source_provenance.version_dates_source_audit`.
-4. **Apply the temporal rule.** Enumerate original version triples in increasing index order and retain a paper if at least one triple satisfies both strict gap checks below. Store the first qualifying triple in numerical lexicographic order and the total number of qualifying triples. Preserve all original versions, including unselected ones.
-5. **Preserve metadata and verify.** Every original field of each selected matching record was retained unchanged; arXiv metadata, dated histories, links, and selection evidence were added. Before archival, an independent check recomputed eligible IDs and triples and checked original metadata, date evidence, source hashes, and cached Atom enrichment. It reported zero errors across 712 cached source files, including 682 XML files. That external validation report and those source files are not bundled; the JSON retains source references and hashes.
+## Collection and selection
 
-## Exact time rule
+1. Preserve the original candidates and matching/date evidence; the [v1.1 README](https://github.com/Misaki-Wang/reviewer-self-ego/blob/v1.1/README.md) describes that pipeline.
+2. Collect complete official lists for the seven additional sources and reconcile presentation-event duplicates. Match against **Cornell arXiv metadata snapshot v302**, updated September 5, 2026, using official identifiers/DOIs or conservative title-and-author agreement. Keep ambiguities unresolved. Refresh recent official arXiv API metadata and validate complete version histories.
+3. For original indices `i < j < k`, require **both** `t[j] - t[i] > 2,592,000 seconds` and `t[k] - t[j] > 2,592,000 seconds`. Exactly 30 days fails. Selected versions **may skip intermediates**, such as `v1 → v3 → v5`. Preserve all dated versions, the lexicographically first qualifying triple and its qualifying-triple count.
+4. Deduplicate by confirmed arXiv ID, preserving every original entry. Keep native oral/poster/spotlight/highlight labels, awards and certifications separate. Unavailable presentation fields remain null. OpenReview review-score requests encountered an access challenge; no scores were inferred.
+5. Append license observations from the pinned snapshot and official **OAI-PMH arXivRaw** records from September 4 through continuation-token exhaustion. This scan covered **14,984 records**, retained 21 candidate observations and found **two license-URI changes** since the snapshot. No candidate, version or temporal selection was removed or rewritten.
 
-For original indices `i < j < k` and UTC submission timestamps `t_i`, `t_j`, and `t_k`, **both** conditions must hold:
+## Metadata and license scope
 
-```text
-t_j - t_i > 2,592,000 seconds
-t_k - t_j > 2,592,000 seconds
-```
+Each `records` entry contains `arxiv_id`, `origin_collections`, `source_ids`, `license_metadata` and **`original_candidate_records`**. The latter retains complete `v1_1_index` and/or `new_source_expansion` entries: original metadata, actual source URLs, histories, selections and provenance. New venue metadata is inside each original entry's `publications` array.
 
-A day is exactly 86,400 seconds. Exactly 30 days **fails**. Full timestamps determine eligibility; rounded displayed days and the total first-to-last span do not substitute for the two checks.
+`license_metadata.license` preserves the source `raw_value` and URI, with normalized `canonical_uri`, `code`, readable `name` and `spdx_id` where applicable. The arXiv nonexclusive license has no invented SPDX identifier. **Descriptive metadata's CC0 license is separate from each manuscript's reported license.**
 
-Selected versions **may skip original intermediate versions**: `v1 → v3 → v5` can qualify. For a paper with exactly three original versions, both `v1 → v2` and `v2 → v3` must pass. The selected example is the **lexicographically first qualifying original-version triple**, not necessarily the only one.
+All **3,724 candidates** have reported latest-record licenses. Versions can have different licenses: **3,736** retained versions have observations in which that version was the latest-record context; **10,350 remain explicitly unknown**. `exact_version_page_verified` is false for this bulk pass. These annotations neither assess reuse permission nor describe publisher copies, code or datasets.
 
-For context, the full upstream inventory produced the following nested candidate settings. Only the **1,437-paper** subset is included here.
+## Download and verification
 
-| Minimum gap on each selected edge | ≥2 selected versions | ≥3 selected versions |
-|---|---:|---:|
-| >7 days | 5,874 | 1,992 |
-| >14 days | 5,674 | 1,767 |
-| >30 days | 5,383 | **1,437** |
-
-## Preserved metadata
-
-| Field or group | Meaning |
-|---|---|
-| `paper_id`, `venue`, `title`, `authors`, `doi` | Original conference/matching metadata. |
-| `official_url`, `acceptance_source_url`, `source_scope` | Official-source references and frame scope. |
-| `status`, `passes`, `requests`, `errors`, `candidates` | Original identity-matching history and evidence. |
-| `arxiv_id`, `raw_version_count`, `arxiv_url` | Confirmed identity, frozen version count, and arXiv link. |
-| `arxiv_metadata` | Cached Atom title, abstract (`summary`), authors, categories, comments, journal reference, DOI, links, and provenance. |
-| `version_history` | All original version dates, completeness/validation status, per-date source evidence, and version-specific arXiv/PDF URLs. |
-| `selected_three_version_example` | Selected versions, two measured gaps, and `qualifying_triple_count`. |
-| `index_eligibility` | Temporal rule and explicit absence of a substantive-content eligibility claim. |
-
-Source values, names, whitespace, and necessary non-English source fragments are preserved verbatim. Documentation is English; source metadata has not been translated or rewritten. Missing source values remain missing.
-
-## Download and local verification
-
-An authenticated GitHub account with repository access is required. Clone the private repository and select the archive:
+Use an authenticated account with repository access and select `git checkout v1.2`. The JSON is an exact copy of the A800 export: **102,321,543 bytes**. From the repository root, run:
 
 ```sh
-git clone https://github.com/Misaki-Wang/reviewer-self-ego.git
-cd reviewer-self-ego
-git checkout v1.1
-```
-
-`v1.1.json` is an exact byte copy of the original export. Run this standalone Python standard-library check from the repository root; no network or other files are required:
-
-```sh
-python3 - <<'PY'
-import hashlib, json, math
+python3 - <<'PYCODE'
+import hashlib, json
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
-raw = Path("v1.1.json").read_bytes()
-assert hashlib.sha256(raw).hexdigest() == "5138a42feda8ae267e6904107fe98efa4ffafd6950c75d230e7f79edf202e042"
-index = json.loads(raw)
-records = index["records"]
-assert len(records) == 1437 == index["record_count"]
-assert len({r["arxiv_id"] for r in records}) == 1437
-assert Counter(r["venue"] for r in records) == {"ICLR2026": 706, "ICML2026": 529, "ACL2026": 202}
-version_count = edge_count = 0
-for paper in records:
-    assert paper["status"] == "matched"
-    history = paper["version_history"]
-    assert history["complete_history"] and not history["validation_errors"]
-    versions = history["versions"]
-    assert [v["version"] for v in versions] == list(range(1, history["frozen_N"] + 1))
-    dates = {}
-    for version in versions:
-        date = datetime.fromisoformat(version["submitted_at"].replace("Z", "+00:00"))
-        assert date.tzinfo is not None and date.utcoffset() is not None
-        dates[version["version"]] = date
-    example = paper["selected_three_version_example"]
-    selected = example["selected_versions"]
-    assert len(selected) == 3 and selected[0] < selected[1] < selected[2]
-    assert len(example["selected_edges"]) == 2
-    for (a, b), edge in zip(zip(selected, selected[1:]), example["selected_edges"]):
-        gap = (dates[b] - dates[a]).total_seconds()
-        assert gap > 2592000
-        assert (edge["from_version"], edge["to_version"]) == (a, b)
-        assert gap == edge["gap_seconds"]
-        assert math.isclose(gap / 86400, edge["gap_days"], rel_tol=0, abs_tol=1e-9)
-        assert datetime.fromisoformat(edge["from_submitted_at"].replace("Z", "+00:00")) == dates[a]
-        assert datetime.fromisoformat(edge["to_submitted_at"].replace("Z", "+00:00")) == dates[b]
-        edge_count += 1
-    version_count += len(versions)
-assert version_count == 5434 and edge_count == 2874
-print("PASS: exact archive bytes, 1437 papers, 5434 versions, 2874 strict >30-day edges.")
-PY
+raw = Path("v1.2.json").read_bytes()
+assert len(raw) == 102321543
+assert hashlib.sha256(raw).hexdigest() == "90dbcce7ffa6013eea194f14d5afc0123fc77d26ff0834b209b69bdc89013f99"
+data = json.loads(raw)
+assert len(data["records"]) == data["record_count"] == 3724
+assert len({r["arxiv_id"] for r in data["records"]}) == 3724
+origins, sources = Counter(), Counter()
+for paper in data["records"]:
+    originals = paper["original_candidate_records"]
+    assert set(originals) == set(paper["origin_collections"])
+    preserved_sources = set()
+    for origin, entry in originals.items():
+        origins[origin] += 1
+        assert entry["arxiv_id"] == paper["arxiv_id"]
+        assert "license_metadata" not in entry
+        labels = ([entry["venue"]] if origin == "v1_1_index" else
+                  [p["source_id"] for p in entry["publications"]])
+        sources.update(labels)
+        preserved_sources.update(labels)
+        dates = {v["version"]: datetime.fromisoformat(
+            (v.get("submitted_at") or v["created_utc"]).replace("Z", "+00:00"))
+            for v in entry["version_history"]["versions"]}
+        example = entry["selected_three_version_example"]
+        chosen = example["selected_versions"]
+        assert len(chosen) == 3 and chosen[0] < chosen[1] < chosen[2]
+        assert len(example["selected_edges"]) == 2
+        for (a, b), edge in zip(zip(chosen, chosen[1:]), example["selected_edges"]):
+            assert dates[a].tzinfo and dates[b].tzinfo
+            gap = (dates[b] - dates[a]).total_seconds()
+            assert gap > 2592000 and gap == edge["gap_seconds"]
+            assert (a, b) == (edge["from_version"], edge["to_version"])
+    assert preserved_sources == set(paper["source_ids"])
+    assert paper["license_metadata"]["license_filter_applied"] is False
+assert origins == {"v1_1_index": 1437, "new_source_expansion": 2301}
+assert sources == {"ICLR2026": 706, "ICML2026": 529, "ACL2026": 202,
+    "acl2025": 174, "cvpr2025": 177, "emnlp2025": 167, "iccv2025": 193,
+    "icml2025": 435, "neurips2025": 673, "tmlr_2025plus": 482}
+print("PASS: archive integrity, candidate/source counts and strict temporal edges.")
+PYCODE
 ```
 
-## Provenance and interpretation limits
-
-Top-level `source_provenance` records the matching-row, completed-date-inventory, and sorted-ID-set checksums. Per-record evidence retains source paths and hashes. These paths are **upstream provenance locators**, not files expected in this two-file archive. Local verification checks the exported data; it cannot recheck absent XML/HTML, establish completeness against the full census, or rerun original identity matching. Full reconstruction requires the original complete inputs, retrieval/matching workflow, and cached evidence. Lowering the threshold on this subset cannot recover papers excluded before export.
-
-Temporal eligibility does not establish scientific changes or reviewer-induced revisions. arXiv versions need not match manuscripts actually seen by reviewers. Metadata does not guarantee current availability of historical PDFs. Multiple pairs/triples from the same paper are dependent observations. Counts are conditional on the resolved identities and chosen conference frames, not estimates of matching recall or content-screening prevalence. This archive does not assign a new license to the underlying papers or source material.
+This standard-library check validates archive integrity and internal source associations. Upstream independent validation additionally compared every original record with its input and checked license observations against raw evidence. PDFs, full source frames, XML/HTML caches and audit programs are **not bundled**. Embedded paths and hashes locate external provenance under `/workspace/yuhang/AI-reviewer/`; they are not repository files. Complete reconstruction requires those inputs. The two-file archive cannot establish missing-identity recall or independently recheck absent sources.
