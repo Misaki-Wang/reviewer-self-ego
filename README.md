@@ -166,4 +166,20 @@ The MBZUAI source is `/fsx/homes/Yaochen.Wang@mbzuai.ac.ae/AI-reviewer/releases/
 
 PDFs, raw JSONL/XML/HTML sources, unresolved queues and full temporal audits remain outside Git. PDF paths resolve under the MBZUAI `AI-reviewer/` directory; source locators resolve under its `raw_v13_20260911/` bundle. Other paths may identify earlier A800 evidence. Rechecking absent sources requires those external inputs.
 
-[v1.2.json](v1.2.json) remains for compatibility; the [v1.1](https://github.com/Misaki-Wang/reviewer-self-ego/tree/v1.1) and [v1.2](https://github.com/Misaki-Wang/reviewer-self-ego/tree/v1.2) tags preserve earlier archives. The existing [preparation utility](utility/README.md) expects the frozen **v1.1 input schema**, recoverable with `git show v1.1:v1.1.json > v1.1.json`; v1.3 is not a direct substitute. The separate [PDF comparison workflow](check_diff/README.md) consumes prepared PDF pairs. Its code does not imply content judgments exist in this dataset.
+[v1.2.json](v1.2.json) remains for compatibility; the [v1.1](https://github.com/Misaki-Wang/reviewer-self-ego/tree/v1.1) and [v1.2](https://github.com/Misaki-Wang/reviewer-self-ego/tree/v1.2) tags preserve earlier archives. The legacy `prepare_input_data.py` expects the frozen **v1.1 input schema**; the separate `prepare_v13_pilot.py` adapter supports this v1.3 archive. Comparison code does not imply content judgments exist in the frozen dataset.
+
+## Automated comparison pipeline
+
+The current executable pipeline is limited to **one paper unit**:
+
+```text
+Frozen v1.3 index + original PDF store
+  -> fixed maximum-cardinality version sequence (each selected gap >30 days)
+  -> adjacent selected PDF pairs
+  -> concurrent version uploads; dispatch each pair when both files are processed
+  -> independent rubric judgments + validated JSON and execution records
+```
+
+Use [utility/prepare_v13_pilot.py](utility/README.md) to freeze and materialize the selection, then [check_diff/pipeline.py](check_diff/README.md) to manage uploaded files and comparisons with `gpt-6-astra / max`. Versions are uploaded once and shared across adjacent pairs; each assessment receives an immutable two-file manifest. Source PDFs, credentials and run artifacts remain outside Git. The rubric and result schema are preserved, and no aggregate S2 pass/fail is inferred.
+
+The formal pipeline ends with saved judgments and execution evidence. The English website is an **optional, read-only inspection tool**, separate from execution and its success criteria. Live concurrent-upload stability and one previously observed visual-coverage uncertainty remain unresolved; see the [comparison documentation](check_diff/README.md#validation-limits).
