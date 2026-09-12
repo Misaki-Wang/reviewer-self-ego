@@ -34,7 +34,7 @@ output/<arxiv_id>/diff_v1_v2.execution.json
 output/token_usage.json
 ```
 
-JSON 开头是独立的 `overall` 对象，包含 A1、A2。其后是 M1、E1–E6、T1、C1、C2、D1、R1、P1、P2 共 14 个变化维度。A1/A2 使用自己的判断体系，不参与 Major/minor/maybe/no change 分级。
+JSON 开头是独立的 `overall` 对象，包含 A1、A2。其后是 M1、E1–E6、T1、C1、C2、D1、R1、P1、P2 共 14 个变化维度。A1/A2 使用自己的判断体系，不参与 major/minor/maybe/no change 分级。
 
 - A1：`value` 为 `comparable`、`partially_comparable` 或 `unable_to_determine`，附简短 `justification`。
 - A2：分别记录 `before` 和 `after`，各有 `value`（`yes`、`no`、`uncertain`）和简短 `justification`。
@@ -47,7 +47,9 @@ JSON 开头是独立的 `overall` 对象，包含 A1、A2。其后是 M1、E1–
 }
 ```
 
-`change` 只取 `Major change`、`minor change`、`maybe`、`no change`。`justification` 用简短英文说明，不限定字数或句数。Major/minor 按各维度内的变化幅度判断；maybe 表示变化或其重要性尚不明确；两版均无该类内容归为 no change。
+`change` 只取 `major change`、`minor change`、`maybe`、`no change`。`justification` 用简短英文说明，不限定字数或句数。major/minor 按各维度内的变化幅度判断；maybe 表示变化或其重要性尚不明确；两版均无该类内容归为 no change。
+
+Change labels are serialized in lowercase. The runner normalizes only the casing of recognized change-label values when reading model responses or writing results. Legacy saved results with different label casing remain valid for resume, so a casing-only difference does not trigger another model call or rewrite the original file. Justifications and per-version assessments are unchanged; unknown label meanings still fail validation.
 
 任务 prompt 位于 `prompts/compare.md`，runner 将其中的占位符替换为该 pair 的真实文件名和绝对路径，并在开头写明比较方向及 A2 before/after 对应的文件。独立维度定义位于 `prompts/rubric.md`。HTML 不参与运行、prompt 构建或结果校验。
 

@@ -20,10 +20,10 @@ import uuid
 from tqdm import tqdm
 
 if __package__:
-    from .schema import SCHEMA, validate_result
+    from .schema import SCHEMA, normalize_result_labels, validate_result
     from . import token_usage
 else:
-    from schema import SCHEMA, validate_result
+    from schema import SCHEMA, normalize_result_labels, validate_result
     import token_usage
 
 HERE = Path(__file__).resolve().parent
@@ -192,12 +192,11 @@ def compare_pair(args, pair, attempt_record=None):
                     attempt_record['exit_code'] = process.returncode
                     attempt_record['token_usage'] = token_usage.read_events(log)
         result = json.loads((workdir / 'response.json').read_text(encoding='utf-8'))
-        validate_result(result)
-        return result
+        return normalize_result_labels(result)
 
 
 def save_result(path, result):
-    validate_result(result)
+    result = normalize_result_labels(result)
     result = {key: result[key] for key in SCHEMA['properties']}
     save_json(path, result)
 
@@ -223,7 +222,7 @@ def run_pair(args, pair):
     path = pair.output_path(args.output)
     if path.exists() and not args.overwrite:
         try:
-            validate_result(json.loads(path.read_text(encoding='utf-8')))
+            normalize_result_labels(json.loads(path.read_text(encoding='utf-8')))
             return 'skipped'
         except (ValueError, OSError) as exc:
             tqdm.write(f'REBUILD {pair.name}: {exc}')

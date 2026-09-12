@@ -8,7 +8,7 @@ In `overall.A2`, `before` refers to `{before_filename}` and `after` refers to `{
 Use the available PDF skill to read the two PDFs, choosing the tools and approach that suit the comparison.
 
 Assess A1 for the pair and A2 separately for each version. Then judge changes along the fourteen dimensions below. For each change dimension, choose one label:
-- `Major change`: A substantial addition, removal, or revision in the scope or substance of this dimension.
+- `major change`: A substantial addition, removal, or revision in the scope or substance of this dimension.
 - `minor change`: A limited addition, removal, correction, or refinement within this dimension.
 - `maybe`: Incomplete or ambiguous evidence prevents a reliable decision about whether content changed or how substantial the change is. State the specific uncertainty.
 - `no change`: The content covered by this dimension is unchanged, or inspection establishes that it is absent from both versions.

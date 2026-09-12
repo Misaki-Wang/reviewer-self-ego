@@ -4,6 +4,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import sys
 import subprocess
 import time
@@ -13,7 +14,7 @@ import unittest
 from unittest.mock import patch
 
 import runner
-from schema import COMPARABILITY, DIMENSIONS, EMPIRICAL_RESULTS, LABELS, validate_result
+from schema import COMPARABILITY, DIMENSIONS, EMPIRICAL_RESULTS, LABELS, SCHEMA, normalize_result_labels, validate_result
 
 
 def annotation():
@@ -105,6 +106,57 @@ pathlib.Path(args[args.index('--output-last-message') + 1]).write_text({json.dum
             with self.assertRaises(ValueError):
                 validate_result(result)
 
+    def test_prompt_and_schema_share_lowercase_labels(self):
+        self.assertIs(runner.validate_result, validate_result)
+        self.assertEqual(LABELS, ('major change', 'minor change', 'maybe', 'no change'))
+        prompt = runner.make_prompt(self.pair)
+        self.assertEqual(re.findall(r'^- `([^`]+)`:', prompt, re.M), list(LABELS))
+        for dimension in DIMENSIONS:
+            self.assertEqual(SCHEMA['properties'][dimension]['properties']['change']['enum'], list(LABELS))
+        legacy = annotation()
+        legacy['M1']['change'] = LABELS[0].capitalize()
+        with self.assertRaises(ValueError):
+            validate_result(legacy)
+
+    def test_normalization_preserves_input_and_rejects_unknown_meanings(self):
+        legacy = annotation()
+        for index, dimension in enumerate(DIMENSIONS):
+            legacy[dimension]['change'] = LABELS[index % len(LABELS)].upper()
+        before = json.dumps(legacy)
+        normalized = normalize_result_labels(legacy)
+        self.assertEqual(json.dumps(legacy), before)
+        self.assertEqual(normalized['overall'], legacy['overall'])
+        for dimension in DIMENSIONS:
+            self.assertEqual(normalized[dimension]['change'], legacy[dimension]['change'].lower())
+            self.assertEqual(normalized[dimension]['justification'], legacy[dimension]['justification'])
+        legacy['M1']['change'] = 'unsupported change'
+        with self.assertRaises(ValueError):
+            normalize_result_labels(legacy)
+
+    def test_legacy_case_result_skips_model_without_rewriting_archive(self):
+        legacy = annotation()
+        legacy['M1']['change'] = LABELS[0].capitalize()
+        path = self.pair.output_path(self.args.output)
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps(legacy))
+        original = path.read_bytes()
+        with patch.object(runner, 'compare_pair') as call:
+            self.assertEqual(self.quiet_run(), 'skipped')
+            call.assert_not_called()
+        self.assertEqual(path.read_bytes(), original)
+
+    def test_cli_response_and_saved_result_are_lowercase(self):
+        legacy = annotation()
+        legacy['M1']['change'] = LABELS[0].capitalize()
+        self.fake_cli(response=legacy)
+        response = runner.compare_pair(self.args, self.pair)
+        self.assertEqual(response['M1']['change'], LABELS[0])
+        output = self.pair.output_path(self.args.output)
+        runner.save_result(output, legacy)
+        saved = json.loads(output.read_text())
+        self.assertEqual(saved, response)
+        self.assertEqual(legacy['M1']['change'], LABELS[0].capitalize())
+
     def test_a1_and_both_a2_results_are_required(self):
         for value in COMPARABILITY:
             result = annotation()
@@ -117,7 +169,7 @@ pathlib.Path(args[args.index('--output-last-message') + 1]).write_text({json.dum
                 validate_result(result)
         bad = []
         result = annotation(); result.pop('overall'); bad.append(result)
-        result = annotation(); result['overall']['A1']['value'] = 'Major change'; bad.append(result)
+        result = annotation(); result['overall']['A1']['value'] = 'major change'; bad.append(result)
         result = annotation(); result['overall'].pop('A1'); bad.append(result)
         result = annotation(); result['overall'].pop('A2'); bad.append(result)
         result = annotation(); result['overall']['A2'].pop('after'); bad.append(result)
