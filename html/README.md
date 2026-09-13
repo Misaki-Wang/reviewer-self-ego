@@ -9,3 +9,8 @@ responses and execution receipts belong in ../res. Current source JSON and PDFs
 belong in ../data/index and ../data/pdf.
 
 - [review-exp-iclr2026-pilot.html](review-exp-iclr2026-pilot.html): standalone ICLR 2026 review pilot summary, with scope, original conditions/prompts, descriptive findings, timing/token accounting and full review previews. Download and open in a browser; source data is published under [../res/published/review_exp_iclr2026_pilot/](../res/published/review_exp_iclr2026_pilot/).
+
+- [ICLR2026-check-diff-summary.html](ICLR2026-check-diff-summary.html): complete
+  ICLR2026 run summary with timing, reported usage, descriptive labels, all 1,588
+  embedded pair previews and the exact frozen prompt. Download and open locally;
+  no network fetch is required for the embedded preview.

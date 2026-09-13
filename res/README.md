@@ -16,3 +16,10 @@ or the self-contained presentation files under ../html, as appropriate.
 ## Published review pilot
 
 [published/review_exp_iclr2026_pilot/](published/review_exp_iclr2026_pilot/) contains the retained ICLR 2026 review pilot: five papers, 18 versions and 234 reviews under the original 13 conditions. It includes curated full reviews, five byte-identical raw result files, timing/token records, settings, frozen prompts and checksums. This release is explicitly allowed through the result ignore rules. Other run outputs and archives remain ignored.
+
+## Selected publication
+
+[published/](published/README.md) contains explicitly selected exports for GitHub.
+Each experiment has an allowlisted directory, an export descriptor and checksums.
+Full execution runs and archives remain separate; publishing an export does not
+modify their original records.

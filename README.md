@@ -122,3 +122,11 @@ python3.12 -B -m unittest discover -s tests -t . -p 'test_*.py'
 Use a CPU-only Slurm allocation for sustained validation. Tests use synthetic
 PDFs/fake CLI calls. The explicit sandbox_smoke tool is outside automatic discovery
 and is not a live-model test. No new dependency is required for this layout.
+
+## Published experiment results
+
+- ICLR2026: [interactive HTML report](html/ICLR2026-check-diff-summary.html) and
+  [selected result package](res/published/iclr2026_full_20260913/README.md).
+  All 706 units are accounted for: 1,588 validated judgments and 11 pairs with
+  unavailable original PDFs. The original selected payload is 37.86 MB.
+  Download the self-contained HTML to explore it locally.
