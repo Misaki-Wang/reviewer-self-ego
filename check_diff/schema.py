@@ -1,8 +1,10 @@
-"""A1, per-version A2, and fourteen change judgments for one PDF pair."""
+"""A1, per-version A2, fourteen changes, and overall improvement for one PDF pair."""
 from copy import deepcopy
 
 DIMENSIONS = ('M1', 'E1', 'E2', 'E3', 'E4', 'E5', 'E6', 'T1', 'C1', 'C2', 'D1', 'R1', 'P1', 'P2')
 LABELS = ('major change', 'minor change', 'maybe', 'no change')
+IMPROVEMENT_LABELS = ('major improvement', 'minor improvement', 'no meaningful change',
+                      'minor deterioration', 'major deterioration', 'maybe')
 COMPARABILITY = ('comparable', 'partially_comparable', 'unable_to_determine')
 EMPIRICAL_RESULTS = ('yes', 'no', 'uncertain')
 
@@ -18,11 +20,12 @@ def judgment(field, labels):
 
 
 SCHEMA = object_schema({
-    'overall': object_schema({
+    'prelim': object_schema({
         'A1': judgment('value', COMPARABILITY),
         'A2': object_schema({side: judgment('value', EMPIRICAL_RESULTS) for side in ('before', 'after')}),
     }),
     **{dimension: judgment('change', LABELS) for dimension in DIMENSIONS},
+    'improvement': judgment('change', IMPROVEMENT_LABELS),
 })
 
 
@@ -44,10 +47,10 @@ def validate_result(result):
 
 
 def normalize_result_labels(result):
-    """Return a validated lowercase-label copy; leave historical input untouched."""
+    """Return a validated lowercase-label copy without changing the input."""
     normalized = deepcopy(result)
     if isinstance(normalized, dict):
-        for dimension in DIMENSIONS:
+        for dimension in (*DIMENSIONS, 'improvement'):
             item = normalized.get(dimension)
             if isinstance(item, dict) and isinstance(item.get('change'), str):
                 item['change'] = item['change'].lower()

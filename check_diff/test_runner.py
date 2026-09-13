@@ -14,17 +14,19 @@ import unittest
 from unittest.mock import patch
 
 import runner
-from schema import COMPARABILITY, DIMENSIONS, EMPIRICAL_RESULTS, LABELS, SCHEMA, normalize_result_labels, validate_result
+from schema import COMPARABILITY, DIMENSIONS, EMPIRICAL_RESULTS, IMPROVEMENT_LABELS, LABELS, SCHEMA, normalize_result_labels, validate_result
 
 
 def annotation():
     return {
-        'overall': {
+        'prelim': {
             'A1': {'value': 'comparable', 'justification': 'Both versions are readable and describe the same work.'},
             'A2': {side: {'value': 'yes', 'justification': 'Reports original experimental results.'}
                    for side in ('before', 'after')},
         },
         **{d: {'change': 'no change', 'justification': 'The content is unchanged.'} for d in DIMENSIONS},
+        'improvement': {'change': 'no meaningful change',
+                        'justification': 'The versions have no meaningful overall quality difference.'},
     }
 
 
@@ -56,11 +58,18 @@ args = sys.argv[1:]
 assert args[0] == 'exec'
 assert args[args.index('--model') + 1] == 'gpt-5.5'
 assert 'model_reasoning_effort="medium"' in args
+assert 'web_search="disabled"' in args
+assert 'sandbox_workspace_write.network_access=false' in args
+assert 'approval_policy="never"' in args
+assert args[args.index('--sandbox') + 1] == 'workspace-write'
 assert '--image' not in args
 prompt = sys.stdin.read()
 assert 'Earlier version: `v1.pdf`' in prompt and 'Later version: `v2.pdf`' in prompt
 assert 'Comparison direction: `v1.pdf -> v2.pdf`.' in prompt
+assert '`prelim.A2`' in prompt and '`overall.A2`' not in prompt
 work = pathlib.Path(args[args.index('--cd') + 1])
+schema = json.loads((work / 'schema.json').read_text())
+assert 'prelim' in schema['required'] and 'overall' not in schema['properties']
 (work / 'model_scratch.txt').write_text('Temporary reading artifact')
 time.sleep({delay})
 if {returncode}:
@@ -110,7 +119,7 @@ pathlib.Path(args[args.index('--output-last-message') + 1]).write_text({json.dum
         self.assertIs(runner.validate_result, validate_result)
         self.assertEqual(LABELS, ('major change', 'minor change', 'maybe', 'no change'))
         prompt = runner.make_prompt(self.pair)
-        self.assertEqual(re.findall(r'^- `([^`]+)`:', prompt, re.M), list(LABELS))
+        self.assertEqual(re.findall(r'^- `([^`]+)`:', prompt, re.M), list(LABELS) + list(IMPROVEMENT_LABELS))
         for dimension in DIMENSIONS:
             self.assertEqual(SCHEMA['properties'][dimension]['properties']['change']['enum'], list(LABELS))
         legacy = annotation()
@@ -125,7 +134,7 @@ pathlib.Path(args[args.index('--output-last-message') + 1]).write_text({json.dum
         before = json.dumps(legacy)
         normalized = normalize_result_labels(legacy)
         self.assertEqual(json.dumps(legacy), before)
-        self.assertEqual(normalized['overall'], legacy['overall'])
+        self.assertEqual(normalized['prelim'], legacy['prelim'])
         for dimension in DIMENSIONS:
             self.assertEqual(normalized[dimension]['change'], legacy[dimension]['change'].lower())
             self.assertEqual(normalized[dimension]['justification'], legacy[dimension]['justification'])
@@ -160,22 +169,22 @@ pathlib.Path(args[args.index('--output-last-message') + 1]).write_text({json.dum
     def test_a1_and_both_a2_results_are_required(self):
         for value in COMPARABILITY:
             result = annotation()
-            result['overall']['A1']['value'] = value
+            result['prelim']['A1']['value'] = value
             validate_result(result)
         for side in ('before', 'after'):
             for value in EMPIRICAL_RESULTS:
                 result = annotation()
-                result['overall']['A2'][side]['value'] = value
+                result['prelim']['A2'][side]['value'] = value
                 validate_result(result)
         bad = []
-        result = annotation(); result.pop('overall'); bad.append(result)
-        result = annotation(); result['overall']['A1']['value'] = 'major change'; bad.append(result)
-        result = annotation(); result['overall'].pop('A1'); bad.append(result)
-        result = annotation(); result['overall'].pop('A2'); bad.append(result)
-        result = annotation(); result['overall']['A2'].pop('after'); bad.append(result)
-        result = annotation(); result['overall']['A1']['value'] = 'yes'; bad.append(result)
-        result = annotation(); result['overall']['A2']['before']['value'] = 'no change'; bad.append(result)
-        result = annotation(); result['overall']['A2']['after']['justification'] = ''; bad.append(result)
+        result = annotation(); result.pop('prelim'); bad.append(result)
+        result = annotation(); result['prelim']['A1']['value'] = 'major change'; bad.append(result)
+        result = annotation(); result['prelim'].pop('A1'); bad.append(result)
+        result = annotation(); result['prelim'].pop('A2'); bad.append(result)
+        result = annotation(); result['prelim']['A2'].pop('after'); bad.append(result)
+        result = annotation(); result['prelim']['A1']['value'] = 'yes'; bad.append(result)
+        result = annotation(); result['prelim']['A2']['before']['value'] = 'no change'; bad.append(result)
+        result = annotation(); result['prelim']['A2']['after']['justification'] = ''; bad.append(result)
         for result in bad:
             with self.assertRaises(ValueError):
                 validate_result(result)
@@ -192,7 +201,8 @@ pathlib.Path(args[args.index('--output-last-message') + 1]).write_text({json.dum
         self.assertEqual(set(p for p in self.args.output.rglob('*') if p.is_file()),
                          {output, output.with_suffix('.execution.json')})
         self.assertEqual(json.loads(output.read_text()), annotation())
-        self.assertEqual(next(iter(json.loads(output.read_text()))), 'overall')
+        self.assertEqual(next(iter(json.loads(output.read_text()))), 'prelim')
+        self.assertEqual(list(json.loads(output.read_text()))[-1], 'improvement')
 
     def test_resume_skips_cli_and_overwrite_recomputes(self):
         runner.save_result(self.pair.output_path(self.args.output), annotation())
@@ -247,6 +257,11 @@ pathlib.Path(args[args.index('--output-last-message') + 1]).write_text({json.dum
         for dimension in ('A1', 'A2', *DIMENSIONS):
             self.assertIn(f'## {dimension} —', prompt)
         self.assertIn('concise English justifications', prompt)
+        self.assertIn('separate, paper-level assessment', prompt)
+        self.assertIn('Use only the supplied local PDFs as evidence', prompt)
+        self.assertIn('Do not search the web', prompt)
+        for label in IMPROVEMENT_LABELS:
+            self.assertIn(f'`{label}`', prompt)
         for removed in ['html', 'Chinese', '30–80', 'coverage records', 'change_ids', 'pypdf', 'pdftoppm']:
             self.assertNotIn(removed, prompt)
 
@@ -310,6 +325,75 @@ pathlib.Path(args[args.index('--output-last-message') + 1]).write_text({json.dum
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(runner.main([str(self.input), '--output', str(self.args.output), '--dry-run']), 0)
         self.assertFalse(self.args.output.exists())
+
+
+    def test_overall_improvement_is_required_and_uses_separate_labels(self):
+        for label in IMPROVEMENT_LABELS:
+            result = annotation()
+            result['improvement']['change'] = label
+            validate_result(result)
+        bad = []
+        result = annotation(); result.pop('improvement'); bad.append(result)
+        result = annotation(); result['improvement']['change'] = 'Minor improvement'; bad.append(result)
+        result = annotation(); result['improvement']['change'] = 'Major change'; bad.append(result)
+        result = annotation(); result['improvement']['justification'] = ' '; bad.append(result)
+        result = annotation(); result['improvement'] = {'M1': result['M1']}; bad.append(result)
+        result = annotation(); result['M1']['change'] = 'Major improvement'; bad.append(result)
+        for result in bad:
+            with self.assertRaises(ValueError):
+                validate_result(result)
+
+    def test_legacy_result_rebuilt_and_preserved_on_failure(self):
+        path = self.pair.output_path(self.args.output)
+        path.parent.mkdir(parents=True)
+        legacy = annotation()
+        legacy.pop('improvement')
+        path.write_text(json.dumps(legacy))
+        with patch.object(runner, 'compare_pair', side_effect=ValueError('Simulated failure')):
+            self.assertEqual(self.quiet_run(), 'failed')
+        self.assertEqual(json.loads(path.read_text()), legacy)
+        self.fake_cli()
+        self.assertEqual(self.quiet_run(), 'done')
+        validate_result(json.loads(path.read_text()))
+
+    def test_improvement_case_normalized_on_cli_save_and_resume(self):
+        for label in IMPROVEMENT_LABELS:
+            historical = annotation()
+            historical['improvement']['change'] = label.upper()
+            historical['M1']['change'] = 'Major change'
+            original = json.dumps(historical)
+            normalized = normalize_result_labels(historical)
+            self.assertEqual(normalized['improvement']['change'], label)
+            self.assertEqual(normalized['M1']['change'], 'major change')
+            self.assertEqual(json.dumps(historical), original)
+            self.assertEqual(normalized['improvement']['justification'], historical['improvement']['justification'])
+        self.fake_cli(response=historical)
+        response = runner.compare_pair(self.args, self.pair)
+        self.assertEqual(response, normalized)
+        path = self.pair.output_path(self.args.output)
+        runner.save_result(path, historical)
+        self.assertEqual(json.loads(path.read_text()), normalized)
+        path.write_text(original)
+        with patch.object(runner, 'compare_pair') as call:
+            self.assertEqual(self.quiet_run(), 'skipped')
+            call.assert_not_called()
+        self.assertEqual(path.read_text(), original)
+        for value in ('improved', 'no change', ' major improvement '):
+            historical['improvement']['change'] = value
+            with self.assertRaises(ValueError):
+                normalize_result_labels(historical)
+
+    def test_old_overall_key_is_not_silently_migrated(self):
+        old = annotation()
+        old['overall'] = old.pop('prelim')
+        with self.assertRaises(ValueError):
+            normalize_result_labels(old)
+        path = self.pair.output_path(self.args.output)
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps(old))
+        with patch.object(runner, 'compare_pair', side_effect=ValueError('fail')):
+            self.assertEqual(self.quiet_run(), 'failed')
+        self.assertEqual(json.loads(path.read_text()), old)
 
 
 if __name__ == '__main__':

@@ -102,6 +102,7 @@ def build_command(args, workdir):
     return [args.codex, 'exec', '--json', '--ignore-user-config', '--ephemeral',
             '--skip-git-repo-check', '--sandbox', 'workspace-write',
             '--model', args.model, '-c', f'model_reasoning_effort="{args.effort}"',
+            '-c', 'web_search="disabled"', '-c', 'sandbox_workspace_write.network_access=false',
             '-c', 'project_doc_max_bytes=0', '-c', 'approval_policy="never"',
             '--cd', str(workdir), '--color', 'never',
             '--output-schema', str(workdir / 'schema.json'),
