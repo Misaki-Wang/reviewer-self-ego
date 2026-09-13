@@ -1,6 +1,6 @@
-"""Shared local PDF and JSON helpers for v1.3 preparation.
+"""Shared local PDF and JSON helpers for source_data preparation.
 
-The preparation entry point is prepare_v13_pilot.py. Historical v1.1 sampling
+The preparation entry point is prepare_source_data.py. Historical v1.1 sampling
 and downloading are retained in Git history, not in the active workflow.
 """
 import hashlib
@@ -57,4 +57,4 @@ def materialize(source, target, sha256):
 
 
 if __name__ == '__main__':
-    raise SystemExit('Use utility/prepare_v13_pilot.py to prepare v1.3 inputs.')
+    raise SystemExit('Use utility/prepare_source_data.py to prepare v1.3 inputs.')

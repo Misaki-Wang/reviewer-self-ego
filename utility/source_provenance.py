@@ -1,37 +1,32 @@
-"""Read-only verification of preparation inputs at a caller-authorized commit.
+"""Content-pinned verification for the formal source_data export root.
 
-Legacy manifests contain ``files`` maps or rows with pinned bytes/sha256. The
-explicit github-check-diff-sync-1 schema also supports digest strings and joins
-v13_json_hashes by bare filename. Hash-only entries never acquire a pinned size:
-their digest is verified against the observed bytes. Original manifest bytes
-are returned unchanged so that distinction survives snapshotting.
-
-Evidence contains only path/bytes/sha256 proofs for the deployment documents,
-compatible with the preparation wrapper's input-proofs loop. Git fallback
-returns empty evidence; the caller records the authorized commit when freezing.
+The caller supplies a SHA-256 content revision, never a Git commit. Verification
+is read-only and returns exact requested source bytes plus deployment documents.
+The manifest revision is SHA-256 of the sorted, compact UTF-8 JSON files map.
 """
-
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import stat
-import subprocess
+import tempfile
 
-
-CORE_FILES = ('runner.py', 'schema.py', 'token_usage.py', 'prompts/compare.md',
+CORE_FILES = ('runner.py', 'schema.py', 'prompts/compare.md',
               'prompts/rubric.md', 'README.md', 'requirements.txt')
-_SYNC_SCHEMA = 'github-check-diff-sync-1'
+MANIFEST_SCHEMA_VERSION = 'source-manifest-1'
+MANIFEST_PATH = 'utility/source_manifest.json'
+PROJECT_PATH = 'utility/project.json'
+INDEX_PATH = 'data/index/index.json'
 
 
 def _digest(raw):
     return {'bytes': len(raw), 'sha256': hashlib.sha256(raw).hexdigest()}
 
 
-def proof(path: Path) -> dict:
-    """Return the observed size and digest, in the existing wrapper format."""
-    return _digest(_read_file(path))
+def _identity(info):
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_size,
+            info.st_mtime_ns, info.st_ctime_ns)
 
 
 def _hex(value, length, label):
@@ -49,8 +44,23 @@ def _relative_name(value):
     return value
 
 
+def _root(value):
+    try:
+        path = Path(value).absolute()
+    except TypeError as exc:
+        raise ValueError('Expected a project directory path') from exc
+    if '..' in path.parts or any(p.is_symlink() for p in (path, *path.parents)):
+        raise ValueError(f'Symlink or traversal is not allowed: {path}')
+    try:
+        path = path.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError(f'Cannot resolve project directory: {path}') from exc
+    if not path.is_dir():
+        raise ValueError(f'Expected a project directory: {path}')
+    return path
+
+
 def _inside(root, value):
-    """Accept project-relative or absolute paths; reject symlink components."""
     if not isinstance(value, (str, Path)) or not str(value) or '\\' in str(value) or '\x00' in str(value):
         raise ValueError(f'Invalid path: {value!r}')
     path = Path(value)
@@ -82,15 +92,23 @@ def _read_file(path):
         before = path.lstat()
         if not stat.S_ISREG(before.st_mode):
             raise ValueError(f'Expected a regular source file: {path}')
-        raw = path.read_bytes()
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        with os.fdopen(descriptor, 'rb') as stream:
+            opened = os.fstat(stream.fileno())
+            raw = stream.read()
+            finished = os.fstat(stream.fileno())
         after = path.lstat()
     except OSError as exc:
         raise ValueError(f'Cannot read regular source file: {path}') from exc
-    identity = lambda info: (info.st_dev, info.st_ino, info.st_mode, info.st_size,
-                             info.st_mtime_ns, info.st_ctime_ns)
-    if identity(before) != identity(after) or len(raw) != before.st_size:
+    if (any(_identity(info) != _identity(before) for info in (opened, finished, after))
+            or len(raw) != before.st_size):
         raise ValueError(f'Source file changed during verification: {path}')
     return raw
+
+
+def proof(path: Path) -> dict:
+    """Return observed bytes/SHA-256 without modifying the source."""
+    return _digest(_read_file(Path(path)))
 
 
 def _json_object(raw, label):
@@ -114,151 +132,228 @@ def _json_object(raw, label):
     return value
 
 
-def _file_index(manifest, worktree):
-    schema = manifest.get('schema_version')
-    if 'schema_version' in manifest and schema != _SYNC_SCHEMA:
-        raise ValueError(f'Unsupported deployment manifest schema: {schema!r}')
-    files = manifest.get('files')
-    if isinstance(files, dict):
-        rows = files.items()
-    elif isinstance(files, list):
-        if any(not isinstance(row, dict) or 'path' not in row for row in files):
-            raise ValueError('Malformed deployment manifest file rows')
-        rows = ((row['path'], row) for row in files)
-    else:
-        raise ValueError('Deployment manifest files must be a map or a list')
-    indexed = {}
-    for name, entry in rows:
-        name = _relative_name(name)
-        _inside(worktree, name)
-        if name in indexed:
-            raise ValueError(f'Duplicate deployment manifest file path: {name}')
-        if isinstance(entry, str) and schema == _SYNC_SCHEMA:
-            digest, size = _hex(entry, 64, f'sha256 for {name}'), None
-        elif isinstance(entry, dict):
-            if 'path' in entry and entry['path'] != name:
-                raise ValueError(f'Conflicting deployment manifest file path: {name}')
-            digest = _hex(entry.get('sha256'), 64, f'sha256 for {name}')
-            size = entry.get('bytes')
-            if type(size) is not int or size < 0:
-                raise ValueError(f'Invalid pinned byte count for {name}')
-        else:
-            raise ValueError(f'Malformed deployment manifest entry: {name}')
-        indexed[name] = (digest, size)
-    if 'v13_json_hashes' in manifest:
-        shards = manifest['v13_json_hashes']
-        if schema != _SYNC_SCHEMA or not isinstance(shards, dict):
-            raise ValueError('v13_json_hashes requires the explicit sync schema and a map')
-        for filename, digest in shards.items():
-            if not isinstance(filename, str) or not re.fullmatch(r'[a-z0-9_]+\.json', filename):
-                raise ValueError(f'Invalid v1.3 shard filename: {filename!r}')
-            name = f'v1.3/{filename}'
-            _inside(worktree, name)
-            digest = _hex(digest, 64, f'sha256 for {name}')
-            if name in indexed and indexed[name][0] != digest:
-                raise ValueError(f'Conflicting deployment manifest shard: {name}')
-            # Agreeing cross-map entries retain any genuinely pinned size.
-            if name not in indexed:
-                indexed[name] = (digest, None)
-    return indexed
+def revision_for_files(files):
+    """Return the canonical content revision; timestamps/configuration are excluded."""
+    raw = json.dumps(files, sort_keys=True, separators=(',', ':'), ensure_ascii=False, allow_nan=False).encode('utf-8')
+    return hashlib.sha256(raw).hexdigest()
 
 
-def _git(worktree, *args):
-    env = os.environ.copy()
-    for key in ('GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE',
-                'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_NAMESPACE'):
-        env.pop(key, None)
-    env.update(GIT_NO_LAZY_FETCH='1', GIT_TERMINAL_PROMPT='0', GIT_OPTIONAL_LOCKS='0')
+def _allowed_name(name):
+    name = _relative_name(name)
+    parts = name.split('/')
+    if any(part.startswith('.') or part in ('__pycache__', 'tests') for part in parts):
+        raise ValueError(f'Excluded source-manifest path: {name}')
+    allowed = (parts[0] == 'check_diff' and len(parts) > 1
+               or len(parts) == 2 and parts[0] == 'utility' and parts[-1].endswith('.py')
+               or len(parts) == 3 and parts[:2] == ['data', 'index'] and parts[-1].endswith('.json')
+               or len(parts) > 3 and parts[:2] == ['data', 'index'] and parts[2] in ('metadata', 'provenance'))
+    if not allowed:
+        raise ValueError(f'Excluded source-manifest path: {name}')
+    return name
+
+
+def _source_names(project):
+    names = set()
+    for folder in ('check_diff', 'data/index/metadata', 'data/index/provenance'):
+        root = _inside(project, folder)
+        if not root.exists():
+            if folder == 'check_diff':
+                raise ValueError('Missing check_diff source directory')
+            continue
+        if not root.is_dir():
+            raise ValueError(f'Expected a source directory: {root}')
+        for path in root.rglob('*'):
+            relative = str(path.relative_to(project))
+            parts = path.relative_to(root).parts
+            if any(p.startswith('.') or p in ('__pycache__', 'tests') for p in parts):
+                continue
+            _inside(project, relative)
+            if not path.is_dir():
+                names.add(_allowed_name(relative))
+    for folder, pattern in (('utility', '*.py'), ('data/index', '*.json')):
+        root = _inside(project, folder)
+        if not root.is_dir():
+            raise ValueError(f'Expected a source directory: {root}')
+        for path in root.glob(pattern):
+            if path.name.startswith('.'):
+                continue
+            names.add(_allowed_name(str(path.relative_to(project))))
+    required = {INDEX_PATH, *(f'check_diff/{name}' for name in CORE_FILES)}
+    if not required <= names:
+        raise ValueError(f'Missing required source files: {sorted(required - names)}')
+    return sorted(names)
+
+
+def _capture(project, name, states):
+    path = _inside(project, name)
     try:
-        return subprocess.run(
-            ['git', '--no-replace-objects', '--literal-pathspecs', '-c', 'protocol.allow=never',
-             '-C', str(worktree), *args], check=True, capture_output=True, env=env).stdout
-    except (OSError, subprocess.CalledProcessError) as exc:
-        raise ValueError(f'Cannot read pinned local Git source ({args[0]}): {worktree}') from exc
+        before = _identity(path.lstat())
+    except OSError as exc:
+        raise ValueError(f'Cannot read regular source file: {path}') from exc
+    raw = _read_file(path)
+    if _identity(path.lstat()) != before:
+        raise ValueError(f'Source file changed during verification: {path}')
+    states[name] = before
+    return raw
 
 
-def verified_sources(project: Path, worktree: Path, sources: list[str],
-                     source_commit: str, extra_files: tuple[str, ...] = ()) -> tuple[dict, dict]:
-    """Verify and read only the requested inputs; never create a run directory.
+def _stable(project, states):
+    for name, before in states.items():
+        path = _inside(project, name)
+        try:
+            after = _identity(path.lstat())
+        except OSError as exc:
+            raise ValueError(f'Source file changed during verification: {path}') from exc
+        if after != before:
+            raise ValueError(f'Source file changed during verification: {path}')
 
-    The full commit ID is mandatory. An existing active configuration must
-    validate successfully; only its absence permits the local Git path. All
-    declared commit/target fields must agree with the caller. Legacy records
-    can omit active_code.source_commit and optional target fields.
+
+def build_manifest(project):
+    """Read current formal sources and return a deterministic manifest; do not write."""
+    project = _root(project)
+    names = _source_names(project)
+    states, files = {}, {}
+    for name in names:
+        files[name] = _digest(_capture(project, name, states))
+    _stable(project, states)
+    if _source_names(project) != names:
+        raise ValueError('Source file inventory changed during manifest construction')
+    return {'schema_version': MANIFEST_SCHEMA_VERSION, 'revision': revision_for_files(files), 'files': files}
+
+
+def write_manifest(project):
+    """Explicit maintenance operation: atomically write utility/source_manifest.json."""
+    project = _root(project)
+    manifest = build_manifest(project)
+    target = _inside(project, MANIFEST_PATH)
+    if target.exists() and not stat.S_ISREG(target.lstat().st_mode):
+        raise ValueError(f'Expected a regular source manifest: {target}')
+    descriptor, temporary = tempfile.mkstemp(prefix='.source-manifest-', suffix='.tmp', dir=target.parent)
+    try:
+        with os.fdopen(descriptor, 'w', encoding='utf-8') as stream:
+            json.dump(manifest, stream, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False)
+            stream.write('\n')
+        _inside(project, MANIFEST_PATH)
+        os.replace(temporary, target)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+    return manifest
+
+
+def _file_index(manifest, project):
+    if set(manifest) != {'schema_version', 'revision', 'files'} or manifest.get('schema_version') != MANIFEST_SCHEMA_VERSION:
+        raise ValueError('Unsupported source manifest schema')
+    files = manifest.get('files')
+    if not isinstance(files, dict) or not files:
+        raise ValueError('Source manifest files must be a nonempty map')
+    indexed = {}
+    for name, entry in files.items():
+        name = _allowed_name(name)
+        _inside(project, name)
+        if not isinstance(entry, dict) or set(entry) != {'bytes', 'sha256'}:
+            raise ValueError(f'Malformed source manifest entry: {name}')
+        if type(entry['bytes']) is not int or entry['bytes'] < 0:
+            raise ValueError(f'Invalid pinned byte count for {name}')
+        indexed[name] = {'bytes': entry['bytes'], 'sha256': _hex(entry['sha256'], 64, f'sha256 for {name}')}
+    revision = _hex(manifest.get('revision'), 64, 'Manifest revision')
+    if revision != revision_for_files(files):
+        raise ValueError('Manifest revision does not match its canonical files map')
+    return indexed, revision
+
+
+def _source_name(source):
+    if not isinstance(source, str) or not re.fullmatch(r'[a-z0-9_]+', source) or source == 'index':
+        raise ValueError('Invalid source names; expected [a-z0-9_]+ shard IDs')
+    return source
+
+
+def _index_shards(index, files):
+    metadata = index.get('dataset_metadata')
+    if (index.get('dataset') != 'source_data' or index.get('schema_version') != 'source-data-index-1'
+            or not isinstance(metadata, dict) or metadata.get('dataset') != 'source_data'):
+        raise ValueError('Index must declare the source_data dataset and current index schema')
+    entries = index.get('files')
+    if not isinstance(entries, list) or not entries:
+        raise ValueError('Index requires a nonempty shard files list')
+    order = index.get('record_order')
+    if (not isinstance(order, list) or any(not isinstance(aid, str) for aid in order)
+            or len(order) != len(set(order)) or metadata.get('record_count') != len(order)):
+        raise ValueError('Invalid source index record_order/count')
+    shards = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ValueError('Malformed index shard entry')
+        source = _source_name(entry.get('source_id'))
+        if entry.get('path') != f'{source}.json' or source in shards:
+            raise ValueError('Invalid or duplicate index shard path/source')
+        name = f'data/index/{source}.json'
+        pinned = files.get(name)
+        if (pinned is None or type(entry.get('bytes')) is not int or entry.get('bytes') != pinned['bytes']
+                or _hex(entry.get('sha256'), 64, 'Index shard sha256') != pinned['sha256']):
+            raise ValueError(f'Index shard hash/size differs from source manifest: {name}')
+        if type(entry.get('record_count')) is not int or entry['record_count'] < 0:
+            raise ValueError('Invalid index shard record count')
+        shards[source] = entry
+    return shards
+
+
+def verified_sources(project, code_root, sources, source_revision, extra_files=()):
+    """Read verified core/index/requested shards/extras and exact deployment proofs.
+
+    The manifest covers all formal source/metadata files; this function verifies
+    the requested payloads. Additional metadata/provenance files may be requested
+    through extra_files. Unrequested file contents are not implicitly certified.
     """
-    source_commit = _hex(source_commit, 40, 'source_commit')
-    if project.is_symlink():
-        raise ValueError(f'Symlink is not allowed: {project}')
-    project = project.resolve(strict=True)
-    if not project.is_dir():
-        raise ValueError(f'Expected a project directory: {project}')
-    worktree = _inside(project, worktree)
-    if not worktree.is_dir():
-        raise ValueError(f'Expected a source worktree directory: {worktree}')
-    if not isinstance(sources, list) or any(
-            not isinstance(source, str) or not re.fullmatch(r'[a-z0-9_]+', source)
-            for source in sources):
-        raise ValueError('Invalid source names; expected a list of [a-z0-9_]+ names')
-    if not isinstance(extra_files, tuple):
-        raise ValueError('extra_files must be a tuple of relative file paths')
-    names = [f'check_diff/{name}' for name in CORE_FILES]
-    names.extend(f'v1.3/{source}.json' for source in sources)
-    names.extend(_relative_name(name) for name in extra_files)
+    source_revision = _hex(source_revision, 64, 'source_revision')
+    project = _root(project)
+    if _root(code_root) != project:
+        raise ValueError('code_root must equal the formal project root')
+    if not isinstance(sources, list):
+        raise ValueError('sources must be a list')
+    sources = [_source_name(source) for source in sources]
+    if len(sources) != len(set(sources)) or not isinstance(extra_files, tuple):
+        raise ValueError('Duplicate sources or invalid extra_files collection')
+    names = [*(f'check_diff/{name}' for name in CORE_FILES), INDEX_PATH,
+             *(f'data/index/{source}.json' for source in sources),
+             *(_allowed_name(name) for name in extra_files)]
     if len(names) != len(set(names)):
         raise ValueError('Duplicate requested source file paths')
-    paths = {name: _inside(worktree, name) for name in names}
-    active_path = _inside(project, 'configs/active_code.json')
-    if active_path.exists():
-        active_raw = _read_file(active_path)
-        active = _json_object(active_raw, 'active_code.json')
-        manifest_path = _inside(project, active.get('code_manifest'))
-        manifest_raw = _read_file(manifest_path)
-        manifest = _json_object(manifest_raw, 'code_manifest.json')
-        if _hex(manifest.get('source_commit'), 40, 'Manifest source_commit') != source_commit:
-            raise ValueError('Deployment manifest source_commit differs from the authorized source_commit')
-        if 'source_commit' in active and _hex(active['source_commit'], 40, 'Active source_commit') != source_commit:
-            raise ValueError('Active configuration source_commit differs from the authorized source_commit')
-        for label, record in (('Active configuration', active), ('Deployment manifest', manifest)):
-            for field in ('worktree', 'target_relative'):
-                if field in record and _inside(project, record[field]) != worktree:
-                    raise ValueError(f'{label} targets a different source worktree')
-        indexed = _file_index(manifest, worktree)
-        missing = set(names) - indexed.keys()
-        if missing:
-            raise ValueError(f'Missing deployment manifest source entries: {sorted(missing)}')
-        blobs = {}
-        for name, path in paths.items():
-            raw = _read_file(path)
-            digest, pinned_size = indexed[name]
-            if hashlib.sha256(raw).hexdigest() != digest or (
-                    pinned_size is not None and len(raw) != pinned_size):
-                raise ValueError(f'Deployment manifest hash/size mismatch: {name}')
-            blobs[name] = raw
-        evidence = {}
-        for key, path, raw in (('active_code', active_path, active_raw),
-                               ('code_manifest', manifest_path, manifest_raw)):
-            blobs[f'deployment_provenance/{key}.json'] = raw
-            evidence[key] = {'path': str(path), **_digest(raw)}
-        return blobs, evidence
-
-    git_marker = _inside(worktree, '.git')
-    if not git_marker.exists():
-        raise ValueError('Exported source requires configs/active_code.json and a verified code_manifest')
-    if _git(worktree, 'cat-file', '-t', source_commit).strip() != b'commit':
-        raise ValueError('source_commit must identify a local Git commit object')
-    tree = _git(worktree, 'ls-tree', '-rz', source_commit, '--', *names)
-    modes = {}
-    for row in tree.split(b'\x00'):
-        if row:
-            metadata, name = row.split(b'\t', 1)
-            mode, kind, _ = metadata.split()
-            modes[os.fsdecode(name)] = (mode, kind)
+    states = {}
+    config_raw = _capture(project, PROJECT_PATH, states)
+    config = _json_object(config_raw, 'project.json')
+    if config.get('schema_version') != 'reviewer-project-1' or not isinstance(config.get('data'), dict):
+        raise ValueError('Invalid formal project configuration')
+    if _inside(project, config['data'].get('index')) != project / INDEX_PATH:
+        raise ValueError('data.index must identify data/index/index.json')
+    manifest_path = _inside(project, config.get('source_manifest'))
+    if manifest_path != project / MANIFEST_PATH:
+        raise ValueError('source_manifest must identify utility/source_manifest.json')
+    manifest_raw = _capture(project, MANIFEST_PATH, states)
+    manifest = _json_object(manifest_raw, 'source_manifest.json')
+    files, revision = _file_index(manifest, project)
+    if revision != source_revision:
+        raise ValueError('Manifest revision differs from the authorized source_revision')
+    if not set(names) <= files.keys():
+        raise ValueError(f'Missing source manifest entries: {sorted(set(names) - files.keys())}')
     blobs = {}
-    for name, path in paths.items():
-        if modes.get(name) not in ((b'100644', b'blob'), (b'100755', b'blob')):
-            raise ValueError(f'Expected a regular pinned Git source file: {name}')
-        raw = _git(worktree, 'show', '--no-ext-diff', '--no-textconv', f'{source_commit}:{name}')
-        if _read_file(path) != raw:
-            raise ValueError(f'Working source differs from pinned commit: {name}')
+    for name in names:
+        raw = _capture(project, name, states)
+        if _digest(raw) != files[name]:
+            raise ValueError(f'Source manifest hash/size mismatch: {name}')
         blobs[name] = raw
-    return blobs, {}
+    shards = _index_shards(_json_object(blobs[INDEX_PATH], INDEX_PATH), files)
+    for source in sources:
+        if source not in shards:
+            raise ValueError(f'Requested source is not listed in the index: {source}')
+        shard = _json_object(blobs[f'data/index/{source}.json'], source)
+        if (shard.get('dataset') != 'source_data' or shard.get('schema_version') != 'source-data-source-shard-1'
+                or shard.get('source_id') != source or not isinstance(shard.get('records'), list)
+                or len(shard['records']) != shards[source]['record_count']
+                or shard.get('record_count') != len(shard['records'])):
+            raise ValueError(f'Shard dataset/source/count mismatch: {source}')
+    _stable(project, states)
+    blobs['deployment_provenance/project.json'] = config_raw
+    blobs['source_manifest.json'] = manifest_raw
+    deployment = {'project': {'path': str(project / PROJECT_PATH), **_digest(config_raw)},
+                  'source_manifest': {'path': str(manifest_path), **_digest(manifest_raw)}}
+    return blobs, deployment

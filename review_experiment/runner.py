@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import fcntl
 import hashlib
 import json
+import importlib.util
 import os
 from pathlib import Path
 import re
@@ -21,10 +22,10 @@ import uuid
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
-if __package__:
-    from . import token_usage
-else:
-    import token_usage
+# Resolve against this source root so frozen runs cannot import a live helper.
+_usage_spec = importlib.util.spec_from_file_location('_codex_token_usage', ROOT / 'utility/token_usage.py')
+token_usage = importlib.util.module_from_spec(_usage_spec)
+_usage_spec.loader.exec_module(token_usage)
 
 OA_VALUES = [1, 3, 5, 6, 8, 10]
 SCHEMA = {'type': 'object', 'properties': {
@@ -333,7 +334,7 @@ def run_paper(args, aid, versions, system, conditions):
         if document.get('format_version') != 1 or document.get('paper_id') != aid:
             raise ValueError(f'Incompatible result file: {path}')
     counts = dict(completed=0, skipped=0, failed=0)
-    with tempfile.TemporaryDirectory(prefix='review-experiment-') as temp:
+    with tempfile.TemporaryDirectory(prefix='review-experiment-', dir=args.output) as temp:
         root = Path(temp)
         for version in versions:
             if STOP.is_set():
@@ -394,10 +395,40 @@ def run_paper(args, aid, versions, system, conditions):
     return counts
 
 
+def validate_output(input_root, output, papers=()):
+    """Keep resumable result paths separate from inputs and protected project files."""
+    output = output.absolute()
+    for path in (output, *output.parents):
+        if path.is_symlink():
+            raise ValueError(f'Output path must not traverse a symlink: {path}')
+        if path.exists() and not path.is_dir():
+            raise ValueError(f'Output path must be a directory: {path}')
+    output = output.resolve()
+    input_root = input_root.resolve()
+    if output == input_root or output in input_root.parents or input_root in output.parents:
+        raise ValueError('Input and output directories must not overlap')
+    project = ROOT.resolve()
+    protected = [project / name for name in
+                 ('review_experiment', 'check_diff', 'utility', 'tests', 'data', 'html', '.git',
+                  'res/archive', 'res/.migration')]
+    for path in protected:
+        if output == path or output in path.parents or path in output.parents:
+            raise ValueError(f'Output overlaps a protected project path: {path}')
+    targets = [(output / '.runner.lock', False), (output / 'run_summary.json', False)]
+    for aid in papers:
+        targets.extend([(output / aid, True), (output / aid / 'reviews.json', False)])
+    for path, directory in targets:
+        if path.is_symlink():
+            raise ValueError(f'Output target must not be a symlink: {path}')
+        if path.exists() and not (path.is_dir() if directory else path.is_file()):
+            raise ValueError(f'Output target must be a {"directory" if directory else "file"}: {path}')
+    return output
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('input', nargs='?', type=Path, default=ROOT / 'input_data')
-    ap.add_argument('--output', type=Path, default=HERE / 'results')
+    ap.add_argument('input', type=Path, help='Explicit prepared <paper>/vX_vY PDF tree; not the raw data index/store')
+    ap.add_argument('--output', type=Path, required=True, help='New or resumable result directory, normally res/<run-id>')
     ap.add_argument('--prompts', type=Path, default=HERE / 'prompts')
     ap.add_argument('--paper', action='append')
     ap.add_argument('--version', type=int, action='append')
@@ -420,9 +451,10 @@ def main(argv=None):
             (args.limit_papers is not None and args.limit_papers < 1) or
             (args.version and min(args.version) < 1)):
         ap.error('Counts/timeout must be positive; retries must be nonnegative')
-    args.output = args.output.resolve()
     try:
+        args.output = validate_output(args.input, args.output)
         papers, pair_count = discover(args.input, args.paper, args.version, args.limit_papers)
+        validate_output(args.input, args.output, papers)
         system, conditions = load_prompts(args.prompts, args.experiment, args.condition)
         version_count = sum(map(len, papers.values()))
         inventory = dict(papers=len(papers), discovered_pairs=pair_count, unique_versions=version_count,
@@ -440,6 +472,7 @@ def main(argv=None):
         if not shutil.which(args.codex):
             raise ValueError(f'Codex executable not found: {args.codex}')
         args.output.mkdir(parents=True, exist_ok=True)
+        validate_output(args.input, args.output, papers)
         with (args.output / '.runner.lock').open('a') as lock:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)

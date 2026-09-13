@@ -89,7 +89,7 @@ def export(source, destination, check=False):
         if saved['files'] != manifest['files'] or saved['conditions'] != manifest['conditions']:
             raise ValueError('Prompt manifest differs from HTML')
     else:
-        destination.mkdir(parents=True, exist_ok=True)
+        destination.mkdir(parents=True, exist_ok=False)
         for name, text in files.items():
             (destination / name).write_bytes(text.encode('utf-8'))
         (destination / 'manifest.json').write_text(
@@ -97,11 +97,24 @@ def export(source, destination, check=False):
     return manifest
 
 
-if __name__ == '__main__':
+def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('--source', type=Path, default=HERE.parent / 'main_experiment.html')
-    ap.add_argument('--destination', type=Path, default=HERE / 'prompts')
+    ap.add_argument('--source', type=Path, default=HERE.parent / 'html/main_experiment.html')
+    ap.add_argument('--destination', type=Path,
+                    help='Fresh export directory, normally res/<export-id>; --check defaults to frozen prompts')
     ap.add_argument('--check', action='store_true')
-    args = ap.parse_args()
-    m = export(args.source, args.destination, args.check)
-    print(f'{"Verified" if args.check else "Exported"} {len(m["conditions"])} user prompts and shared system prompt.')
+    args = ap.parse_args(argv)
+    if args.destination is None:
+        if not args.check:
+            ap.error('--destination is required for a fresh prompt export')
+        args.destination = HERE / 'prompts'
+    try:
+        manifest = export(args.source, args.destination, args.check)
+    except (OSError, ValueError) as exc:
+        ap.exit(1, str(exc) + '\n')
+    print(f'{"Verified" if args.check else "Exported"} {len(manifest["conditions"])} user prompts and shared system prompt.')
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

@@ -1,11 +1,9 @@
-"""Offline provenance regressions; all mutable fixtures and Git repos are temporary."""
-
+"""Offline formal-export provenance regressions; every writable fixture is temporary."""
 import copy
 import hashlib
 import json
 import os
 from pathlib import Path
-import shutil
 import subprocess
 import tempfile
 import unittest
@@ -13,511 +11,500 @@ from unittest import mock
 
 from utility import source_provenance as provenance
 
-
-EXTRAS = ('utility/prepare_v13_pilot.py', 'utility/prepare_input_data.py',
-          'utility/source_provenance.py')
-NEW_PIN = hashlib.sha1(b'current fixture commit').hexdigest()
-OLD_PIN = hashlib.sha1(b'previous fixture commit').hexdigest()
+EXTRAS = ('utility/prepare_source_data.py', 'utility/prepare_input_data.py', 'utility/source_provenance.py')
 
 
 def digest(raw):
     return hashlib.sha256(raw).hexdigest()
 
 
-class SourceFixture:
+class SourceFixture(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix='source-provenance-')
         self.addCleanup(temporary.cleanup)
         self.project = Path(temporary.name).resolve()
-        self.worktree = self.project / 'worktrees/source'
-        self.active_path = self.project / 'configs/active_code.json'
-        self.manifest_path = self.project / 'evidence/deployment.json'
-        names = [f'check_diff/{name}' for name in provenance.CORE_FILES]
-        names += ['v1.3/acl2026.json', 'v1.3/iclr2026.json', *EXTRAS]
-        self.raw = {name: f'original fixture bytes: {name}\n'.encode() for name in names}
-        for name, raw in self.raw.items():
-            path = self.worktree / name
+        self.config_path = self.project / 'utility/project.json'
+        self.manifest_path = self.project / 'utility/source_manifest.json'
+        for name in [*(f'check_diff/{name}' for name in provenance.CORE_FILES), *EXTRAS]:
+            path = self.project / name
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(raw)
+            path.write_text(f'# Original fixture source: {name}\n')
+        self.index = {'dataset': 'source_data', 'schema_version': 'source-data-index-1',
+                      'dataset_metadata': {'dataset': 'source_data', 'schema_version': 'source-data-source-1', 'record_count': 2},
+                      'record_order': ['2501.00001', '2501.00002'], 'files': []}
+        for number, source in enumerate(('acl2026', 'iclr2026'), 1):
+            name = f'data/index/{source}.json'
+            shard = {'dataset': 'source_data', 'schema_version': 'source-data-source-shard-1',
+                     'source_id': source, 'record_count': 1,
+                     'records': [{'arxiv_id': f'2501.{number:05d}', 'source_ids': [source]}]}
+            self.write_json(self.project / name, shard)
+            raw = (self.project / name).read_bytes()
+            self.index['files'].append({'source_id': source, 'path': f'{source}.json', 'record_count': 1,
+                                        'bytes': len(raw), 'sha256': digest(raw)})
+        self.write_json(self.project / provenance.INDEX_PATH, self.index)
+        self.write_json(self.project / 'data/index/provenance/build_metadata.json', {'historical': 'unchanged'})
+        self.write_json(self.project / 'data/index/metadata/provenance.json', {'observed': 'unchanged'})
+        ledger = self.project / 'data/index/metadata/version_metadata.jsonl'
+        ledger.write_text('{"version":1,"page_count":null}\n')
+        self.config = {'schema_version': 'reviewer-project-1',
+                       'data': {'index': provenance.INDEX_PATH, 'pdf_root': 'data/pdf', 'metadata_root': 'data/index/metadata'},
+                       'outputs': {'runs_root': 'res', 'html_root': 'html'}, 'paused': True,
+                       'source_manifest': provenance.MANIFEST_PATH}
+        self.write_json(self.config_path, self.config)
+        self.manifest = provenance.write_manifest(self.project)
+        self.initial = self.snapshot()
 
     def write_json(self, path, value):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(value), encoding='utf-8')
 
-    def requested(self, sources=('acl2026',), extras=EXTRAS):
-        return [*(f'check_diff/{name}' for name in provenance.CORE_FILES),
-                *(f'v1.3/{source}.json' for source in sources), *extras]
+    def snapshot(self):
+        return {str(p.relative_to(self.project)): p.read_bytes() for p in self.project.rglob('*') if p.is_file()}
 
+    def reset(self):
+        for name, raw in self.initial.items():
+            (self.project / name).write_bytes(raw)
+        self.manifest = json.loads(self.manifest_path.read_bytes())
 
-class ExportedSourcesTests(SourceFixture, unittest.TestCase):
-    def setUp(self):
-        super().setUp()
-        self.active = {'code_manifest': 'evidence/deployment.json',
-                       'source_commit': NEW_PIN, 'worktree': str(self.worktree)}
-        self.manifest = {'source_commit': NEW_PIN, 'target_relative': 'worktrees/source',
-                         'files': {name: {'bytes': len(raw), 'sha256': digest(raw)}
-                                   for name, raw in self.raw.items()}}
-        self.save()
-
-    def save(self):
-        self.write_json(self.active_path, self.active)
+    def seal(self):
+        self.manifest['revision'] = provenance.revision_for_files(self.manifest['files'])
         self.write_json(self.manifest_path, self.manifest)
 
-    def current_schema(self):
-        self.manifest['schema_version'] = 'github-check-diff-sync-1'
-        self.manifest['files'] = {name: digest(raw) for name, raw in self.raw.items()
-                                  if not name.startswith('v1.3/')}
-        self.manifest['v13_json_hashes'] = {Path(name).name: digest(raw)
-                                          for name, raw in self.raw.items()
-                                          if name.startswith('v1.3/')}
-        self.manifest.pop('target_relative', None)  # The audited sync writer omits this.
-        self.save()
+    def repin(self, shard=None):
+        if shard is not None:
+            index = json.loads((self.project / provenance.INDEX_PATH).read_bytes())
+            raw = (self.project / f'data/index/{shard}.json').read_bytes()
+            for entry in index['files']:
+                if entry['source_id'] == shard:
+                    entry.update(bytes=len(raw), sha256=digest(raw))
+            self.write_json(self.project / provenance.INDEX_PATH, index)
+        self.manifest = provenance.write_manifest(self.project)
 
-    def verify(self, sources=None, source_commit=NEW_PIN, extras=EXTRAS):
-        # A bad active record must never silently fall back to Git or any process.
-        with mock.patch.object(provenance.subprocess, 'run', side_effect=AssertionError('Unexpected subprocess')):
-            return provenance.verified_sources(self.project, self.worktree,
-                                               ['acl2026'] if sources is None else sources,
-                                               source_commit, extras)
+    def verify(self, sources=None, revision=None, extras=EXTRAS, code_root=None):
+        return provenance.verified_sources(self.project, self.project if code_root is None else code_root,
+            ['acl2026'] if sources is None else sources,
+            self.manifest['revision'] if revision is None else revision, extras)
 
-    def assert_verified(self, blobs, evidence, sources=('acl2026',), extras=EXTRAS):
-        expected = {name: self.raw[name] for name in self.requested(sources, extras)}
-        for key, path in (('active_code', self.active_path), ('code_manifest', self.manifest_path)):
-            raw = path.read_bytes()
-            expected[f'deployment_provenance/{key}.json'] = raw
-            self.assertEqual(evidence[key], {'path': str(path), 'bytes': len(raw), 'sha256': digest(raw)})
+    def assert_verified(self, sources=('acl2026',), extras=EXTRAS):
+        blobs, deployment = self.verify(list(sources), extras=extras)
+        names = [*(f'check_diff/{name}' for name in provenance.CORE_FILES), provenance.INDEX_PATH,
+                 *(f'data/index/{source}.json' for source in sources), *extras]
+        expected = {name: (self.project / name).read_bytes() for name in names}
+        expected['deployment_provenance/project.json'] = self.config_path.read_bytes()
+        expected['source_manifest.json'] = self.manifest_path.read_bytes()
         self.assertEqual(blobs, expected)
-        self.assertEqual(set(evidence), {'active_code', 'code_manifest'})
-        # This is the legacy MBZ input-proofs loop, without metadata exceptions.
-        for item in evidence.values():
-            self.assertEqual(provenance.proof(Path(item['path'])),
-                             {key: item[key] for key in ('bytes', 'sha256')})
+        for key, path in (('project', self.config_path), ('source_manifest', self.manifest_path)):
+            raw = path.read_bytes()
+            self.assertEqual(deployment[key], {'path': str(path), 'bytes': len(raw), 'sha256': digest(raw)})
+            self.assertEqual(provenance.proof(path), {'bytes': len(raw), 'sha256': digest(raw)})
+        self.assertEqual(set(deployment), {'project', 'source_manifest'})
 
-    def test_core_file_contract_and_legacy_map(self):
-        self.assertEqual(provenance.CORE_FILES,
-                         ('runner.py', 'schema.py', 'token_usage.py', 'prompts/compare.md',
-                          'prompts/rubric.md', 'README.md', 'requirements.txt'))
-        self.assert_verified(*self.verify())
 
-    def test_legacy_list_and_optional_active_fields(self):
-        self.active = {'code_manifest': str(self.manifest_path)}
-        self.manifest['files'] = [{'path': name, **row, 'mode': 420}
-                                  for name, row in self.manifest['files'].items()]
-        self.save()
-        self.assert_verified(*self.verify())
+class ExportedSourcesTests(SourceFixture):
+    def test_core_file_contract_and_manifest_map(self):
+        self.assertEqual(provenance.CORE_FILES, ('runner.py', 'schema.py', 'prompts/compare.md',
+                                               'prompts/rubric.md', 'README.md', 'requirements.txt'))
+        self.assert_verified()
 
-    def test_current_hash_strings_and_separate_shards(self):
-        self.current_schema()
-        before = self.manifest_path.read_bytes()
-        blobs, evidence = self.verify(sources=['acl2026', 'iclr2026'])
-        self.assert_verified(blobs, evidence, sources=('acl2026', 'iclr2026'))
-        self.assertEqual(blobs['deployment_provenance/code_manifest.json'], before)
-        frozen = json.loads(blobs['deployment_provenance/code_manifest.json'])
-        self.assertTrue(all(isinstance(row, str) for row in frozen['files'].values()))
-        self.assertEqual(frozen, self.manifest)  # No fabricated pinned byte counts.
+    def test_raw_manifest_and_config_bytes_preserved(self):
+        before = self.snapshot()
+        self.assert_verified(sources=('acl2026', 'iclr2026'))
+        self.assertEqual(before, self.snapshot())
 
-    def test_audit_old_pin_fails_and_caller_selected_current_pin_passes(self):
-        self.current_schema()
-        (self.worktree / '.git').write_text('must not be consulted')
-        with self.assertRaisesRegex(ValueError, 'manifest source_commit differs'):
-            self.verify(source_commit=OLD_PIN)
-        self.assert_verified(*self.verify(source_commit=NEW_PIN))
-        # The implementation must not contain its own preferred commit.
-        self.active['source_commit'] = self.manifest['source_commit'] = OLD_PIN
-        self.save()
-        self.assert_verified(*self.verify(source_commit=OLD_PIN))
+    def test_revision_pin_is_required_and_caller_selected(self):
+        with self.assertRaisesRegex(ValueError, 'authorized source_revision'):
+            self.verify(revision='0' * 64)
+        old = self.manifest['revision']
+        (self.project / EXTRAS[0]).write_text('# explicitly revised helper\n')
+        self.repin()
+        self.assertNotEqual(self.manifest['revision'], old)
+        with self.assertRaises(ValueError):
+            self.verify(revision=old)
+        self.assert_verified()
 
-    def test_altered_core_shard_and_helper_rejected_in_every_format(self):
-        for shape in ('map', 'list', 'sync'):
-            if shape == 'list':
-                self.manifest['files'] = [{'path': name, **row}
-                                          for name, row in self.manifest['files'].items()]
-                self.save()
-            elif shape == 'sync':
-                self.current_schema()
-            for name in ('check_diff/runner.py', 'v1.3/acl2026.json', *EXTRAS):
-                with self.subTest(shape=shape, path=name):
-                    path = self.worktree / name
-                    path.write_bytes(b'X' + self.raw[name][1:])  # Same size, wrong digest.
-                    with self.assertRaisesRegex(ValueError, 'hash/size mismatch'):
-                        self.verify()
-                    path.write_bytes(self.raw[name])
+    def test_altered_core_shard_and_helper_rejected(self):
+        for name in ('check_diff/runner.py', 'data/index/acl2026.json', *EXTRAS):
+            with self.subTest(path=name):
+                path = self.project / name
+                raw = path.read_bytes()
+                path.write_bytes(b'X' + raw[1:])
+                with self.assertRaisesRegex(ValueError, 'hash/size mismatch'):
+                    self.verify()
+                path.write_bytes(raw)
 
     def test_missing_source_core_and_extra_entries_rejected(self):
-        original = copy.deepcopy(self.manifest)
-        for name in ('check_diff/schema.py', 'v1.3/acl2026.json', *EXTRAS):
+        for name in ('check_diff/schema.py', 'data/index/acl2026.json', *EXTRAS):
             with self.subTest(path=name):
-                self.manifest = copy.deepcopy(original)
+                self.reset()
                 del self.manifest['files'][name]
-                self.save()
-                with self.assertRaisesRegex(ValueError, 'Missing deployment manifest source entries'):
+                self.seal()
+                with self.assertRaisesRegex(ValueError, 'Missing source manifest entries'):
                     self.verify()
-        self.current_schema()
-        del self.manifest['v13_json_hashes']['acl2026.json']
-        self.save()
-        with self.assertRaisesRegex(ValueError, 'Missing deployment manifest source entries'):
-            self.verify()
 
-    def test_current_schema_without_selected_shards_is_rejected(self):
-        self.current_schema()
-        del self.manifest['v13_json_hashes']
-        self.save()
-        with self.assertRaisesRegex(ValueError, 'Missing deployment manifest source entries'):
-            self.verify()
-
-    def test_agreeing_shard_overlap_retains_pinned_size_and_rejects_conflict(self):
-        self.current_schema()
-        name = 'v1.3/acl2026.json'
-        self.manifest['files'][name] = {'sha256': digest(self.raw[name]), 'bytes': len(self.raw[name])}
-        self.save()
-        self.assert_verified(*self.verify())
-        self.manifest['files'][name]['bytes'] += 1
-        self.save()
+    def test_index_must_be_verified_even_for_single_shard(self):
+        path = self.project / provenance.INDEX_PATH
+        path.write_bytes(path.read_bytes() + b' ')
         with self.assertRaisesRegex(ValueError, 'hash/size mismatch'):
             self.verify()
-        self.manifest['files'][name] = digest(b'conflicting bytes')
-        self.save()
-        with self.assertRaisesRegex(ValueError, 'Conflicting deployment manifest shard'):
+        self.reset()
+        del self.manifest['files'][provenance.INDEX_PATH]
+        self.seal()
+        with self.assertRaisesRegex(ValueError, 'Missing source manifest entries'):
             self.verify()
 
-    def test_duplicate_list_rows_even_identical_are_rejected(self):
-        rows = [{'path': name, **row} for name, row in self.manifest['files'].items()]
-        self.manifest['files'] = rows + [rows[0]]
-        self.save()
-        with self.assertRaisesRegex(ValueError, 'Duplicate deployment manifest file path'):
-            self.verify()
+    def test_index_and_manifest_shard_hashes_agree(self):
+        for field, value in (('bytes', 0), ('sha256', '0' * 64)):
+            with self.subTest(field=field):
+                self.reset()
+                index = copy.deepcopy(self.index)
+                index['files'][0][field] = value
+                self.write_json(self.project / provenance.INDEX_PATH, index)
+                self.repin()
+                with self.assertRaisesRegex(ValueError, 'Index shard hash/size'):
+                    self.verify()
 
-    def test_duplicate_json_keys_rejected_at_every_relevant_level(self):
-        for target, raw in (
-                (self.active_path, '{"code_manifest":"evidence/deployment.json","code_manifest":"other"}'),
-                (self.manifest_path, '{"files":{},"files":{}}'),
-                (self.manifest_path, '{"files":{"a":{},"a":{}}}'),
-                (self.manifest_path, '{"files":{"a":{"bytes":1,"bytes":1}}}'),
-                (self.manifest_path, '{"v13_json_hashes":{"a.json":"a","a.json":"a"}}')):
-            with self.subTest(raw=raw):
-                self.save()
-                target.write_text(raw)
+    def test_duplicate_json_keys_rejected_at_every_level(self):
+        cases = [(provenance.PROJECT_PATH, '{"schema_version":"a","schema_version":"b"}'),
+                 (provenance.MANIFEST_PATH, '{"files":{},"files":{}}'),
+                 (provenance.MANIFEST_PATH, '{"files":{"utility/a.py":{},"utility/a.py":{}}}'),
+                 (provenance.MANIFEST_PATH, '{"files":{"utility/a.py":{"bytes":1,"bytes":1}}}'),
+                 (provenance.INDEX_PATH, '{"files":[],"files":[]}'),
+                 ('data/index/acl2026.json', '{"records":[],"records":[]}')]
+        for name, raw in cases:
+            with self.subTest(path=name):
+                self.reset()
+                (self.project / name).write_text(raw)
+                if name.startswith('data/'):
+                    self.repin('acl2026' if name.endswith('acl2026.json') else None)
                 with self.assertRaisesRegex(ValueError, 'Duplicate JSON key'):
                     self.verify()
 
     def test_malformed_json_and_non_object_documents_rejected(self):
-        for target in (self.active_path, self.manifest_path):
-            for raw in (b'{', b'[]', b'null', b'123', b'"text"', b'\xff', b'{"bad":NaN}'):
-                with self.subTest(target=target.name, raw=raw):
-                    self.save()
-                    target.write_bytes(raw)
+        for name in (provenance.PROJECT_PATH, provenance.MANIFEST_PATH, provenance.INDEX_PATH, 'data/index/acl2026.json'):
+            for raw in ('{', '[]', '{"bad":NaN}', '{"bad":Infinity}'):
+                with self.subTest(path=name, raw=raw):
+                    self.reset()
+                    (self.project / name).write_text(raw)
+                    if name.startswith('data/'):
+                        self.repin('acl2026' if name.endswith('acl2026.json') else None)
                     with self.assertRaises(ValueError):
                         self.verify()
 
-    def test_unknown_schema_and_unversioned_digest_strings_rejected(self):
-        for schema in ('unknown-2', None, 1):
-            with self.subTest(schema=schema):
-                self.manifest['schema_version'] = schema
-                self.save()
-                with self.assertRaisesRegex(ValueError, 'Unsupported deployment manifest schema'):
+    def test_unknown_schema_and_legacy_formats_rejected(self):
+        for change in ({'schema_version': 'github-check-diff-sync-1'}, {'source_commit': '1' * 40},
+                       {'files': list(self.manifest['files'].items())},
+                       {'files': {name: row['sha256'] for name, row in self.manifest['files'].items()}}):
+            with self.subTest(change=change):
+                self.reset()
+                self.manifest.update(change)
+                self.write_json(self.manifest_path, self.manifest)
+                with self.assertRaises(ValueError):
                     self.verify()
-        self.current_schema()
-        del self.manifest['schema_version']
-        self.save()
-        with self.assertRaisesRegex(ValueError, 'Malformed deployment manifest entry'):
-            self.verify()
 
     def test_malformed_file_entries_rejected(self):
-        name = 'check_diff/runner.py'
-        good = copy.deepcopy(self.manifest)
-        invalid = (None, [], 2, True, 'a' * 64, {}, {'bytes': 1},
-                   {'sha256': 'a' * 64}, {'sha256': 'invalid', 'bytes': 2},
-                   {'sha256': 'a' * 64, 'bytes': True}, {'sha256': 'a' * 64, 'bytes': -1},
-                   {'sha256': 'a' * 64, 'bytes': 1.0}, {'sha256': 'a' * 64, 'bytes': '1'},
-                   {'sha256': 'a' * 64, 'bytes': 1, 'path': 'other'})
-        for entry in invalid:
+        for entry in (None, '0' * 64, {}, {'bytes': True, 'sha256': '0' * 64},
+                      {'bytes': -1, 'sha256': '0' * 64}, {'bytes': 1.5, 'sha256': '0' * 64},
+                      {'bytes': 1, 'sha256': 'short'}, {'bytes': 1, 'sha256': None},
+                      {'bytes': 1, 'sha256': '0' * 64, 'path': 'other'}):
             with self.subTest(entry=entry):
-                self.manifest = copy.deepcopy(good)
-                self.manifest['files'][name] = entry
-                self.save()
-                with self.assertRaises(ValueError):
-                    self.verify()
-        for files in (None, 1, 'files', [1], [{'bytes': 1}], [{'path': []}]):
-            with self.subTest(files=files):
-                self.manifest['files'] = files
-                self.save()
+                self.reset()
+                self.manifest['files'][EXTRAS[0]] = entry
+                self.seal()
                 with self.assertRaises(ValueError):
                     self.verify()
 
-    def test_malformed_shard_maps_and_digests_rejected(self):
-        self.current_schema()
-        for shards in (None, [], 'hashes', {'acl2026.json': None}, {'acl2026.json': {}},
-                       {'acl2026.json': 'g' * 64}, {'acl2026.json': 'a' * 63}):
-            with self.subTest(shards=shards):
-                self.manifest['v13_json_hashes'] = shards
-                self.save()
-                with self.assertRaises(ValueError):
-                    self.verify()
+    def test_source_revision_is_required_and_full_hex(self):
+        for revision in (None, '', '1' * 40, 'g' * 64, 123, True):
+            with self.subTest(revision=revision), self.assertRaises(ValueError):
+                provenance.verified_sources(self.project, self.project, ['acl2026'], revision)
 
-    def test_source_commit_is_required_and_full_hex(self):
-        with self.assertRaises(TypeError):
-            provenance.verified_sources(self.project, self.worktree, ['acl2026'])
-        for value in (None, 1, '', 'HEAD', 'main', NEW_PIN[:12], NEW_PIN + '0', 'g' * 40,
-                      NEW_PIN + '\n', NEW_PIN + ':check_diff/runner.py'):
-            with self.subTest(value=value), self.assertRaisesRegex(ValueError, 'source_commit'):
-                self.verify(source_commit=value)
+    def test_manifest_revision_canonical_hash_cannot_be_fabricated(self):
+        self.manifest['revision'] = '0' * 64
+        self.write_json(self.manifest_path, self.manifest)
+        with self.assertRaisesRegex(ValueError, 'canonical files map'):
+            self.verify(revision='0' * 64)
 
-    def test_mismatched_or_invalid_record_commit_rejected(self):
-        for record in (self.active, self.manifest):
-            for value in (OLD_PIN, 'HEAD', None):
-                with self.subTest(record=record is self.active, value=value):
-                    record['source_commit'] = value
-                    self.save()
-                    with self.assertRaisesRegex(ValueError, 'source_commit'):
+    def test_code_root_must_equal_project(self):
+        nested = self.project / 'worktrees/source'
+        nested.mkdir(parents=True)
+        with self.assertRaisesRegex(ValueError, 'code_root must equal'):
+            self.verify(code_root=nested)
+        alias = self.project / 'root-alias'
+        alias.symlink_to(self.project, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, 'Symlink'):
+            self.verify(code_root=alias)
+
+    def test_invalid_manifest_paths_and_index_config_rejected(self):
+        for field, values in (('source_manifest', ('../outside.json', '/outside.json', provenance.INDEX_PATH)),
+                              ('index', ('../outside.json', '/outside.json', provenance.MANIFEST_PATH))):
+            for value in values:
+                with self.subTest(field=field, value=value):
+                    config = copy.deepcopy(self.config)
+                    (config['data'] if field == 'index' else config)[field] = value
+                    self.write_json(self.config_path, config)
+                    with self.assertRaises(ValueError):
                         self.verify()
-            record['source_commit'] = NEW_PIN
-        del self.manifest['source_commit']
-        self.save()
-        with self.assertRaisesRegex(ValueError, 'source_commit'):
-            self.verify()
-
-    def test_all_declared_targets_must_match(self):
-        for record in (self.active, self.manifest):
-            for field in ('worktree', 'target_relative'):
-                with self.subTest(active=record is self.active, field=field):
-                    prior = copy.deepcopy(record)
-                    record[field] = 'worktrees/other'
-                    self.save()
-                    with self.assertRaisesRegex(ValueError, 'different source worktree'):
-                        self.verify()
-                    record.clear()
-                    record.update(prior)
-
-    def test_invalid_manifest_paths_and_path_escape_rejected(self):
-        for path in ('../outside.json', str(self.project.parent / 'outside.json'),
-                     'evidence/../evidence/deployment.json', '', None, [], str(self.project)):
-            with self.subTest(path=path):
-                self.active['code_manifest'] = path
-                self.save()
-                with self.assertRaises(ValueError):
-                    self.verify()
 
     def test_unsafe_names_and_reserved_paths_rejected(self):
-        for name in ('../outside', '/absolute', 'utility/../escape', './utility/x',
-                     'utility//x', 'utility\\x', 'utility/x\x00', '.git/config',
-                     'deployment_provenance/active_code.json'):
-            with self.subTest(extra=name), self.assertRaises(ValueError):
-                self.verify(extras=(name,))
-            # Unrequested manifest entries still must be well formed.
-            self.manifest['files'][name] = {'bytes': 0, 'sha256': digest(b'')}
-            self.save()
-            with self.subTest(manifest=name), self.assertRaises(ValueError):
-                self.verify()
-            del self.manifest['files'][name]
-        self.save()
-        for source in ('../acl2026', '/tmp/a', 'a/b', 'a\\b', '.', '', None, 'acl2026.json'):
-            with self.subTest(source=source), self.assertRaises(ValueError):
-                self.verify(sources=[source])
-
-    def test_invalid_shard_filenames_rejected(self):
-        self.current_schema()
-        for name in ('../acl2026.json', 'v1.3/acl2026.json', '/acl2026.json', 'acl2026',
-                     './acl2026.json', 'a\\b.json', 'a.json\x00'):
+        for name in ('/absolute.py', '../outside.py', 'utility/../bad.py', 'utility//bad.py',
+                     'utility/./bad.py', 'utility\\bad.py', 'utility/a\x00.py',
+                     'deployment_provenance/project.json', 'utility/project.json',
+                     'utility/source_manifest.json', 'res/log.json', 'html/page.html',
+                     'review_experiment/run.py', 'utility/.runtime/helper.py', 'tests/helper.py'):
             with self.subTest(name=name):
-                self.manifest['v13_json_hashes'][name] = digest(b'')
-                self.save()
-                with self.assertRaisesRegex(ValueError, 'Invalid v1.3 shard filename'):
+                self.reset()
+                self.manifest['files'][name] = {'bytes': 0, 'sha256': digest(b'')}
+                self.seal()
+                with self.assertRaises(ValueError):
                     self.verify()
-                del self.manifest['v13_json_hashes'][name]
+
+    def test_invalid_source_ids_and_index_filenames_rejected(self):
+        for name in ('../acl2026', '/acl2026', 'acl2026.json', '', 'index', 'UPPER', None):
+            with self.subTest(source=name), self.assertRaises(ValueError):
+                self.verify(sources=[name])
+        for path in ('../acl2026.json', '/acl2026.json', 'other.json'):
+            self.reset()
+            index = copy.deepcopy(self.index)
+            index['files'][0]['path'] = path
+            self.write_json(self.project / provenance.INDEX_PATH, index)
+            self.repin()
+            with self.assertRaises(ValueError):
+                self.verify()
 
     def test_duplicate_requests_and_invalid_collections_rejected(self):
-        for sources, extras in ((['acl2026', 'acl2026'], EXTRAS),
-                                (['acl2026'], ('check_diff/runner.py',)),
-                                (['acl2026'], ('v1.3/acl2026.json',)),
-                                ('acl2026', EXTRAS), (['acl2026'], list(EXTRAS))):
+        for sources, extras in ((['acl2026', 'acl2026'], EXTRAS), ('acl2026', EXTRAS),
+                                ([], list(EXTRAS)), (['acl2026'], (EXTRAS[0], EXTRAS[0])),
+                                (['acl2026'], (provenance.INDEX_PATH,))):
             with self.subTest(sources=sources, extras=extras), self.assertRaises(ValueError):
                 self.verify(sources=sources, extras=extras)
 
     def test_symlink_files_and_parent_components_rejected(self):
-        for path in (self.active_path, self.manifest_path, self.worktree / 'check_diff/runner.py',
-                     self.worktree / 'v1.3/acl2026.json', self.worktree / EXTRAS[0],
-                     self.worktree / 'check_diff/prompts', self.active_path.parent,
-                     self.manifest_path.parent, self.worktree):
-            with self.subTest(path=path):
-                original = path.with_name(path.name + '.original')
-                path.rename(original)
-                path.symlink_to(original, target_is_directory=original.is_dir())
-                try:
-                    with self.assertRaisesRegex(ValueError, 'Symlink'):
-                        self.verify()
-                finally:
-                    path.unlink()
-                    original.rename(path)
-
-    def test_broken_active_symlink_never_allows_git_fallback(self):
-        self.active_path.unlink()
-        self.active_path.symlink_to(self.project / 'missing.json')
-        (self.worktree / '.git').write_text('fixture')
+        for name in ('check_diff/runner.py', 'data/index/acl2026.json', EXTRAS[0]):
+            with self.subTest(path=name):
+                path = self.project / name
+                raw = path.read_bytes()
+                target = self.project / 'outside-source'
+                target.write_bytes(raw)
+                path.unlink()
+                path.symlink_to(target)
+                with self.assertRaisesRegex(ValueError, 'Symlink'):
+                    self.verify()
+                path.unlink()
+                path.write_bytes(raw)
+        prompts = self.project / 'check_diff/prompts'
+        relocated = self.project / 'prompt-bytes'
+        prompts.rename(relocated)
+        prompts.symlink_to(relocated, target_is_directory=True)
         with self.assertRaisesRegex(ValueError, 'Symlink'):
             self.verify()
 
-    def test_missing_or_nonregular_required_files_rejected(self):
-        path = self.worktree / 'check_diff/runner.py'
-        path.unlink()
-        with self.assertRaisesRegex(ValueError, 'Cannot read regular source file'):
-            self.verify()
-        path.mkdir()
-        with self.assertRaisesRegex(ValueError, 'Expected a regular source file'):
-            self.verify()
-
-    def test_read_only_success_and_failure_without_git(self):
-        def snapshot():
-            return {str(path.relative_to(self.project)): path.read_bytes()
-                    for path in self.project.rglob('*') if path.is_file()}
-
-        before = snapshot()
-        self.verify(extras=())
-        self.assertEqual(snapshot(), before)
-        self.assertFalse((self.project / 'experiments').exists())
-        self.active_path.unlink()
-        before = snapshot()
-        with self.assertRaisesRegex(ValueError, 'Exported source requires'):
-            self.verify()
-        self.assertEqual(snapshot(), before)
-
-
-@unittest.skipUnless(shutil.which('git'), 'Local Git is required for temporary-repo tests')
-class GitSourcesTests(SourceFixture, unittest.TestCase):
-    def setUp(self):
-        super().setUp()
-        self.git_env = os.environ.copy()
-        for key in list(self.git_env):
-            if key.startswith('GIT_'):
-                del self.git_env[key]
-        self.git_env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM='1')
-        self.git('init', '-q')
-        self.git('add', '.')
-        self.git('commit', '-qm', 'Temporary provenance fixture')
-        self.pin = self.git('rev-parse', 'HEAD').decode().strip()
-
-    def git(self, *args):
-        return subprocess.run(['git', '-C', str(self.worktree), '-c', 'user.name=Fixture',
-                               '-c', 'user.email=fixture@example.invalid',
-                               '-c', 'commit.gpgsign=false', '-c', f'core.hooksPath={os.devnull}',
-                               *args], check=True, capture_output=True, env=self.git_env).stdout
-
-    def verify(self, source_commit=None, extras=EXTRAS):
-        return provenance.verified_sources(self.project, self.worktree, ['acl2026'],
-                                           self.pin if source_commit is None else source_commit, extras)
-
-    def test_explicit_pin_and_live_bytes_match_read_only(self):
-        before = self.git('status', '--porcelain')
-        with mock.patch.object(provenance.subprocess, 'run', wraps=subprocess.run) as run:
-            blobs, evidence = self.verify()
-        self.assertEqual(blobs, {name: self.raw[name] for name in self.requested()})
-        self.assertEqual(evidence, {})
-        commands = [call.args[0] for call in run.call_args_list]
-        refs = [command[-1] for command in commands if 'show' in command]
-        self.assertEqual(refs, [f'{self.pin}:{name}' for name in self.requested()])
-        for call in run.call_args_list:
-            self.assertIn('--no-replace-objects', call.args[0])
-            self.assertIn('protocol.allow=never', call.args[0])
-            self.assertEqual(call.kwargs['env']['GIT_NO_LAZY_FETCH'], '1')
-        self.assertEqual(self.git('status', '--porcelain'), before)
-
-    def test_dirty_core_shard_and_helper_rejected(self):
-        for name in ('check_diff/runner.py', 'v1.3/acl2026.json', *EXTRAS):
-            for staged in (False, True):
-                with self.subTest(name=name, staged=staged):
-                    path = self.worktree / name
-                    path.write_bytes(b'changed working bytes')
-                    if staged:
-                        self.git('add', name)
-                    with self.assertRaisesRegex(ValueError, 'Working source differs from pinned commit'):
-                        self.verify()
-                    path.write_bytes(self.raw[name])
-                    self.git('add', name)
-
-    def test_old_commit_does_not_silently_hide_new_working_bytes(self):
-        path = self.worktree / 'check_diff/runner.py'
-        path.write_bytes(b'new committed bytes')
-        self.git('add', '.')
-        self.git('commit', '-qm', 'Temporary second revision')
-        current = self.git('rev-parse', 'HEAD').decode().strip()
-        with self.assertRaisesRegex(ValueError, 'Working source differs from pinned commit'):
-            self.verify(source_commit=self.pin)
-        blobs, _ = self.verify(source_commit=current)
-        self.assertEqual(blobs['check_diff/runner.py'], b'new committed bytes')
-
-    def test_unrelated_dirty_file_does_not_expand_verification_scope(self):
-        (self.worktree / 'unrelated.txt').write_text('concurrent unrelated work')
-        self.verify()
-
-    def test_replacement_ref_cannot_substitute_a_different_commit(self):
-        path = self.worktree / 'check_diff/runner.py'
-        path.write_bytes(b'replacement commit bytes')
-        self.git('add', '.')
-        self.git('commit', '-qm', 'Temporary replacement revision')
-        replacement = self.git('rev-parse', 'HEAD').decode().strip()
-        self.git('replace', self.pin, replacement)
-        with self.assertRaisesRegex(ValueError, 'Working source differs from pinned commit'):
-            self.verify()
-
-    def test_linked_worktree_git_file_is_supported(self):
-        linked = self.project / 'worktrees/linked'
-        self.git('worktree', 'add', '--detach', str(linked), self.pin)
-        self.assertTrue((linked / '.git').is_file())
-        blobs, evidence = provenance.verified_sources(self.project, linked, ['acl2026'], self.pin, EXTRAS)
-        self.assertEqual(blobs, {name: self.raw[name] for name in self.requested()})
-        self.assertEqual(evidence, {})
-
-    def test_literal_extra_filename_is_supported(self):
-        name = 'utility/[literal].py'
-        (self.worktree / name).write_bytes(b'literal path fixture')
-        self.git('add', '.')
-        self.git('commit', '-qm', 'Temporary literal path fixture')
-        pin = self.git('rev-parse', 'HEAD').decode().strip()
-        blobs, _ = self.verify(source_commit=pin, extras=(name,))
-        self.assertEqual(blobs[name], b'literal path fixture')
-
-    def test_missing_commit_and_noncommit_object_rejected(self):
-        with self.assertRaisesRegex(ValueError, 'Cannot read pinned local Git source'):
-            self.verify(source_commit='0' * 40)
-        tree = self.git('rev-parse', 'HEAD^{tree}').decode().strip()
-        with self.assertRaisesRegex(ValueError, 'must identify a local Git commit object'):
-            self.verify(source_commit=tree)
-
-    def test_missing_pinned_extra_rejected(self):
-        (self.worktree / 'utility/untracked.py').write_text('untracked helper')
-        with self.assertRaisesRegex(ValueError, 'Expected a regular pinned Git source file'):
-            self.verify(extras=('utility/untracked.py',))
-
-    def test_bad_active_configuration_never_falls_back(self):
-        self.write_json(self.active_path, {'code_manifest': 'missing.json'})
-        with mock.patch.object(provenance.subprocess, 'run', side_effect=AssertionError('Unexpected Git')):
-            with self.assertRaises(ValueError):
+    def test_broken_configuration_symlink_never_falls_back(self):
+        self.config_path.unlink()
+        self.config_path.symlink_to(self.project / 'missing.json')
+        (self.project / '.git').mkdir()
+        with mock.patch.object(subprocess, 'run', side_effect=AssertionError('Git fallback')):
+            with self.assertRaisesRegex(ValueError, 'Symlink'):
                 self.verify()
 
-    def test_committed_symlink_rejected_even_if_live_replaced_by_regular_file(self):
-        path = self.worktree / 'utility/link.py'
-        path.symlink_to('prepare_input_data.py')
-        self.git('add', '.')
-        self.git('commit', '-qm', 'Temporary symlink fixture')
-        pin = self.git('rev-parse', 'HEAD').decode().strip()
-        path.unlink()
-        path.write_bytes(b'prepare_input_data.py')
-        with self.assertRaisesRegex(ValueError, 'Expected a regular pinned Git source file'):
-            self.verify(source_commit=pin, extras=('utility/link.py',))
+    def test_missing_or_nonregular_required_files_rejected(self):
+        for name in (provenance.PROJECT_PATH, provenance.MANIFEST_PATH, 'check_diff/runner.py', EXTRAS[0]):
+            for directory in (False, True):
+                with self.subTest(path=name, directory=directory):
+                    self.reset()
+                    path = self.project / name
+                    path.unlink()
+                    if directory:
+                        path.mkdir()
+                    with self.assertRaises(ValueError):
+                        self.verify()
+                    if directory:
+                        path.rmdir()
+                    path.write_bytes(self.initial[name])
 
-    def test_live_source_symlink_rejected(self):
-        path = self.worktree / 'check_diff/runner.py'
-        original = path.with_suffix('.original')
-        path.rename(original)
-        path.symlink_to(original)
+    def test_read_only_success_and_failure_without_subprocess(self):
+        with mock.patch.object(subprocess, 'run', side_effect=AssertionError('Unexpected subprocess')):
+            before = self.snapshot()
+            self.assert_verified()
+            self.assertEqual(before, self.snapshot())
+            with self.assertRaises(ValueError):
+                self.verify(revision='0' * 64)
+            self.assertEqual(before, self.snapshot())
+
+    def test_unrequested_file_bytes_do_not_expand_verification_scope(self):
+        (self.project / 'data/index/iclr2026.json').write_text('Unrequested changed bytes')
+        self.assert_verified()
+        with self.assertRaisesRegex(ValueError, 'hash/size mismatch'):
+            self.verify(sources=['iclr2026'])
+
+    def test_literal_extra_filename_is_supported(self):
+        name = 'utility/[literal]*.py'
+        (self.project / name).write_text('# literal filename\n')
+        self.repin()
+        self.assert_verified(extras=(*EXTRAS, name))
+
+    def test_requested_shard_schema_source_and_count_checked(self):
+        for field, value in (('dataset', 'v1.3'), ('schema_version', 'old-schema'), ('source_id', 'other'),
+                             ('record_count', 9), ('records', None)):
+            with self.subTest(field=field):
+                self.reset()
+                path = self.project / 'data/index/acl2026.json'
+                shard = json.loads(path.read_bytes())
+                shard[field] = value
+                self.write_json(path, shard)
+                self.repin('acl2026')
+                with self.assertRaisesRegex(ValueError, 'Shard dataset/source/count'):
+                    self.verify()
+
+    def test_index_record_order_and_count_checked(self):
+        for change in ({'record_order': ['2501.00001', '2501.00001']}, {'record_order': [None]},
+                       {'record_order': []}, {'dataset': 'v1.3'}, {'schema_version': 'old-schema'}):
+            with self.subTest(change=change):
+                self.reset()
+                index = copy.deepcopy(self.index)
+                index.update(change)
+                self.write_json(self.project / provenance.INDEX_PATH, index)
+                self.repin()
+                with self.assertRaises(ValueError):
+                    self.verify()
+
+    def test_changed_source_after_read_is_rejected(self):
+        original = provenance._read_file
+        def raced(path):
+            raw = original(path)
+            if path == self.project / EXTRAS[-1]:
+                (self.project / 'check_diff/runner.py').write_text('# Changed after its verified read\n')
+            return raw
+        with mock.patch.object(provenance, '_read_file', side_effect=raced):
+            with self.assertRaisesRegex(ValueError, 'changed during verification'):
+                self.verify()
+
+    def test_changed_config_or_manifest_after_read_is_rejected(self):
+        original = provenance._read_file
+        for target in (self.config_path, self.manifest_path):
+            self.reset()
+            def raced(path):
+                raw = original(path)
+                if path == self.project / EXTRAS[-1]:
+                    target.write_bytes(target.read_bytes() + b'\n')
+                return raw
+            with mock.patch.object(provenance, '_read_file', side_effect=raced):
+                with self.assertRaisesRegex(ValueError, 'changed during verification'):
+                    self.verify()
+
+    def test_same_file_changed_during_read_is_rejected(self):
+        path = self.project / 'check_diff/runner.py'
+        original = provenance.os.fstat
+        calls = 0
+        def raced(descriptor):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                path.write_text('# Changed inside the read\n')
+            return original(descriptor)
+        with mock.patch.object(provenance.os, 'fstat', side_effect=raced):
+            with self.assertRaisesRegex(ValueError, 'changed during verification'):
+                provenance.proof(path)
+
+    def test_metadata_extra_is_pinned_and_read_only(self):
+        name = 'data/index/metadata/version_metadata.jsonl'
+        self.assert_verified(extras=(*EXTRAS, name))
+        path = self.project / name
+        path.write_bytes(path.read_bytes() + b'\n')
+        with self.assertRaisesRegex(ValueError, 'hash/size mismatch'):
+            self.verify(extras=(*EXTRAS, name))
+
+
+class ManifestBuilderTests(SourceFixture):
+    def test_build_manifest_is_deterministic_read_only_and_config_independent(self):
+        before = self.snapshot()
+        first = provenance.build_manifest(self.project)
+        self.assertEqual(first, provenance.build_manifest(self.project))
+        self.assertEqual(before, self.snapshot())
+        config = copy.deepcopy(self.config)
+        config['runtime'] = {'python': '/explicit/fixture/python'}
+        self.write_json(self.config_path, config)
+        self.assertEqual(first, provenance.build_manifest(self.project))
+        self.assertEqual(first['revision'], digest(json.dumps(first['files'], sort_keys=True,
+                         separators=(',', ':'), ensure_ascii=False).encode()))
+
+    def test_manifest_includes_source_index_and_metadata_only(self):
+        for name in ('res/output.json', 'html/view.html', 'tests/temp.py', 'review_experiment/run.py',
+                     'runtime-store/lib.py'):
+            path = self.project / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('Excluded fixture')
+        (self.project / 'utility/.runtime').symlink_to(self.project / 'runtime-store', target_is_directory=True)
+        files = provenance.build_manifest(self.project)['files']
+        for name in (provenance.INDEX_PATH, 'data/index/acl2026.json', *EXTRAS,
+                     'data/index/metadata/version_metadata.jsonl', 'data/index/provenance/build_metadata.json'):
+            self.assertIn(name, files)
+        for name in (provenance.PROJECT_PATH, provenance.MANIFEST_PATH, 'res/output.json', 'html/view.html',
+                     'tests/temp.py', 'review_experiment/run.py', 'utility/.runtime/lib.py'):
+            self.assertNotIn(name, files)
+
+    def test_write_manifest_atomic_repeatable_and_no_temp_leaks(self):
+        first = provenance.write_manifest(self.project)
+        raw = self.manifest_path.read_bytes()
+        self.assertEqual(first, provenance.write_manifest(self.project))
+        self.assertEqual(raw, self.manifest_path.read_bytes())
+        self.assertEqual(list(self.manifest_path.parent.glob('.source-manifest-*.tmp')), [])
+
+    def test_write_manifest_refuses_symlink_destination(self):
+        target = self.project / 'protected.json'
+        target.write_text('preserved')
+        self.manifest_path.unlink()
+        self.manifest_path.symlink_to(target)
         with self.assertRaisesRegex(ValueError, 'Symlink'):
-            self.verify()
+            provenance.write_manifest(self.project)
+        self.assertEqual(target.read_text(), 'preserved')
 
-    def test_no_git_marker_cannot_use_ancestor_repository(self):
-        nested = self.worktree / 'nested'
-        nested.mkdir()
-        with mock.patch.object(provenance.subprocess, 'run', side_effect=AssertionError('Unexpected Git')):
-            with self.assertRaisesRegex(ValueError, 'Exported source requires'):
-                provenance.verified_sources(self.project, nested, ['acl2026'], self.pin)
+    def test_build_manifest_rejects_symlink_source_directory_and_file(self):
+        path = self.project / EXTRAS[0]
+        raw = path.read_bytes()
+        outside = self.project / 'other.py'
+        outside.write_bytes(raw)
+        path.unlink()
+        path.symlink_to(outside)
+        with self.assertRaisesRegex(ValueError, 'Symlink'):
+            provenance.build_manifest(self.project)
+        path.unlink()
+        path.write_bytes(raw)
+        metadata = self.project / 'data/index/metadata'
+        metadata.rename(self.project / 'old-metadata')
+        metadata.symlink_to(self.project / 'old-metadata', target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, 'Symlink'):
+            provenance.build_manifest(self.project)
+
+    def test_build_manifest_rejects_missing_and_nonregular_core(self):
+        path = self.project / 'check_diff/runner.py'
+        path.unlink()
+        with self.assertRaisesRegex(ValueError, 'Missing required source files'):
+            provenance.build_manifest(self.project)
+        path.mkdir()
+        with self.assertRaisesRegex(ValueError, 'Missing required source files'):
+            provenance.build_manifest(self.project)
+
+    def test_build_manifest_rejects_source_inventory_changes(self):
+        original = provenance._read_file
+        def raced(path):
+            raw = original(path)
+            if path == self.project / EXTRAS[-1]:
+                (self.project / 'utility/new.py').write_text('# Added after enumeration\n')
+            return raw
+        with mock.patch.object(provenance, '_read_file', side_effect=raced):
+            with self.assertRaisesRegex(ValueError, 'inventory changed'):
+                provenance.build_manifest(self.project)
+
+    def test_build_manifest_rejects_cross_file_races(self):
+        original = provenance._read_file
+        def raced(path):
+            raw = original(path)
+            if path == self.project / EXTRAS[-1]:
+                (self.project / 'check_diff/runner.py').write_text('# Changed earlier source\n')
+            return raw
+        with mock.patch.object(provenance, '_read_file', side_effect=raced):
+            with self.assertRaisesRegex(ValueError, 'changed during verification'):
+                provenance.build_manifest(self.project)
 
 
 if __name__ == '__main__':

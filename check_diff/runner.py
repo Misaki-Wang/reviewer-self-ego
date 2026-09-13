@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
+import importlib.util
 import os
 from pathlib import Path
 import re
@@ -21,13 +22,15 @@ from tqdm import tqdm
 
 if __package__:
     from .schema import SCHEMA, normalize_result_labels, validate_result
-    from . import token_usage
 else:
     from schema import SCHEMA, normalize_result_labels, validate_result
-    import token_usage
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
+# Resolve against this source root so frozen runs cannot import a live helper.
+_usage_spec = importlib.util.spec_from_file_location('_codex_token_usage', ROOT / 'utility/token_usage.py')
+token_usage = importlib.util.module_from_spec(_usage_spec)
+_usage_spec.loader.exec_module(token_usage)
 STOP = threading.Event()
 PROCESS_LOCK = threading.Lock()
 ACTIVE_PROCESSES = set()
@@ -329,9 +332,9 @@ def start_background(args, argv):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('input', type=Path, nargs='?', default=ROOT / 'input_data',
-                        help='input_data directory or one <arxiv_id>/v1_v2 directory')
-    parser.add_argument('--output', type=Path, default=ROOT / 'output')
+    parser.add_argument('input', type=Path,
+                        help='Prepared run directory or one <arxiv_id>/v1_v2 directory')
+    parser.add_argument('--output', type=Path, required=True, help='Explicit result directory, normally res/<run-id>/output')
     parser.add_argument('--paper', action='append', help='Select all pairs of an arXiv ID; repeatable')
     parser.add_argument('--limit', type=int)
     parser.add_argument('--model', default='gpt-5.5')
@@ -343,13 +346,15 @@ def main(argv=None):
     parser.add_argument('--overwrite', action='store_true', help='Recompute existing results')
     parser.add_argument('--dry-run', action='store_true', help='List inputs and outputs without running Codex')
     parser.add_argument('--background', action='store_true', help='Detach the batch and write progress to a log')
-    parser.add_argument('--log-file', type=Path, default=Path('/tmp') / f'{ROOT.name}_check_diff.log')
+    parser.add_argument('--log-file', type=Path, help='Background log (default: <output>/runner.log)')
     argv = list(sys.argv[1:] if argv is None else argv)
     args = parser.parse_args(argv)
     if (args.workers < 1 or args.timeout <= 0 or args.retries < 0 or
             (args.limit is not None and args.limit < 1)):
         parser.error('workers, timeout and limit must be positive; retries must be nonnegative')
     args.output = args.output.resolve()
+    if args.log_file is None:
+        args.log_file = args.output / 'runner.log'
     try:
         pairs = load_pairs(args.input, args.paper, args.limit)
         if args.dry_run:
