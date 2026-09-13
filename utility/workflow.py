@@ -168,13 +168,14 @@ def prepare_run(args, config):
                                 ('timeout', 'timeout_seconds'), ('validation_workers', 'validation_workers'))}
     if any(not isinstance(values[key], str) or not values[key].strip() for key in ('model', 'effort')):
         raise ValueError('Model and effort must be nonempty strings')
-    for key, maximum in (('units', None), ('workers', 64), ('validation_workers', 16), ('timeout', None)):
+    for key, maximum in (('units', None), ('workers', 96), ('validation_workers', 16), ('timeout', None)):
         value = args.units if key == 'units' else values[key]
         if type(value) is not int or value < 1 or (maximum and value > maximum):
             raise ValueError(f'Invalid positive {key}: {value}')
     if args.concurrency_ladder is not None and (
-            args.concurrency_ladder != [64, 48, 32, 16] or values['workers'] != 64):
-        raise ValueError('--concurrency-ladder requires 64 48 32 16 and --workers 64')
+            args.concurrency_ladder not in ([64, 48, 32, 16], [96, 80, 64, 48]) or
+            values['workers'] != args.concurrency_ladder[0]):
+        raise ValueError('--concurrency-ladder requires 64 48 32 16 or 96 80 64 48, with --workers matching its first value')
     adapter_proof = local_module('source_provenance').proof(Path(__file__).resolve())
     if adapter_proof != manifest['files'].get('utility/workflow.py'):
         raise ValueError('Loaded workflow adapter differs from its source manifest entry')

@@ -122,3 +122,10 @@ Both experiment runners use the single utility/token_usage.py implementation.
 It preserves raw reported usage and the existing aggregation contract. New batch
 snapshots freeze it at source_snapshot/utility/token_usage.py; historical snapshots
 are unchanged. The independent verifier retains its separate arithmetic.
+
+## Comparison concurrency
+
+The formal workflow accepts 1 through 96 comparison workers. Optional pressure
+fallback ladders are 64/48/32/16 and 96/80/64/48; --workers must match the first
+value. Reductions affect new admissions and preserve active Codex calls. Live
+run control remains under res/<run-id>/control.json.

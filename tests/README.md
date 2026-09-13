@@ -14,11 +14,11 @@ are synthetic; the explicit sandbox_smoke tool is not part of test discovery.
 
 | Directory | Tests | Coverage |
 | --- | ---: | --- |
-| check_diff/ | 25 | Comparison runner, I/O, isolated state, resume and errors |
-| utility/ | 143 | Shared token accounting/loading, source data/provenance and workflow |
-| mbz/ | 110 | Batch preparation, scheduling, recovery and independent verification |
+| check_diff/ | 28 | Comparison runner, I/O, isolated state, resume and errors |
+| utility/ | 144 | Shared token accounting/loading, source data/provenance and workflow |
+| mbz/ | 114 | Batch preparation, scheduling, recovery and independent verification |
 | data/ | 2 | Full source-data packaging, original records and metadata preservation |
-| review_experiment/ | 19 | Explicit review I/O, prompts, fake CLI and resume |
+| review_experiment/ | 71 | Source profiles/scales, shared baseline, concurrent review I/O and resume |
 
 The accounting tests are utility/test_token_usage.py and
 utility/test_token_usage_loading.py. Both runners share utility/token_usage.py;

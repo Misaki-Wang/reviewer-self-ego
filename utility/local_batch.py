@@ -199,6 +199,7 @@ class Batch:
         import prepare_source_data
         self.runner, self.tokens, self.prepare = runner, runner.token_usage, prepare_source_data
         self.stop = threading.Event()
+        self.termination_started = False
         self.process_lock = threading.Lock()
         self.processes = set()
         self.active = {}
@@ -543,6 +544,10 @@ class Batch:
         return {key: self.pdfs[key]['expected_sha256'] for key in pair['pdf_ids']}
 
     def terminate(self, *_):
+        # Signals may interrupt Event.set(), registry locks or subprocess.wait().
+        if self.termination_started:
+            return
+        self.termination_started = True
         self.stop.set()
         with self.process_lock:
             processes = list(self.processes)
@@ -974,7 +979,8 @@ class Batch:
                     save(self.run / 'run_manifest.json', result)
                     save(self.run / 'progress.json', result)
                     return 0 if status.startswith('completed') else 1
-                self.stop.wait(2)
+                # The signal handler sets stop; do not hold its condition here.
+                time.sleep(2)
 
 
 def main():

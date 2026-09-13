@@ -32,6 +32,7 @@ _usage_spec = importlib.util.spec_from_file_location('_codex_token_usage', ROOT 
 token_usage = importlib.util.module_from_spec(_usage_spec)
 _usage_spec.loader.exec_module(token_usage)
 STOP = threading.Event()
+STOP_REQUESTED = False
 PROCESS_LOCK = threading.Lock()
 ACTIVE_PROCESSES = set()
 
@@ -129,6 +130,11 @@ def terminate(process):
 
 
 def request_stop(signum, frame):
+    global STOP_REQUESTED
+    # Signals can reenter Event/process locks; latch before taking any of them.
+    if STOP_REQUESTED:
+        return
+    STOP_REQUESTED = True
     STOP.set()
     with PROCESS_LOCK:
         processes = list(ACTIVE_PROCESSES)
@@ -331,6 +337,7 @@ def start_background(args, argv):
 
 
 def main(argv=None):
+    global STOP_REQUESTED
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('input', type=Path,
                         help='Prepared run directory or one <arxiv_id>/v1_v2 directory')
@@ -365,6 +372,7 @@ def main(argv=None):
         if args.background:
             return start_background(args, argv)
         STOP.clear()
+        STOP_REQUESTED = False
         previous = {sig: signal.signal(sig, request_stop) for sig in (signal.SIGINT, signal.SIGTERM)}
         try:
             return run(args, pairs)

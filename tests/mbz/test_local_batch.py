@@ -596,6 +596,21 @@ class LadderTests(unittest.TestCase):
     def scale(self):
         return self.controller.scale(batch.read(self.controller.run / 'control.json'))
 
+    def test_96_ladder_reduces_to_80_64_48_without_cancelling_active_calls(self):
+        self.controller.config.update(max_workers=96, concurrency_ladder=[96, 80, 64, 48])
+        self.control['workers'] = 96
+        batch.save(self.controller.run / 'control.json', self.control)
+        active = dict(self.controller.active)
+        for at, expected in ((601, 80), (1202, 64), (1803, 48), (2404, 48)):
+            self.clock.return_value = at
+            self.observations({'status': 'failed', 'error': 'WebSocket connection closed'}, count=3, at=at-1)
+            self.assertEqual(self.scale()['workers'], expected)
+            self.assertEqual(self.controller.active, active)
+        rows = [json.loads(line) for line in (self.controller.run / 'concurrency_history.jsonl').read_text().splitlines()]
+        self.assertEqual([(row['from'], row['to']) for row in rows], [(96, 80), (80, 64), (64, 48)])
+        for future in active:
+            future.cancel.assert_not_called()
+
     def test_short_opt_in_cooldown_handles_fresh_fast_transport_failures(self):
         self.controller.config['concurrency_cooldown_seconds'] = 60
         self.observations({'status': 'failed', 'error': 'Connection reset by peer'}, count=3, at=30)

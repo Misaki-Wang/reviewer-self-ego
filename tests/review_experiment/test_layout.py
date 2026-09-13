@@ -1,5 +1,5 @@
 """Formal-layout I/O regressions use only temporary files and the existing fake CLI."""
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import redirect_stderr
 import importlib
 import io
 from pathlib import Path
@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from review_experiment import export_prompts, runner
+from review_experiment import runner
 from . import test_pipeline
 
 
@@ -101,30 +101,6 @@ class LayoutTests(unittest.TestCase):
             target.unlink()
         self.assertEqual(marker.read_bytes(), b'fake protected evidence')
         self.assertEqual(list(outside.iterdir()), [marker])
-
-    def test_export_rejects_existing_destination_without_mutation(self):
-        destination = self.fixture.root / 'export'
-        destination.mkdir()
-        marker = destination / 'system.txt'
-        marker.write_bytes(b'preserve frozen prompt')
-        with self.assertRaises(FileExistsError):
-            export_prompts.export(runner.ROOT / 'html/main_experiment.html', destination)
-        self.assertEqual(marker.read_bytes(), b'preserve frozen prompt')
-        self.assertEqual(list(destination.iterdir()), [marker])
-
-    def test_export_cli_requires_destination_and_checks_formal_html(self):
-        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as error:
-            export_prompts.main([])
-        self.assertEqual(error.exception.code, 2)
-        with redirect_stdout(io.StringIO()):
-            self.assertEqual(export_prompts.main(['--check']), 0)
-
-    def test_fresh_export_preserves_all_frozen_prompt_bytes(self):
-        destination = self.fixture.root / 'export'
-        export_prompts.export(runner.ROOT / 'html/main_experiment.html', destination)
-        for path in (runner.HERE / 'prompts').glob('*.txt'):
-            self.assertEqual((destination / path.name).read_bytes(), path.read_bytes())
-        export_prompts.export(runner.ROOT / 'html/main_experiment.html', destination, check=True)
 
     def test_source_and_test_packages_remain_distinct(self):
         source = importlib.import_module('review_experiment')

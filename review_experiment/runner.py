@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Review deduplicated paper versions with frozen prompts; one result JSON per paper."""
 import argparse
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import fcntl
@@ -27,13 +28,18 @@ _usage_spec = importlib.util.spec_from_file_location('_codex_token_usage', ROOT 
 token_usage = importlib.util.module_from_spec(_usage_spec)
 _usage_spec.loader.exec_module(token_usage)
 
-OA_VALUES = [1, 3, 5, 6, 8, 10]
-SCHEMA = {'type': 'object', 'properties': {
-    'oa': {'type': 'integer', 'enum': OA_VALUES},
-    'strengths': {'type': 'array', 'items': {'type': 'string'}},
-    'weaknesses': {'type': 'array', 'items': {'type': 'string'}},
-}, 'required': ['oa', 'strengths', 'weaknesses'], 'additionalProperties': False}
+if not __package__:
+    sys.path.insert(0, str(ROOT))
+from review_experiment import source_profiles
+if Path(source_profiles.__file__).resolve() != (HERE / 'source_profiles.py').resolve():
+    raise ImportError('Source profile helper differs from this runner source root')
+load_prompts = source_profiles.load_prompts
+resolve_sources = source_profiles.resolve_sources
+validate_result = source_profiles.validate_result
+
 STOP = threading.Event()
+DRAIN = threading.Event()
+RESULT_LOCK = threading.Lock()
 LOCK = threading.Lock()
 PROCESSES = set()
 
@@ -133,37 +139,6 @@ def discover(root, papers=None, versions=None, limit=None):
     return result, pairs
 
 
-def load_prompts(folder, experiments=None, conditions=None):
-    manifest = json.loads((folder / 'manifest.json').read_text(encoding='utf-8'))
-    texts = {}
-    for name, expected in manifest['files'].items():
-        path = folder / name
-        if path.parent.resolve() != folder.resolve():
-            raise ValueError('Invalid prompt path')
-        data = path.read_bytes()
-        if sha(data) != expected:
-            raise ValueError(f'Frozen prompt checksum mismatch: {path}')
-        texts[name] = data.decode('utf-8')
-    available = manifest['conditions']
-    if conditions and set(conditions) - {c['id'] for c in available}:
-        raise ValueError('Unknown condition ID')
-    selected = [c for c in available if (not conditions or c['id'] in conditions)
-                and (not experiments or c['experiment'] in experiments)]
-    if not selected:
-        raise ValueError('No conditions selected')
-    return texts[manifest['system_file']], [(c['id'], texts[c['user_file']]) for c in selected]
-
-
-def validate_result(result):
-    if (not isinstance(result, dict) or set(result) != set(SCHEMA['required']) or
-            type(result['oa']) is not int or result['oa'] not in OA_VALUES):
-        raise ValueError(f'Expected oa, strengths, weaknesses with a valid integer OA: {result!r}')
-    for key in ('strengths', 'weaknesses'):
-        if not isinstance(result[key], list) or any(not isinstance(x, str) or not x.strip() for x in result[key]):
-            raise ValueError(f'{key} must be a list of nonempty text items')
-    return result
-
-
 def render_user(template, other_model, pdf_path):
     if template.count('{PAPER_CONTENT}') != 1:
         raise ValueError('Expected one PAPER_CONTENT placeholder')
@@ -192,7 +167,7 @@ def pdf_skill_path(explicit=None):
     return max(candidates, key=lambda p: p.stat().st_mtime).resolve()
 
 
-def permission_options(work, snapshot, skill):
+def permission_options(work, snapshot, skill, codex=None, tool_runtime=None, ripgrep=None):
     """No broad workspace or host read grant. The exact PDF is read-only."""
     filesystem = {':root': 'deny', ':minimal': 'read',
                   str(work.resolve()): 'write', str(snapshot.resolve()): 'read',
@@ -202,6 +177,15 @@ def permission_options(work, snapshot, skill):
                  Path.home() / '.cache/codex-runtimes/codex-primary-runtime/dependencies'):
         if path.exists():
             filesystem[str(path.absolute())] = 'read'
+    executable = shutil.which(codex or 'codex')
+    if executable:
+        # Linux sandbox setup re-executes this exact binary inside its filesystem.
+        filesystem[str(Path(executable).resolve())] = 'read'
+    if tool_runtime:
+        for name in ('python_vendor', 'ghostscript-9.55.0'):
+            filesystem[str((tool_runtime / name).resolve())] = 'read'
+    if ripgrep:
+        filesystem[str(Path(ripgrep).resolve())] = 'read'
     table = '{' + ', '.join(f'{json.dumps(path)}={json.dumps(access)}'
                             for path, access in filesystem.items()) + '}'
     return ['-c', 'default_permissions="review_only"',
@@ -213,14 +197,27 @@ def build_command(args, work, system, snapshot):
     runtime = Path.home() / '.cache/codex-runtimes/codex-primary-runtime/dependencies'
     path = ':'.join(str(p) for p in (runtime / 'bin/override', runtime / 'python/bin',
                                     Path('/usr/bin'), Path('/bin')) if p.is_dir())
-    tool_environment = '{' + ', '.join(f'{json.dumps(k)}={json.dumps(v)}' for k, v in
-        {'PATH': path, 'TMPDIR': str(work), 'PYTHONNOUSERSITE': '1'}.items()) + '}'
+    environment = {'PATH': path, 'TMPDIR': str(work), 'PYTHONNOUSERSITE': '1'}
+    tool_runtime = getattr(args, 'tool_runtime', None)
+    if tool_runtime:
+        gs = tool_runtime / 'ghostscript-9.55.0'
+        environment['PATH'] = str(gs / 'bin') + ':' + path
+        environment['PYTHONPATH'] = str(tool_runtime / 'python_vendor')
+        environment['GS_LIB'] = ':'.join(str(p) for p in (
+            gs / 'share/ghostscript/9.55.0/Resource/Init',
+            gs / 'share/ghostscript/9.55.0/lib',
+            gs / 'share/ghostscript/9.55.0/Resource/Font'))
+    ripgrep = getattr(args, 'ripgrep', None)
+    if ripgrep:
+        environment['PATH'] = str(ripgrep.parent) + ':' + environment['PATH']
+    tool_environment = '{' + ', '.join(f'{json.dumps(k)}={json.dumps(v)}'
+                                      for k, v in environment.items()) + '}'
     return [args.codex, 'exec', '--json', '--strict-config', '--ignore-user-config', '--ephemeral',
             '--skip-git-repo-check',
             '--model', args.model, '-c', 'model_reasoning_effort=' + json.dumps(args.effort),
             '-c', 'developer_instructions=' + json.dumps(system),
             '-c', 'web_search="disabled"',
-            *permission_options(work, snapshot, args.pdf_skill),
+            *permission_options(work, snapshot, args.pdf_skill, args.codex, tool_runtime, ripgrep),
             '-c', 'mcp_servers={}',
             '-c', 'features.apps=false', '-c', 'features.plugins=false',
             '-c', 'features.browser_use=false', '-c', 'features.computer_use=false',
@@ -255,7 +252,7 @@ def stop(signum, frame):
         terminate(process)
 
 
-def call_codex(args, system, template, snapshot, work, attempt):
+def call_codex(args, profile, template, snapshot, work, attempt):
     work.mkdir()
     # Fresh cwd/session per review, with no paper/version labels or other results.
     manuscript = work / 'manuscript.pdf'
@@ -263,9 +260,10 @@ def call_codex(args, system, template, snapshot, work, attempt):
     skills = work / '.agents/skills'
     skills.mkdir(parents=True)
     (skills / 'pdf').symlink_to(args.pdf_skill.parent, target_is_directory=True)
-    (work / 'schema.json').write_text(json.dumps(SCHEMA))
+    (work / 'schema.json').write_text(json.dumps(profile.schema))
     user = render_user(template, args.other_model, manuscript)
     attempt['user_message'] = user
+    attempt['ripgrep'] = getattr(args, 'ripgrep_metadata', None)
     env = os.environ.copy()
     # Tool subprocesses may create scratch files here, not in a shared /tmp.
     env['TMPDIR'] = str(work)
@@ -279,7 +277,7 @@ def call_codex(args, system, template, snapshot, work, attempt):
             with LOCK:
                 if STOP.is_set():
                     raise RuntimeError('Interrupted')
-                process = subprocess.Popen(build_command(args, work, system, snapshot), stdin=subprocess.PIPE,
+                process = subprocess.Popen(build_command(args, work, profile.text, snapshot), stdin=subprocess.PIPE,
                                            stdout=events, stderr=errors, text=True, env=env,
                                            start_new_session=True)
                 PROCESSES.add(process)
@@ -288,7 +286,7 @@ def call_codex(args, system, template, snapshot, work, attempt):
                 raise RuntimeError('Interrupted')
             if process.returncode:
                 raise RuntimeError(f'Codex exited {process.returncode}')
-            return validate_result(json.loads((work / 'response.json').read_text()))
+            return validate_result(json.loads((work / 'response.json').read_text()), profile.schema)
         finally:
             if process:
                 terminate(process)
@@ -316,83 +314,139 @@ def call_codex(args, system, template, snapshot, work, attempt):
                 attempt['raw_response'] = response.read_text()
 
 
-def fingerprint(args, system, template, checksum):
-    return sha(json.dumps({'system': system, 'user_template': template,
+def fingerprint(args, profile, template, checksum):
+    return sha(json.dumps({'system': profile.text, 'source_id': profile.source_id,
+                           'score_scale': profile.metadata(), 'user_template': template,
                            'other_model': args.other_model if '{OTHER_MODEL_NAME}' in template else None,
                            'pdf_sha256': checksum, 'model': args.model, 'effort': args.effort,
                            'codex_executable': str(Path(shutil.which(args.codex) or args.codex).resolve()),
-                           'schema': SCHEMA, 'adapter_version': 2,
+                           'schema': profile.schema, 'adapter_version': 3,
                            'file_access': 'review_only_minimal_runtime',
+                           'tool_runtime': str(args.tool_runtime) if getattr(args, 'tool_runtime', None) else None,
+                           'ripgrep': getattr(args, 'ripgrep_metadata', None),
                            'pdf_skill_sha256': args.pdf_skill_sha256}, sort_keys=True).encode())
 
 
-def run_paper(args, aid, versions, system, conditions):
-    path = args.output / aid / 'reviews.json'
-    document = {'format_version': 1, 'paper_id': aid, 'versions': {}}
-    if path.exists():
+def read_document(path, aid, source_id=None):
+    if not path.exists():
+        document = {'format_version': 1, 'paper_id': aid, 'versions': {}}
+    else:
         document = json.loads(path.read_text())
         if document.get('format_version') != 1 or document.get('paper_id') != aid:
             raise ValueError(f'Incompatible result file: {path}')
-    counts = dict(completed=0, skipped=0, failed=0)
+    if source_id is not None:
+        saved_source = document.get('source_id')
+        has_reviews = any(v.get('reviews') for v in document['versions'].values())
+        if saved_source not in (None, source_id) or (saved_source is None and has_reviews):
+            raise ValueError(f'Result source is missing or differs for {aid}; use a fresh output directory')
+        document['source_id'] = source_id
+    return document
+
+
+def save_review(path, aid, version, review):
+    # Each worker owns one cell. Merge against the latest document while locked;
+    # never publish another worker's stale paper snapshot.
+    with RESULT_LOCK:
+        document = read_document(path, aid, review['source_id'])
+        document['versions'][f'v{version.number}']['reviews'][
+            f"{review['condition']}/r{review['replicate']}"] = review
+        document.update(updated_at=now(), latest_selection_status='in_progress')
+        save_json(path, document)
+
+
+def save_selection(path, aid, counts, status):
+    with RESULT_LOCK:
+        document = read_document(path, aid)
+        document.update(updated_at=now(), latest_selection_counts=dict(counts),
+                        latest_selection_status=status)
+        save_json(path, document)
+
+
+def drain(signum, frame):
+    """Stop new admissions while allowing active calls to finish normally."""
+    DRAIN.set()
+
+
+def run_review(args, aid, version, payload, profile, condition, template, replicate):
+    if STOP.is_set():
+        return None
+    data, checksum = payload
+    path = args.output / aid / 'reviews.json'
+    key = f'{condition}/r{replicate}'
+    review = dict(condition=condition, replicate=replicate,
+                  fingerprint=fingerprint(args, profile, template, checksum),
+                  source_id=profile.source_id, system_prompt=profile.metadata(),
+                  model=args.model, effort=args.effort, codex_executable=args.codex,
+                  status='failed', attempts=[])
     with tempfile.TemporaryDirectory(prefix='review-experiment-', dir=args.output) as temp:
         root = Path(temp)
-        for version in versions:
+        snapshot = root / 'snapshot.pdf'
+        snapshot.write_bytes(data)
+        for number in range(args.retries + 1):
             if STOP.is_set():
                 break
-            data, checksum = version.read()
-            snapshot = root / 'snapshot.pdf'
-            snapshot.write_bytes(data)
-            del data
+            attempt = dict(started_at=now(), status='failed')
+            review['attempts'].append(attempt)
+            work = root / ('call-' + uuid.uuid4().hex)
+            print(f'START {aid}/v{version.number} {key} attempt={number + 1}', flush=True)
+            started = time.monotonic()
+            try:
+                review['result'] = call_codex(args, profile, template, snapshot, work, attempt)
+                review['status'] = attempt['status'] = 'completed'
+            except Exception as exc:
+                attempt['error'] = f'{type(exc).__name__}: {exc}'
+                print(f'FAILED {aid}/v{version.number} {key}: {exc}', flush=True)
+            finally:
+                attempt.update(finished_at=now(), elapsed_seconds=round(time.monotonic() - started, 3))
+                review['token_usage'] = token_usage.summarize(review['attempts'])
+                save_review(path, aid, version, review)
+                shutil.rmtree(work, ignore_errors=True)
+            if review['status'] == 'completed' or STOP.is_set():
+                break
+    return review['status'] if review['attempts'] else None
+
+
+def prepare_reviews(args, papers, profiles, conditions):
+    """Read each version once, retain immutable bytes, and skip valid prior cells."""
+    queues, counts = [], {}
+    documents = {aid: read_document(args.output / aid / 'reviews.json', aid, profiles[aid].source_id)
+                 for aid in papers}
+    for aid, versions in papers.items():
+        path = args.output / aid / 'reviews.json'
+        document = documents[aid]
+        profile = profiles[aid]
+        queue = deque()
+        counts[aid] = dict(completed=0, skipped=0, failed=0)
+        for version in versions:
+            payload = version.read()
+            checksum = payload[1]
             record = document['versions'].setdefault(f'v{version.number}', {'reviews': {}})
             if record.get('sha256') not in (None, checksum):
-                # Never mix outputs for two different PDFs under the same version.
                 record['reviews'] = {}
             record.update(sha256=checksum, source_paths=[str(p) for p in version.sources])
             for condition, template in conditions:
                 for replicate in range(1, args.replicates + 1):
-                    if STOP.is_set():
-                        break
-                    key = f'{condition}/r{replicate}'
-                    mark = fingerprint(args, system, template, checksum)
-                    previous = record['reviews'].get(key, {})
-                    if not args.overwrite and previous.get('fingerprint') == mark and previous.get('status') == 'completed':
+                    previous = record['reviews'].get(f'{condition}/r{replicate}', {})
+                    mark = fingerprint(args, profile, template, checksum)
+                    if (not args.overwrite and previous.get('fingerprint') == mark
+                            and previous.get('status') == 'completed'):
                         try:
-                            validate_result(previous['result'])
+                            validate_result(previous['result'], profile.schema)
                         except (ValueError, KeyError):
                             pass
                         else:
-                            counts['skipped'] += 1
+                            counts[aid]['skipped'] += 1
                             continue
-                    review = dict(condition=condition, replicate=replicate, fingerprint=mark,
-                                  model=args.model, effort=args.effort, codex_executable=args.codex,
-                                  status='failed', attempts=[])
-                    record['reviews'][key] = review
-                    for number in range(args.retries + 1):
-                        attempt = dict(started_at=now(), status='failed')
-                        review['attempts'].append(attempt)
-                        work = root / ('call-' + uuid.uuid4().hex)
-                        print(f'START {aid}/v{version.number} {key} attempt={number + 1}', flush=True)
-                        started = time.monotonic()
-                        try:
-                            review['result'] = call_codex(args, system, template, snapshot, work, attempt)
-                            review['status'] = attempt['status'] = 'completed'
-                        except Exception as exc:
-                            attempt['error'] = f'{type(exc).__name__}: {exc}'
-                            print(f'FAILED {aid}/v{version.number} {key}: {exc}', flush=True)
-                        finally:
-                            attempt.update(finished_at=now(), elapsed_seconds=round(time.monotonic() - started, 3))
-                            review['token_usage'] = token_usage.summarize(review['attempts'])
-                            document.update(updated_at=now(), latest_selection_status='in_progress')
-                            save_json(path, document)
-                            shutil.rmtree(work, ignore_errors=True)
-                        if review['status'] == 'completed' or STOP.is_set():
-                            break
-                    counts['completed' if review['status'] == 'completed' else 'failed'] += 1
-        document.update(updated_at=now(), latest_selection_counts=counts,
-                        latest_selection_status='stopped' if STOP.is_set() else 'failed' if counts['failed'] else 'completed')
+                    queue.append((aid, version, payload, profile, condition, template, replicate))
         save_json(path, document)
-    print(f'PAPER {aid}: {counts}', flush=True)
-    return counts
+        queues.append(queue)
+    # Keep paper admissions balanced while preserving each paper's queue order.
+    pending = deque()
+    while any(queues):
+        for queue in queues:
+            if queue:
+                pending.append(queue.popleft())
+    return pending, counts
 
 
 def validate_output(input_root, output, papers=()):
@@ -430,6 +484,8 @@ def main(argv=None):
     ap.add_argument('input', type=Path, help='Explicit prepared <paper>/vX_vY PDF tree; not the raw data index/store')
     ap.add_argument('--output', type=Path, required=True, help='New or resumable result directory, normally res/<run-id>')
     ap.add_argument('--prompts', type=Path, default=HERE / 'prompts')
+    ap.add_argument('--source', help='Explicit source ID; otherwise resolve each paper from input provenance/catalog')
+    ap.add_argument('--source-metadata', type=Path, help='Explicit prepared scope, source shard or source catalog JSON')
     ap.add_argument('--paper', action='append')
     ap.add_argument('--version', type=int, action='append')
     ap.add_argument('--limit-papers', type=int)
@@ -437,10 +493,15 @@ def main(argv=None):
     ap.add_argument('--condition', action='append')
     ap.add_argument('--other-model', help='Explicit author model name for exp2_other_llm')
     ap.add_argument('--model', default='gpt-5.5')
-    ap.add_argument('--effort', default='medium', choices=['low', 'medium', 'high', 'xhigh'])
+    ap.add_argument('--effort', default='medium', choices=['low', 'medium', 'high', 'xhigh', 'max'])
     ap.add_argument('--codex', default=shutil.which('codex') or 'codex')
+    bundled_rg = ROOT / 'utility/.runtime/ripgrep/rg'
+    ap.add_argument('--ripgrep', type=Path,
+                    default=bundled_rg if bundled_rg.is_file() else shutil.which('rg'),
+                    help='Exact rg executable; defaults to the project runtime, then PATH')
     ap.add_argument('--pdf-skill', type=Path)
-    ap.add_argument('--workers', type=int, default=1, help='Concurrent papers (each paper runs sequentially)')
+    ap.add_argument('--tool-runtime', type=Path, help='Explicit existing python_vendor and ghostscript-9.55.0 runtime root')
+    ap.add_argument('--workers', type=int, default=1, help='Maximum concurrent independent reviews across versions and conditions')
     ap.add_argument('--replicates', type=int, default=1)
     ap.add_argument('--timeout', type=float, default=1800)
     ap.add_argument('--retries', type=int, default=1)
@@ -455,18 +516,46 @@ def main(argv=None):
         args.output = validate_output(args.input, args.output)
         papers, pair_count = discover(args.input, args.paper, args.version, args.limit_papers)
         validate_output(args.input, args.output, papers)
-        system, conditions = load_prompts(args.prompts, args.experiment, args.condition)
+        available_profiles, conditions = load_prompts(args.prompts, args.experiment, args.condition)
+        source_by_paper, source_provenance = resolve_sources(
+            args.input, papers, available_profiles, source=args.source,
+            metadata=args.source_metadata, project_root=ROOT)
+        profiles = {aid: available_profiles[source] for aid, source in source_by_paper.items()}
         version_count = sum(map(len, papers.values()))
         inventory = dict(papers=len(papers), discovered_pairs=pair_count, unique_versions=version_count,
                          conditions=[c[0] for c in conditions], replicates=args.replicates,
                          planned_reviews=version_count * len(conditions) * args.replicates,
-                         versions_by_paper={aid: [v.number for v in vs] for aid, vs in papers.items()})
+                         versions_by_paper={aid: [v.number for v in vs] for aid, vs in papers.items()},
+                         source_by_paper=source_by_paper, source_provenance=source_provenance,
+                         system_profiles={source: available_profiles[source].metadata()
+                                          for source in sorted(set(source_by_paper.values()))})
         if args.dry_run:
             print(json.dumps(inventory, indent=2))
             return 0
         if any('{OTHER_MODEL_NAME}' in t for _, t in conditions):
             if not args.other_model or args.other_model.casefold() == args.model.casefold():
                 raise ValueError('Provide --other-model different from the evaluator model')
+        if args.tool_runtime:
+            args.tool_runtime = args.tool_runtime.resolve()
+            if not all((args.tool_runtime / name).is_dir()
+                       for name in ('python_vendor', 'ghostscript-9.55.0')):
+                raise ValueError('--tool-runtime requires python_vendor and ghostscript-9.55.0 directories')
+        args.ripgrep_metadata = None
+        if args.ripgrep:
+            args.ripgrep = args.ripgrep.expanduser().resolve()
+            if (args.ripgrep.name != 'rg' or not args.ripgrep.is_file() or
+                    not os.access(args.ripgrep, os.X_OK)):
+                raise ValueError('--ripgrep must name an executable rg file')
+            try:
+                probe = subprocess.run([str(args.ripgrep), '--version'], check=True,
+                                       capture_output=True, text=True, timeout=5)
+            except (OSError, subprocess.SubprocessError) as exc:
+                raise ValueError(f'Cannot execute ripgrep: {args.ripgrep}') from exc
+            version = probe.stdout.splitlines()
+            if not version or not version[0].startswith('ripgrep '):
+                raise ValueError(f'Unexpected ripgrep version output: {args.ripgrep}')
+            args.ripgrep_metadata = {'path': str(args.ripgrep), 'version': version[0],
+                                     'sha256': sha(args.ripgrep.read_bytes())}
         args.pdf_skill = pdf_skill_path(args.pdf_skill)
         args.pdf_skill_sha256 = sha(args.pdf_skill.read_bytes())
         if not shutil.which(args.codex):
@@ -479,27 +568,62 @@ def main(argv=None):
             except BlockingIOError:
                 raise ValueError('Another runner is using this output directory')
             STOP.clear()
+            DRAIN.clear()
+            summary = dict(inventory=inventory, started_at=now(), papers={}, errors={},
+                           scheduling_unit='review', workers=args.workers, max_observed_concurrency=0)
+            pending, counts = prepare_reviews(args, papers, profiles, conditions)
+            summary['papers'] = counts
+            totals = {aid: len(versions) * len(conditions) * args.replicates
+                      for aid, versions in papers.items()}
+            summary.update(status='running', pending_reviews=len(pending))
+            save_json(args.output / 'run_summary.json', summary)
             handlers = {sig: signal.signal(sig, stop) for sig in (signal.SIGINT, signal.SIGTERM)}
-            summary = dict(inventory=inventory, started_at=now(), papers={}, errors={})
+            if hasattr(signal, 'SIGUSR1'):
+                handlers[signal.SIGUSR1] = signal.signal(signal.SIGUSR1, drain)
             try:
                 with ThreadPoolExecutor(max_workers=args.workers) as pool:
-                    futures = {pool.submit(run_paper, args, aid, vs, system, conditions): aid
-                               for aid, vs in papers.items()}
-                    for future in as_completed(futures):
-                        aid = futures[future]
-                        try:
-                            summary['papers'][aid] = future.result()
-                        except Exception as exc:
-                            summary['errors'][aid] = str(exc)
-                            print(f'PAPER FAILED {aid}: {exc}', file=sys.stderr)
-                        save_json(args.output / 'run_summary.json', summary)
+                    active = {}
+                    while pending or active:
+                        while pending and len(active) < args.workers and not STOP.is_set() and not DRAIN.is_set():
+                            cell = pending.popleft()
+                            aid, version, payload, profile, condition, template, replicate = cell
+                            future = pool.submit(run_review, args, aid, version, payload, profile,
+                                                 condition, template, replicate)
+                            active[future] = cell
+                        summary['max_observed_concurrency'] = max(summary['max_observed_concurrency'], len(active))
+                        if not active:
+                            break
+                        finished, _ = wait(active, timeout=1, return_when=FIRST_COMPLETED)
+                        for future in finished:
+                            aid, version, _, _, condition, _, replicate = active.pop(future)
+                            try:
+                                status = future.result()
+                                if status is not None:
+                                    counts[aid][status] += 1
+                            except Exception as exc:
+                                summary['errors'][f'{aid}/v{version.number}/{condition}/r{replicate}'] = str(exc)
+                                counts[aid]['failed'] += 1
+                                print(f'REVIEW FAILED {aid}/v{version.number} {condition}: {exc}', file=sys.stderr)
+                            complete = sum(counts[aid].values()) == totals[aid]
+                            state = ('failed' if counts[aid]['failed'] else 'completed') if complete else 'in_progress'
+                            save_selection(args.output / aid / 'reviews.json', aid, counts[aid], state)
+                            summary['pending_reviews'] = len(pending) + len(active)
+                            save_json(args.output / 'run_summary.json', summary)
             finally:
                 for sig, handler in handlers.items():
                     signal.signal(sig, handler)
-            failed = bool(summary['errors']) or any(c['failed'] for c in summary['papers'].values())
-            summary.update(finished_at=now(), status='stopped' if STOP.is_set() else 'failed' if failed else 'completed')
+            failed = bool(summary['errors']) or any(c['failed'] for c in counts.values())
+            state = ('stopped' if STOP.is_set() else 'drained' if pending and DRAIN.is_set()
+                     else 'failed' if failed else 'completed')
+            summary.update(finished_at=now(), status=state,
+                           pending_reviews=sum(totals[a] - sum(c.values()) for a, c in counts.items()))
+            for aid, count in counts.items():
+                complete = sum(count.values()) == totals[aid]
+                paper_state = ('failed' if count['failed'] else 'completed') if complete else state
+                save_selection(args.output / aid / 'reviews.json', aid, count, paper_state)
+                print(f'PAPER {aid}: {count}', flush=True)
             save_json(args.output / 'run_summary.json', summary)
-            return 130 if STOP.is_set() else 1 if failed else 0
+            return 130 if state in ('stopped', 'drained') else 1 if failed else 0
     except (ValueError, OSError) as exc:
         ap.exit(1, str(exc) + '\n')
 

@@ -274,6 +274,21 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(args.run, self.root / 'res/current/new-run')
         self.assertEqual(args.runs_root, self.root / 'res/current')
 
+    def test_prepare_accepts_96_worker_ladder_and_rejects_mismatch(self):
+        code, _, error = self.prepare('--workers', '96', '--concurrency-ladder', '96', '80', '64', '48')
+        self.assertEqual(code, 0, error)
+        args = self.preparer.prepare.call_args.args[0]
+        self.assertEqual(args.workers, 96)
+        self.assertEqual(args.concurrency_ladder, [96, 80, 64, 48])
+        self.preparer.prepare.reset_mock()
+        for workers, ladder in (('80', ('96', '80', '64', '48')),
+                                ('96', ('96', '64', '80', '48')),
+                                ('97', ('97', '80', '64', '48'))):
+            with self.subTest(workers=workers, ladder=ladder):
+                self.assertNotEqual(self.prepare('--workers', workers, '--concurrency-ladder', *ladder)[0], 0)
+        self.preparer.prepare.assert_not_called()
+        self.process.assert_not_called()
+
     def test_prepare_explicit_overrides(self):
         code, _, error = self.prepare('--model', 'explicit-model', '--effort', 'high',
             '--workers', '32', '--validation-workers', '2', '--timeout', '90')
@@ -283,7 +298,7 @@ class WorkflowTests(unittest.TestCase):
                          ('explicit-model', 'high', 32, 2, 90))
 
     def test_prepare_rejects_invalid_numeric_scope_and_defaults(self):
-        for flag, value in (('--units', '0'), ('--workers', '65'), ('--validation-workers', '17'), ('--timeout', '0')):
+        for flag, value in (('--units', '0'), ('--workers', '97'), ('--validation-workers', '17'), ('--timeout', '0')):
             with self.subTest(flag=flag):
                 self.assertNotEqual(self.prepare(flag, value)[0], 0)
         self.preparer.prepare.assert_not_called()

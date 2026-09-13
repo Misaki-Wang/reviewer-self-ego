@@ -134,6 +134,20 @@ class PreparationTests(unittest.TestCase):
         self.assertEqual(set(namespace['SCHEMA']['properties']['prelim']['properties']), {'A1', 'A2'})
         self.assertIn('improvement', namespace['SCHEMA']['properties'])
 
+    def test_96_worker_ladder_is_frozen_with_the_exact_scope(self):
+        self.args.units, self.args.workers = 1, 96
+        self.args.concurrency_ladder = [96, 80, 64, 48]
+        manifest = self.prepare()
+        config = pilot.read(self.run / 'run_config.json')
+        self.assertEqual((config['initial_workers'], config['max_workers']), (96, 96))
+        self.assertEqual(config['concurrency_ladder'], [96, 80, 64, 48])
+        self.assertEqual(pilot.read(self.run / 'scope_input.json')['records'], self.records[:1])
+        self.assertEqual(manifest['summary']['pair_count'], 3)
+        control = pilot.read(self.run / 'control.json')
+        self.assertEqual(control['workers'], 96)
+        self.assertTrue(control['auto_scale'])
+        self.assertTrue(control['pause_dispatch'])
+
     def test_requested_positive_counts_keep_exact_prefix_and_worker_limits(self):
         for units, workers in ((1, 1), (7, 48), (11, 64)):
             with self.subTest(units=units, workers=workers):
@@ -238,7 +252,7 @@ class PreparationTests(unittest.TestCase):
 
     def test_invalid_counts_and_ladders_fail_before_reading_sources_or_creating_run(self):
         changes = [{'units': value} for value in (0, -1, True, 1.5)]
-        changes += [{'workers': value} for value in (0, 65, True, 1.5)]
+        changes += [{'workers': value} for value in (0, 97, True, 1.5)]
         changes += [{'timeout': 0}]
         changes += [{'validation_workers': value} for value in (0, -1, 17, 65, True, 1.5)]
         changes += [{'workers': 64, 'concurrency_ladder': value}

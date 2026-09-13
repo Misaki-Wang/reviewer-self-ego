@@ -224,13 +224,14 @@ def prepare(args):
     ladder = getattr(args, 'concurrency_ladder', None)
     validation_workers = getattr(args, 'validation_workers', 4)
     if (type(args.units) is not int or args.units < 1 or
-            type(args.workers) is not int or not 1 <= args.workers <= 64 or
+            type(args.workers) is not int or not 1 <= args.workers <= 96 or
             type(args.timeout) is not int or args.timeout < 1 or
             type(validation_workers) is not int or not 1 <= validation_workers <= 16):
-        raise ValueError('Require positive integer units/timeout, 1..64 comparison workers, and 1..16 validation workers')
+        raise ValueError('Require positive integer units/timeout, 1..96 comparison workers, and 1..16 validation workers')
     if ladder is not None and (not isinstance(ladder, list) or
-            any(type(n) is not int for n in ladder) or ladder != [64, 48, 32, 16] or args.workers != 64):
-        raise ValueError('--concurrency-ladder requires 64 48 32 16 and --workers 64')
+            any(type(n) is not int for n in ladder) or
+            ladder not in ([64, 48, 32, 16], [96, 80, 64, 48]) or args.workers != ladder[0]):
+        raise ValueError('--concurrency-ladder requires 64 48 32 16 or 96 80 64 48, with --workers matching its first value')
     if run == runs_root or not run.is_relative_to(runs_root):
         raise ValueError(f'--run must be a fresh directory below the configured runs root: {runs_root}')
     if run.exists():
@@ -380,7 +381,7 @@ def main(argv=None):
     parser.add_argument('--effort', default=None)
     parser.add_argument('--workers', type=int, default=None)
     parser.add_argument('--concurrency-ladder', type=int, nargs='+',
-                        help='Opt into downward-only 64 48 32 16 admissions; requires --workers 64')
+                        help='Opt into downward-only 64 48 32 16 or 96 80 64 48 admissions; --workers must match the first value')
     parser.add_argument('--validation-workers', type=int, default=None,
                         help='Parallel original-PDF checks during preparation and execution (1..16; default: 4)')
     parser.add_argument('--timeout', type=int, default=None)
