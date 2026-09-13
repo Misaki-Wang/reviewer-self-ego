@@ -17,12 +17,8 @@ from unittest import mock
 
 from pypdf import PdfWriter
 
-if __package__:
-    from . import prepare_v13_pilot as pilot
-    from . import prepare_input_data as legacy
-else:
-    import prepare_v13_pilot as pilot
-    import prepare_input_data as legacy
+from utility import prepare_v13_pilot as pilot
+from utility import prepare_input_data as helpers
 
 
 def paper(aid='2501.00001', source_ids=None, days=(0, 1, 31, 62)):
@@ -199,15 +195,24 @@ class SourceTests(unittest.TestCase):
 
 class PreparationTests(unittest.TestCase):
     def test_reuses_python311_helpers_unmodified(self):
-        self.assertIs(pilot.materialize, legacy.materialize)
-        self.assertIs(pilot.validate_original_pdf, legacy.validate_pdf)
-        self.assertIs(pilot.write_json, legacy.write_json)
+        self.assertIs(pilot.materialize, helpers.materialize)
+        self.assertIs(pilot.validate_original_pdf, helpers.validate_pdf)
+        self.assertIs(pilot.write_json, helpers.write_json)
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / 'payload.bin'
             payload = b'preserve streaming digest behavior\x00' * 70000
             path.write_bytes(payload)
             expected = hashlib.sha256(payload).hexdigest()
-            self.assertEqual(legacy.digest(path), expected)
+            self.assertEqual(helpers.digest(path), expected)
+
+    def test_materialize_copy_fallback(self):
+        with tempfile.TemporaryDirectory() as temp:
+            source, target = Path(temp) / 'source.pdf', Path(temp) / 'target.pdf'
+            source.write_bytes(b'PDF fixture bytes')
+            with mock.patch.object(helpers.os, 'link', side_effect=OSError('No hardlinks')):
+                helpers.materialize(source, target, helpers.digest(source))
+            self.assertEqual(target.read_bytes(), source.read_bytes())
+            self.assertFalse(target.is_symlink())
 
     def test_full_metadata_and_pair_layout_preserved(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -341,15 +346,11 @@ class PrepFixture(unittest.TestCase):
         self.output = self.root / 'out'
         self.records = [paper(f'2501.{i:05d}') for i in range(1, 8)]
         write_source(self.source, self.records)
-        # Every public operation exercised here must stay local, even though
-        # the shared legacy module also exposes a downloader.
+        # Every public operation exercised here must stay local.
         for target in ('socket.create_connection', 'urllib.request.urlopen'):
             guard = mock.patch(target, side_effect=AssertionError('Network access forbidden'))
             guard.start()
             self.addCleanup(guard.stop)
-        guard = mock.patch.object(legacy, 'download_pdf', side_effect=AssertionError('Download forbidden'))
-        guard.start()
-        self.addCleanup(guard.stop)
 
     def args(self, **changes):
         values = dict(source=self.source, pdf_root=self.pdf_root, output=self.output,

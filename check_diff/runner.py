@@ -254,8 +254,7 @@ def run_pair(args, pair):
             if STOP.is_set():
                 record['status'] = 'stopped'
                 return 'stopped'
-            detail = ' '.join(str(exc).split())
-            tqdm.write(f'FAILED {pair.name} ({attempt + 1}/{args.retries + 1}): {detail}')
+            tqdm.write(f'FAILED {pair.name} ({attempt + 1}/{args.retries + 1}): {record["error"]}')
         finally:
             record['finished_at_utc'] = datetime.now(timezone.utc).isoformat()
             receipt.update(status=record['status'], finished_at_utc=record['finished_at_utc'],

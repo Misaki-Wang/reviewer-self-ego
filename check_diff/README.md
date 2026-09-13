@@ -70,7 +70,7 @@ JSON 最后追加独立的顶层 `improvement` 对象，包含 `change` 和英�
 缺少 `improvement` 或仍使用 `overall` 而非 `prelim` 的旧 JSON 不符合新 schema，之后运行到对应 pair 时会按现有逻辑自动重算；只有新结果生成并通过校验后才替换原文件。
 
 ```sh
-python3 -m unittest discover -s check_diff -p 'test_*.py'
+python3 -m unittest discover -s tests/check_diff -t . -p 'test_*.py'
 ```
 
 ## Actual token usage

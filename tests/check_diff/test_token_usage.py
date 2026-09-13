@@ -9,9 +9,9 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-import runner
-import token_usage
-from test_runner import annotation
+from check_diff import runner, token_usage
+
+from .fixtures import annotation
 
 
 def event_usage(input_tokens=100, cached=80, output=20, reasoning=12):

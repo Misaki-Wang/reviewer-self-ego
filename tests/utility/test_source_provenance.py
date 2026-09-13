@@ -11,10 +11,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-if __package__:
-    from . import source_provenance as provenance
-else:
-    import source_provenance as provenance
+from utility import source_provenance as provenance
 
 
 EXTRAS = ('utility/prepare_v13_pilot.py', 'utility/prepare_input_data.py',
