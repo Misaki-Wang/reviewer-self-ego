@@ -166,7 +166,7 @@ The MBZUAI source is `/fsx/homes/Yaochen.Wang@mbzuai.ac.ae/AI-reviewer/releases/
 
 PDFs, raw JSONL/XML/HTML sources, unresolved queues and full temporal audits remain outside Git. PDF paths resolve under the MBZUAI `AI-reviewer/` directory; source locators resolve under its `raw_v13_20260911/` bundle. Other paths may identify earlier A800 evidence. Rechecking absent sources requires those external inputs.
 
-This branch contains only the v1.3 dataset. The [v1.1](https://github.com/Misaki-Wang/reviewer-self-ego/tree/v1.1) and [v1.2](https://github.com/Misaki-Wang/reviewer-self-ego/tree/v1.2) tags preserve earlier archives. The existing [preparation utility](utility/README.md) expects the frozen **v1.1 input schema**, recoverable with `git show v1.1:v1.1.json > v1.1.json`; v1.3 is not a direct substitute. The separate [PDF comparison workflow](check_diff/README.md) consumes prepared PDF pairs. Its code does not imply content judgments exist in this dataset.
+This branch contains only the v1.3 dataset. The [v1.1](https://github.com/Misaki-Wang/reviewer-self-ego/tree/v1.1) and [v1.2](https://github.com/Misaki-Wang/reviewer-self-ego/tree/v1.2) tags preserve earlier archives. The [v1.3 preparation utility](utility/README.md#v13-preparation) reads the index or source shards, freezes maximum-sequence pairs and validates existing version-specific PDFs. The original v1.1 preparation utility remains available for historical inputs; the two input schemas are handled by separate entry points. The separate [PDF comparison workflow](check_diff/README.md) consumes prepared PDF pairs. Its code does not imply content judgments exist in this dataset.
 
 ## Code baseline
 

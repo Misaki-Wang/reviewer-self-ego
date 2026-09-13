@@ -24,3 +24,5 @@ A **planned pair** is one consecutive transition in the earliest-valid, maximum-
 All 3,724 units in these shards are temporally eligible and have resolved selection. Their frozen histories retain all 14,086 original versions, including skipped versions. Selected sequence lengths range from 3 to 8. These counts use the supplied frozen metadata without a live arXiv refresh.
 
 Planned pairs may lack PDFs. These are metadata-derived comparison counts, not counts of completed or currently runnable comparisons. No current PDF availability or usability was checked, and temporal eligibility does not establish substantive research change. No downloads or model calls were performed for this count.
+
+For fixed-scope planning and cached-PDF materialization, see the [v1.3 preparation workflow](../utility/README.md#v13-preparation).
