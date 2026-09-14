@@ -14,3 +14,5 @@ belong in ../data/index and ../data/pdf.
   ICLR2026 run summary with timing, reported usage, descriptive labels, all 1,588
   embedded pair previews and the exact frozen prompt. Download and open locally;
   no network fetch is required for the embedded preview.
+
+- [review-exp-multisource-pilot-20260914.html](review-exp-multisource-pilot-20260914.html): completed ten-source review pilot (100 papers, 364 versions, 4,368 reviews), with source-specific score scales, full review comparisons, exact prompts and audited time/token statistics. The report works offline; separate raw-file links use the [published package](../res/published/review_exp_multisource_pilot_20260914/).

@@ -23,3 +23,7 @@ or the self-contained presentation files under ../html, as appropriate.
 Each experiment has an allowlisted directory, an export descriptor and checksums.
 Full execution runs and archives remain separate; publishing an export does not
 modify their original records.
+
+## Multisource review pilot
+
+[published/review_exp_multisource_pilot_20260914/](published/review_exp_multisource_pilot_20260914/) contains the completed ten-source pilot: ten papers per source, 100 distinct papers, 364 selected versions and 4,368 reviews under the current twelve-condition design. The release preserves complete parsed reviews, exact raw results, prompts, execution evidence and independently checked time/token accounting. See the [standalone report](../html/review-exp-multisource-pilot-20260914.html).
