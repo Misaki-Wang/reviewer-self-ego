@@ -9,6 +9,7 @@ runs, input PDFs, caches and historical archives are not included here.
 | [Review experiment pilot](review_exp_iclr2026_pilot/README.md) | Independent review pilot; see its package README | See package | [HTML](../../html/review-exp-iclr2026-pilot.html) |
 | [Multisource review pilot](review_exp_multisource_pilot_20260914/README.md) | 10 sources; 100 papers; 364 versions; 4,368 reviews | See package | [HTML](../../html/review-exp-multisource-pilot-20260914.html) |
 | [Remaining nine-source check_diff](check_diff_remaining_sources_20260914/README.md) | 3,018 unique units; 6,814 judgments; 15 unavailable pairs | 156.38 MB original; 238.59 MB full package | [Self-contained HTML](../../html/remaining-sources-check-diff-summary-20260914.html) |
+| [Latest-version three-model review pilot](review_exp_multisource_3model_latest_pilot_20260914/README.md) | 10 sources; 50 unique papers/latest versions; 3 models; 29 conditions; 4,350 reviews | 98.37 MB raw; 235.56 MB full package | [Self-contained HTML](../../html/review-exp-multisource-3model-latest-pilot-20260914.html) |
 
 Original-payload sizes exclude generated HTML, README and checksum/descriptor files.
 Original selected file bytes are covered by each export's SHA256SUMS.

@@ -27,3 +27,7 @@ modify their original records.
 ## Multisource review pilot
 
 [published/review_exp_multisource_pilot_20260914/](published/review_exp_multisource_pilot_20260914/) contains the completed ten-source pilot: ten papers per source, 100 distinct papers, 364 selected versions and 4,368 reviews under the current twelve-condition design. The release preserves complete parsed reviews, exact raw results, prompts, execution evidence and independently checked time/token accounting. See the [standalone report](../html/review-exp-multisource-pilot-20260914.html).
+
+## Latest-version three-model review pilot
+
+[published/review_exp_multisource_3model_latest_pilot_20260914/](published/review_exp_multisource_3model_latest_pilot_20260914/) retains the completed run-20260914-03: ten sources, five unique papers per source, one latest indexed original version, three evaluators and 29 canonical conditions, for 4,350 reviews. It includes 150 byte-identical raw result files, exact prompts, descriptive analysis and audited time/token accounting. The 235.56 MB package includes 98.37 MB of original raw reviews and compressed execution provenance; the separate self-contained HTML is 19.99 MB. See the [report](../html/review-exp-multisource-3model-latest-pilot-20260914.html).

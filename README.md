@@ -137,3 +137,5 @@ and is not a live-model test. No new dependency is required for this layout.
   with unavailable original PDFs. The 238.59 MB selected package includes 156.38 MB
   of original selected records plus derived accounting and preview data; the HTML
   is an additional 70.38 MB. Frozen and independent artifact audits passed with zero errors.
+
+- Latest-version three-model review pilot: [self-contained HTML report](html/review-exp-multisource-3model-latest-pilot-20260914.html) and [selected results](res/published/review_exp_multisource_3model_latest_pilot_20260914/README.md). Ten sources, five papers each, one latest indexed original version and 29 canonical conditions yield 4,350 reviews: 1,450 each from gpt-6-astra/max, gpt-5.6-sol/max and gpt-5.5/xhigh. The 235.56 MB package retains 150 original raw result files, prompts, time/token statistics and auditable provenance; the standalone HTML is an additional 19.99 MB. Native venue score scales remain separate.
