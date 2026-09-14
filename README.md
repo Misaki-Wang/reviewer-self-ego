@@ -130,3 +130,10 @@ and is not a live-model test. No new dependency is required for this layout.
   All 706 units are accounted for: 1,588 validated judgments and 11 pairs with
   unavailable original PDFs. The original selected payload is 37.86 MB.
   Download the self-contained HTML to explore it locally.
+
+- Remaining nine-source check_diff: [self-contained HTML report](html/remaining-sources-check-diff-summary-20260914.html) and
+  [selected result package](res/published/check_diff_remaining_sources_20260914/README.md).
+  All 3,018 unique units are accounted for: 6,814 validated judgments and 15 pairs
+  with unavailable original PDFs. The 238.59 MB selected package includes 156.38 MB
+  of original selected records plus derived accounting and preview data; the HTML
+  is an additional 70.38 MB. Frozen and independent artifact audits passed with zero errors.

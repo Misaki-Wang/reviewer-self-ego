@@ -16,3 +16,5 @@ belong in ../data/index and ../data/pdf.
   no network fetch is required for the embedded preview.
 
 - [review-exp-multisource-pilot-20260914.html](review-exp-multisource-pilot-20260914.html): completed ten-source review pilot (100 papers, 364 versions, 4,368 reviews), with source-specific score scales, full review comparisons, exact prompts and audited time/token statistics. The report works offline; separate raw-file links use the [published package](../res/published/review_exp_multisource_pilot_20260914/).
+
+- [remaining-sources-check-diff-summary-20260914.html](remaining-sources-check-diff-summary-20260914.html): completed nine-source comparison run, with all 6,814 pair previews, source-conditioned labels, exact prompts, unavailable inputs, and audited time/token accounting. Download and open locally; original-record links use authenticated GitHub file views. [Selected data](../res/published/check_diff_remaining_sources_20260914/README.md).
