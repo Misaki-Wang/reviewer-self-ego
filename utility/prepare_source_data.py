@@ -178,11 +178,15 @@ the frozen paper-level temporal eligibility or its historical proof witness.
     return selected, edges
 
 
-def pdf_path(pdf_root, aid, version):
+def pdf_path(pdf_root, aid, version, source=None):
     if (not isinstance(aid, str) or not re.fullmatch(r'\d{4}\.\d{4,5}', aid)
             or type(version) is not int or version < 1):
         raise ValueError('Invalid PDF identity')
-    path = pdf_root / aid / f'{aid}v{version}.pdf'
+    if source is not None and (not isinstance(source, str)
+            or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*', source) or '..' in source):
+        raise ValueError(f'Invalid conference identity: {source}')
+    path = (pdf_root / source / aid / f'v{version}.pdf' if source is not None
+            else pdf_root / aid / f'{aid}v{version}.pdf')
     if not path.resolve().is_relative_to(pdf_root.resolve()):
         raise ValueError(f'PDF path escapes the local PDF root: {path}')
     return path
@@ -258,7 +262,23 @@ def build_plan(args):
     per_source = 5 if per_source is None else per_source
     records, provenance = load_source(args.source)
     pdf_root = args.pdf_root.resolve()
+    layout = getattr(args, 'pdf_layout', 'legacy')
+    if layout not in ('legacy', 'conference'):
+        raise ValueError(f'Unsupported PDF layout: {layout}')
+    conference = getattr(args, 'conf', None)
+    arxiv_ids = getattr(args, 'arxiv_id', None) or []
+    if conference is not None or arxiv_ids:
+        records = [p for p in records if (conference is None or conference in p['source_ids'])
+                   and (not arxiv_ids or p['arxiv_id'] in arxiv_ids)]
+        missing = set(arxiv_ids) - {p['arxiv_id'] for p in records}
+        if not records or missing:
+            raise ValueError(f'No matching papers for conference/IDs: {conference}, {sorted(missing)}')
+        provenance['unfiltered_dataset_metadata'] = provenance['dataset_metadata']
+        provenance['dataset_metadata'] = {**provenance['dataset_metadata'], 'record_count': len(records)}
+        provenance['selection_filter'] = {'conference': conference, 'arxiv_ids': arxiv_ids}
     sources = sorted({s for p in records for s in p['source_ids']})
+    if conference is not None:
+        sources = [conference]
     counts = {s: Counter(candidate_memberships=0, metadata_temporally_eligible=0,
                          sequence_selection_resolved=0, sequence_selection_unresolved=0,
                          all_selected_pdf_files_present=0, missing_selected_pdf_files=0)
@@ -266,13 +286,14 @@ def build_plan(args):
     pools, candidates, exclusions = {s: [] for s in sources}, {}, []
     for paper in records:
         aid = paper['arxiv_id']
-        for source in paper['source_ids']:
+        memberships = [s for s in paper['source_ids'] if s in sources]
+        for source in memberships:
             counts[source]['candidate_memberships'] += 1
         if paper['temporal_eligibility']['status'] != 'eligible':
             exclusions.append({'arxiv_id': aid, 'source_ids': paper['source_ids'],
                                'reason': 'not_frozen_temporally_eligible'})
             continue
-        for source in paper['source_ids']:
+        for source in memberships:
             counts[source]['metadata_temporally_eligible'] += 1
         try:
             selected, edges = select_versions(paper)
@@ -282,12 +303,13 @@ def build_plan(args):
             exclusions.append({'arxiv_id': aid, 'source_ids': paper['source_ids'],
                                'reason': 'full_history_sequence_selection_unresolved', 'detail': str(exc),
                                'frozen_temporal_eligibility': paper['temporal_eligibility']})
-            for source in paper['source_ids']:
+            for source in memberships:
                 counts[source]['sequence_selection_unresolved'] += 1
             continue
-        missing = [v['version'] for v in selected
-                   if not pdf_path(pdf_root, aid, v['version']).is_file()]
-        for source in paper['source_ids']:
+        for source in memberships:
+            missing = [v['version'] for v in selected
+                       if not pdf_path(pdf_root, aid, v['version'],
+                                       source if layout == 'conference' else None).is_file()]
             counts[source]['sequence_selection_resolved'] += 1
             counts[source]['missing_selected_pdf_files' if missing else 'all_selected_pdf_files_present'] += 1
             pools[source].append(aid)
@@ -300,7 +322,7 @@ def build_plan(args):
                              'excluded_records=' + json.dumps(exclusions, ensure_ascii=False))
         assignment, quotas = {}, Counter()
         for aid, (paper, _, _) in candidates.items():
-            source = min(paper['source_ids'], key=lambda s: (quotas[s], s))
+            source = min((s for s in paper['source_ids'] if s in sources), key=lambda s: (quotas[s], s))
             assignment[aid] = source
             quotas[source] += 1
     else:
@@ -311,7 +333,7 @@ def build_plan(args):
         selected_metadata = []
         for version in selected:
             number = version['version']
-            path = pdf_path(pdf_root, aid, number)
+            path = pdf_path(pdf_root, aid, number, source if layout == 'conference' else None)
             requested = {'arxiv_id': aid, 'version': number, 'requested_id': f'{aid}v{number}',
                          'pdf_url': version['pdf_url'], 'submitted_at': version['submitted_at'],
                          'pdf_path': str(path), 'present_at_plan': path.is_file(),
@@ -330,6 +352,7 @@ def build_plan(args):
             'created_at_utc': datetime.now(timezone.utc).isoformat(), **provenance,
             'adapter_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
             'pdf_root': str(pdf_root),
+            'pdf_layout': layout,
             'sample_selection': {'method': 'all_records_in_source_order' if all_records else 'source_stratified_seeded_bipartite_assignment',
                                  'all_records': all_records,
                                  'seed': None if all_records else args.seed,
@@ -391,6 +414,9 @@ def validate_plan(plan):
     if not isinstance(plan['pdf_root'], str) or not Path(plan['pdf_root']).is_absolute():
         raise ValueError('Plan pdf_root must be an absolute local path')
     root = Path(plan['pdf_root'])
+    layout = plan.get('pdf_layout', 'legacy')
+    if layout not in ('legacy', 'conference'):
+        raise ValueError(f'Unsupported PDF layout: {layout}')
     rule = plan['temporal_rule']
     if rule.get('operator') != '>' or rule.get('gap_seconds') != GAP_SECONDS:
         raise ValueError('Plan temporal rule must use a strict > 2592000 second gap')
@@ -416,7 +442,8 @@ def validate_plan(plan):
             # is provenance, not an input to read or a path to resolve/follow.
             expected = {'arxiv_id': aid, 'version': number, 'requested_id': f'{aid}v{number}',
                         'pdf_url': version['pdf_url'], 'submitted_at': version['submitted_at'],
-                        'pdf_path': str(root / aid / f'{aid}v{number}.pdf'),
+                        'pdf_path': str(root / assignment[aid] / aid / f'v{number}.pdf'
+                                        if layout == 'conference' else root / aid / f'{aid}v{number}.pdf'),
                         'expected_sha256': version.get('pdf', {}).get('sha256') or
                                            version.get('pdf', {}).get('expected_sha256')}
             if (any(request.get(k) != value for k, value in expected.items())
@@ -482,11 +509,15 @@ def materialize_plan(manifest_path, output=None, pdf_root=None):
     papers, selections = validate_plan(plan)
     out = output.resolve() if output else manifest_path.parent
     root = (pdf_root if pdf_root else Path(plan['pdf_root'])).resolve()
+    def local_pdf(aid, number):
+        source = (plan['sample_selection']['source_assignment'][aid]
+                  if plan.get('pdf_layout', 'legacy') == 'conference' else None)
+        return pdf_path(root, aid, number, source)
     # Resolve only the current local PDF root, and validate every path before
     # creating even a manifest or a failure receipt.
     for aid, selected in selections.items():
         for version in selected:
-            pdf_path(root, aid, version['version'])
+            local_pdf(aid, version['version'])
     validate_output_paths(out, plan)
     local_manifest = out / 'selection_manifest.json'
     if local_manifest.resolve() != manifest_path:
@@ -503,7 +534,7 @@ def materialize_plan(manifest_path, output=None, pdf_root=None):
         for version in selections[aid]:
             key = f"{aid}v{version['version']}"
             try:
-                verified[key] = validate_pdf(pdf_path(root, aid, version['version']), aid, version)
+                verified[key] = validate_pdf(local_pdf(aid, version['version']), aid, version)
             except Exception as exc:
                 failures.append({'arxiv_id': aid, 'version': version['version'],
                                  'requested_id': key, 'reason': 'selected_pdf_unavailable_or_invalid',
@@ -581,11 +612,16 @@ def prepare(args):
     return plan
 
 
-def main():
+def main(cleaned=False):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source', type=Path, help='Local source_data index.json, source shard, or combined source_data.')
     parser.add_argument('--pdf-root', type=Path,
-                        help='Existing data/pdf directory containing <id>/<id>vN.pdf.')
+                        help='PDF store; build_pairs defaults to clean_data with layout <conf>/<id>/vN.pdf.')
+    parser.add_argument('--pdf-layout', choices=('legacy', 'conference'),
+                        default='conference' if cleaned else 'legacy')
+    parser.add_argument('--conf', help='Only select papers from this conference/source ID.')
+    parser.add_argument('--arxiv-id', action='append', default=[],
+                        help='Only these paper IDs; repeatable. Defaults to --all within this filter.')
     parser.add_argument('--output', type=Path, help='Required for writes; optional for --dry-run.')
     parser.add_argument('--per-source', type=int, help='Distinct papers per source (default: 5 when no scope option is set).')
     parser.add_argument('--units', type=int,
@@ -597,13 +633,20 @@ def main():
     parser.add_argument('--plan-only', action='store_true', help='Freeze paper IDs and exact PDF requests without validation or materialization.')
     parser.add_argument('--materialize-plan', type=Path, help='Materialize a fixed selection_manifest.json without resampling.')
     args = parser.parse_args()
+    if args.arxiv_id and args.units is None and args.per_source is None:
+        args.all = True
+    if cleaned and not args.materialize_plan:
+        project = Path(__file__).resolve().parent.parent
+        config = json.loads((project / 'utility/project.json').read_text())
+        args.source = args.source or project / config['data']['index']
+        args.pdf_root = args.pdf_root or project / config['data']['clean_root']
     if ((args.per_source is not None and args.per_source < 1)
             or (args.units is not None and args.units < 1)):
         parser.error('--per-source and --units must be positive')
     if args.all and (args.units is not None or args.per_source is not None):
         parser.error('--all cannot be combined with --units or explicit --per-source')
     if args.materialize_plan:
-        if (args.plan_only or args.dry_run or args.source or args.all
+        if (args.plan_only or args.dry_run or args.source or args.all or args.conf or args.arxiv_id
                 or args.units is not None or args.per_source is not None or args.seed is not None):
             parser.error('--materialize-plan cannot be combined with source, sampling, --plan-only or --dry-run options')
     elif not all((args.source, args.pdf_root)):

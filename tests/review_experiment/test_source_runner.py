@@ -117,6 +117,147 @@ print(json.dumps({{'type':'turn.completed','usage':{{'input_tokens':100,'cached_
         b=runner.fingerprint(args,second,'template','b'*64)
         self.assertNotEqual(a,b)
 
+    def prepared_sources(self):
+        self.fixture.make_paper('2501.12345', [2, 9, 10])
+        sources = {'2406.03862': 'iclr2026', '2501.12345': 'acl2026'}
+        # The exact metadata shape emitted by utility.build_pairs supplies the
+        # assignment; review selection does not reload or rebuild the catalog.
+        plan = {'records': [{'arxiv_id': aid, 'source_ids': [source]}
+                            for aid, source in sources.items()],
+                'selected_units': [{'arxiv_id': aid, 'assigned_source_id': source}
+                                   for aid, source in sources.items()]}
+        (self.fixture.input / 'selection_manifest.json').write_text(json.dumps(plan))
+        return sources
+
+    def inventory(self, *extra):
+        stdout = io.StringIO()
+        with redirect_stdout(stdout), \
+                patch.object(runner.Version, 'read', side_effect=AssertionError('PDF read during inventory')), \
+                patch.object(runner, 'call_codex', side_effect=AssertionError('Model call during inventory')):
+            code = runner.main([str(self.fixture.input), '--output', str(self.fixture.output),
+                                '--condition', 'exp1_quality', '--dry-run', *extra])
+        self.assertEqual(code, 0)
+        self.assertFalse(self.fixture.output.exists())
+        return json.loads(stdout.getvalue())
+
+    def test_prepared_pairs_filter_conference_before_limit_and_keep_source_assignment(self):
+        self.prepared_sources()
+        result = self.inventory('--conf', 'acl2026', '--limit-papers', '1')
+        self.assertEqual(result['versions_by_paper'], {'2501.12345': [2, 9, 10]})
+        self.assertEqual(result['source_by_paper'], {'2501.12345': 'acl2026'})
+        self.assertEqual(result['discovered_pairs'], 2)
+        self.assertEqual(result['source_provenance']['mode'], 'nearby_metadata')
+        self.assertTrue(result['source_provenance']['metadata_path'].endswith('selection_manifest.json'))
+
+    def test_latest_is_numeric_and_only_within_the_prepared_input(self):
+        self.prepared_sources()
+        result = self.inventory('--latest-only')
+        self.assertEqual(result['versions_by_paper'], {'2406.03862': [3], '2501.12345': [10]})
+        self.assertEqual(result['planned_reviews'], 2)
+        self.assertTrue(result['selection']['latest_only'])
+
+    def test_version_check_applies_only_to_selected_conference(self):
+        self.prepared_sources()
+        result = self.inventory('--conf', 'acl2026', '--version', '9')
+        self.assertEqual(result['versions_by_paper'], {'2501.12345': [9]})
+        self.assertEqual(result['planned_reviews'], 1)
+
+    def test_multiple_conferences_and_paper_filter_intersect(self):
+        self.prepared_sources()
+        result = self.inventory('--conf', 'iclr2026', '--conf', 'acl2026',
+                                '--paper', '2501.12345', '--latest-only')
+        self.assertEqual(result['versions_by_paper'], {'2501.12345': [10]})
+        self.assertEqual(result['discovered_pairs'], 2)
+
+    def test_unknown_empty_and_missing_version_selections_fail_before_execution(self):
+        self.prepared_sources()
+        for extra in (('--conf', 'unknown'), ('--conf', 'cvpr2025'),
+                      ('--conf', 'acl2026', '--version', '8'),
+                      ('--conf', 'acl2026', '--latest-only', '--version', '9')):
+            with self.subTest(extra=extra), redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                self.inventory(*extra)
+            self.assertFalse(self.fixture.output.exists())
+
+    def test_latest_selection_runs_only_one_fake_review_and_resumes_it(self):
+        self.assertEqual(self.invoke('--source', 'iclr2026', '--latest-only'), 0)
+        document = self.fixture.result()
+        self.assertEqual(list(document['versions']), ['v3'])
+        self.assertEqual(len(self.log.read_text().splitlines()), 1)
+        self.assertEqual(self.invoke('--source', 'iclr2026', '--latest-only'), 0)
+        self.assertEqual(len(self.log.read_text().splitlines()), 1)
+
+    def clean_input(self):
+        self.fixture.input = self.root / 'clean_data'
+        for conf, aid, numbers in (('iclr2026', '2406.03862', [1, 2, 3]),
+                                   ('acl2026', '2501.12345', [2, 9, 10])):
+            folder = self.fixture.input / conf / aid
+            folder.mkdir(parents=True)
+            for number in numbers:
+                (folder / f'v{number}.pdf').write_bytes(f'%PDF-1.4\nfixture {number}'.encode())
+            # Anonymized stores contain only PDFs, with no metadata sidecar.
+
+    def test_clean_pdfs_are_read_directly_without_metadata_or_pairs(self):
+        self.clean_input()
+        with patch.object(runner, 'resolve_sources', side_effect=AssertionError('Catalog loaded')):
+            result = self.inventory()
+        self.assertEqual(result['versions_by_paper'], {'2406.03862': [1, 2, 3], '2501.12345': [2, 9, 10]})
+        self.assertEqual(result['discovered_pairs'], 0)
+        self.assertEqual(result['source_by_paper'], {'2406.03862': 'iclr2026', '2501.12345': 'acl2026'})
+
+    def test_default_input_uses_configured_clean_root_without_download_fallback(self):
+        self.clean_input()
+        clean = self.root / 'anonymous-store'
+        self.fixture.input.rename(clean)
+        config = self.root / 'utility/project.json'
+        config.parent.mkdir(exist_ok=True)
+        config.write_text(json.dumps({'data': {'clean_root': 'anonymous-store'}}))
+        raw = self.root / 'downloads_papers/iclr2026/2406.03862'
+        raw.mkdir(parents=True)
+        (raw / 'v99.pdf').write_bytes(b'%PDF-1.4\nraw original')
+        args = ['--output', str(self.fixture.output), '--conf', 'iclr2026', '--dry-run']
+        with patch.object(runner, 'ROOT', self.root), redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(runner.main(args), 0)
+        result = json.loads(out.getvalue())
+        self.assertEqual(result['input_root'], str(clean))
+        self.assertEqual(result['versions_by_paper'], {'2406.03862': [1, 2, 3]})
+        with patch.object(runner, 'ROOT', self.root), redirect_stderr(io.StringIO()), \
+                self.assertRaises(SystemExit):
+            runner.main([*args, '--version', '99'])
+
+    def test_clean_filters_and_numeric_latest_reuse_existing_options(self):
+        self.clean_input()
+        result = self.inventory('--conf', 'acl2026', '--limit-papers', '1', '--latest-only')
+        self.assertEqual(result['versions_by_paper'], {'2501.12345': [10]})
+        result = self.inventory('--conf', 'acl2026', '--version', '9')
+        self.assertEqual(result['versions_by_paper'], {'2501.12345': [9]})
+
+    def test_clean_conference_and_single_paper_paths(self):
+        self.clean_input()
+        self.fixture.input /= 'iclr2026'
+        self.assertEqual(self.inventory()['versions_by_paper'], {'2406.03862': [1, 2, 3]})
+        self.fixture.input /= '2406.03862'
+        self.assertEqual(self.inventory('--latest-only')['versions_by_paper'], {'2406.03862': [3]})
+
+    def test_repeated_clean_paper_uses_one_directory_without_conflict_processing(self):
+        self.clean_input()
+        folder = self.fixture.input / 'acl2026' / '2406.03862'
+        folder.mkdir()
+        (folder / 'v1.pdf').write_bytes(b'%PDF-1.4\nduplicate fixture')
+        result = self.inventory('--paper', '2406.03862')
+        self.assertEqual(result['source_by_paper'], {'2406.03862': 'acl2026'})
+        result = self.inventory('--paper', '2406.03862', '--conf', 'iclr2026')
+        self.assertEqual(result['source_by_paper'], {'2406.03862': 'iclr2026'})
+
+    def test_clean_fake_review_keeps_output_and_resume_format(self):
+        self.clean_input()
+        self.assertEqual(self.invoke('--conf', 'iclr2026', '--latest-only'), 0)
+        document = self.fixture.result()
+        self.assertEqual(document['source_id'], 'iclr2026')
+        self.assertEqual(list(document['versions']), ['v3'])
+        self.assertEqual(document['versions']['v3']['reviews']['exp1_quality/r1']['status'], 'completed')
+        self.assertEqual(self.invoke('--conf', 'iclr2026', '--latest-only'), 0)
+        self.assertEqual(len(self.log.read_text().splitlines()), 1)
+
 
 if __name__=='__main__':
     unittest.main()

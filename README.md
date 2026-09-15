@@ -14,6 +14,8 @@ utility/             Shared preparation, workflow, verification and configuratio
 data/
    index/            index.json, conference JSON shards, metadata and provenance
    pdf/              Original PDFs: <paper-id>/<paper-id>vN.pdf
+downloads_papers/     Download cache: <conference>/<arxiv_id>/vN.pdf, all versions
+clean_data/          Anonymized PDFs: <conference>/<arxiv_id>/vN.pdf
 res/                 One directory per new run; historical studies under archive/
 html/                Experiment design and result-sharing HTML
 .gitignore
@@ -21,12 +23,33 @@ README.md
 ~~~
 
 The code directories are real directories. No dated worktree or old dataset
-alias is required. There is one JSON catalog and one original-PDF store.
+alias is required. There is one JSON catalog. New downloads use downloads_papers;
+the existing data/pdf store remains supported by the formal frozen-run workflow.
 The catalog contains 3,724 distinct papers and 14,086 original versions across
 ten conference shards. Paper/version values and order are preserved; only the
 active package name, paths and packaging hashes changed. The original PDF store
 contains 14,063 files; 23 versions have recorded official unavailability.
 See [data/index/README.md](data/index/README.md) for counts and source contracts.
+
+Download all catalogued versions, anonymize each required PDF, then construct pairs offline:
+
+```sh
+python3.11 -B -m utility.download_papers --conf acl2026
+# Run anonymize_pdf once for each required downloaded PDF, for example:
+python3.11 -B -m utility.anonymize_pdf downloads_papers/acl2026/2305.14299/v1.pdf
+# After all required versions are present in clean_data:
+python3.11 -B -m utility.build_pairs --conf acl2026 --all --output res/NEW_RUN_ID/prepared
+```
+
+The download root is configured by `data.downloads_root` in
+`utility/project.json`. Each paper directory holds `v1.pdf`, `v2.pdf`, etc. and
+the original `metadata.json`. Anonymization writes only the PDF to `data.clean_root`
+(default `clean_data`). Both `build_pairs` and `review_experiment` read this clean
+store by default. Pair selection still uses the source catalog for timestamps;
+no `metadata.json` is required in `clean_data`. Missing clean versions fail pair
+construction without falling back to original downloads. Pair construction
+retains the existing temporal rule and output format.
+See [utility/README.md](utility/README.md) for filters, retries and fixed plans.
 
 ## One configuration and one main workflow
 
@@ -76,12 +99,19 @@ Unknown usage remains unknown, and failed/retried calls keep their reported usag
 
 ## Separate review experiments
 
-[review_experiment/README.md](review_experiment/README.md) documents the existing
-review workflow. It currently consumes explicitly prepared PDF-pair directories,
-not the raw catalog/PDF layout directly. Supply both its input and output paths,
-normally a prepared run and a dedicated res/ directory. It is not automatically
-launched by the main comparison workflow. Its prompts and scientific review logic
-were preserved; no live review experiment was run during this reorganization.
+[review_experiment/README.md](review_experiment/README.md) documents the review
+workflow. Reviews read directly from `clean_data/<conference>/<paper>/vN.pdf`.
+Use `--conf`/`--paper`/`--limit-papers` to select papers and `--version` or
+`--latest-only` to select available clean versions. No pair-building step is needed
+for reviews. Paired `input_data/` remains the input for `check_diff`.
+
+The review runner retains its existing output format and isolation. Supply the
+desired output directory; the input defaults to `data.clean_root`:
+
+```sh
+python3.11 -B -m review_experiment.runner clean_data \
+  --output output/review-sample --conf iclr2026 --latest-only --dry-run
+```
 
 ## Results, archives and HTML
 

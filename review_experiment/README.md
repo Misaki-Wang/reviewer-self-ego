@@ -2,33 +2,65 @@
 
 This standalone runner reviews distinct paper versions using four single-manuscript experiments (29 unique conditions) and writes one `reviews.json` per paper. It uses Python 3.9+ standard-library modules, an authenticated Codex CLI supporting the existing permission-profile options, and an installed PDF skill. No new dependency is required by this migration. The active code and prompts incorporate the completed 2026-09-14 three-model pilot source snapshot from `res/published/review_exp_multisource_3model_latest_pilot_20260914/provenance.zip`, with the local macOS isolation fixes retained. The archive and historical results remain unchanged.
 
-## Formal-layout input boundary
+## Read reviews directly from anonymized PDFs
 
-Canonical source metadata and original PDFs live under `data/index/` and `data/pdf/`. The PDF loader accepts an explicitly prepared pair tree or direct-version tree (`<paper_id>/vN.pdf`). Source metadata or the canonical index supplies the venue profile; PDF preparation remains a separate step:
+Point the runner at `clean_data`, a conference directory, or one paper:
 
 ```text
-res/<prepared-run>/input_data/
-  <paper_id>/
-    v1_v2/v1.pdf
-    v1_v2/v2.pdf
-    v2_v3/v2.pdf
-    v2_v3/v3.pdf
+clean_data/
+  <conference>/
+    <paper_id>/
+      v1.pdf
+      v2.pdf
+      v3.pdf
 ```
 
-The directory shown is illustrative; it is not created automatically. Input preparation and paper selection must be separately authorized and retain provenance to `data/index/` and `data/pdf/`. The runner retains the supplied paper/version scope and deduplicates versions from this tree. It reads supported source metadata for profile selection; `pair.json` and `.pdf_cache` are not source-profile inputs.
-
-`utility/project.json` describes the canonical source data and the separate comparison workflow. Its raw input paths do not satisfy this runner's prepared-version interface, so this runner does not inherit its comparison model settings or inspect its pause flag. When no prepared provenance or explicit source is supplied, source selection can fall back to the canonical `data/index/index.json` catalog. Root workflow documentation must not imply that it automates `review_experiment`. A future live review requires its own explicitly authorized scope and invocation.
-
-Both the positional input and `--output` are required. Relative CLI paths resolve from the current working directory. For example, from the project root, inventory an already prepared input without reading PDF contents or calling any model:
+Reviews read these PDFs directly. No pair construction, intermediate input tree,
+or per-paper metadata validation is needed. Conference directory names select the
+existing source-specific review profiles. `--conf`, `--paper`, `--limit-papers`,
+`--version` and `--latest-only` select from the files already present.
+`--latest-only` selects the numerically highest available version and cannot be
+combined with `--version`; without either, all available versions are selected.
+Conference filtering precedes the total paper limit and version checks.
 
 ```sh
-python3 -B -m review_experiment.runner res/prepared-review/input_data \
-  --output res/review-inventory --source iclr2026 --dry-run
+# Inventory all available clean versions without reading PDF bytes or calling models.
+python3.11 -B -m review_experiment.runner clean_data \
+  --output output/review-sample --dry-run
+
+# Select three ICLR papers and each paper's latest clean version.
+python3.11 -B -m review_experiment.runner clean_data \
+  --output output/review-sample --conf iclr2026 --limit-papers 3 \
+  --latest-only --dry-run
 ```
 
-The example paths must be replaced with the selected prepared input and an active run path. The output may be new or an existing resumable directory. `--dry-run` creates or changes no output. A paper directory or a single `vX_vY` pair directory is also accepted as input; a pair directory selects its two versions.
+`--output` is required. The positional input is optional and defaults to
+`data.clean_root` in `utility/project.json` (`clean_data`). Explicit relative
+input paths resolve from the current working directory. There is no fallback to
+`downloads_papers` when clean PDFs are missing. Output behavior is unchanged: reviews go to
+`<output>/<paper_id>/reviews.json`, with `run_summary.json` at the output root.
+`--dry-run` creates or changes no output. Isolation, prompts, model invocation,
+concurrency, retries, usage accounting and resume behavior are unchanged.
 
-`--paper`, `--version`, `--condition`, and `--experiment` may be repeated. `--limit-papers` restricts paper count; `--replicates` controls independent calls per condition. `--workers` limits concurrent independent version/condition/replicate reviews. Each selected version is read once into an immutable byte snapshot, and pending cells are admitted across papers in round-robin order. Per-paper JSON updates are serialized to preserve every completed cell. Per-call `--timeout` defaults to 1800 seconds and `--retries` to one retry.
+`--conf`, `--paper`, `--version`, `--condition` and `--experiment` can be repeated.
+The paper limit is total across selected conferences, in paper-ID order. If a
+paper occurs in multiple selected conference directories, the first directory
+in conference-name order is used once; `--conf` selects a particular conference.
+Explicit `--source` or `--source-metadata` retains the existing profile-selection
+behavior when supplied. Otherwise the conference directory supplies the profile,
+without loading the catalog or `metadata.json`.
+
+Prepared pair inputs and historical `<paper_id>/vN.pdf` trees remain supported.
+The paired `input_data/` workflow remains available for `check_diff`; reviews
+no longer need it. Prepared inputs keep their existing source-provenance lookup
+and version deduplication behavior. The comparison workflow does not launch
+reviews. A live review still requires its own authorized invocation.
+
+`--replicates` controls independent calls per condition. `--workers` limits
+concurrent version/condition/replicate reviews. Each selected version is read once
+into an immutable byte snapshot, and pending cells are admitted across papers
+in round-robin order. Per-paper JSON updates are serialized. Per-call `--timeout`
+defaults to 1800 seconds and `--retries` to one retry.
 
 Condition order is randomized per paper/version/replicate using a persisted root seed. `--order-seed INTEGER` fixes it explicitly; otherwise one is generated for the run. Resume reuses the recorded seed and order, including when widening a condition selection. A conflicting seed is rejected. Review admission across papers remains round-robin.
 
@@ -36,7 +68,7 @@ The existing defaults remain `gpt-5.5` and `medium`; `--model` and `--effort` ov
 
 ## Version identity and independent reviews
 
-The runner discovers `<paper_id>/vX_vY/vN.pdf` and `<paper_id>/vN.pdf`, deduplicates by `(paper_id, version)`, and sorts versions numerically. For example, v2 in both `v1_v2` and `v2_v3` becomes one version. Hardlinks are read once per inode; distinct copies of the same version must have matching hashes. Conflicting contents or missing/empty pair PDFs fail. Different version numbers remain distinct even when their PDF bytes match.
+The runner reads `<conference>/<paper_id>/vN.pdf` directly. For prepared inputs it discovers `<paper_id>/vX_vY/vN.pdf` and `<paper_id>/vN.pdf`, deduplicates by `(paper_id, version)`, and sorts versions numerically. For example, v2 in both `v1_v2` and `v2_v3` becomes one version. Hardlinks are read once per inode; distinct copies of the same version must have matching hashes. Conflicting contents or missing/empty pair PDFs fail. Different version numbers remain distinct even when their PDF bytes match.
 
 One byte snapshot is reused across that version's conditions. Every condition and replicate still starts its own `codex exec --ephemeral`, with a fresh working directory and no previous reviews or other versions. Experiment 1's `exp1_quality` is the shared neutral baseline for experiments 3 and 4. Experiment 4 also reuses three neutral-attitude authorship conditions from experiment 2 and four neutral-authorship attitude conditions from experiment 3; only 12 interaction conditions require new calls. Reuse is restricted to the same version, replicate and matching request fingerprint. Historical duplicate-condition records remain in their original results.
 
@@ -58,12 +90,12 @@ Maintain the 29 user templates directly in `prompts/` and the source-specific sy
 
 Sources were checked on 2026-09-13. See the per-profile references in `prompts/manifest.json` and [system/SOURCES.md](prompts/system/SOURCES.md). Extended score descriptions are study wording based on official criteria and labels, not verbatim official forms. These profiles define new experimental reviews; they do not relabel historical human scores. Different venues' numeric OA values must not be pooled as if they meant the same thing. TMLR's numbers are explicitly an experimental ordinal encoding, not an official numeric scale.
 
-The runner resolves one profile per paper. It first uses `--source-metadata` when provided; otherwise it checks `source_metadata.json` or `selection_manifest.json` at the prepared-tree root, then `scope_input.json` next to that root. The metadata may be a per-paper source map, a prepared scope/selection plan, a canonical source shard, or a hash-verified canonical catalog. With no such metadata, `--source SOURCE_ID` explicitly declares the source. Without either, the canonical project catalog is used. Unknown, missing, ambiguous or contradictory source assignments fail before a model call. A paper appearing in both ICML and TMLR needs an unambiguous prepared assignment or explicit source; the runner does not guess from its PDF or directory name.
+For historical prepared inputs, the runner resolves one profile per paper. It first uses `--source-metadata` when provided; otherwise it checks `source_metadata.json` or `selection_manifest.json` at the prepared-tree root, then `scope_input.json` next to that root. The metadata may be a per-paper source map, a prepared scope/selection plan, a canonical source shard, or a hash-verified canonical catalog. With no such metadata, `--source SOURCE_ID` explicitly declares the source. Without either, the canonical project catalog is used. Unknown, missing, ambiguous or contradictory source assignments fail before a model call. A paper appearing in both ICML and TMLR needs an unambiguous prepared assignment or explicit source; the runner does not guess from its PDF or directory name.
 
 For prepared inputs with source provenance, omit `--source` to route each paper automatically. An explicit selection can also be checked without model calls:
 
 ```sh
-python3 -B -m review_experiment.runner res/prepared-review/input_data \
+python3 -B -m review_experiment.runner res/prepared-review/input \
   --output res/review-inventory --source-metadata data/index/acl2026.json --dry-run
 ```
 

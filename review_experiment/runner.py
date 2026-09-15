@@ -153,6 +153,45 @@ def discover(root, papers=None, versions=None, limit=None):
     return result, pairs
 
 
+def discover_conference_pdfs(root, known_sources, papers=None, conferences=None,
+                       versions=None, limit=None):
+    """Read the conference PDF tree directly; reuse the existing version reader."""
+    root = root.resolve()
+    paper_re = re.compile(r'\d{4}\.\d{4,5}')
+    if paper_re.fullmatch(root.name) and root.parent.name in known_sources:
+        folders = [root]
+    elif root.name in known_sources and root.is_dir():
+        folders = [p for p in root.iterdir() if paper_re.fullmatch(p.name) and p.is_dir()]
+    else:
+        folders = [p for p in root.glob('*/*') if paper_re.fullmatch(p.name) and p.is_dir()]
+        if not folders:
+            return None  # Existing prepared-pair/direct-version input.
+    if conferences and set(conferences) - set(known_sources):
+        raise ValueError(f'Unknown conferences: {sorted(set(conferences) - set(known_sources))}')
+    selected = {}
+    for folder in sorted(folders):
+        conf, aid = folder.parent.name, folder.name
+        if conferences and conf not in conferences or papers and aid not in papers:
+            continue
+        # Keep one copy per paper, in conference-directory order. --conf picks
+        # the desired directory when a paper belongs to several conferences.
+        selected.setdefault(aid, folder)
+    if papers and set(papers) - set(selected):
+        raise ValueError(f'Unknown paper IDs: {sorted(set(papers) - set(selected))}')
+    if not selected:
+        raise ValueError('No input papers match the requested conferences/papers')
+    result, assigned = {}, {}
+    for aid in sorted(selected)[:limit]:
+        folder = selected[aid]
+        conf = folder.parent.name
+        if conf not in known_sources:
+            raise ValueError(f'Unknown source: {conf}')
+        found, _ = discover(folder, versions=versions)
+        result[aid] = found[aid]
+        assigned[aid] = conf
+    return result, assigned
+
+
 def bind_model_names(template, other_model=None, evaluator_model=None):
     for placeholder, value, option in (
             ('{EVALUATOR_MODEL_NAME}', evaluator_model, '--model'),
@@ -603,13 +642,19 @@ def validate_output(input_root, output, papers=()):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('input', type=Path, help='Explicit prepared <paper>/vX_vY/vN.pdf pair tree or <paper>/vN.pdf direct-version tree; not the raw data index/store')
+    ap.add_argument('input', type=Path, nargs='?',
+                    help='Defaults to configured clean_data; also accepts a conference/paper directory or historical prepared pair tree')
     ap.add_argument('--output', type=Path, required=True, help='New or resumable result directory, normally res/<run-id>')
     ap.add_argument('--prompts', type=Path, default=HERE / 'prompts')
     ap.add_argument('--source', help='Explicit source ID; otherwise resolve each paper from input provenance/catalog')
     ap.add_argument('--source-metadata', type=Path, help='Explicit prepared scope, source shard or source catalog JSON')
+    ap.add_argument('--conf', action='append',
+                    help='Select clean-data conferences or saved prepared-input assignments; repeatable')
     ap.add_argument('--paper', action='append')
-    ap.add_argument('--version', type=int, action='append')
+    version_scope = ap.add_mutually_exclusive_group()
+    version_scope.add_argument('--version', type=int, action='append')
+    version_scope.add_argument('--latest-only', action='store_true',
+                               help='Review only the highest version present for each selected paper in this input')
     ap.add_argument('--limit-papers', type=int)
     ap.add_argument('--experiment', choices=['1', '2', '3', '4'], action='append')
     ap.add_argument('--order-seed', type=int,
@@ -637,23 +682,67 @@ def main(argv=None):
             (args.version and min(args.version) < 1)):
         ap.error('Counts/timeout must be positive; retries must be nonnegative')
     try:
+        if args.input is None:
+            config = json.loads((ROOT / 'utility/project.json').read_text())
+            args.input = ROOT / config['data']['clean_root']
         args.output = validate_output(args.input, args.output)
-        papers, pair_count = discover(args.input, args.paper, args.version, args.limit_papers)
-        validate_output(args.input, args.output, papers)
         available_profiles, conditions, args.prompt_manifest = load_prompts(
             args.prompts, args.experiment, args.condition, with_manifest=True)
+        conference_pdfs = discover_conference_pdfs(args.input, available_profiles, args.paper, args.conf,
+                                                  args.version, args.limit_papers)
+        if conference_pdfs is not None:
+            papers, source_by_paper = conference_pdfs
+            pair_count = 0
+            if args.source or args.source_metadata:
+                source_by_paper, source_provenance = resolve_sources(
+                    args.input, papers, available_profiles, source=args.source,
+                    metadata=args.source_metadata, project_root=ROOT)
+            else:
+                source_provenance = {'mode': 'conference_directory', 'source': None,
+                                     'metadata_path': None, 'sha256': {}}
+        else:
+            # Historical prepared trees remain usable; their saved assignment
+            # controls source routing, with conference filtering before limits.
+            papers, pair_count = discover(args.input, args.paper,
+                                          None if args.conf else args.version,
+                                          None if args.conf else args.limit_papers)
+            source_by_paper, source_provenance = resolve_sources(
+                args.input, papers, available_profiles, source=args.source,
+                metadata=args.source_metadata, project_root=ROOT)
+        validate_output(args.input, args.output, papers)
         args.condition_metadata = {
             item['id']: {key: item.get(key) for key in (
                 'id', 'experiment', 'authorship', 'author_model_name',
                 'user_evaluation', 'effort_unit', 'shared_baseline_for',
                 'user_file', 'source_block', 'source_code_index')}
             for item in args.prompt_manifest['conditions']}
-        source_by_paper, source_provenance = resolve_sources(
-            args.input, papers, available_profiles, source=args.source,
-            metadata=args.source_metadata, project_root=ROOT)
+        if args.conf and conference_pdfs is None:
+            requested = set(args.conf)
+            if requested - set(available_profiles):
+                raise ValueError(f'Unknown conferences: {sorted(requested - set(available_profiles))}')
+            selected = [aid for aid in papers if source_by_paper[aid] in requested]
+            if not selected:
+                raise ValueError('No input papers match the requested conferences')
+            papers = {aid: papers[aid] for aid in selected[:args.limit_papers]}
+            source_by_paper = {aid: source_by_paper[aid] for aid in papers}
+            pair_count = len({path.parent for vs in papers.values() for version in vs
+                              for path in version.sources
+                              if re.fullmatch(r'v[1-9]\d*_v[1-9]\d*', path.parent.name)})
+            if args.version:
+                for aid, vs in papers.items():
+                    missing = set(args.version) - {v.number for v in vs}
+                    if missing:
+                        raise ValueError(f'{aid}: requested versions missing: {sorted(missing)}')
+                    papers[aid] = [v for v in vs if v.number in args.version]
+        if args.latest_only:
+            papers = {aid: [max(vs, key=lambda version: version.number)] for aid, vs in papers.items()}
         profiles = {aid: available_profiles[source] for aid, source in source_by_paper.items()}
         version_count = sum(map(len, papers.values()))
         inventory = dict(papers=len(papers), discovered_pairs=pair_count, unique_versions=version_count,
+                         input_root=str(args.input.resolve()),
+                         selection={'conferences': args.conf, 'papers': args.paper,
+                                    'versions': args.version, 'latest_only': args.latest_only,
+                                    'limit_papers': args.limit_papers},
                          conditions=[c[0] for c in conditions], replicates=args.replicates,
                          design_version=args.prompt_manifest.get('design_version'),
                          user_template_origin=args.prompt_manifest.get('user_template_origin'),

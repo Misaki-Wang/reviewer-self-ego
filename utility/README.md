@@ -4,6 +4,154 @@ The active export root contains check_diff/, utility/, data/index and data/pdf.
 Current configuration is utility/project.json. Use its existing runtime settings;
 no new Python dependencies are required.
 
+## Download all versions, then build pairs
+
+These are separate stages. `download_papers` downloads every version recorded in
+the source catalog (`v1` through `frozen_N`), including intermediate versions that
+pair selection skips. It does not apply temporal eligibility or page filters and
+does not discover versions newer than the frozen catalog.
+
+The download root is `data.downloads_root` in `utility/project.json`, currently
+`downloads_papers`. The layout is:
+
+```text
+downloads_papers/
+  download_manifest.json
+  acl2026/
+    2305.14299/
+      metadata.json
+      v1.pdf
+      v2.pdf
+      v3.pdf
+```
+
+`metadata.json` preserves the complete original paper record. A paper belonging
+to multiple conferences is stored under each selected conference; verified bytes
+are reused within the invocation to avoid duplicate network requests. Existing
+valid files are skipped, and validated files from the configured legacy `data/pdf`
+store can also be reused. Downloads use explicit version URLs, rate limiting,
+bounded retries, temporary files and PDF/hash validation before replacement.
+Failures are recorded in `download_manifest.json` and cause a nonzero exit status;
+rerunning retries failed/missing files. This manifest describes the latest
+invocation's scope; earlier cached papers and their metadata remain in place.
+
+From the project root with Python 3.11+ and the existing pypdf dependency:
+
+```sh
+# Inspect the complete download inventory without network requests or writes.
+python3.11 -B -m utility.download_papers --dry-run
+
+# Download all catalogued versions for a conference (omit --conf for all sources).
+python3.11 -B -m utility.download_papers --conf acl2026
+
+# Or download all versions of one paper.
+python3.11 -B -m utility.download_papers --conf acl2026 --arxiv-id 2305.14299
+
+# Anonymize each needed PDF separately before pairing, for example:
+python3.11 -B -m utility.anonymize_pdf downloads_papers/acl2026/2305.14299/v1.pdf
+
+# Once all required versions are clean, build pairs with the existing pairing rule.
+python3.11 -B -m utility.build_pairs --conf acl2026 --all \
+  --output res/NEW_RUN_ID/prepared
+```
+
+`--conf` uses the catalog's source ID, such as `acl2026` or `iclr2026`.
+Download filters `--conf` and `--arxiv-id` are repeatable. `--output` changes the
+download root. `data.clean_root` configures the anonymous output and downstream
+input store, normally `clean_data`; `build_pairs --pdf-root` can select another
+clean store. Pair construction defaults to the configured source index and clean root;
+`--source` can provide a source shard or combined catalog. Use matching source/conference scopes when downloading and building pairs.
+The clean tree needs only PDFs; pairing reads version timestamps from the catalog.
+There is no fallback to downloaded originals if a clean version is missing. Downloading a single paper does not narrow
+the pair population automatically: pass the same `--arxiv-id` filter to
+`build_pairs` when building only its pairs. Explicit paper IDs default to all
+papers within that filter, unless a sampling scope is also supplied.
+
+`build_pairs` shares `prepare_source_data`'s selection and materialization code.
+It supports `--all`, `--units`, `--per-source`, `--dry-run`, `--plan-only` and
+`--materialize-plan`. Without a scope flag it keeps the existing default of five
+papers per source. Selected gaps remain strictly greater than 2,592,000 seconds,
+and pairs connect adjacent versions in the maximum selected sequence. Missing
+PDFs fail the fixed selection; they never cause replacement sampling. Pair
+outputs retain the existing `<id>/vX_vY/` and `pairs.json` format for downstream
+consumers. `--all` still requires every scoped record to be eligible and resolved.
+
+The existing `prepare_source_data`/formal batch entry points keep their legacy
+`data/pdf/<id>/<id>vN.pdf` default. `prepare_source_data --pdf-layout conference`
+also accepts the new store. The dedicated `build_pairs` entry point selects that
+layout automatically; frozen plans record the layout so they can be resumed or
+transported without guessing from file presence.
+
+## Anonymize one PDF for review
+
+`anonymize_pdf.py` operates on **one PDF**, without scanning or processing its
+directory. It uses the authenticated Codex CLI and an installed PDF skill. The
+existing local Python 3.11 environment includes the required PyMuPDF dependency.
+
+```sh
+# Inspect the paths first; this makes no model calls or PDF edits.
+python3.11 -B -m utility.anonymize_pdf \
+  downloads_papers/iclr2026/2301.12412/v1.pdf --dry-run
+
+# Process this single PDF (identify, then audit; retry with feedback if needed).
+python3.11 -B -m utility.anonymize_pdf \
+  downloads_papers/iclr2026/2301.12412/v1.pdf --model gpt-5.5 --effort high
+```
+
+The default result is `clean_data/iclr2026/2301.12412/v1.pdf`: the same relative
+conference/paper/version path as the download store. Original PDFs are unchanged.
+Only the PDF is copied to the clean tree; `metadata.json` is not needed for review
+and is not copied. `--output` can select an explicit PDF path, and is required for
+input PDFs outside the configured download store. The script rejects directory
+inputs. It does not start comparison or review experiments.
+
+The stages are:
+
+1. Render all original pages and extract coordinate-bearing text spans. A Codex
+   session using the PDF skill identifies author names, affiliations, contact
+   details, acknowledgments, author links, venue/submission/acceptance notices,
+   arXiv/DOI stamps and other direct identity clues, including logos/images.
+2. Apply actual PyMuPDF content redactions and rewrite the PDF with garbage
+   collection. Remove document/XMP metadata, annotations, forms, links, outlines,
+   attachments and hidden text. Scientific text, equations, diagrams and ordinary
+   reference entries are preserved; the layout is not reflowed.
+3. Check the page count/geometry, missing identity strings and hidden metadata.
+   Compare rendered pixels outside the specified redaction regions against the
+   original. If smoothing alone differs, require an exact second comparison with
+   antialiasing disabled and record the affected pages. A second fresh Codex session uses the PDF skill to visually review
+   every page. Publish the PDF only if both local checks and that review pass.
+
+Uncertain identification, changes outside the selected rectangles, a failed visual
+review or a CLI failure trigger another attempt with the previous error, redaction
+plan and audit feedback. Each attempt starts from the original PDF. The default
+`--max-attempts 3` allows up to three attempts (at most six CLI calls); processing
+stops as soon as an attempt passes. Exhausting the limit produces an error without
+publishing a new PDF. Reports retain every attempt and its token usage. All CLI
+instructions are in English and state that the user authorized anonymization of
+these publicly downloaded papers. Rendered pages are attached to each CLI prompt.
+This is automatic removal/review of direct identity clues, not a guarantee that a
+paper cannot be identified from its scientific content, title or retained path.
+Visually spot-check real outputs before using them in a blinded experiment.
+
+The audit report defaults to `res/anonymize_pdf/<conference>/<paper>/vN.json` and
+contains each attempt's plan, CLI responses, validation status, input/output hashes and
+reported token usage. It can contain removed identity information and stays
+outside `clean_data`. A matching completed output is reused without model calls;
+`--overwrite` explicitly regenerates it. `--pdf-skill` chooses a skill, `--codex`
+chooses the executable, and `--timeout` bounds each CLI call. The bundled PDF
+skill's edit marker requires Node.js (`--node` can select it).
+
+All CLI sessions are ephemeral, use the installed PDF skill, and restrict tools
+to the current scratch workspace, the one read-only source PDF and runtime/skill
+files. No changes are made to review_experiment's existing isolation, prompts,
+output format or model-call implementation.
+
+Implementation references: [Codex non-interactive mode](https://learn.chatgpt.com/docs/non-interactive-mode),
+[Codex skills](https://learn.chatgpt.com/docs/build-skills),
+[PyMuPDF redactions](https://pymupdf.readthedocs.io/en/latest/page.html#Page.apply_redactions).
+Offline tests are in `tests/utility/test_anonymize_pdf.py` and use synthetic PDFs
+and a fake CLI, including actual text/image redaction and an output/resume test.
+
 ## Dataset packaging and preparation
 
 data/index/index.json declares dataset source_data and schema
@@ -109,7 +257,9 @@ and SHA-256. No fabricated source_commit or Git fallback is used.
 ## Tests
 
 Current tests live in tests/utility/test_prepare_source_data.py,
-tests/utility/test_source_provenance.py and tests/data/test_source_data.py.
+tests/utility/test_download_papers.py, tests/utility/test_source_provenance.py and
+tests/data/test_source_data.py. Download tests use synthetic PDFs and fake network
+responses, including an end-to-end clean-store-to-pairs check.
 Use an owned private-project TMPDIR. The data test reconstructs both the current
 combined stream and the historical combined stream to prove complete record
 equivalence, and checks unchanged observed-metadata bytes. Original Git/release
