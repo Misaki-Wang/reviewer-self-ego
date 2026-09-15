@@ -62,6 +62,7 @@ work = pathlib.Path(args[args.index('--cd')+1])
 assert (work / '.agents/skills/pdf/SKILL.md').is_file()
 assert (work / 'manuscript.pdf').read_bytes().startswith(b'%PDF-')
 assert '{{PAPER_CONTENT}}' not in user and '{{OTHER_MODEL_NAME}}' not in user
+assert '{{EVALUATOR_MODEL_NAME}}' not in user
 assert user.endswith(str(work / 'manuscript.pdf'))
 assert '2406.03862' not in user and 'exp3_' not in user
 count = pathlib.Path({str(self.count)!r})
@@ -91,8 +92,8 @@ print(json.dumps({{'type':'turn.completed','usage':{{'input_tokens':100,'cached_
         profiles, conditions = runner.load_prompts(runner.HERE / 'prompts')
         self.assertEqual(len(profiles), 10)
         self.assertEqual(profiles['iclr2026'].schema, self.schema)
-        self.assertEqual(len(conditions), 12)
-        self.assertEqual(len({name for name, _ in conditions}), 12)
+        self.assertEqual(len(conditions), 29)
+        self.assertEqual(len({name for name, _ in conditions}), 29)
         self.assertNotEqual(dict(conditions)['exp1_quality'], dict(conditions)['exp2_self_human'])
         self.assertNotIn('exp3_neutral', dict(conditions))
         self.assertFalse((runner.HERE / 'prompts/exp3_neutral.user.txt').exists())
@@ -136,18 +137,18 @@ print(json.dumps({{'type':'turn.completed','usage':{{'input_tokens':100,'cached_
             self.assertEqual(document['versions'][version]['reviews']['exp1_quality/r1'],
                              record['reviews']['exp1_quality/r1'])
         self.assertEqual(list(document['versions']), ['v1', 'v2', 'v3'])
-        self.assertEqual(len(self.count.read_text().splitlines()), 36)
+        self.assertEqual(len(self.count.read_text().splitlines()), 87)
         for version in document['versions'].values():
-            self.assertEqual(len(version['reviews']), 12)
+            self.assertEqual(len(version['reviews']), 29)
             for review in version['reviews'].values():
                 self.assertEqual(review['result'], {'oa': 6, 'strengths': ['Fixture strength'], 'weaknesses': ['Fixture weakness']})
                 self.assertEqual(review['token_usage']['reported_totals']['total_tokens'], 105)
                 self.assertFalse(Path(review['attempts'][0]['user_message'].splitlines()[-1]).exists())
         self.assertEqual(self.run_cli(), 0)
-        self.assertEqual(len(self.count.read_text().splitlines()), 36)
-        self.assertEqual(self.result()['latest_selection_counts']['skipped'], 36)
+        self.assertEqual(len(self.count.read_text().splitlines()), 87)
+        self.assertEqual(self.result()['latest_selection_counts']['skipped'], 87)
         self.assertEqual(self.run_cli('--condition', 'exp1_quality', '--version', '1', '--effort', 'high'), 0)
-        self.assertEqual(len(self.count.read_text().splitlines()), 37)
+        self.assertEqual(len(self.count.read_text().splitlines()), 88)
 
     def test_failed_outputs_retry_resume_and_timeout(self):
         opts = ('--condition', 'exp1_quality', '--version', '1')
@@ -214,12 +215,30 @@ print(json.dumps({{'type':'turn.completed','usage':{{'input_tokens':100,'cached_
         self.assertIn('"PYTHONPATH"=' + json.dumps(str(runtime / 'python_vendor')), environment)
         self.assertIn(str(runtime / 'ghostscript-9.55.0/bin'), environment)
         self.assertIn('permissions.review_only.network.enabled=false', command)
+        self.assertIn('"TMPDIR"=' + json.dumps(str(work)), environment)
+        self.assertIn('"TMPPREFIX"=' + json.dumps(str(work / 'zsh')), environment)
+
+    def test_macos_shared_temp_denials_are_explicit_globs(self):
+        with patch.object(runner.sys, 'platform', 'darwin'):
+            options = runner.permission_options(self.root / 'work', self.root / 'snapshot.pdf',
+                                                self.skill)
+        filesystem = options[-1]
+        for path in ('/tmp', '/private/tmp', '/var/tmp', '/private/var/tmp'):
+            self.assertIn(json.dumps(path + '/**') + '="deny"', filesystem)
+            self.assertIn(json.dumps(path[:-1] + '[p]') + '="deny"', filesystem)
+
+    def test_macos_temp_rules_do_not_change_linux_permissions(self):
+        with patch.object(runner.sys, 'platform', 'linux'):
+            options = runner.permission_options(self.root / 'work', self.root / 'snapshot.pdf',
+                                                self.skill)
+        self.assertIn('\":minimal\"=\"read\"', options[-1])
+        self.assertNotIn('/private/tmp/**', options[-1])
 
     def test_dry_run_has_no_reads_or_results(self):
         with patch.object(runner.Version, 'read', side_effect=AssertionError('PDF read')):
             with redirect_stdout(io.StringIO()) as out:
                 self.assertEqual(runner.main([str(self.input), '--output', str(self.output), '--source', 'iclr2026', '--dry-run']), 0)
-        self.assertEqual(json.loads(out.getvalue())['planned_reviews'], 36)
+        self.assertEqual(json.loads(out.getvalue())['planned_reviews'], 87)
         self.assertFalse(self.output.exists())
 
 

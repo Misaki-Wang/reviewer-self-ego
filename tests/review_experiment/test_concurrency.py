@@ -20,7 +20,7 @@ class ConcurrentReviewTests(unittest.TestCase):
 
     def response(self, args, system, template, snapshot, work, attempt):
         result = {'oa': 6, 'strengths': ['Fixture strength'], 'weaknesses': ['Fixture weakness']}
-        attempt['user_message'] = runner.render_user(template, args.other_model, work / 'manuscript.pdf')
+        attempt['user_message'] = runner.render_user(template, args.other_model, work / 'manuscript.pdf', args.model)
         attempt['raw_response'] = json.dumps(result)
         attempt['exit_code'] = 0
         attempt['token_usage'] = {'source': 'codex_exec_turn_completed', 'records': [
@@ -60,12 +60,12 @@ class ConcurrentReviewTests(unittest.TestCase):
             gate.set()
             timer.cancel()
         self.assertEqual(peak, 32)
-        self.assertEqual(calls, 36)
+        self.assertEqual(calls, 87)
         self.assertEqual(sorted(reads), [('2406.03862', n) for n in (1, 2, 3)])
         document = self.fixture.result()
-        self.assertEqual(document['latest_selection_counts'], {'completed': 36, 'skipped': 0, 'failed': 0})
+        self.assertEqual(document['latest_selection_counts'], {'completed': 87, 'skipped': 0, 'failed': 0})
         for version in document['versions'].values():
-            self.assertEqual(len(version['reviews']), 12)
+            self.assertEqual(len(version['reviews']), 29)
             self.assertTrue(all(r['status'] == 'completed' for r in version['reviews'].values()))
 
     def test_resume_skips_exact_completed_records_with_parallel_remaining_cells(self):
@@ -73,7 +73,7 @@ class ConcurrentReviewTests(unittest.TestCase):
         original = deepcopy(self.fixture.result()['versions']['v1']['reviews']['exp1_quality/r1'])
         with patch.object(runner, 'call_codex', side_effect=self.response) as call:
             self.assertEqual(self.fixture.run_cli('--workers', '16'), 0)
-            self.assertEqual(call.call_count, 35)
+            self.assertEqual(call.call_count, 86)
         document = self.fixture.result()
         self.assertEqual(document['versions']['v1']['reviews']['exp1_quality/r1'], original)
         reviews = deepcopy(document['versions'])
@@ -81,7 +81,7 @@ class ConcurrentReviewTests(unittest.TestCase):
             self.assertEqual(self.fixture.run_cli('--workers', '32'), 0)
             call.assert_not_called()
         self.assertEqual(self.fixture.result()['versions'], reviews)
-        self.assertEqual(self.fixture.result()['latest_selection_counts']['skipped'], 36)
+        self.assertEqual(self.fixture.result()['latest_selection_counts']['skipped'], 87)
 
     def test_parallel_replicates_keep_retry_receipts_and_usage(self):
         lock = threading.Lock()
@@ -119,10 +119,10 @@ class ConcurrentReviewTests(unittest.TestCase):
         self.assertLessEqual(completed, 4)
         summary = json.loads((self.fixture.output / 'run_summary.json').read_text())
         self.assertEqual(summary['status'], 'drained')
-        self.assertEqual(summary['pending_reviews'], 36 - completed)
+        self.assertEqual(summary['pending_reviews'], 87 - completed)
         with patch.object(runner, 'call_codex', side_effect=self.response) as call:
             self.assertEqual(self.fixture.run_cli('--workers', '4'), 0)
-            self.assertEqual(call.call_count, 36 - completed)
+            self.assertEqual(call.call_count, 87 - completed)
         after = self.fixture.result()['versions']
         for version, record in before.items():
             for key, value in record['reviews'].items():

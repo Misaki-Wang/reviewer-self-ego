@@ -22,7 +22,14 @@ class LayoutTests(unittest.TestCase):
             with self.subTest(argv=argv), redirect_stderr(io.StringIO()):
                 with self.assertRaises(SystemExit) as error:
                     runner.main(argv)
-                self.assertEqual(error.exception.code, 2)
+                    self.assertEqual(error.exception.code, 2)
+
+    def test_macos_shared_temp_output_is_rejected_before_model_call(self):
+        with patch.object(runner.sys, 'platform', 'darwin'):
+            for root in ('/private/tmp', '/private/var/tmp'):
+                with self.subTest(root=root):
+                    self.assert_output_rejected(Path(root) / 'review-probe-output',
+                                                'shared temporary directories')
 
     def assert_output_rejected(self, output, message, *extra, before_discovery=True):
         with redirect_stderr(io.StringIO()) as errors, \

@@ -31,8 +31,8 @@ class Concurrency64Tests(unittest.TestCase):
         finally:
             gate.set();timer.cancel()
         self.assertEqual(peak,64)
-        self.assertEqual(calls,72)
+        self.assertEqual(calls,174)
         doc=fixture.fixture.result()
-        self.assertEqual(doc['latest_selection_counts'],{'completed':72,'skipped':0,'failed':0})
-        self.assertEqual([len(v['reviews']) for v in doc['versions'].values()],[24,24,24])
+        self.assertEqual(doc['latest_selection_counts'],{'completed':174,'skipped':0,'failed':0})
+        self.assertEqual([len(v['reviews']) for v in doc['versions'].values()],[58,58,58])
         self.assertTrue(all(r['status']=='completed' for v in doc['versions'].values() for r in v['reviews'].values()))

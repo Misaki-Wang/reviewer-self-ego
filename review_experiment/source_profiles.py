@@ -108,7 +108,7 @@ def _source(value, known=None):
     return value
 
 
-def load_prompts(folder: Path, experiments=None, conditions=None):
+def load_prompts(folder: Path, experiments=None, conditions=None, *, with_manifest=False):
     folder = Path(folder)
     manifest_path = _safe_path(folder, 'manifest.json')
     manifest = _json(manifest_path.read_bytes(), manifest_path)
@@ -162,7 +162,7 @@ def load_prompts(folder: Path, experiments=None, conditions=None):
                      any(value in experiments for value in c.get('shared_baseline_for', [])))]
     if not selected:
         raise ValueError('No conditions selected')
-    return profiles, selected
+    return (profiles, selected, manifest) if with_manifest else (profiles, selected)
 
 
 def validate_result(result, schema):

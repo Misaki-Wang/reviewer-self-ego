@@ -11,6 +11,7 @@ import json
 import importlib.util
 import os
 from pathlib import Path
+import random
 import re
 import shutil
 import signal
@@ -99,12 +100,13 @@ def discover(root, papers=None, versions=None, limit=None):
         raise ValueError(f'Input directory does not exist: {root}')
     pair_re = re.compile(r'v([1-9]\d*)_v([1-9]\d*)')
     paper_re = re.compile(r'\d{4}\.\d{4,5}')
+    version_re = re.compile(r'v([1-9]\d*)\.pdf')
     if pair_re.fullmatch(root.name):
-        folders = [root]
+        folders, direct = [root], []
     elif paper_re.fullmatch(root.name):
-        folders = root.glob('v*_v*')
+        folders, direct = root.glob('v*_v*'), root.glob('*.pdf')
     else:
-        folders = root.glob('*/v*_v*')
+        folders, direct = root.glob('*/v*_v*'), root.glob('*/*.pdf')
     found = {}
     pairs = 0
     for folder in sorted(folders):
@@ -125,10 +127,22 @@ def discover(root, papers=None, versions=None, limit=None):
             if not path.is_file() or path.stat().st_size == 0:
                 raise ValueError(f'Missing or empty PDF: {path}')
             found.setdefault(aid, {}).setdefault(number, []).append(path)
+    for path in sorted(direct):
+        aid = path.parent.name
+        if papers and aid not in papers:
+            continue
+        if not paper_re.fullmatch(aid):
+            raise ValueError(f'Invalid paper ID: {aid}')
+        match = version_re.fullmatch(path.name)
+        if not match:
+            raise ValueError(f'Invalid version PDF filename: {path}')
+        if not path.is_file() or path.stat().st_size == 0:
+            raise ValueError(f'Missing or empty PDF: {path}')
+        found.setdefault(aid, {}).setdefault(int(match[1]), []).append(path)
     if papers and set(papers) - set(found):
         raise ValueError(f'Unknown paper IDs: {sorted(set(papers) - set(found))}')
     if not found:
-        raise ValueError(f'No PDF pairs found: {root}')
+        raise ValueError(f'No PDF versions found: {root}')
     result = {}
     for aid in sorted(found)[:limit]:
         if versions and set(versions) - set(found[aid]):
@@ -139,13 +153,21 @@ def discover(root, papers=None, versions=None, limit=None):
     return result, pairs
 
 
-def render_user(template, other_model, pdf_path):
+def bind_model_names(template, other_model=None, evaluator_model=None):
+    for placeholder, value, option in (
+            ('{EVALUATOR_MODEL_NAME}', evaluator_model, '--model'),
+            ('{OTHER_MODEL_NAME}', other_model, '--other-model')):
+        if placeholder in template:
+            if not value:
+                raise ValueError(f'{option} is required for {placeholder}')
+            template = template.replace(placeholder, value)
+    return template
+
+
+def render_user(template, other_model, pdf_path, evaluator_model=None):
     if template.count('{PAPER_CONTENT}') != 1:
         raise ValueError('Expected one PAPER_CONTENT placeholder')
-    if '{OTHER_MODEL_NAME}' in template:
-        if not other_model:
-            raise ValueError('--other-model is required for exp2_other_llm')
-        template = template.replace('{OTHER_MODEL_NAME}', other_model)
+    template = bind_model_names(template, other_model, evaluator_model)
     # No prose is added: a neutral local PDF path replaces the material placeholder.
     return template.replace('{PAPER_CONTENT}', str(pdf_path))
 
@@ -169,9 +191,17 @@ def pdf_skill_path(explicit=None):
 
 def permission_options(work, snapshot, skill, codex=None, tool_runtime=None, ripgrep=None):
     """No broad workspace or host read grant. The exact PDF is read-only."""
-    filesystem = {':root': 'deny', ':minimal': 'read',
-                  str(work.resolve()): 'write', str(snapshot.resolve()): 'read',
-                  str(skill.parent.resolve()): 'read'}
+    filesystem = {':root': 'deny', ':minimal': 'read'}
+    if sys.platform == 'darwin':
+        # Codex 0.154's Seatbelt :minimal defaults grant shared temporary
+        # directories. Plain path denials do not override those defaults;
+        # explicit glob denials do. Match each root as well as its descendants
+        # so directory listings cannot disclose other calls' filenames.
+        for path in ('/tmp', '/private/tmp', '/var/tmp', '/private/var/tmp'):
+            filesystem[path + '/**'] = 'deny'
+            filesystem[path[:-1] + '[p]'] = 'deny'
+    filesystem.update({str(work.resolve()): 'write', str(snapshot.resolve()): 'read',
+                       str(skill.parent.resolve()): 'read'})
     # Explicit interpreter/library exceptions, never the user's home or repository.
     for path in (Path(sys.executable), Path(sys.executable).resolve(), Path(sys.base_prefix),
                  Path.home() / '.cache/codex-runtimes/codex-primary-runtime/dependencies'):
@@ -197,7 +227,8 @@ def build_command(args, work, system, snapshot):
     runtime = Path.home() / '.cache/codex-runtimes/codex-primary-runtime/dependencies'
     path = ':'.join(str(p) for p in (runtime / 'bin/override', runtime / 'python/bin',
                                     Path('/usr/bin'), Path('/bin')) if p.is_dir())
-    environment = {'PATH': path, 'TMPDIR': str(work), 'PYTHONNOUSERSITE': '1'}
+    environment = {'PATH': path, 'TMPDIR': str(work), 'TMPPREFIX': str(work / 'zsh'),
+                   'PYTHONNOUSERSITE': '1'}
     tool_runtime = getattr(args, 'tool_runtime', None)
     if tool_runtime:
         gs = tool_runtime / 'ghostscript-9.55.0'
@@ -261,8 +292,10 @@ def call_codex(args, profile, template, snapshot, work, attempt):
     skills.mkdir(parents=True)
     (skills / 'pdf').symlink_to(args.pdf_skill.parent, target_is_directory=True)
     (work / 'schema.json').write_text(json.dumps(profile.schema))
-    user = render_user(template, args.other_model, manuscript)
+    user = render_user(template, args.other_model, manuscript, args.model)
     attempt['user_message'] = user
+    attempt['developer_message'] = profile.text
+    # Preserve both exact messages even if the CLI or response validation fails.
     attempt['ripgrep'] = getattr(args, 'ripgrep_metadata', None)
     env = os.environ.copy()
     # Tool subprocesses may create scratch files here, not in a shared /tmp.
@@ -314,17 +347,53 @@ def call_codex(args, profile, template, snapshot, work, attempt):
                 attempt['raw_response'] = response.read_text()
 
 
-def fingerprint(args, profile, template, checksum):
-    return sha(json.dumps({'system': profile.text, 'source_id': profile.source_id,
+def fingerprint(args, profile, template, checksum, condition=None):
+    binding = {'system': profile.text, 'source_id': profile.source_id,
                            'score_scale': profile.metadata(), 'user_template': template,
                            'other_model': args.other_model if '{OTHER_MODEL_NAME}' in template else None,
                            'pdf_sha256': checksum, 'model': args.model, 'effort': args.effort,
                            'codex_executable': str(Path(shutil.which(args.codex) or args.codex).resolve()),
                            'schema': profile.schema, 'adapter_version': 3,
-                           'file_access': 'review_only_minimal_runtime',
+                           'file_access': 'review_only_private_temp_v1',
                            'tool_runtime': str(args.tool_runtime) if getattr(args, 'tool_runtime', None) else None,
                            'ripgrep': getattr(args, 'ripgrep_metadata', None),
-                           'pdf_skill_sha256': args.pdf_skill_sha256}, sort_keys=True).encode())
+                           'pdf_skill_sha256': args.pdf_skill_sha256}
+    manifest = getattr(args, 'prompt_manifest', {})
+    # Leave archived fingerprints intact; bind the new design without changing CLI semantics.
+    if manifest.get('design_version') or '{EVALUATOR_MODEL_NAME}' in template:
+        binding['design'] = {
+            'version': manifest.get('design_version'),
+            'user_template_origin': manifest.get('user_template_origin'),
+            'condition': condition,
+            'metadata': getattr(args, 'condition_metadata', {}).get(condition),
+            'resolved_user_template': bind_model_names(template, args.other_model, args.model)}
+    return sha(json.dumps(binding, sort_keys=True).encode())
+
+
+def review_metadata(args, aid, version, condition, replicate, checksum):
+    manifest = getattr(args, 'prompt_manifest', {})
+    factors = getattr(args, 'condition_metadata', {}).get(condition, {})
+    author = factors.get('author_model_name')
+    if author is not None:
+        author = bind_model_names(author, args.other_model, args.model)
+    ownership = factors.get('authorship')
+    order = getattr(args, 'condition_orders', {}).get((aid, version.number, replicate))
+    return {
+        'experiment_id': factors.get('experiment'), 'paper_id': aid,
+        'version_ids': [f'v{version.number}'], 'version_pair_id': None,
+        'content_hashes': {f'v{version.number}': checksum},
+        'author_model_names': [author] if author is not None else None,
+        'ownership_by_version': {f'v{version.number}': ownership} if ownership is not None else None,
+        'role': ownership, 'user_evaluation': factors.get('user_evaluation'),
+        'effort_unit': factors.get('effort_unit'),
+        'condition_metadata': factors, 'prompt_version': manifest.get('design_version'),
+        'user_template_origin': manifest.get('user_template_origin'),
+        'order_seed': getattr(args, 'order_seed', None),
+        'display_order': order['conditions'].index(condition) + 1 if order else None,
+        'condition_order_ref': f'versions/v{version.number}/condition_orders/r{replicate}' if order else None,
+        'gold_quality_relation': None, 'annotation_version': None, 'trajectory_id': None,
+        'sampling_config': None, 'reasoning_config': {'effort': args.effort},
+        'output_budget': None, 'timestamp': now()}
 
 
 def read_document(path, aid, source_id=None):
@@ -374,10 +443,11 @@ def run_review(args, aid, version, payload, profile, condition, template, replic
     path = args.output / aid / 'reviews.json'
     key = f'{condition}/r{replicate}'
     review = dict(condition=condition, replicate=replicate,
-                  fingerprint=fingerprint(args, profile, template, checksum),
+                  fingerprint=fingerprint(args, profile, template, checksum, condition),
                   source_id=profile.source_id, system_prompt=profile.metadata(),
                   model=args.model, effort=args.effort, codex_executable=args.codex,
                   status='failed', attempts=[])
+    review.update(review_metadata(args, aid, version, condition, replicate, checksum))
     with tempfile.TemporaryDirectory(prefix='review-experiment-', dir=args.output) as temp:
         root = Path(temp)
         snapshot = root / 'snapshot.pdf'
@@ -406,14 +476,60 @@ def run_review(args, aid, version, payload, profile, condition, template, replic
     return review['status'] if review['attempts'] else None
 
 
+def resolve_order_seed(args, documents):
+    seeds = [d['order_seed'] for d in documents.values() if 'order_seed' in d]
+    summary = args.output / 'run_summary.json'
+    if summary.is_file():
+        saved = json.loads(summary.read_text())
+        if 'order_seed' in saved:
+            seeds.append(saved['order_seed'])
+    requested = getattr(args, 'order_seed', None)
+    if requested is not None:
+        seeds.append(requested)
+    if any(type(seed) is not int for seed in seeds) or len(set(seeds)) > 1:
+        raise ValueError('Condition order seed differs or is invalid; use a fresh output directory')
+    args.order_seed = seeds[0] if seeds else random.SystemRandom().getrandbits(64)
+
+
+def condition_order(args, aid, version, record, replicate, conditions):
+    # Shuffle the whole catalog, then filter selected IDs. Widening a selection
+    # therefore leaves both completed records and the original randomization intact.
+    catalog = sorted(getattr(args, 'condition_metadata', {}) or dict(conditions))
+    seed = sha(json.dumps([args.order_seed, aid, version.number, replicate]).encode())
+    orders = record.setdefault('condition_orders', {})
+    key = f'r{replicate}'
+    if not isinstance(orders, dict):
+        raise ValueError(f'Invalid saved condition orders: {aid}/v{version.number}')
+    if key not in orders:
+        order = list(catalog)
+        random.Random(seed).shuffle(order)
+        orders[key] = {'seed': seed, 'conditions': order}
+    order = orders[key]
+    if not isinstance(order, dict):
+        raise ValueError(f'Invalid saved condition order: {aid}/v{version.number}/{key}')
+    ids = order.get('conditions')
+    if (order.get('seed') != seed or not isinstance(ids, list) or
+            any(not isinstance(cid, str) for cid in ids) or len(ids) != len(set(ids))):
+        raise ValueError(f'Invalid saved condition order: {aid}/v{version.number}/{key}')
+    additions = sorted(set(catalog) - set(ids))
+    random.Random(seed).shuffle(additions)
+    ids.extend(additions)
+    args.condition_orders[aid, version.number, replicate] = order
+    selected = dict(conditions)
+    return [(cid, selected[cid]) for cid in ids if cid in selected]
+
+
 def prepare_reviews(args, papers, profiles, conditions):
     """Read each version once, retain immutable bytes, and skip valid prior cells."""
     queues, counts = [], {}
     documents = {aid: read_document(args.output / aid / 'reviews.json', aid, profiles[aid].source_id)
                  for aid in papers}
+    resolve_order_seed(args, documents)
+    args.condition_orders = {}
     for aid, versions in papers.items():
         path = args.output / aid / 'reviews.json'
         document = documents[aid]
+        document['order_seed'] = args.order_seed
         profile = profiles[aid]
         queue = deque()
         counts[aid] = dict(completed=0, skipped=0, failed=0)
@@ -424,10 +540,11 @@ def prepare_reviews(args, papers, profiles, conditions):
             if record.get('sha256') not in (None, checksum):
                 record['reviews'] = {}
             record.update(sha256=checksum, source_paths=[str(p) for p in version.sources])
-            for condition, template in conditions:
-                for replicate in range(1, args.replicates + 1):
+            for replicate in range(1, args.replicates + 1):
+                ordered = condition_order(args, aid, version, record, replicate, conditions)
+                for condition, template in ordered:
                     previous = record['reviews'].get(f'{condition}/r{replicate}', {})
-                    mark = fingerprint(args, profile, template, checksum)
+                    mark = fingerprint(args, profile, template, checksum, condition)
                     if (not args.overwrite and previous.get('fingerprint') == mark
                             and previous.get('status') == 'completed'):
                         try:
@@ -458,6 +575,11 @@ def validate_output(input_root, output, papers=()):
         if path.exists() and not path.is_dir():
             raise ValueError(f'Output path must be a directory: {path}')
     output = output.resolve()
+    if sys.platform == 'darwin' and any(
+            output == root or root in output.parents
+            for root in (Path('/private/tmp'), Path('/private/var/tmp'))):
+        raise ValueError('Output must be outside shared temporary directories on macOS; '
+                         'use a dedicated project res/ directory')
     input_root = input_root.resolve()
     if output == input_root or output in input_root.parents or input_root in output.parents:
         raise ValueError('Input and output directories must not overlap')
@@ -481,7 +603,7 @@ def validate_output(input_root, output, papers=()):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('input', type=Path, help='Explicit prepared <paper>/vX_vY PDF tree; not the raw data index/store')
+    ap.add_argument('input', type=Path, help='Explicit prepared <paper>/vX_vY/vN.pdf pair tree or <paper>/vN.pdf direct-version tree; not the raw data index/store')
     ap.add_argument('--output', type=Path, required=True, help='New or resumable result directory, normally res/<run-id>')
     ap.add_argument('--prompts', type=Path, default=HERE / 'prompts')
     ap.add_argument('--source', help='Explicit source ID; otherwise resolve each paper from input provenance/catalog')
@@ -489,9 +611,11 @@ def main(argv=None):
     ap.add_argument('--paper', action='append')
     ap.add_argument('--version', type=int, action='append')
     ap.add_argument('--limit-papers', type=int)
-    ap.add_argument('--experiment', choices=['1', '2', '3'], action='append')
+    ap.add_argument('--experiment', choices=['1', '2', '3', '4'], action='append')
+    ap.add_argument('--order-seed', type=int,
+                    help='Condition scheduling seed; generated once and reused on resume if omitted')
     ap.add_argument('--condition', action='append')
-    ap.add_argument('--other-model', help='Explicit author model name for exp2_other_llm')
+    ap.add_argument('--other-model', help='Author model name for custom legacy OTHER_MODEL_NAME templates')
     ap.add_argument('--model', default='gpt-5.5')
     ap.add_argument('--effort', default='medium', choices=['low', 'medium', 'high', 'xhigh', 'max'])
     ap.add_argument('--codex', default=shutil.which('codex') or 'codex')
@@ -516,7 +640,14 @@ def main(argv=None):
         args.output = validate_output(args.input, args.output)
         papers, pair_count = discover(args.input, args.paper, args.version, args.limit_papers)
         validate_output(args.input, args.output, papers)
-        available_profiles, conditions = load_prompts(args.prompts, args.experiment, args.condition)
+        available_profiles, conditions, args.prompt_manifest = load_prompts(
+            args.prompts, args.experiment, args.condition, with_manifest=True)
+        args.condition_metadata = {
+            item['id']: {key: item.get(key) for key in (
+                'id', 'experiment', 'authorship', 'author_model_name',
+                'user_evaluation', 'effort_unit', 'shared_baseline_for',
+                'user_file', 'source_block', 'source_code_index')}
+            for item in args.prompt_manifest['conditions']}
         source_by_paper, source_provenance = resolve_sources(
             args.input, papers, available_profiles, source=args.source,
             metadata=args.source_metadata, project_root=ROOT)
@@ -524,6 +655,12 @@ def main(argv=None):
         version_count = sum(map(len, papers.values()))
         inventory = dict(papers=len(papers), discovered_pairs=pair_count, unique_versions=version_count,
                          conditions=[c[0] for c in conditions], replicates=args.replicates,
+                         design_version=args.prompt_manifest.get('design_version'),
+                         user_template_origin=args.prompt_manifest.get('user_template_origin'),
+                         condition_metadata={cid: args.condition_metadata[cid] for cid, _ in conditions},
+                         order_seed=args.order_seed,
+                         condition_order_scope='paper/version/replicate; full catalog, selected IDs only',
+                         condition_order_algorithm='sha256(root seed, paper, version, replicate) -> Python Random.shuffle',
                          planned_reviews=version_count * len(conditions) * args.replicates,
                          versions_by_paper={aid: [v.number for v in vs] for aid, vs in papers.items()},
                          source_by_paper=source_by_paper, source_provenance=source_provenance,
@@ -572,6 +709,7 @@ def main(argv=None):
             summary = dict(inventory=inventory, started_at=now(), papers={}, errors={},
                            scheduling_unit='review', workers=args.workers, max_observed_concurrency=0)
             pending, counts = prepare_reviews(args, papers, profiles, conditions)
+            summary['order_seed'] = inventory['order_seed'] = args.order_seed
             summary['papers'] = counts
             totals = {aid: len(versions) * len(conditions) * args.replicates
                       for aid, versions in papers.items()}

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise the real OS sandbox with harmless fixture files, without calling an LLM."""
 import argparse
+from contextlib import ExitStack
 import json
 from pathlib import Path
 import subprocess
@@ -15,7 +16,7 @@ from review_experiment.runner import build_command, permission_options
 
 
 def check(codex='codex', ripgrep=None):
-    with tempfile.TemporaryDirectory(prefix='review-access-probe-') as temp:
+    with tempfile.TemporaryDirectory(prefix='review-access-probe-') as temp, ExitStack() as cleanup:
         root = Path(temp).resolve()
         work = root / 'work'
         work.mkdir()
@@ -28,6 +29,11 @@ def check(codex='codex', ripgrep=None):
         skill.write_text('Fixture PDF skill')
         (work / 'manuscript.pdf').symlink_to(pdf)
         (work / 'escape-link.txt').symlink_to(outside)
+        shared_tmp = ''
+        if sys.platform == 'darwin':
+            shared_tmp = cleanup.enter_context(tempfile.TemporaryDirectory(
+                prefix='review-unprovided-', dir='/private/tmp'))
+            (Path(shared_tmp) / 'other-version.pdf').write_text('UNPROVIDED_SHARED_TEMP')
         tool_path = ''
         if ripgrep:
             ripgrep = Path(ripgrep).resolve()
@@ -38,7 +44,7 @@ def check(codex='codex', ripgrep=None):
             tool_path = json.JSONDecoder().raw_decode(setting.split('"PATH"=', 1)[1])[0]
         code = '''import errno, json, pathlib, socket, subprocess, sys
 work, pdf, outside, skill = map(pathlib.Path, sys.argv[1:5])
-rg, tool_path = sys.argv[5:7]
+rg, tool_path, shared_tmp = sys.argv[5:8]
 assert pdf.read_text() == 'PROVIDED_CONTENT'
 assert (work / 'manuscript.pdf').read_text() == 'PROVIDED_CONTENT'
 assert skill.read_text() == 'Fixture PDF skill'
@@ -69,6 +75,24 @@ finally:
 result = {'provided_pdf_read': True, 'scratch_write': True, 'outside_read_denied': True,
           'symlink_escape_denied': True, 'outside_directory_contents_hidden': True,
           'pdf_write_denied': True, 'network_denied': True}
+if shared_tmp:
+    canary = pathlib.Path(shared_tmp) / 'other-version.pdf'
+    for path in (canary, pathlib.Path('/tmp') / canary.parent.name / canary.name):
+        try: path.read_text()
+        except (PermissionError, FileNotFoundError): pass
+        else: raise AssertionError('Shared temporary file readable: ' + str(path))
+    for directory in (pathlib.Path('/tmp'), pathlib.Path('/private/tmp'),
+                      pathlib.Path('/var/tmp'), pathlib.Path('/private/var/tmp'), canary.parent):
+        try: list(directory.iterdir())
+        except (PermissionError, FileNotFoundError): pass
+        else: raise AssertionError('Shared temporary filenames visible: ' + str(directory))
+    shell = subprocess.run(['/bin/zsh', '-c', "cat <<'EOF'\\nallowed heredoc\\nEOF"],
+                           cwd=work, env={'PATH': '/usr/bin:/bin', 'TMPDIR': str(work),
+                                          'TMPPREFIX': str(work / 'zsh')},
+                           capture_output=True, text=True, timeout=5)
+    assert shell.returncode == 0 and shell.stdout == 'allowed heredoc\\n', shell.stderr
+    result.update(shared_temp_read_denied=True, shared_temp_names_hidden=True,
+                  private_heredoc_works=True)
 if rg:
     env = {'PATH': tool_path}
     version = subprocess.run(['rg', '--version'], env=env, cwd=work,
@@ -79,6 +103,11 @@ if rg:
     denied = subprocess.run(['rg', 'SHOULD_NOT_BE_READ', str(outside)], env=env,
                             cwd=work, capture_output=True, text=True, timeout=5)
     assert denied.returncode != 0 and 'SHOULD_NOT_BE_READ' not in denied.stdout
+    for target in (str(outside.parent), shared_tmp):
+        if not target: continue
+        listing = subprocess.run(['rg', '--files', '--hidden', '--follow', target],
+                                 env=env, cwd=work, capture_output=True, text=True, timeout=5)
+        assert outside.name not in listing.stdout and 'other-version.pdf' not in listing.stdout
     result.update(ripgrep_version=version.stdout.splitlines()[0],
                   ripgrep_search=True, ripgrep_outside_read_denied=True)
 print(json.dumps(result))
@@ -86,7 +115,7 @@ print(json.dumps(result))
         command = [codex, 'sandbox', *permission_options(work, pdf, skill, codex, ripgrep=ripgrep),
                    '--permission-profile', 'review_only', '--cd', str(work), '--',
                    str(Path(sys.executable).resolve()), '-c', code,
-                   str(work), str(pdf), str(outside), str(skill), str(ripgrep or ''), tool_path]
+                   str(work), str(pdf), str(outside), str(skill), str(ripgrep or ''), tool_path, shared_tmp]
         completed = subprocess.run(command, text=True, capture_output=True, timeout=30)
         if completed.returncode:
             raise RuntimeError(completed.stderr + completed.stdout)
