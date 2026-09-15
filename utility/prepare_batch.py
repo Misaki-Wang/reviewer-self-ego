@@ -31,7 +31,7 @@ else:
 CORE_FILES = source_provenance.CORE_FILES
 HELPERS = ('prepare_source_data.py', 'prepare_input_data.py', 'source_provenance.py')
 BUNDLE = ('local_batch.py', 'completed_turn.py', 'verify_local_batch.py')
-FROZEN_FILES = HELPERS + BUNDLE + ('prepare_batch.py', 'workflow.py', 'token_usage.py')
+FROZEN_FILES = HELPERS + BUNDLE + ('prepare_batch.py', 'workflow.py', 'token_usage.py', 'codex_isolation.py')
 METADATA = 'data/index/metadata'
 
 
@@ -65,9 +65,9 @@ def under(project, value):
     return path
 
 
-def verified_sources(project, code_root, sources, source_revision, metadata_files=()):
+def verified_sources(project, code_root, sources, source_revision, metadata_files=(), *, catalog="data"):
     return source_provenance.verified_sources(project, code_root, sources, source_revision,
-        extra_files=tuple(f'utility/{name}' for name in FROZEN_FILES) + metadata_files)
+        extra_files=tuple(f'utility/{name}' for name in FROZEN_FILES) + metadata_files, catalog=catalog)
 
 def freeze(run, code_root, blobs, deployment, source_revision):
     locations = {}
@@ -75,7 +75,7 @@ def freeze(run, code_root, blobs, deployment, source_revision):
         if name.startswith('utility/'):
             basename = Path(name).name
             folder = ('controller_versions/bundle' if basename in BUNDLE else
-                      'source_snapshot/utility' if basename == 'token_usage.py' else 'source_snapshot')
+                      'source_snapshot/utility' if basename in ('token_usage.py', 'codex_isolation.py') else 'source_snapshot')
             target = run / folder / basename
         else:
             target = run / 'source_snapshot' / name
@@ -87,14 +87,25 @@ def freeze(run, code_root, blobs, deployment, source_revision):
     return locations
 
 
-def select_scope(code_root, sources, units):
+def select_scope(code_root, sources, units, catalog="data"):
     """Freeze first-N source order, not first-N readable or eligible PDFs."""
     records, memberships, parents = {}, {}, []
+    index = code_root / source_provenance.catalog_index(catalog)
+    input_files = {str(index): {"path": str(index), **proof(index)}}
+    entries = read(index)["files"]
     for source in sources:
         if not re.fullmatch(r'[a-z0-9_]+', source):
             raise ValueError(f'Invalid source name: {source}')
-        path = code_root / 'data/index' / f'{source}.json'
-        rows, provenance = preparation.load_source(path)
+        if catalog == 'data':
+            entry = next((entry for entry in entries if entry.get('source_id') == source), None)
+            if entry is None:
+                raise ValueError(f'Requested source is not listed in the index: {source}')
+            path = source_provenance._inside(code_root, f'data/index/{entry["path"]}')
+            rows, provenance = preparation.load_source(path)
+        else:
+            path = index
+            rows, provenance = preparation.load_source(index, source_ids=[source])
+        input_files.update((item['path'], item) for item in provenance['input_files'])
         parents.append({'source': source, 'path': str(path), **proof(path), 'record_count': len(rows)})
         if provenance['dataset_metadata'].get('dataset') != 'source_data':
             raise ValueError(f'Expected source_data shard: {source}')
@@ -110,15 +121,17 @@ def select_scope(code_root, sources, units):
     # Fail on an unresolved fixed unit, rather than silently substituting another.
     for aid in chosen:
         selected, _ = preparation.select_versions(records[aid])
-        if records[aid]['temporal_eligibility']['status'] != 'eligible' or len(selected) < 3:
+        if records[aid]['temporal_eligibility']['status'] != 'eligible' or len(selected) < 2:
             raise ValueError(f'Fixed unit lacks a resolved eligible sequence: {aid}')
     return {'schema_version': 'authorized-source-union-1', 'dataset': 'source_data',
             'record_count': units, 'authorized_sources': sources, 'parent_sources': parents,
+            'source_catalog': catalog, 'source_index': {'path': str(index), **proof(index)},
+            'input_files': list(input_files.values()),
             'record_memberships': {aid: memberships[aid] for aid in chosen},
             'records': [records[aid] for aid in chosen]}
 
 
-def make_plan(scope, scope_path, pdf_root):
+def make_plan(scope, scope_path, pdf_root, fallback_pdf_roots=()):
     units, requests = [], []
     assignment = {aid: sources[0] for aid, sources in scope['record_memberships'].items()}
     for paper in scope['records']:
@@ -127,7 +140,7 @@ def make_plan(scope, scope_path, pdf_root):
         versions = []
         for version in selected:
             number = version['version']
-            path = preparation.pdf_path(pdf_root, aid, number)
+            path = preparation.resolve_pdf(pdf_root, aid, number, fallback_roots=fallback_pdf_roots)
             versions.append({'arxiv_id': aid, 'version': number, 'requested_id': f'{aid}v{number}',
                              'pdf_url': version['pdf_url'], 'submitted_at': version['submitted_at'],
                              'pdf_path': str(path), 'present_at_plan': path.is_file(),
@@ -143,13 +156,14 @@ def make_plan(scope, scope_path, pdf_root):
     return {'schema_version': preparation.PLAN_SCHEMA_VERSION, 'language': 'en', 'status': 'planned',
             'created_at_utc': now(), 'source_file': str(scope_path),
             'source_sha256': proof(scope_path)['sha256'], 'pdf_root': str(pdf_root),
+            'fallback_pdf_roots': [str(path) for path in fallback_pdf_roots],
             'input_files': [{'path': str(scope_path), **proof(scope_path)}],
             'sample_selection': {'method': 'first_n_in_authorized_source_file_order',
                 'requested_units': len(units), 'source_assignment': assignment,
                 'source_quotas': {s: Counter(assignment.values())[s] for s in scope['authorized_sources']},
                 'pdf_availability_affects_selection': False,
                 'replacement_policy': 'Never replace fixed units for missing or invalid inputs.'},
-            'temporal_rule': {'operator': '>', 'gap_seconds': preparation.GAP_SECONDS,
+            'temporal_rule': {'operator': '>', 'gap_seconds': preparation.GAP_SECONDS, 'minimum_selected_versions': 2,
                 'sequence_objective': 'maximum_number_of_selected_original_versions',
                 'algorithm': 'earliest_valid_greedy',
                 'selected_versions_may_skip_intermediate_versions': True,
@@ -163,18 +177,21 @@ def make_plan(scope, scope_path, pdf_root):
                         'missing_pdf_count_at_plan': len(missing)}}
 
 
-def observe(pdf_root, paper, version, prior, ledger_sha):
+def observe(pdf_root, paper, version, prior, ledger_sha, fallback_pdf_roots=()):
     """Recheck current bytes/pages without modifying original metadata or PDFs."""
     aid, number = paper['arxiv_id'], version['version']
     key = f'{aid}v{number}'
     if (prior['arxiv_id'], prior['version'], prior['requested_id'], prior['submitted_at']) != (
             aid, number, key, version['submitted_at']):
         raise ValueError(f'Ledger identity/date mismatch: {key}')
-    path = preparation.pdf_path(pdf_root, aid, number)
+    path = preparation.resolve_pdf(pdf_root, aid, number, fallback_roots=fallback_pdf_roots)
     result = {'schema_version': 'source-data-observed-original-pdf-metadata-1',
               'arxiv_id': aid, 'version': number, 'requested_id': key,
               'submitted_at': version['submitted_at'], 'observed_at_utc': now(),
               'prior_ledger_sha256': ledger_sha, 'official_no_pdf_evidence': None}
+    if prior.get('metadata_origin') == 'absent_from_original_ledger':
+        result.update(prior_ledger_sha256=None, consulted_ledger_sha256=ledger_sha,
+                      prior_ledger_row_status='absent')
     try:
         if path.is_symlink() or not path.is_file():
             raise ValueError('Missing regular original PDF in the existing store')
@@ -224,14 +241,14 @@ def prepare(args):
     ladder = getattr(args, 'concurrency_ladder', None)
     validation_workers = getattr(args, 'validation_workers', 4)
     if (type(args.units) is not int or args.units < 1 or
-            type(args.workers) is not int or not 1 <= args.workers <= 96 or
+            type(args.workers) is not int or not 1 <= args.workers <= 256 or
             type(args.timeout) is not int or args.timeout < 1 or
             type(validation_workers) is not int or not 1 <= validation_workers <= 16):
-        raise ValueError('Require positive integer units/timeout, 1..96 comparison workers, and 1..16 validation workers')
+        raise ValueError('Require positive integer units/timeout, 1..256 comparison workers, and 1..16 validation workers')
     if ladder is not None and (not isinstance(ladder, list) or
             any(type(n) is not int for n in ladder) or
-            ladder not in ([64, 48, 32, 16], [96, 80, 64, 48]) or args.workers != ladder[0]):
-        raise ValueError('--concurrency-ladder requires 64 48 32 16 or 96 80 64 48, with --workers matching its first value')
+            ladder not in ([64, 48, 32, 16], [96, 80, 64, 48], [160, 128, 96, 80, 64, 48], [256, 224, 192, 160, 128, 96, 80, 64, 48]) or args.workers != ladder[0]):
+        raise ValueError('--concurrency-ladder requires 64 48 32 16, 96 80 64 48, 160 128 96 80 64 48, or 256 224 192 160 128 96 80 64 48, with --workers matching its first value')
     if run == runs_root or not run.is_relative_to(runs_root):
         raise ValueError(f'--run must be a fresh directory below the configured runs root: {runs_root}')
     if run.exists():
@@ -243,10 +260,16 @@ def prepare(args):
     if not isinstance(source_revision, str) or not re.fullmatch(r'[0-9a-f]{64}', source_revision):
         raise ValueError('An explicit immutable --source-revision (64 hexadecimal characters) is required')
     metadata = under(project, getattr(args, 'metadata_dir', None) or Path(active['data']['metadata_root']))
-    pdf_root = under(project, getattr(args, 'pdf_root', None) or Path(active['data']['pdf_root']))
+    catalog = getattr(args, 'catalog', 'data')
+    index = project / source_provenance.catalog_index(catalog)
+    default_pdf = active['data']['pdf_root'] if catalog == 'data' else 'data_full/pdf'
+    pdf_root = under(project, getattr(args, 'pdf_root', None) or Path(default_pdf))
+    # An explicit alternate store (for example cleaned PDFs) never falls back to originals.
+    fallback_pdf_roots = ([under(project, active['data']['pdf_root'])]
+                          if catalog == 'data_full' and pdf_root == project / 'data_full/pdf' else [])
     metadata_files = tuple(str((metadata / name).relative_to(project))
                            for name in ('version_metadata.jsonl', 'provenance.json'))
-    blobs, deployment = verified_sources(project, code_root, sources, source_revision, metadata_files)
+    blobs, deployment = verified_sources(project, code_root, sources, source_revision, metadata_files, catalog=catalog)
     helper_paths = {'prepare_source_data.py': Path(preparation.__file__),
                     'prepare_input_data.py': Path(preparation.materialize.__code__.co_filename),
                     'source_provenance.py': Path(source_provenance.__file__),
@@ -256,13 +279,13 @@ def prepare(args):
     for name, path in helper_paths.items():
         if path.read_bytes() != blobs[f'utility/{name}']:
             raise ValueError(f'Loaded preparation helper differs from the verified source: {name}')
-    scope = select_scope(code_root, sources, args.units)
-    # Compare whole shard bytes, not just IDs, to the verified canonical inputs.
-    for parent in scope['parent_sources']:
-        raw = blobs[f"data/index/{parent['source']}.json"]
-        if (parent['bytes'], parent['sha256']) != (len(raw), hashlib.sha256(raw).hexdigest()):
-            raise ValueError(f"Scope source differs from canonical shard: {parent['source']}")
-    for source_root in (project / 'check_diff', project / 'utility', project / 'review_experiment', project / 'data/index', metadata, pdf_root):
+    scope = select_scope(code_root, sources, args.units, catalog)
+    # Every selected catalog input must match the verified original bytes.
+    for item in scope['input_files']:
+        raw = blobs[str(Path(item['path']).relative_to(project))]
+        if (item['bytes'], item['sha256']) != (len(raw), hashlib.sha256(raw).hexdigest()):
+            raise ValueError(f"Scope source differs from canonical shard: {item['path']}")
+    for source_root in (project / 'check_diff', project / 'utility', project / 'review_experiment', project / 'data/index', index.parent, metadata, pdf_root, *fallback_pdf_roots):
         if runs_root.is_relative_to(source_root) or source_root.is_relative_to(runs_root):
             raise ValueError(f'Run output root overlaps source inputs: {source_root}')
     ledger_path, provenance_path = metadata / 'version_metadata.jsonl', metadata / 'provenance.json'
@@ -280,6 +303,16 @@ def prepare(args):
                 if key in ledger:
                     raise ValueError(f'Duplicate selected-unit ledger version: {key}')
                 ledger[key] = row
+    if catalog == 'data_full':
+        for paper in scope['records']:
+            for version in paper['versions']:
+                key = f"{paper['arxiv_id']}v{version['version']}"
+                if key not in ledger:
+                    ledger[key] = {'arxiv_id': paper['arxiv_id'], 'version': version['version'],
+                        'requested_id': key, 'submitted_at': version['submitted_at'],
+                        'pdf': {'availability_status': 'unresolved'}, 'page_count': {'value': None},
+                        'unresolved_reason': 'No original metadata ledger row; observe current original PDF.',
+                        'metadata_origin': 'absent_from_original_ledger', 'official_no_pdf_evidence': None}
     if set(ledger) != needed:
         raise ValueError(f'Missing original-version ledger rows: {sorted(needed - set(ledger))}')
     run.mkdir(parents=True, exist_ok=False)
@@ -288,7 +321,7 @@ def prepare(args):
     locations = freeze(run, code_root, blobs, deployment, source_revision)
     save(run / 'scope_input.json', scope)
     prepared = run / 'prepared'
-    plan = make_plan(scope, run / 'scope_input.json', pdf_root)
+    plan = make_plan(scope, run / 'scope_input.json', pdf_root, fallback_pdf_roots)
     save(prepared / 'selection_manifest.json', plan)
     selected_ids = {r['requested_id'] for r in plan['requested_pdfs']}
 
@@ -298,7 +331,7 @@ def prepare(args):
         return {'arxiv_id': paper['arxiv_id'], 'version': version['version'],
             'requested_id': key, 'selected_for_comparison': key in selected_ids,
             'frozen_version_metadata': version,
-            'pdf_observation': observe(pdf_root, paper, version, ledger[key], ledger_proof['sha256'])}
+            'pdf_observation': observe(pdf_root, paper, version, ledger[key], ledger_proof['sha256'], fallback_pdf_roots)}
 
     with ThreadPoolExecutor(max_workers=validation_workers) as validators:
         inventory = list(validators.map(inventory_row,
@@ -314,12 +347,18 @@ def prepare(args):
         'retry_base_seconds': 30, 'prepared_path': str(prepared), 'pdf_root': str(pdf_root),
         'metadata_ledger': str(run / 'provenance_version_metadata.jsonl'),
         'source_revision': source_revision, 'previous_judgments_reused': False,
+        'source_catalog': catalog, 'source_index': scope['source_index'],
+        'fallback_pdf_roots': [str(path) for path in fallback_pdf_roots],
         'codex_path': str(getattr(args, 'codex', None) or active['runtime']['codex']), 'transport': 'default Codex WebSocket; native fallback policy unchanged'}
     if ladder is not None:
         config['concurrency_ladder'] = list(ladder)
+    config['isolation_policy'] = {'version': audit.ISOLATION_VERSION,
+        'sha256': proof(run / 'source_snapshot/utility/codex_isolation.py')['sha256']}
+    config['isolation_resources'] = audit.freeze_isolation_resources(config, run)
     save(run / 'run_config.json', config)
     sig = audit.signature(config, audit.Reader(), run)
-    save(run / 'execution_contract.json', {'execution_signature': sig, 'requested_model': args.model,
+    save(run / 'execution_contract.json', {'execution_signature': sig, 'isolation_policy': config['isolation_policy'],
+        'isolation_resources': config['isolation_resources'], 'requested_model': args.model,
         'requested_reasoning_effort': args.effort, 'unit_count': args.units,
         'comparison_count': plan['summary']['pair_count'],
         'source_membership_counts': {s: sum(s in ms for ms in scope['record_memberships'].values())
@@ -342,7 +381,7 @@ def prepare(args):
                                   'token_usage': audit.summarize([])})
     verification = audit.Verifier(run).verify()
     save(run / 'preparation_verification.json', verification)
-    inputs = scope['parent_sources'] + [
+    inputs = scope['input_files'] + [
         {'path': str(ledger_path), **ledger_proof}, {'path': str(provenance_path), **proof(provenance_path)}]
     inputs.extend(deployment.values())
     for item in inputs + list(locations.values()):
@@ -352,6 +391,7 @@ def prepare(args):
         'status': 'blocked' if verification['errors'] else 'prepared',
         'model_execution_performed': False, 'downloads_performed': False, 'resampling_performed': False,
         'source_revision': source_revision, 'source_file_locations': locations, 'input_files': inputs,
+        'source_catalog': catalog, 'source_index': scope['source_index'],
         'deployment_provenance': deployment,
         'execution_signature': sig, 'summary': plan['summary'],
         'controller': 'controller_versions/bundle/local_batch.py',
@@ -375,13 +415,15 @@ def main(argv=None):
     parser.add_argument('--source-revision', required=True, help='Exact authorized source-manifest revision (64 hexadecimal characters)')
     parser.add_argument('--pdf-root', type=Path, help='Existing version-specific PDF store, inside --project')
     parser.add_argument('--metadata-dir', type=Path, help='Verified version_metadata.jsonl and provenance.json directory')
+    parser.add_argument('--catalog', choices=source_provenance.CATALOGS, default='data',
+                        help='Source catalog to freeze; data_full reuses original data read-only')
     parser.add_argument('--source', action='append', required=True)
     parser.add_argument('--units', type=int, required=True)
     parser.add_argument('--model', default=None)
     parser.add_argument('--effort', default=None)
-    parser.add_argument('--workers', type=int, default=None)
+    parser.add_argument('--workers', type=int, default=None, help='Comparison workers (1..256)')
     parser.add_argument('--concurrency-ladder', type=int, nargs='+',
-                        help='Opt into downward-only 64 48 32 16 or 96 80 64 48 admissions; --workers must match the first value')
+                        help='Opt into downward-only 64 48 32 16, 96 80 64 48, 160 128 96 80 64 48, or 256 224 192 160 128 96 80 64 48 admissions; --workers must match the first value')
     parser.add_argument('--validation-workers', type=int, default=None,
                         help='Parallel original-PDF checks during preparation and execution (1..16; default: 4)')
     parser.add_argument('--timeout', type=int, default=None)

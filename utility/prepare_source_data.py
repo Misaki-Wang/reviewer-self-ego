@@ -62,13 +62,19 @@ def validate_identity(paper):
         raise ValueError(f'Incomplete source_data paper metadata: {aid}')
 
 
-def load_source(path):
-    """Read the combined source_data or hash-verified, deduplicated source shards."""
-    path = Path(path).resolve()
+def load_source(path, source_ids=None):
+    """Read source_data, optionally composing pinned readonly bases and additions."""
+    requested_path = Path(path).absolute()
+    path = requested_path.resolve()
     raw = path.read_bytes()
     source = json.loads(raw)
     require_source_data(source, 'Source')
     inputs = [{'path': str(path), 'bytes': len(raw), 'sha256': hashlib.sha256(raw).hexdigest()}]
+    selected_sources = set(source_ids or ())
+    overlay = 'bases' in source
+    record_origins = []
+    if overlay and ('records' in source or not isinstance(source['bases'], list) or not source['bases']):
+        raise ValueError('An overlay requires nonempty bases and local source shard files')
     if 'records' in source:
         records = source['records']
         metadata = {k: v for k, v in source.items() if k != 'records'}
@@ -78,56 +84,104 @@ def load_source(path):
         require_source_data(metadata, 'Index dataset metadata')
         if not isinstance(source.get('files'), list) or not source['files']:
             raise ValueError('A source_data index requires source shard files')
-        seen_paths = {path}
+        entries = []
+        if overlay:
+            if (path.parent.name != 'index' or path.parent.parent.name != 'data_full'
+                    or requested_path != path):
+                raise ValueError('Overlay index must be in the canonical data_full/index directory')
+            project = path.parent.parent.parent
+            for entry in source['bases']:
+                sid = entry.get('source_id')
+                if (entry.get('catalog') != 'data' or 'path' in entry
+                        or not isinstance(sid, str)
+                        or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*', sid) or '..' in sid):
+                    raise ValueError('Invalid readonly base catalog/source identity')
+                base = project / 'data' / 'index' / f'{sid}.json'
+                if base.resolve() != base:
+                    raise ValueError('Readonly base path escapes the canonical data/index directory')
+                if (type(entry.get('bytes')) is not int or entry['bytes'] < 0
+                        or type(entry.get('record_count')) is not int or entry['record_count'] < 0
+                        or not isinstance(entry.get('sha256'), str)
+                        or not re.fullmatch(r'[0-9a-f]{64}', entry['sha256'])):
+                    raise ValueError('Invalid readonly base checksum/record count')
+                entries.append((entry, base, 'Base'))
         for entry in source['files']:
             relative = Path(entry['path'])
             if relative.is_absolute() or '..' in relative.parts:
                 raise ValueError(f'Shard path escapes the index directory: {entry["path"]}')
-            shard_path = (path.parent / entry['path']).resolve()
+            shard_path = (path.parent / relative).resolve()
             if not shard_path.is_relative_to(path.parent):
                 raise ValueError(f'Shard path escapes the index directory: {entry["path"]}')
+            entries.append((entry, shard_path, 'Shard'))
+        seen_paths = {path}
+        for entry, shard_path, kind in entries:
             if shard_path in seen_paths:
-                raise ValueError(f'Duplicate shard path: {entry["path"]}')
+                raise ValueError(f'Duplicate shard path: {shard_path}')
             seen_paths.add(shard_path)
+            if selected_sources and entry.get('source_id') not in selected_sources:
+                # Unlabelled legacy shards are still read and filtered by membership.
+                if 'source_id' in entry:
+                    continue
             payload = shard_path.read_bytes()
             sha = hashlib.sha256(payload).hexdigest()
             if sha != entry['sha256'] or len(payload) != entry['bytes']:
-                raise ValueError(f'Shard checksum mismatch: {shard_path.name}')
+                raise ValueError(f'{kind} checksum mismatch: {shard_path.name}')
             shard = json.loads(payload)
-            require_source_data(shard, f'Shard {shard_path.name}')
+            require_source_data(shard, f'{kind} {shard_path.name}')
+            if 'bases' in shard:
+                raise ValueError('Nested overlay catalogs are unsupported')
             if not isinstance(shard.get('records'), list):
-                raise ValueError(f'Shard records must be a list: {shard_path.name}')
-            if len(shard['records']) != entry['record_count']:
-                raise ValueError(f'Shard record count mismatch: {shard_path.name}')
-            if shard.get('record_count', len(shard['records'])) != len(shard['records']):
-                raise ValueError(f'Shard record count mismatch: {shard_path.name}')
+                raise ValueError(f'{kind} records must be a list: {shard_path.name}')
+            if (len(shard['records']) != entry['record_count']
+                    or shard.get('record_count', len(shard['records'])) != len(shard['records'])):
+                raise ValueError(f'{kind} record count mismatch: {shard_path.name}')
             if 'source_id' in entry and (shard.get('source_id') != entry['source_id']
                     or any(entry['source_id'] not in p.get('source_ids', []) for p in shard['records'])):
-                raise ValueError(f'Shard source identity mismatch: {shard_path.name}')
+                raise ValueError(f'{kind} source identity mismatch: {shard_path.name}')
             records.extend(shard['records'])
+            if overlay:
+                record_origins.extend([shard_path if kind == 'Base' else None] * len(shard['records']))
             inputs.append({'path': str(shard_path), 'bytes': len(payload), 'sha256': sha})
     if not isinstance(records, list) or not records:
         raise ValueError('A source_data source requires a nonempty records list')
     by_id = {}
-    for record in records:
+    origins_by_id = {}
+    for position, record in enumerate(records):
         validate_identity(record)
         aid = record['arxiv_id']
+        origin = record_origins[position] if overlay else None
+        # Only identical memberships across distinct readonly base shards may overlap.
+        if aid in by_id and overlay and (origin is None or origins_by_id[aid] is None
+                                        or origin == origins_by_id[aid]):
+            raise ValueError(f'Overlapping overlay paper identity: {aid}')
         if aid in by_id and by_id[aid] != record:
             raise ValueError(f'Conflicting duplicate paper metadata: {aid}')
         by_id[aid] = record
+        origins_by_id[aid] = origin
     if 'record_order' in source:
         order = source['record_order']
         if (not isinstance(order, list) or any(not isinstance(aid, str) for aid in order)
-                or len(order) != len(set(order)) or set(order) != set(by_id)):
+                or len(order) != len(set(order))
+                or (not selected_sources and set(order) != set(by_id))
+                or (selected_sources and not set(by_id).issubset(order))):
             raise ValueError('Index record_order does not match the deduplicated records')
-        ordered = [by_id[aid] for aid in order]
+        ordered = [by_id[aid] for aid in order if aid in by_id]
     else:
         ordered = list(by_id.values())
-    if metadata.get('record_count', len(ordered)) != len(ordered):
+    if not selected_sources and metadata.get('record_count', len(ordered)) != len(ordered):
         raise ValueError('Dataset record_count does not match deduplicated records')
-    return ordered, {'source_file': str(path), 'source_sha256': inputs[0]['sha256'],
-                     'input_files': inputs, 'dataset_metadata': metadata,
-                     'duplicate_memberships_collapsed': len(records) - len(ordered)}
+    provenance = {'source_file': str(path), 'source_sha256': inputs[0]['sha256'],
+                  'input_files': inputs, 'dataset_metadata': metadata,
+                  'duplicate_memberships_collapsed': len(records) - len(ordered)}
+    if selected_sources:
+        available = {sid for paper in ordered for sid in paper['source_ids']}
+        if selected_sources - available:
+            raise ValueError(f'Unknown source IDs: {sorted(selected_sources - available)}')
+        ordered = [paper for paper in ordered if selected_sources.intersection(paper['source_ids'])]
+        provenance['unfiltered_dataset_metadata'] = metadata
+        provenance['dataset_metadata'] = {**metadata, 'record_count': len(ordered)}
+        provenance['selection_filter'] = {'source_ids': sorted(selected_sources)}
+    return ordered, provenance
 
 
 def parse_timestamp(value):
@@ -190,6 +244,15 @@ def pdf_path(pdf_root, aid, version, source=None):
     if not path.resolve().is_relative_to(pdf_root.resolve()):
         raise ValueError(f'PDF path escapes the local PDF root: {path}')
     return path
+
+
+def resolve_pdf(pdf_root, aid, version, source=None, fallback_roots=()):
+    """Choose an explicit readonly original store first; never skip existing bad bytes."""
+    for root in fallback_roots:
+        candidate = pdf_path(Path(root), aid, version)
+        if candidate.exists() or candidate.is_symlink():
+            return candidate
+    return pdf_path(Path(pdf_root), aid, version, source)
 
 
 def validate_pdf(path, aid, version):
@@ -262,6 +325,7 @@ def build_plan(args):
     per_source = 5 if per_source is None else per_source
     records, provenance = load_source(args.source)
     pdf_root = args.pdf_root.resolve()
+    fallback_roots = [Path(root).resolve() for root in (getattr(args, 'fallback_pdf_root', None) or ())]
     layout = getattr(args, 'pdf_layout', 'legacy')
     if layout not in ('legacy', 'conference'):
         raise ValueError(f'Unsupported PDF layout: {layout}')
@@ -297,7 +361,7 @@ def build_plan(args):
             counts[source]['metadata_temporally_eligible'] += 1
         try:
             selected, edges = select_versions(paper)
-            if len(selected) < 3:
+            if len(selected) < 2:
                 raise ValueError('Full-history timestamps contradict the frozen eligible status')
         except ValueError as exc:
             exclusions.append({'arxiv_id': aid, 'source_ids': paper['source_ids'],
@@ -308,8 +372,8 @@ def build_plan(args):
             continue
         for source in memberships:
             missing = [v['version'] for v in selected
-                       if not pdf_path(pdf_root, aid, v['version'],
-                                       source if layout == 'conference' else None).is_file()]
+                       if not resolve_pdf(pdf_root, aid, v['version'],
+                                          source if layout == 'conference' else None, fallback_roots).is_file()]
             counts[source]['sequence_selection_resolved'] += 1
             counts[source]['missing_selected_pdf_files' if missing else 'all_selected_pdf_files_present'] += 1
             pools[source].append(aid)
@@ -333,7 +397,7 @@ def build_plan(args):
         selected_metadata = []
         for version in selected:
             number = version['version']
-            path = pdf_path(pdf_root, aid, number, source if layout == 'conference' else None)
+            path = resolve_pdf(pdf_root, aid, number, source if layout == 'conference' else None, fallback_roots)
             requested = {'arxiv_id': aid, 'version': number, 'requested_id': f'{aid}v{number}',
                          'pdf_url': version['pdf_url'], 'submitted_at': version['submitted_at'],
                          'pdf_path': str(path), 'present_at_plan': path.is_file(),
@@ -353,6 +417,7 @@ def build_plan(args):
             'adapter_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
             'pdf_root': str(pdf_root),
             'pdf_layout': layout,
+            **({'fallback_pdf_roots': [str(root) for root in fallback_roots]} if fallback_roots else {}),
             'sample_selection': {'method': 'all_records_in_source_order' if all_records else 'source_stratified_seeded_bipartite_assignment',
                                  'all_records': all_records,
                                  'seed': None if all_records else args.seed,
@@ -367,7 +432,7 @@ def build_plan(args):
                                                          'All frozen temporally eligible papers with resolved full-history sequence selection.'),
                                  'pdf_availability_affects_selection': False,
                                  'replacement_policy': 'Never replace selected papers because PDFs are missing or invalid.'},
-            'temporal_rule': {'operator': '>', 'gap_seconds': GAP_SECONDS,
+            'temporal_rule': {'operator': '>', 'gap_seconds': GAP_SECONDS, 'minimum_selected_versions': 2,
                               'sequence_objective': 'maximum_number_of_selected_original_versions',
                               'algorithm': 'earliest_valid_greedy',
                               'tie_break': 'earliest UTC timestamp, then original version ID',
@@ -414,6 +479,10 @@ def validate_plan(plan):
     if not isinstance(plan['pdf_root'], str) or not Path(plan['pdf_root']).is_absolute():
         raise ValueError('Plan pdf_root must be an absolute local path')
     root = Path(plan['pdf_root'])
+    fallback_roots = plan.get('fallback_pdf_roots', [])
+    if (not isinstance(fallback_roots, list)
+            or any(not isinstance(value, str) or not Path(value).is_absolute() for value in fallback_roots)):
+        raise ValueError('Plan fallback_pdf_roots must be absolute local paths')
     layout = plan.get('pdf_layout', 'legacy')
     if layout not in ('legacy', 'conference'):
         raise ValueError(f'Unsupported PDF layout: {layout}')
@@ -428,7 +497,7 @@ def validate_plan(plan):
                 or unit['assigned_source_id'] != assignment[aid]):
             raise ValueError(f'Plan source assignment disagrees with paper membership: {aid}')
         selected, edges = select_versions(paper)
-        if (paper['temporal_eligibility']['status'] != 'eligible' or len(selected) < 3
+        if (paper['temporal_eligibility']['status'] != 'eligible' or len(selected) < 2
                 or [v['version'] for v in selected] != unit['selected_version_ids']
                 or edges != unit['selected_transitions']
                 or unit['selected_version_count'] != len(selected)
@@ -446,6 +515,12 @@ def validate_plan(plan):
                                         if layout == 'conference' else root / aid / f'{aid}v{number}.pdf'),
                         'expected_sha256': version.get('pdf', {}).get('sha256') or
                                            version.get('pdf', {}).get('expected_sha256')}
+            if fallback_roots:
+                allowed_paths = {expected['pdf_path'], *(str(Path(value) / aid / f'{aid}v{number}.pdf')
+                                                        for value in fallback_roots)}
+                if request.get('pdf_path') not in allowed_paths:
+                    raise ValueError(f'Plan PDF path is outside the declared stores: {aid}v{number}')
+                expected['pdf_path'] = request['pdf_path']
             if (any(request.get(k) != value for k, value in expected.items())
                     or type(request.get('present_at_plan')) is not bool):
                 raise ValueError(f'Plan PDF request identity/path disagrees with the fixed sequence: {aid}v{number}')
@@ -501,7 +576,7 @@ def validate_output_paths(out, plan):
             raise ValueError(f'Output temporary path already exists: {temporary}')
 
 
-def materialize_plan(manifest_path, output=None, pdf_root=None):
+def materialize_plan(manifest_path, output=None, pdf_root=None, fallback_pdf_roots=None):
     """Verify and materialize the fixed selected paper IDs; never resample."""
     manifest_path = manifest_path.resolve()
     raw = manifest_path.read_bytes()
@@ -509,7 +584,17 @@ def materialize_plan(manifest_path, output=None, pdf_root=None):
     papers, selections = validate_plan(plan)
     out = output.resolve() if output else manifest_path.parent
     root = (pdf_root if pdf_root else Path(plan['pdf_root'])).resolve()
+    stored_roots = plan.get('fallback_pdf_roots', [])
+    fallback_roots = ([Path(value).resolve() for value in fallback_pdf_roots]
+                      if fallback_pdf_roots is not None else [Path(value) for value in stored_roots])
+    if len(fallback_roots) != len(stored_roots):
+        raise ValueError('Relocated fallback PDF roots must match the frozen root count')
+    requests = {request['requested_id']: request for request in plan['requested_pdfs']}
     def local_pdf(aid, number):
+        request = requests[f'{aid}v{number}']
+        for frozen_root, local_root in zip(stored_roots, fallback_roots):
+            if request['pdf_path'] == str(Path(frozen_root) / aid / f'{aid}v{number}.pdf'):
+                return pdf_path(local_root, aid, number)
         source = (plan['sample_selection']['source_assignment'][aid]
                   if plan.get('pdf_layout', 'legacy') == 'conference' else None)
         return pdf_path(root, aid, number, source)
@@ -534,7 +619,8 @@ def materialize_plan(manifest_path, output=None, pdf_root=None):
         for version in selections[aid]:
             key = f"{aid}v{version['version']}"
             try:
-                verified[key] = validate_pdf(local_pdf(aid, version['version']), aid, version)
+                evidence = validate_pdf(local_pdf(aid, version['version']), aid, version)
+                verified[key] = evidence
             except Exception as exc:
                 failures.append({'arxiv_id': aid, 'version': version['version'],
                                  'requested_id': key, 'reason': 'selected_pdf_unavailable_or_invalid',
@@ -545,7 +631,8 @@ def materialize_plan(manifest_path, output=None, pdf_root=None):
     receipt = {'schema_version': 'source-data-materialization-1', 'language': 'en',
                'selection_manifest_sha256': hashlib.sha256(raw).hexdigest(),
                'created_at_utc': datetime.now(timezone.utc).isoformat(),
-               'pdf_root': str(root), 'status': 'unresolved' if failures else 'verified',
+               'pdf_root': str(root), 'fallback_pdf_roots': [str(value) for value in fallback_roots],
+               'status': 'unresolved' if failures else 'verified',
                'verified_pdfs': verified, 'failures': failures,
                'sample_unchanged': True, 'resampling_performed': False}
     write_json(out / 'materialization_manifest.json', receipt)
@@ -619,6 +706,8 @@ def main(cleaned=False):
                         help='PDF store; build_pairs defaults to clean_data with layout <conf>/<id>/vN.pdf.')
     parser.add_argument('--pdf-layout', choices=('legacy', 'conference'),
                         default='conference' if cleaned else 'legacy')
+    parser.add_argument('--fallback-pdf-root', type=Path, action='append',
+                        help='Readonly original <id>/<id>vN.pdf store checked before the primary root; repeatable.')
     parser.add_argument('--conf', help='Only select papers from this conference/source ID.')
     parser.add_argument('--arxiv-id', action='append', default=[],
                         help='Only these paper IDs; repeatable. Defaults to --all within this filter.')
@@ -633,6 +722,8 @@ def main(cleaned=False):
     parser.add_argument('--plan-only', action='store_true', help='Freeze paper IDs and exact PDF requests without validation or materialization.')
     parser.add_argument('--materialize-plan', type=Path, help='Materialize a fixed selection_manifest.json without resampling.')
     args = parser.parse_args()
+    if cleaned and args.fallback_pdf_root:
+        parser.error('build_pairs requires its clean PDF store; original fallback roots are unsupported')
     if args.arxiv_id and args.units is None and args.per_source is None:
         args.all = True
     if cleaned and not args.materialize_plan:
@@ -656,7 +747,7 @@ def main(cleaned=False):
     args.seed = 20260911 if args.seed is None else args.seed
     try:
         if args.materialize_plan:
-            materialize_plan(args.materialize_plan, args.output, args.pdf_root)
+            materialize_plan(args.materialize_plan, args.output, args.pdf_root, args.fallback_pdf_root)
         else:
             prepare(args)
     except (ValueError, OSError, KeyError, TypeError) as exc:

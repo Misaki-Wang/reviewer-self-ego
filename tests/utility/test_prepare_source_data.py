@@ -95,9 +95,9 @@ class TemporalTests(unittest.TestCase):
             with self.subTest(changes=changes), self.assertRaisesRegex(ValueError, 'unresolved'):
                 pilot.select_versions({**paper(), **changes})
 
-    def test_long_first_to_last_span_is_insufficient(self):
+    def test_long_first_to_last_span_selects_one_qualifying_pair(self):
         selected, edges = pilot.select_versions(paper(days=(0, 1, 2, 100)))
-        self.assertEqual(len(selected), 2)
+        self.assertEqual([v['version'] for v in selected], [1, 4])
         self.assertEqual(len(edges), 1)
 
     def test_missing_even_unselected_date_leaves_maximum_unresolved(self):
@@ -191,6 +191,252 @@ class SourceTests(unittest.TestCase):
         self.assertEqual(len(assignment), 4)
         self.assertEqual({s: list(assignment.values()).count(s) for s in pools},
                          {'a': 1, 'b': 0, 'c': 3})
+
+
+class OverlaySourceTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name).resolve()
+        self.base = self.root / 'data/index/source_a.json'
+        self.delta = self.root / 'data_full/index/source_a.additions.json'
+        self.index = self.delta.parent / 'index.json'
+        self.base.parent.mkdir(parents=True)
+        self.delta.parent.mkdir(parents=True)
+        self.original = paper()
+        self.addition = paper(aid='2501.00002')
+        self.write_shard(self.base, [self.original])
+        self.write_shard(self.delta, [self.addition])
+        self.document = {'dataset': 'source_data',
+                         'dataset_metadata': {'dataset': 'source_data', 'record_count': 2},
+                         'bases': [{'catalog': 'data', **self.pin(self.base)}],
+                         'files': [{'path': self.delta.name, **self.pin(self.delta)}],
+                         'record_order': [self.addition['arxiv_id'], self.original['arxiv_id']]}
+
+    def write_shard(self, path, records, **extra):
+        path.write_text(json.dumps({'dataset': 'source_data', 'source_id': 'source_a',
+                                    'records': records, **extra}))
+
+    def pin(self, path):
+        raw = path.read_bytes()
+        return {'source_id': 'source_a', 'bytes': len(raw),
+                'sha256': hashlib.sha256(raw).hexdigest(),
+                'record_count': len(json.loads(raw)['records'])}
+
+    def load(self):
+        self.index.write_text(json.dumps(self.document))
+        return pilot.load_source(self.index)
+
+    def test_exact_records_order_and_all_input_hashes(self):
+        raw = self.base.read_bytes()
+        records, provenance = self.load()
+        self.assertEqual(records, [self.addition, self.original])
+        self.assertEqual([entry['path'] for entry in provenance['input_files']],
+                         [str(self.index), str(self.base), str(self.delta)])
+        self.assertEqual(provenance['duplicate_memberships_collapsed'], 0)
+        self.assertEqual(self.base.read_bytes(), raw)
+        selected, _ = pilot.load_source(self.index, source_ids=['source_a'])
+        self.assertEqual(selected, records)
+
+    def test_filtered_source_reads_only_its_pinned_files_in_index_order(self):
+        other = self.delta.parent / 'source_b.json'
+        other.write_text(json.dumps({'dataset': 'source_data', 'source_id': 'source_b',
+                                     'records': [paper(aid='2501.00003', source_ids=['source_b'])]}))
+        entry = {'path': other.name, **self.pin(other), 'source_id': 'source_b'}
+        self.document['files'].append(entry)
+        self.document['record_order'].insert(1, '2501.00003')
+        self.document['dataset_metadata']['record_count'] = 3
+        self.index.write_text(json.dumps(self.document))
+        other.write_text('changed unrelated bytes')
+        records, provenance = pilot.load_source(self.index, source_ids=['source_a'])
+        self.assertEqual(records, [self.addition, self.original])
+        self.assertEqual(len(provenance['input_files']), 3)
+        self.assertEqual(provenance['dataset_metadata']['record_count'], 2)
+        with self.assertRaisesRegex(ValueError, 'checksum'):
+            pilot.load_source(self.index)
+
+    def add_shared_base(self):
+        self.original = paper(source_ids=['source_a', 'source_b'])
+        self.write_shard(self.base, [self.original])
+        self.document['bases'][0].update(self.pin(self.base))
+        second_base = self.base.with_name('source_b.json')
+        self.write_shard(second_base, [self.original], source_id='source_b')
+        self.document['bases'].append({'catalog': 'data', **self.pin(second_base),
+                                       'source_id': 'source_b'})
+        return second_base
+
+    def test_identical_records_across_bases_are_collapsed_with_pins_and_order(self):
+        second_base = self.add_shared_base()
+        before = {path: path.read_bytes() for path in (self.base, second_base)}
+        records, provenance = self.load()
+        self.assertEqual(records, [self.addition, self.original])
+        self.assertEqual(provenance['duplicate_memberships_collapsed'], 1)
+        self.assertEqual([item['path'] for item in provenance['input_files']],
+                         [str(self.index), str(self.base), str(second_base), str(self.delta)])
+        self.assertEqual({path: path.read_bytes() for path in before}, before)
+        selected, filtered = pilot.load_source(self.index, source_ids=['source_b'])
+        self.assertEqual(selected, [self.original])
+        self.assertEqual(filtered['duplicate_memberships_collapsed'], 0)
+        second_base.write_text('changed base bytes')
+        with self.assertRaisesRegex(ValueError, 'checksum'):
+            pilot.load_source(self.index)
+
+    def test_conflicting_records_across_bases_are_rejected(self):
+        second_base = self.add_shared_base()
+        changed = copy.deepcopy(self.original)
+        changed['title'] = 'Conflicting base title'
+        self.write_shard(second_base, [changed], source_id='source_b')
+        self.document['bases'][1].update(self.pin(second_base), source_id='source_b')
+        with self.assertRaisesRegex(ValueError, 'Conflicting duplicate'):
+            self.load()
+
+    def test_duplicate_within_one_base_is_still_rejected(self):
+        second_base = self.add_shared_base()
+        self.write_shard(second_base, [self.original, self.original], source_id='source_b')
+        self.document['bases'][1].update(self.pin(second_base), source_id='source_b')
+        with self.assertRaisesRegex(ValueError, 'Overlapping'):
+            self.load()
+
+    def test_identical_or_changed_delta_overlap_is_still_rejected(self):
+        duplicate_path = self.delta.with_name('duplicate.additions.json')
+        for changed in (False, True):
+            with self.subTest(changed=changed):
+                duplicate = copy.deepcopy(self.addition)
+                if changed:
+                    duplicate['title'] = 'Changed delta title'
+                self.write_shard(duplicate_path, [duplicate])
+                self.document['files'] = [
+                    {'path': path.name, **self.pin(path)}
+                    for path in (self.delta, duplicate_path)]
+                with self.assertRaisesRegex(ValueError, 'Overlapping'):
+                    self.load()
+
+    def test_delta_overlap_with_shared_base_is_still_rejected(self):
+        self.add_shared_base()
+        self.write_shard(self.delta, [self.original])
+        self.document['files'][0].update(self.pin(self.delta))
+        with self.assertRaisesRegex(ValueError, 'Overlapping'):
+            self.load()
+
+    def test_equal_or_changed_overlap_is_rejected(self):
+        for changed in (False, True):
+            with self.subTest(changed=changed):
+                duplicate = copy.deepcopy(self.original)
+                if changed:
+                    duplicate['title'] = 'Changed'
+                self.write_shard(self.delta, [duplicate])
+                self.document['files'][0].update(self.pin(self.delta))
+                with self.assertRaisesRegex(ValueError, 'Overlapping'):
+                    self.load()
+
+    def test_rejects_base_checksum_size_count_and_identity(self):
+        for key, value, message in [('sha256', '0' * 64, 'checksum'),
+                                    ('bytes', 1, 'checksum'),
+                                    ('record_count', 99, 'record count')]:
+            previous = copy.deepcopy(self.document)
+            self.document['bases'][0][key] = value
+            with self.subTest(key=key), self.assertRaisesRegex(ValueError, message):
+                self.load()
+            self.document = previous
+        self.write_shard(self.base, [paper(source_ids=['other'])])
+        self.document['bases'][0].update(self.pin(self.base))
+        with self.assertRaisesRegex(ValueError, 'source identity'):
+            self.load()
+
+    def test_rejects_arbitrary_base_paths_nested_overlays_and_symlinks(self):
+        for change in ({'path': '../data/index/source_a.json'}, {'catalog': 'other'},
+                       {'source_id': '../source_a'}):
+            previous = copy.deepcopy(self.document)
+            self.document['bases'][0].update(change)
+            with self.subTest(change=change), self.assertRaisesRegex(ValueError, 'base'):
+                self.load()
+            self.document = previous
+        self.write_shard(self.base, [self.original], bases=[])
+        self.document['bases'][0].update(self.pin(self.base))
+        with self.assertRaisesRegex(ValueError, 'Nested'):
+            self.load()
+        self.write_shard(self.base, [self.original])
+        self.document['bases'][0].update(self.pin(self.base))
+        outside = self.root / 'outside.json'
+        self.base.rename(outside)
+        self.base.symlink_to(outside)
+        with self.assertRaisesRegex(ValueError, 'canonical'):
+            self.load()
+
+    def test_existing_local_shard_escape_and_record_order_rules_remain(self):
+        for change, message in [({'path': '../source_a.json'}, 'escapes'),
+                                ({'path': str(self.delta)}, 'escapes')]:
+            previous = copy.deepcopy(self.document)
+            self.document['files'][0].update(change)
+            with self.subTest(change=change), self.assertRaisesRegex(ValueError, message):
+                self.load()
+            self.document = previous
+        self.document['record_order'] = [self.original['arxiv_id']]
+        with self.assertRaisesRegex(ValueError, 'record_order'):
+            self.load()
+
+
+class SharedPdfTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name).resolve()
+        self.base = self.root / 'data/pdf'
+        self.primary = self.root / 'data_full/pdf'
+        self.source = self.root / 'source.json'
+        self.item = paper()
+        for number in (1, 3):
+            write_pdf(pilot.pdf_path(self.base, self.item['arxiv_id'], number))
+        write_pdf(pilot.pdf_path(self.primary, self.item['arxiv_id'], 4))
+        one = pilot.pdf_path(self.base, self.item['arxiv_id'], 1)
+        self.item['versions'][0]['pdf']['sha256'] = hashlib.sha256(one.read_bytes()).hexdigest()
+        write_source(self.source, [self.item])
+        self.args = argparse.Namespace(source=self.source, pdf_root=self.primary,
+                                       fallback_pdf_root=[self.base], output=self.root / 'prepared',
+                                       per_source=1, seed=1, dry_run=False, plan_only=True)
+
+    def plan(self):
+        with redirect_stdout(io.StringIO()):
+            return pilot.prepare(self.args)
+
+    def test_planning_does_not_parse_or_hash_and_materializes_shared_bytes(self):
+        before = {path: path.read_bytes() for path in self.base.rglob('*.pdf')}
+        with mock.patch.object(pilot, 'validate_pdf', side_effect=AssertionError('Plan must not parse PDFs')):
+            plan = self.plan()
+        self.assertEqual(plan['summary']['missing_pdf_count_at_plan'], 0)
+        self.assertEqual(plan['fallback_pdf_roots'], [str(self.base)])
+        self.assertEqual(plan['requested_pdfs'][0]['pdf_path'], str(pilot.pdf_path(self.base, self.item['arxiv_id'], 1)))
+        pilot.materialize_plan(self.args.output / 'selection_manifest.json')
+        self.assertEqual(before, {path: path.read_bytes() for path in self.base.rglob('*.pdf')})
+        for pair in json.loads((self.args.output / 'pairs.json').read_text())['pairs']:
+            for side in ('before', 'after'):
+                self.assertTrue((self.args.output / pair[side]['pdf_path']).is_file())
+                self.assertTrue(pair[side]['sha256'])
+        self.assertFalse(pilot.pdf_path(self.primary, self.item['arxiv_id'], 1).exists())
+
+    def test_frozen_shared_path_missing_or_invalid_never_uses_other_bytes(self):
+        plan = self.plan()
+        old = pilot.pdf_path(self.base, self.item['arxiv_id'], 1)
+        write_pdf(pilot.pdf_path(self.primary, self.item['arxiv_id'], 1))
+        old.write_bytes(b'corrupt shared bytes')
+        with self.assertRaisesRegex(ValueError, 'fixed paper IDs preserved'):
+            pilot.materialize_plan(self.args.output / 'selection_manifest.json')
+        self.assertEqual(old.read_bytes(), b'corrupt shared bytes')
+        old.unlink()
+        with self.assertRaisesRegex(ValueError, 'fixed paper IDs preserved'):
+            pilot.materialize_plan(self.args.output / 'selection_manifest.json')
+
+    def test_known_hash_mismatch_is_not_hidden_by_primary_pdf(self):
+        shared = pilot.pdf_path(self.base, self.item['arxiv_id'], 1)
+        write_pdf(pilot.pdf_path(self.primary, self.item['arxiv_id'], 1))
+        writer = PdfWriter()
+        writer.add_blank_page(width=10, height=10)
+        writer.write(shared)
+        self.plan()
+        with self.assertRaisesRegex(ValueError, 'fixed paper IDs preserved'):
+            pilot.materialize_plan(self.args.output / 'selection_manifest.json')
+        failure = json.loads((self.args.output / 'materialization_manifest.json').read_text())
+        self.assertIn('SHA-256', failure['failures'][0]['detail'])
 
 
 class PreparationTests(unittest.TestCase):
@@ -381,6 +627,27 @@ class PrepFixture(unittest.TestCase):
 
 
 class BoundedInterfaceTests(PrepFixture):
+    def test_any_qualifying_pair_is_sufficient_and_thirty_days_is_excluded(self):
+        for days, expected in (((0, 31), [1, 2]), ((0, 30), None), ((0, 1, 2, 100), [1, 4])):
+            with self.subTest(days=days):
+                item = paper()
+                item['versions'] = item['versions'][:len(days)]
+                item['frozen_N'] = len(days)
+                item['temporal_eligibility'] = {'status': 'eligible'}
+                start = datetime(2025, 1, 1, tzinfo=timezone.utc)
+                for version, day in zip(item['versions'], days):
+                    version['submitted_at'] = (start + timedelta(days=day)).isoformat()
+                write_source(self.source, [item])
+                if expected is None:
+                    with self.assertRaisesRegex(ValueError, '--all requires every metadata record'):
+                        pilot.build_plan(self.args(**{'all': True}))
+                    continue
+                plan = pilot.build_plan(self.args(**{'all': True}))
+                pilot.validate_plan(plan)
+                self.assertEqual(plan['selected_units'][0]['selected_version_ids'], expected)
+                self.assertEqual(plan['summary']['pair_count'], 1)
+                self.assertEqual(plan['records'], [item])
+
     def test_default_remains_five_per_source(self):
         plan = pilot.build_plan(self.args())
         self.assertEqual(plan['summary']['paper_count'], 5)

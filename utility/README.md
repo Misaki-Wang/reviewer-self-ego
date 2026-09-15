@@ -275,7 +275,93 @@ are unchanged. The independent verifier retains its separate arithmetic.
 
 ## Comparison concurrency
 
-The formal workflow accepts 1 through 96 comparison workers. Optional pressure
-fallback ladders are 64/48/32/16 and 96/80/64/48; --workers must match the first
-value. Reductions affect new admissions and preserve active Codex calls. Live
+The deployed formal workflow accepts 1 through 256 comparison workers. Optional
+pressure fallback ladders are 64/48/32/16, 96/80/64/48,
+160/128/96/80/64/48 and 256/224/192/160/128/96/80/64/48; --workers must match
+the first value. These are planning limits, not a guarantee of runtime capacity.
+The project configuration and each frozen run retain their selected worker count. Reductions affect new admissions and preserve active Codex calls. Live
 run control remains under res/<run-id>/control.json.
+
+## Share original data through data_full
+
+Existing original source shards in `data/` remain immutable. ICLR2025 adds a
+separate three-version shard without rewriting those original records. `data_full/index/index.json`
+references hash-pinned original conference shards through explicit `bases`
+entries and keeps only disjoint additions in local shard files. The shared loader
+resolves full records/order and checks every base, addition and index identity.
+Only canonical sibling `data/index/<source_id>.json` bases are supported; ordinary
+shard path restrictions remain unchanged.
+
+```sh
+# Resolve the expanded ICLR catalog without downloading or invoking a model.
+python3.12 -B -m utility.prepare_source_data \
+  --source data_full/index/index.json --pdf-root data_full/pdf \
+  --fallback-pdf-root data/pdf --all --dry-run
+
+# Freeze a fresh explicit scope using the expanded catalog; default is still data.
+python3.12 -B -m utility.workflow prepare --catalog data_full \
+  --source iclr2026 --units 10 --run-id NEW_RUN_ID
+
+# Inspect download scope while directly reusing existing original PDF files.
+python3.12 -B -m utility.download_papers \
+  --source data_full/index/index.json --conf iclr2026 \
+  --output data_full/pdf --pdf-layout legacy --reference-pdf-root data/pdf --dry-run
+```
+
+Existing original PDFs are read-only references, validated on use; reference reuse
+does not copy them into the new store. Missing or corrupt selected files do not
+trigger replacement sampling. `build_pairs` rejects fallback roots and reads clean
+PDFs only. An explicit custom or clean PDF store in formal preparation also does
+not automatically fall back to originals. Each run freezes resolved metadata and
+all selected catalog dependencies; later live catalog changes cannot alter it.
+
+## Reference compatible historical judgments
+
+`utility.result_reuse` checks frozen pair inputs and execution evidence before
+creating a reference to an existing judgment. It does not dispatch models, change
+batch state, or import old attempts into a new run. It preserves historical token
+usage separately; missing historical usage remains unknown.
+
+```sh
+python3.12 -B -m utility.result_reuse check \
+  --source-run res/OLD_RUN --target-run res/NEW_RUN --pair ARXIV_ID__v1_v2
+python3.12 -B -m utility.result_reuse create \
+  --source-run res/OLD_RUN --target-run res/NEW_RUN --pair ARXIV_ID__v1_v2 \
+  --output data_full/results/ARXIV_ID__v1_v2.reference.json
+python3.12 -B -m utility.result_reuse load \
+  data_full/results/ARXIV_ID__v1_v2.reference.json
+```
+
+Compatibility requires identical ordered PDF hashes, scientific templates/schema,
+execution code/dependencies, model/settings and proven resource/policy identities.
+Only the two verified endpoint path parameters may differ between rendered prompts;
+the reference records both exact prompt hashes and the versioned equivalence rule.
+Changed/deleted referenced artifacts fail revalidation. Legacy artifacts without
+archived PDF-skill/resource identity are incompatible; no missing proof is inferred
+from currently installed resources. Unknown isolation policies also fail closed.
+
+## Shared Codex file isolation
+
+`codex_isolation.py` supplies the common permission flags and controlled child
+environment for comparison, single-paper review, and both anonymization stages.
+Each call receives an explicit list of regular input files and a separate writable
+work directory. Image attachments must resolve into that same input list before
+the host CLI loads them. Tool/runtime resources use a separate narrow read-only
+allowlist. Creating or writing a sandbox-only Linux mount ancestor does not grant
+access to the corresponding unmounted host files.
+
+Anonymization keeps controller artifacts outside the identify and audit working
+directories. Identify reads its original PDF, extracted page metadata and before
+images. Audit additionally reads the candidate PDF, plan and after images; it
+cannot read identify's raw response or event log. Every retry gets new directories.
+
+New batch snapshots retain the shared helper beside token_usage. The execution
+contract pins its identity and approved runtime/skill paths; recovery validates
+saved grants without discovering a newer installed runtime. Old snapshots and
+results are preserved and retain an explicit legacy-isolation limitation.
+
+Cross-run result references currently reject the new `isolated_files` policy.
+The approved runtime path list is not an archive of runtime bytes and must not be
+used as a substitute for the stronger historical resource proof required by
+`result_reuse`. A missing proof remains incompatible; no legacy result is relabeled
+as an isolated result.

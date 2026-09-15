@@ -7,6 +7,7 @@ both the local checks and the visual review pass. No directory batch scan.
 """
 import argparse
 import hashlib
+import importlib.util
 import json
 import math
 import os
@@ -25,6 +26,12 @@ else:
 
 
 ROOT = Path(__file__).resolve().parent.parent
+# Resolve beside this script so frozen runs cannot import the active helper.
+_isolation_spec = importlib.util.spec_from_file_location(
+    '_anonymize_codex_isolation', Path(__file__).resolve().parent / 'codex_isolation.py')
+isolation = importlib.util.module_from_spec(_isolation_spec)
+sys.modules[_isolation_spec.name] = isolation
+_isolation_spec.loader.exec_module(isolation)
 CATEGORIES = ['author', 'affiliation', 'contact', 'acknowledgment', 'venue',
               'identifier', 'author_link', 'other_identity']
 
@@ -118,20 +125,7 @@ def regular_destination(path):
 
 
 def find_skill(explicit=None):
-    if explicit:
-        path = Path(explicit)
-        path = path / 'SKILL.md' if path.is_dir() else path
-    else:
-        home = Path(os.environ.get('CODEX_HOME', str(Path.home() / '.codex')))
-        choices = [home / 'skills/pdf/SKILL.md',
-                   *home.glob('plugins/cache/*/pdf/*/skills/pdf/SKILL.md')]
-        choices = [p for p in choices if p.is_file()]
-        if not choices:
-            raise ValueError('No installed PDF skill; supply --pdf-skill')
-        path = max(choices, key=lambda p: p.stat().st_mtime)
-    if not path.is_file():
-        raise ValueError(f'PDF skill is missing: {path}')
-    return path.resolve()
+    return isolation.resolve_pdf_skill(explicit)
 
 
 def inspect_pdf(source, work):
@@ -291,55 +285,53 @@ def check_pdf(source, candidate, plan, work):
             'antialias_only_pages': antialias_only_pages}
 
 
-def cli_command(args, work, source, skill, schema, response):
-    permissions = {':root': 'deny', ':minimal': 'read'}
-    if sys.platform == 'darwin':
-        for path in ('/tmp', '/private/tmp', '/var/tmp', '/private/var/tmp'):
-            permissions[path + '/**'] = 'deny'
-            permissions[path[:-1] + '[p]'] = 'deny'
-    permissions.update({str(work): 'write', str(source): 'read', str(skill.parent): 'read',
-                        str(Path(sys.base_prefix)): 'read'})
-    executable = shutil.which(args.codex) or args.codex
-    permissions[str(Path(executable).resolve())] = 'read'
-    table = '{' + ', '.join(f'{json.dumps(k)}={json.dumps(v)}' for k, v in permissions.items()) + '}'
-    environment = {'PATH': os.pathsep.join(dict.fromkeys((str(Path(sys.executable).parent), '/usr/bin', '/bin'))),
-                   'TMPDIR': str(work), 'TMPPREFIX': str(work / 'zsh'), 'PYTHONNOUSERSITE': '1'}
-    env_table = '{' + ', '.join(f'{json.dumps(k)}={json.dumps(v)}' for k, v in environment.items()) + '}'
-    return [args.codex, 'exec', '--json', '--strict-config', '--ignore-user-config', '--ephemeral',
-            '--skip-git-repo-check', '--model', args.model, '-c', 'model_reasoning_effort=' + json.dumps(args.effort),
-            '-c', 'developer_instructions=' + json.dumps(SYSTEM),
-            '-c', 'approval_policy="never"', '-c', 'default_permissions="pdf_anonymization"',
-            '-c', 'permissions.pdf_anonymization.network.enabled=false',
-            '-c', 'permissions.pdf_anonymization.filesystem=' + table,
-            '-c', 'web_search="disabled"', '-c', 'mcp_servers={}',
-            *[part for feature in ('apps', 'plugins', 'browser_use', 'computer_use', 'multi_agent',
-                                   'memories', 'hooks', 'workspace_dependencies', 'shell_snapshot')
-              for part in ('-c', f'features.{feature}=false')],
-            '-c', 'features.skip_host_skill_discovery=true',
-            '-c', 'project_doc_max_bytes=0', '-c', 'allow_login_shell=false',
-            '-c', 'shell_environment_policy.inherit="none"', '-c', 'shell_environment_policy.set=' + env_table,
-            '--cd', str(work), '--color', 'never', '--output-schema', str(schema),
-            '--output-last-message', str(response), '-']
+def cli_command(args, work, read_files, skill, schema, response, images=()):
+    flags, env = isolation.isolation_options(
+        read_files, work, codex=args.codex, pdf_skill=skill, image_files=images)
+    command = [args.codex, 'exec', '--json', *flags, '--model', args.model,
+               '-c', 'model_reasoning_effort=' + json.dumps(args.effort),
+               '-c', 'developer_instructions=' + json.dumps(SYSTEM),
+               '--cd', str(work), '--color', 'never', '--output-schema', str(schema),
+               '--output-last-message', str(response),
+               *[arg for path in images for arg in ('--image', str(path))], '-']
+    return command, env
 
 
-def call_cli(args, work, source, skill, stage, schema, prompt, attempts):
+def call_cli(args, materials, source, skill, stage, schema, prompt, attempts):
+    if stage not in ('identify', 'audit'):
+        raise ValueError(f'Unknown anonymization stage: {stage}')
+    pages = json.loads((materials / 'pages.json').read_text())
+    names = [f'page-{number:04d}.png' for number in range(1, len(pages) + 1)]
+    relative = [Path('pages.json'), *[Path('before') / name for name in names]]
+    if stage == 'audit':
+        relative += [Path('candidate.pdf'), Path('plan.json'),
+                     *[Path('after') / name for name in names]]
+    read_files = isolation.material_paths([source, *[materials / path for path in relative]])
+    # The controller's immutable artifacts and other calls' logs stay outside
+    # this writable scope. Per-file links retain the scientific prompts' paths.
+    work = materials.parent / stage
+    work.mkdir()
+    for path in relative:
+        link = work / path
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to((materials / path).resolve())
+    skills = work / '.agents/skills'
+    skills.mkdir(parents=True)
+    (skills / 'pdf').symlink_to(skill.parent, target_is_directory=True)
     schema_path, response = work / f'{stage}-schema.json', work / f'{stage}-response.json'
     write_json(schema_path, schema)
     image_dir = work / ('before' if stage == 'identify' else 'after')
-    images = sorted(image_dir.glob('page-*.png'))
+    images = [image_dir / name for name in names]
     prompt = (f'Read and use the PDF skill at {skill}.\nSingle source PDF: {source}\n'
-              f'Working directory: {work}\nPython: {shlex.quote(sys.executable)}\n'
+              f'Working directory: {work}\nPython: {shlex.quote(str(Path(sys.executable).resolve()))}\n'
               f'Attached images are all {image_dir.name}/ pages in page-number order, '
               'starting at page 1. Inspect the images as well as extracted text.\n' + prompt)
-    command = cli_command(args, work, source, skill, schema_path, response)
-    command[-1:-1] = [arg for path in images for arg in ('--image', str(path))]
+    command, env = cli_command(args, work, read_files, skill, schema_path, response, images)
     attempt = {'stage': stage, 'prompt': prompt, 'command': command,
+               'workdir': str(work), 'read_files': [str(path) for path in read_files],
+               'isolation_policy': isolation.identity(),
                'attached_images': [str(path) for path in images]}
     attempts.append(attempt)
-    env = os.environ.copy()
-    env['TMPDIR'] = str(work)
-    for key in ('CODEX_THREAD_ID', 'CODEX_SESSION_ID', 'CODEX_INTERNAL_ORIGINATOR_OVERRIDE', 'CODEX_APP_TOOLS_PIPE_PATH'):
-        env.pop(key, None)
     with (work / f'{stage}.jsonl').open('w+') as events, (work / f'{stage}.stderr').open('w+') as errors:
         process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=events, stderr=errors,
                                    text=True, env=env, start_new_session=True)
@@ -378,7 +370,7 @@ def anonymize(args, source, target, report):
     binding = {'source_sha256': digest(source), 'script_sha256': digest(Path(__file__)),
                'skill_sha256': digest(skill), 'model': args.model, 'effort': args.effort,
                'codex': str(Path(shutil.which(args.codex) or args.codex).resolve()),
-               'pymupdf': pymupdf.VersionBind}
+               'pymupdf': pymupdf.VersionBind, 'isolation_policy': isolation.identity()}
     if target.exists() and not args.overwrite:
         previous = json.loads(report.read_text()) if report.exists() else {}
         if (previous.get('status') == 'completed' and previous.get('binding') == binding
@@ -395,10 +387,8 @@ def anonymize(args, source, target, report):
             feedback = ''
             marked = False
             for number in range(1, args.max_attempts + 1):
-                work = Path(scratch).resolve() / f'attempt-{number}'
-                skills = work / '.agents/skills'
-                skills.mkdir(parents=True)
-                (skills / 'pdf').symlink_to(skill.parent, target_is_directory=True)
+                work = Path(scratch).resolve() / f'attempt-{number}' / 'materials'
+                work.mkdir(parents=True)
                 iteration = {'number': number, 'status': 'in_progress'}
                 receipt['iterations'].append(iteration)
                 start = len(receipt['attempts'])

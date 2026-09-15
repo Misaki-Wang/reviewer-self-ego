@@ -18,6 +18,13 @@ MANIFEST_SCHEMA_VERSION = 'source-manifest-1'
 MANIFEST_PATH = 'utility/source_manifest.json'
 PROJECT_PATH = 'utility/project.json'
 INDEX_PATH = 'data/index/index.json'
+CATALOGS = ('data', 'data_full')
+
+
+def catalog_index(catalog='data'):
+    if catalog not in CATALOGS:
+        raise ValueError(f'Unsupported source catalog: {catalog}')
+    return f'{catalog}/index/index.json'
 
 
 def _digest(raw):
@@ -145,8 +152,8 @@ def _allowed_name(name):
         raise ValueError(f'Excluded source-manifest path: {name}')
     allowed = (parts[0] == 'check_diff' and len(parts) > 1
                or len(parts) == 2 and parts[0] == 'utility' and parts[-1].endswith('.py')
-               or len(parts) == 3 and parts[:2] == ['data', 'index'] and parts[-1].endswith('.json')
-               or len(parts) > 3 and parts[:2] == ['data', 'index'] and parts[2] in ('metadata', 'provenance'))
+               or len(parts) == 3 and parts[0] in CATALOGS and parts[1] == 'index' and parts[-1].endswith('.json')
+               or len(parts) > 3 and parts[0] in CATALOGS and parts[1] == 'index' and parts[2] in ('metadata', 'provenance'))
     if not allowed:
         raise ValueError(f'Excluded source-manifest path: {name}')
     return name
@@ -154,7 +161,8 @@ def _allowed_name(name):
 
 def _source_names(project):
     names = set()
-    for folder in ('check_diff', 'data/index/metadata', 'data/index/provenance'):
+    for folder in ('check_diff', *(f'{catalog}/index/{kind}' for catalog in CATALOGS
+                                   for kind in ('metadata', 'provenance'))):
         root = _inside(project, folder)
         if not root.exists():
             if folder == 'check_diff':
@@ -170,8 +178,10 @@ def _source_names(project):
             _inside(project, relative)
             if not path.is_dir():
                 names.add(_allowed_name(relative))
-    for folder, pattern in (('utility', '*.py'), ('data/index', '*.json')):
+    for folder, pattern in (('utility', '*.py'), ('data/index', '*.json'), ('data_full/index', '*.json')):
         root = _inside(project, folder)
+        if folder == 'data_full/index' and not root.exists():
+            continue
         if not root.is_dir():
             raise ValueError(f'Expected a source directory: {root}')
         for path in root.glob(pattern):
@@ -267,37 +277,53 @@ def _source_name(source):
     return source
 
 
-def _index_shards(index, files):
+def _index_shards(index, files, catalog='data'):
     metadata = index.get('dataset_metadata')
     if (index.get('dataset') != 'source_data' or index.get('schema_version') != 'source-data-index-1'
             or not isinstance(metadata, dict) or metadata.get('dataset') != 'source_data'):
         raise ValueError('Index must declare the source_data dataset and current index schema')
     entries = index.get('files')
-    if not isinstance(entries, list) or not entries:
+    bases = index.get('bases', [])
+    if not isinstance(bases, list) or (bases and catalog != 'data_full'):
+        raise ValueError('Base references are allowed only in data_full')
+    if not isinstance(entries, list) or not (entries or bases):
         raise ValueError('Index requires a nonempty shard files list')
     order = index.get('record_order')
     if (not isinstance(order, list) or any(not isinstance(aid, str) for aid in order)
             or len(order) != len(set(order)) or metadata.get('record_count') != len(order)):
         raise ValueError('Invalid source index record_order/count')
     shards = {}
-    for entry in entries:
+    seen = set()
+    for entry in [*bases, *entries]:
         if not isinstance(entry, dict):
             raise ValueError('Malformed index shard entry')
         source = _source_name(entry.get('source_id'))
-        if entry.get('path') != f'{source}.json' or source in shards:
+        is_base = entry in bases
+        if is_base:
+            if entry.get('catalog') != 'data' or 'path' in entry:
+                raise ValueError('Invalid base catalog reference')
+            name = f'data/index/{source}.json'
+        else:
+            expected = f'{source}.additions.json' if bases else f'{source}.json'
+            if entry.get('path') != expected:
+                raise ValueError('Invalid or duplicate index shard path/source')
+            name = f'{catalog}/index/{expected}'
+        if name in seen:
             raise ValueError('Invalid or duplicate index shard path/source')
-        name = f'data/index/{source}.json'
+        seen.add(name)
         pinned = files.get(name)
-        if (pinned is None or type(entry.get('bytes')) is not int or entry.get('bytes') != pinned['bytes']
+        if pinned is None:
+            raise ValueError(f'Missing source manifest entries: {[name]}')
+        if (type(entry.get('bytes')) is not int or entry.get('bytes') != pinned['bytes']
                 or _hex(entry.get('sha256'), 64, 'Index shard sha256') != pinned['sha256']):
             raise ValueError(f'Index shard hash/size differs from source manifest: {name}')
         if type(entry.get('record_count')) is not int or entry['record_count'] < 0:
             raise ValueError('Invalid index shard record count')
-        shards[source] = entry
+        shards.setdefault(source, []).append((name, entry))
     return shards
 
 
-def verified_sources(project, code_root, sources, source_revision, extra_files=()):
+def verified_sources(project, code_root, sources, source_revision, extra_files=(), *, catalog='data'):
     """Read verified core/index/requested shards/extras and exact deployment proofs.
 
     The manifest covers all formal source/metadata files; this function verifies
@@ -313,8 +339,8 @@ def verified_sources(project, code_root, sources, source_revision, extra_files=(
     sources = [_source_name(source) for source in sources]
     if len(sources) != len(set(sources)) or not isinstance(extra_files, tuple):
         raise ValueError('Duplicate sources or invalid extra_files collection')
-    names = [*(f'check_diff/{name}' for name in CORE_FILES), INDEX_PATH,
-             *(f'data/index/{source}.json' for source in sources),
+    index_path = catalog_index(catalog)
+    names = [*(f'check_diff/{name}' for name in CORE_FILES), index_path,
              *(_allowed_name(name) for name in extra_files)]
     if len(names) != len(set(names)):
         raise ValueError('Duplicate requested source file paths')
@@ -333,24 +359,66 @@ def verified_sources(project, code_root, sources, source_revision, extra_files=(
     files, revision = _file_index(manifest, project)
     if revision != source_revision:
         raise ValueError('Manifest revision differs from the authorized source_revision')
+    if index_path not in files:
+        raise ValueError(f'Missing source manifest entries: {[index_path]}')
+    index_raw = _capture(project, index_path, states)
+    if _digest(index_raw) != files[index_path]:
+        raise ValueError(f'Source manifest hash/size mismatch: {index_path}')
+    shards = _index_shards(_json_object(index_raw, index_path), files, catalog)
+    for source in sources:
+        if source not in shards:
+            raise ValueError(f'Requested source is not listed in the index: {source}')
+        names.extend(name for name, _ in shards[source])
+    if len(names) != len(set(names)):
+        raise ValueError('Duplicate requested source file paths')
     if not set(names) <= files.keys():
         raise ValueError(f'Missing source manifest entries: {sorted(set(names) - files.keys())}')
+    if catalog == 'data_full':
+        names.extend(name for name in files if name.startswith('data_full/index/provenance/')
+                     and name not in names)
     blobs = {}
     for name in names:
         raw = _capture(project, name, states)
         if _digest(raw) != files[name]:
             raise ValueError(f'Source manifest hash/size mismatch: {name}')
         blobs[name] = raw
-    shards = _index_shards(_json_object(blobs[INDEX_PATH], INDEX_PATH), files)
     for source in sources:
-        if source not in shards:
-            raise ValueError(f'Requested source is not listed in the index: {source}')
-        shard = _json_object(blobs[f'data/index/{source}.json'], source)
-        if (shard.get('dataset') != 'source_data' or shard.get('schema_version') != 'source-data-source-shard-1'
-                or shard.get('source_id') != source or not isinstance(shard.get('records'), list)
-                or len(shard['records']) != shards[source]['record_count']
-                or shard.get('record_count') != len(shard['records'])):
-            raise ValueError(f'Shard dataset/source/count mismatch: {source}')
+        for name, entry in shards[source]:
+            shard = _json_object(blobs[name], source)
+            if (shard.get('dataset') != 'source_data' or shard.get('schema_version') != 'source-data-source-shard-1'
+                    or shard.get('source_id') != source or not isinstance(shard.get('records'), list)
+                    or len(shard['records']) != entry['record_count']
+                    or shard.get('record_count') != len(shard['records'])):
+                raise ValueError(f'Shard dataset/source/count mismatch: {source}')
+    documents = [(index_path, _json_object(index_raw, index_path)['dataset_metadata'])]
+    documents.extend((name, _json_object(blobs[name], name))
+                     for source in sources for name, _ in shards[source])
+    for owner, document in documents:
+        declared = document.get('build_provenance')
+        if declared is None:
+            continue
+        if not isinstance(declared, dict) or set(declared) != {'path', 'bytes', 'sha256'}:
+            raise ValueError(f'Invalid declared build provenance: {owner}')
+        relative = _relative_name(declared['path'])
+        if not relative.startswith('provenance/'):
+            raise ValueError(f'Build provenance must stay in the catalog provenance directory: {owner}')
+        name = _allowed_name(str(Path(owner).parent / relative))
+        if files.get(name) != {key: declared[key] for key in ('bytes', 'sha256')}:
+            raise ValueError(f'Build provenance differs from source manifest: {name}')
+        raw = _capture(project, name, states)
+        if _digest(raw) != files[name]:
+            raise ValueError(f'Source manifest hash/size mismatch: {name}')
+        blobs[name] = raw
+    if __package__:
+        from .prepare_source_data import load_source
+    else:
+        from prepare_source_data import load_source
+    if sources:
+        _, loaded = load_source(project / index_path, source_ids=sources)
+        for item in loaded['input_files']:
+            name = str(_inside(project, item['path']).relative_to(project))
+            if name not in blobs or _digest(blobs[name]) != {k: item[k] for k in ('bytes', 'sha256')}:
+                raise ValueError(f'Loaded catalog differs from verified source bytes: {name}')
     _stable(project, states)
     blobs['deployment_provenance/project.json'] = config_raw
     blobs['source_manifest.json'] = manifest_raw

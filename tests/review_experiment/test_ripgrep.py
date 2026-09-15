@@ -40,7 +40,7 @@ class RipgrepTests(unittest.TestCase):
         args = SimpleNamespace(codex=str(cli), model='fixture', effort='low',
                                pdf_skill=self.fixture.skill, ripgrep=rg)
         command = runner.build_command(args, work, 'fixture', snapshot)
-        filesystem = next(s for s in command if s.startswith('permissions.review_only.filesystem='))
+        filesystem = next(s for s in command if s.startswith('permissions.isolated_files.filesystem='))
         self.assertIn(json.dumps(str(rg.resolve())) + '="read"', filesystem)
         self.assertNotIn(json.dumps(str(rg.parent)) + '="read"', filesystem)
         self.assertIn('":root"="deny"', filesystem)

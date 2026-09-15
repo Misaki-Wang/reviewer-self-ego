@@ -31,6 +31,9 @@ ROOT = HERE.parent
 _usage_spec = importlib.util.spec_from_file_location('_codex_token_usage', ROOT / 'utility/token_usage.py')
 token_usage = importlib.util.module_from_spec(_usage_spec)
 _usage_spec.loader.exec_module(token_usage)
+_isolation_spec = importlib.util.spec_from_file_location('_codex_isolation', ROOT / 'utility/codex_isolation.py')
+isolation = importlib.util.module_from_spec(_isolation_spec)
+_isolation_spec.loader.exec_module(isolation)
 STOP = threading.Event()
 STOP_REQUESTED = False
 PROCESS_LOCK = threading.Lock()
@@ -102,12 +105,16 @@ def make_prompt(pair):
     return f'{task}\n{rubric}\n'
 
 
-def build_command(args, workdir):
-    return [args.codex, 'exec', '--json', '--ignore-user-config', '--ephemeral',
-            '--skip-git-repo-check', '--sandbox', 'workspace-write',
+def build_command(args, workdir, pair):
+    """Grant this comparison's two PDFs and private work, using shared policy."""
+    if len(pair.pdfs) != 2:
+        raise ValueError('Comparison isolation requires exactly two PDFs')
+    skill = isolation.resolve_pdf_skill(getattr(args, 'pdf_skill', None))
+    flags, _ = isolation.isolation_options(
+        pair.pdfs, workdir, codex=args.codex, pdf_skill=skill,
+        tool_runtime=getattr(args, 'tool_runtime', None), ripgrep=getattr(args, 'ripgrep', None))
+    return [args.codex, 'exec', '--json', *flags,
             '--model', args.model, '-c', f'model_reasoning_effort="{args.effort}"',
-            '-c', 'web_search="disabled"', '-c', 'sandbox_workspace_write.network_access=false',
-            '-c', 'project_doc_max_bytes=0', '-c', 'approval_policy="never"',
             '--cd', str(workdir), '--color', 'never',
             '--output-schema', str(workdir / 'schema.json'),
             '--output-last-message', str(workdir / 'response.json'), '-']
@@ -142,23 +149,17 @@ def request_stop(signum, frame):
         terminate(process)
 
 
-def task_environment(state_dir):
+def task_environment(state_dir, pdf_skill=None):
     """Give each CLI its own writable state and expose the installed PDF skill."""
     source_home = Path(os.environ.get('CODEX_HOME', str(Path.home() / '.codex')))
     state_dir.mkdir(mode=0o700)
     auth = source_home / 'auth.json'
     if auth.is_file():
         (state_dir / 'auth.json').symlink_to(auth.resolve())
-    configured = os.environ.get('CHECK_DIFF_PDF_SKILL')
-    candidates = [Path(configured)] if configured else [source_home / 'skills/pdf/SKILL.md']
-    if not configured:
-        candidates.extend(source_home.glob('plugins/cache/*/pdf/*/skills/pdf/SKILL.md'))
-    candidates = [p for p in candidates if p.is_file()]
-    if candidates:
-        skill = max(candidates, key=lambda p: p.stat().st_mtime)
-        skills = state_dir / 'skills'
-        skills.mkdir()
-        (skills / 'pdf').symlink_to(skill.parent.resolve(), target_is_directory=True)
+    skill = isolation.resolve_pdf_skill(pdf_skill)
+    skills = state_dir / 'skills'
+    skills.mkdir()
+    (skills / 'pdf').symlink_to(skill.parent, target_is_directory=True)
     env = os.environ.copy()
     env['CODEX_HOME'] = str(state_dir)
     for key in ('CODEX_THREAD_ID', 'CODEX_SESSION_ID', 'CODEX_INTERNAL_ORIGINATOR_OVERRIDE',
@@ -169,17 +170,23 @@ def task_environment(state_dir):
 
 def compare_pair(args, pair, attempt_record=None):
     """The model reads the two PDFs; all scratch files live in a temporary directory."""
-    with tempfile.TemporaryDirectory(prefix='check_diff-') as tmp:
+    args.output.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='check_diff-', dir=args.output) as tmp:
         workdir = Path(tmp) / 'work'
         workdir.mkdir()
-        env = task_environment(Path(tmp) / 'cli_state')
+        skill = isolation.resolve_pdf_skill(getattr(args, 'pdf_skill', None))
+        settings = argparse.Namespace(**{**vars(args), 'pdf_skill': skill})
+        env = isolation.child_environment(workdir, task_environment(Path(tmp) / 'cli_state', skill))
+        if attempt_record is not None:
+            attempt_record.update(isolation_policy=isolation.identity(),
+                                  read_files=[str(p) for p in isolation.material_paths(pair.pdfs)])
         (workdir / 'schema.json').write_text(json.dumps(SCHEMA), encoding='utf-8')
         with (Path(tmp) / 'events.jsonl').open('w+', encoding='utf-8') as log, \
                 (Path(tmp) / 'stderr.log').open('w+', encoding='utf-8') as stderr:
             with PROCESS_LOCK:
                 if STOP.is_set():
                     raise RuntimeError('Interrupted')
-                process = subprocess.Popen(build_command(args, workdir), stdin=subprocess.PIPE,
+                process = subprocess.Popen(build_command(settings, workdir, pair), stdin=subprocess.PIPE,
                                            stdout=log, stderr=stderr, text=True, start_new_session=True, env=env)
                 ACTIVE_PROCESSES.add(process)
             try:
@@ -233,13 +240,24 @@ def run_pair(args, pair):
     if path.exists() and not args.overwrite:
         try:
             normalize_result_labels(json.loads(path.read_text(encoding='utf-8')))
-            return 'skipped'
         except (ValueError, OSError) as exc:
             tqdm.write(f'REBUILD {pair.name}: {exc}')
+        else:
+            try:
+                previous = json.loads(path.with_suffix('.execution.json').read_text())
+            except (OSError, ValueError):
+                previous = {}
+            if (not isinstance(previous, dict) or previous.get('status') != 'completed'
+                    or previous.get('isolation_policy') != isolation.identity()):
+                tqdm.write(f'BLOCKED {pair.name}: existing result has no matching isolation policy; '
+                           'use a fresh output directory or explicit --overwrite')
+                return 'failed'
+            return 'skipped'
     started = time.monotonic()
     attempts = []
     receipt = {'arxiv_id': pair.arxiv_id, 'pair': [pair.before, pair.after],
                'run_id': getattr(args, 'execution_run_id', None),
+               'isolation_policy': isolation.identity(),
                'requested_model': args.model, 'requested_reasoning_effort': args.effort,
                'started_at_utc': datetime.now(timezone.utc).isoformat(), 'attempts': attempts}
     for attempt in range(args.retries + 1):
@@ -301,6 +319,7 @@ def run(args, pairs):
             attempts.extend(receipt['attempts'])
         saved_pairs.append({'pair': pair.name, 'executed_in_this_run': current,
                             'execution_path': str(receipt_path),
+                            'isolation_policy': receipt.get('isolation_policy'),
                             'token_usage': receipt.get('token_usage', token_usage.summarize([{}]))})
     save_json(args.output / 'token_usage.json', {
         'run_id': args.execution_run_id, 'scope': 'Model attempts executed in this runner invocation only',
@@ -350,6 +369,7 @@ def main(argv=None):
     parser.add_argument('--timeout', type=float, default=1800, help='Seconds per comparison attempt')
     parser.add_argument('--retries', type=int, default=1)
     parser.add_argument('--codex', default=shutil.which('codex') or 'codex')
+    parser.add_argument('--pdf-skill', type=Path, help='Exact PDF SKILL.md for this comparison')
     parser.add_argument('--overwrite', action='store_true', help='Recompute existing results')
     parser.add_argument('--dry-run', action='store_true', help='List inputs and outputs without running Codex')
     parser.add_argument('--background', action='store_true', help='Detach the batch and write progress to a log')

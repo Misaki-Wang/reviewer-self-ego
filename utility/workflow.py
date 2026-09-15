@@ -16,7 +16,7 @@ FROZEN_CONFIG = 'source_snapshot/deployment_provenance/project.json'
 FROZEN_SOURCE_MANIFEST = 'source_snapshot/source_manifest.json'
 IMMUTABLE_ROOTS = ('source_snapshot', 'controller_versions')
 REQUIRED_IMMUTABLE = {
-    FROZEN_CONFIG, FROZEN_SOURCE_MANIFEST, 'source_snapshot/data/index/index.json',
+    FROZEN_CONFIG, FROZEN_SOURCE_MANIFEST,
     'source_snapshot/utility/token_usage.py',
     *(f'source_snapshot/check_diff/{name}' for name in (
         'runner.py', 'schema.py', 'prompts/compare.md',
@@ -79,7 +79,7 @@ def runtime_paths(project, runtime):
     return result
 
 
-def configuration(project):
+def configuration(project, *, require_inputs=True):
     project = project.expanduser().resolve(strict=True)
     config_path = inside(project, 'utility/project.json')
     raw = read_object(config_path)
@@ -92,7 +92,7 @@ def configuration(project):
             raise ValueError(f'Missing comparison.{key}')
     for key in ('index', 'pdf_root', 'metadata_root'):
         result[key] = inside(project, raw['data'][key])
-        if not (result[key].is_file() if key == 'index' else result[key].is_dir()):
+        if require_inputs and not (result[key].is_file() if key == 'index' else result[key].is_dir()):
             raise ValueError(f'Missing configured data path: {result[key]}')
     # prepare_batch and source_provenance share this formal source-index contract.
     if result['index'] != (project / 'data/index/index.json').resolve():
@@ -104,7 +104,7 @@ def configuration(project):
         raise ValueError('source_manifest must identify utility/source_manifest.json')
     for key in ('runs_root', 'html_root'):
         root = result[key] = inside(project, raw['outputs'][key])
-        protected = [project / name for name in ('utility', 'check_diff', 'review_experiment', 'tests', 'data')]
+        protected = [project / name for name in ('utility', 'check_diff', 'review_experiment', 'tests', 'data', 'data_full')]
         protected += [result['index'].parent, result['pdf_root'], result['metadata_root']]
         if any(overlaps(root, path.resolve()) for path in protected):
             raise ValueError(f'Output root overlaps source/data: {root}')
@@ -154,11 +154,18 @@ def prepare_run(args, config):
     runtime = runtime_paths(config['project'], config['runtime'])
     manifest = read_object(config['source_manifest'])
     revision = source_revision(manifest)
+    catalog = getattr(args, 'catalog', 'data')
+    if catalog not in ('data', 'data_full'):
+        raise ValueError(f'Unsupported source catalog: {catalog}')
+    index = inside(config['project'], f'{catalog}/index/index.json')
+    if not index.is_file():
+        raise ValueError(f'Missing source index: {index}')
+    pdf_root = config['pdf_root'] if catalog == 'data' else inside(config['project'], 'data_full/pdf')
     sources = list(dict.fromkeys(args.source))
     for name in sources:
         if not re.fullmatch(r'[a-z0-9_]+', name):
             raise ValueError(f'Invalid source: {name}')
-        if not inside(config['index'].parent, f'{name}.json').is_file():
+        if catalog == 'data' and not inside(index.parent, f'{name}.json').is_file():
             raise ValueError(f'Missing source shard: {name}')
     for name in ('version_metadata.jsonl', 'provenance.json'):
         if not inside(config['metadata_root'], name).is_file():
@@ -168,25 +175,27 @@ def prepare_run(args, config):
                                 ('timeout', 'timeout_seconds'), ('validation_workers', 'validation_workers'))}
     if any(not isinstance(values[key], str) or not values[key].strip() for key in ('model', 'effort')):
         raise ValueError('Model and effort must be nonempty strings')
-    for key, maximum in (('units', None), ('workers', 96), ('validation_workers', 16), ('timeout', None)):
+    for key, maximum in (('units', None), ('workers', 256), ('validation_workers', 16), ('timeout', None)):
         value = args.units if key == 'units' else values[key]
         if type(value) is not int or value < 1 or (maximum and value > maximum):
             raise ValueError(f'Invalid positive {key}: {value}')
     if args.concurrency_ladder is not None and (
-            args.concurrency_ladder not in ([64, 48, 32, 16], [96, 80, 64, 48]) or
+            not isinstance(args.concurrency_ladder, list) or
+            any(type(n) is not int for n in args.concurrency_ladder) or
+            args.concurrency_ladder not in ([64, 48, 32, 16], [96, 80, 64, 48], [160, 128, 96, 80, 64, 48], [256, 224, 192, 160, 128, 96, 80, 64, 48]) or
             values['workers'] != args.concurrency_ladder[0]):
-        raise ValueError('--concurrency-ladder requires 64 48 32 16 or 96 80 64 48, with --workers matching its first value')
+        raise ValueError('--concurrency-ladder requires 64 48 32 16, 96 80 64 48, 160 128 96 80 64 48, or 256 224 192 160 128 96 80 64 48, with --workers matching its first value')
     adapter_proof = local_module('source_provenance').proof(Path(__file__).resolve())
     if adapter_proof != manifest['files'].get('utility/workflow.py'):
         raise ValueError('Loaded workflow adapter differs from its source manifest entry')
     request = argparse.Namespace(project=config['project'], source_worktree=config['project'],
-        source_revision=revision, run=run, runs_root=config['runs_root'], pdf_root=config['pdf_root'],
+        source_revision=revision, run=run, runs_root=config['runs_root'], pdf_root=pdf_root, catalog=catalog,
         metadata_dir=config['metadata_root'], source=sources, units=args.units, codex=runtime['codex'],
         concurrency_ladder=args.concurrency_ladder, **values)
     result = local_module('prepare_batch').prepare(request)
-    emit(command='prepare', status=result['status'], source_revision=revision, index=config['index'],
-         sources=[config['index'].parent / f'{name}.json' for name in sources],
-         pdf_root=config['pdf_root'], metadata_root=config['metadata_root'],
+    emit(command='prepare', status=result['status'], source_revision=revision, index=index, catalog=catalog,
+         sources=sources,
+         pdf_root=pdf_root, metadata_root=config['metadata_root'],
          run=run, prepared=run / 'prepared', output=run / 'output', model_execution_performed=False)
     return 0
 
@@ -219,8 +228,19 @@ def immutable_snapshot(run, manifest):
             if relative.as_posix() != name or '..' in relative.parts:
                 raise ValueError(f'Noncanonical immutable artifact path: {name}')
             expected.add(name)
-    if not REQUIRED_IMMUTABLE <= expected:
-        raise ValueError(f'Missing required immutable pins: {sorted(REQUIRED_IMMUTABLE - expected)}')
+    catalog = manifest.get('source_catalog', 'data')
+    if catalog not in ('data', 'data_full'):
+        raise ValueError(f'Unsupported frozen source catalog: {catalog}')
+    required = REQUIRED_IMMUTABLE | {f'source_snapshot/{catalog}/index/index.json'}
+
+    config = read_object(inside(run, 'run_config.json'))
+    helper = 'source_snapshot/utility/codex_isolation.py'
+    runner = run / 'source_snapshot/check_diff/runner.py'
+    if ('isolation_policy' in config or helper in expected or
+            (runner.is_file() and b'codex_isolation' in runner.read_bytes())):
+        required.add(helper)
+    if not required <= expected:
+        raise ValueError(f'Missing required immutable pins: {sorted(required - expected)}')
     observed, directories = set(), set()
     for name in IMMUTABLE_ROOTS:
         root = run / name
@@ -270,6 +290,15 @@ def dispatch(args, config):
     run_config = read_object(inside(run, 'run_config.json'))
     if revision != manifest['source_revision'] or revision != run_config['source_revision']:
         raise ValueError('Frozen manifest revision differs from the run source_revision')
+    if (manifest.get('source_catalog', 'data') != run_config.get('source_catalog', 'data')
+            or manifest.get('source_index') != run_config.get('source_index')):
+        raise ValueError('Frozen catalog identity differs from the run configuration')
+    chosen = manifest.get('source_index')
+    if chosen is not None:
+        path = immutable[f"source_snapshot/{manifest.get('source_catalog', 'data')}/index/index.json"]
+        if ({'bytes': path.stat().st_size, 'sha256': manifest['artifact_sha256'][str(path.relative_to(run))]}
+                != {key: chosen[key] for key in ('bytes', 'sha256')}):
+            raise ValueError('Frozen source index differs from its recorded catalog identity')
     frozen = read_object(frozen_config)
     if frozen['schema_version'] != 'reviewer-project-1':
         raise ValueError('Unsupported historical run; restore its recorded environment separately')
@@ -307,14 +336,18 @@ def parser():
     paths.add_argument('--run-id')
     commands.add_parser('freeze-sources', help='Explicitly write the source manifest and print its revision')
     prepare = commands.add_parser('prepare', help='Freeze an explicit scope without starting a model run')
+    prepare.add_argument('--catalog', choices=('data', 'data_full'), default='data',
+                         help='Select the original catalog or the base-plus-additions catalog')
     prepare.add_argument('--source', action='append', required=True)
     prepare.add_argument('--units', type=int, required=True)
     prepare.add_argument('--run-id', required=True)
     for name in ('model', 'effort'):
         prepare.add_argument(f'--{name}')
-    for name in ('workers', 'validation-workers', 'timeout'):
+    prepare.add_argument('--workers', type=int, help='Comparison workers (1..256)')
+    for name in ('validation-workers', 'timeout'):
         prepare.add_argument(f'--{name}', type=int)
-    prepare.add_argument('--concurrency-ladder', type=int, nargs='+')
+    prepare.add_argument('--concurrency-ladder', type=int, nargs='+',
+                         help='Opt into downward-only 64 48 32 16, 96 80 64 48, 160 128 96 80 64 48, or 256 224 192 160 128 96 80 64 48 admissions; --workers must match the first value')
     run = commands.add_parser('run', help='Use this new formal run frozen controller; respect both pauses')
     run.add_argument('--run-id', required=True)
     run.add_argument('--retry-failed', action='store_true')
@@ -327,7 +360,7 @@ def parser():
 def main(argv=None):
     args = parser().parse_args(argv)
     try:
-        config = configuration(args.project)
+        config = configuration(args.project, require_inputs=args.command not in ('run', 'verify'))
         if args.command == 'paths':
             config['runtime'] = runtime_paths(config['project'], config['runtime'])
             paths = {}

@@ -10,7 +10,7 @@ import unittest
 
 from check_diff import runner as compare
 from review_experiment import runner as review
-from utility import token_usage
+from utility import token_usage, codex_isolation
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -21,6 +21,12 @@ class SharedTokenLoadingTests(unittest.TestCase):
         for module in (compare.token_usage, review.token_usage, token_usage):
             self.assertEqual(Path(module.__file__).resolve(), target)
             self.assertEqual(module.summarize([]), token_usage.summarize([]))
+
+    def test_both_runners_resolve_canonical_isolation(self):
+        target = ROOT / 'utility/codex_isolation.py'
+        for module in (compare.isolation, review.isolation, codex_isolation):
+            self.assertEqual(Path(module.__file__).resolve(), target)
+            self.assertEqual(module.identity(), codex_isolation.identity())
 
     def test_direct_script_entrypoints_work_outside_the_project(self):
         with tempfile.TemporaryDirectory() as name:
@@ -37,11 +43,15 @@ class SharedTokenLoadingTests(unittest.TestCase):
             (snapshot / 'utility').mkdir()
             for filename in ('runner.py', 'schema.py'):
                 shutil.copyfile(ROOT / 'check_diff' / filename, snapshot / 'check_diff' / filename)
+            isolation = snapshot / 'utility/codex_isolation.py'
+            isolation.write_bytes((ROOT / 'utility/codex_isolation.py').read_bytes() + b"\nORIGIN = 'frozen'\n")
             helper = snapshot / 'utility/token_usage.py'
             helper.write_bytes((ROOT / 'utility/token_usage.py').read_bytes() + b"\nORIGIN = 'frozen'\n")
             script = r"""
 import importlib.util, pathlib, sys, types
-from utility import token_usage as live
+from utility import token_usage as live, codex_isolation as live_isolation
+live_isolation.ORIGIN = 'live'
+sys.modules['codex_isolation'] = live_isolation
 live.ORIGIN = 'live'
 live.summarize = lambda attempts: {'wrong_live_helper': True}
 sys.modules['token_usage'] = live
@@ -55,6 +65,18 @@ def load(name):
     return module
 runner = load('frozen_token_runner')
 assert runner.token_usage.ORIGIN == 'frozen'
+assert runner.isolation.ORIGIN == 'frozen'
+assert live_isolation.ORIGIN == 'live'
+isolation_path = snapshot / 'utility/codex_isolation.py'
+isolation_raw = isolation_path.read_bytes()
+isolation_path.unlink()
+try:
+    load('missing_frozen_isolation_runner')
+except (FileNotFoundError, ImportError):
+    pass
+else:
+    raise AssertionError('Missing isolation helper fell back to a live package')
+isolation_path.write_bytes(isolation_raw)
 assert runner.token_usage.summarize([])['status'] == 'not_run'
 assert live.ORIGIN == 'live'
 (snapshot / 'utility/token_usage.py').unlink()

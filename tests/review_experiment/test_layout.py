@@ -104,7 +104,7 @@ class LayoutTests(unittest.TestCase):
             target.symlink_to(outside if is_directory else marker, target_is_directory=is_directory)
             with self.subTest(relative=relative):
                 self.assert_output_rejected(self.fixture.output, 'symlink', '--overwrite',
-                                            '--dry-run', before_discovery=False)
+                                            '--source', 'iclr2026', '--dry-run', before_discovery=False)
             target.unlink()
         self.assertEqual(marker.read_bytes(), b'fake protected evidence')
         self.assertEqual(list(outside.iterdir()), [marker])

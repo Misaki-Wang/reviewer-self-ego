@@ -9,6 +9,7 @@ import sys
 import subprocess
 import time
 import tempfile
+import tomllib
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -24,6 +25,13 @@ class CheckDiffTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name).resolve()
+        cli_home = self.root / 'fixture_cli'
+        skill = cli_home / 'skills/pdf/SKILL.md'
+        skill.parent.mkdir(parents=True)
+        skill.write_text('Fixture PDF skill')
+        environment = patch.dict(os.environ, {'CODEX_HOME': str(cli_home), 'CHECK_DIFF_PDF_SKILL': ''})
+        environment.start()
+        self.addCleanup(environment.stop)
         self.input = self.root / 'input_data'
         self.pair = self.make_pair('2406.03862', 1, 2)
         self.args = SimpleNamespace(output=self.root / 'output', model='gpt-5.5', effort='medium',
@@ -48,9 +56,11 @@ assert args[0] == 'exec'
 assert args[args.index('--model') + 1] == 'gpt-5.5'
 assert 'model_reasoning_effort="medium"' in args
 assert 'web_search="disabled"' in args
-assert 'sandbox_workspace_write.network_access=false' in args
+assert 'permissions.isolated_files.network.enabled=false' in args
 assert 'approval_policy="never"' in args
-assert args[args.index('--sandbox') + 1] == 'workspace-write'
+assert '--sandbox' not in args
+assert 'default_permissions="isolated_files"' in args
+assert '--strict-config' in args
 assert '--image' not in args
 prompt = sys.stdin.read()
 assert 'Earlier version: `v1.pdf`' in prompt and 'Later version: `v2.pdf`' in prompt
@@ -131,7 +141,7 @@ pathlib.Path(args[args.index('--output-last-message') + 1]).write_text({json.dum
         with self.assertRaises(ValueError):
             normalize_result_labels(legacy)
 
-    def test_legacy_case_result_skips_model_without_rewriting_archive(self):
+    def test_legacy_case_result_blocks_reuse_without_rewriting_archive(self):
         legacy = annotation()
         legacy['M1']['change'] = LABELS[0].capitalize()
         path = self.pair.output_path(self.args.output)
@@ -139,7 +149,7 @@ pathlib.Path(args[args.index('--output-last-message') + 1]).write_text({json.dum
         path.write_text(json.dumps(legacy))
         original = path.read_bytes()
         with patch.object(runner, 'compare_pair') as call:
-            self.assertEqual(self.quiet_run(), 'skipped')
+            self.assertEqual(self.quiet_run(), 'failed')
             call.assert_not_called()
         self.assertEqual(path.read_bytes(), original)
 
@@ -195,6 +205,8 @@ pathlib.Path(args[args.index('--output-last-message') + 1]).write_text({json.dum
 
     def test_resume_skips_cli_and_overwrite_recomputes(self):
         runner.save_result(self.pair.output_path(self.args.output), annotation())
+        runner.save_json(self.pair.output_path(self.args.output).with_suffix('.execution.json'),
+                         {'status': 'completed', 'isolation_policy': runner.isolation.identity()})
         with patch.object(runner, 'compare_pair', return_value=annotation()) as call:
             self.assertEqual(self.quiet_run(), 'skipped')
             call.assert_not_called()
@@ -363,6 +375,8 @@ pathlib.Path(args[args.index('--output-last-message') + 1]).write_text({json.dum
         runner.save_result(path, historical)
         self.assertEqual(json.loads(path.read_text()), normalized)
         path.write_text(original)
+        runner.save_json(path.with_suffix('.execution.json'),
+                         {'status': 'completed', 'isolation_policy': runner.isolation.identity()})
         with patch.object(runner, 'compare_pair') as call:
             self.assertEqual(self.quiet_run(), 'skipped')
             call.assert_not_called()
@@ -384,6 +398,40 @@ pathlib.Path(args[args.index('--output-last-message') + 1]).write_text({json.dum
             self.assertEqual(self.quiet_run(), 'failed')
         self.assertEqual(json.loads(path.read_text()), old)
 
+
+
+    def test_comparison_command_grants_exact_endpoints_and_no_parent_directory(self):
+        self.fake_cli()
+        work = self.root / 'call-work'
+        work.mkdir()
+        third = self.make_pair('2501.00001', 1, 3)
+        command = runner.build_command(self.args, work, self.pair)
+        setting = next(v for v in command if v.startswith('permissions.isolated_files.filesystem='))
+        fs = tomllib.loads('value=' + setting.split('=', 1)[1])['value']
+        self.assertEqual(fs[':root'], 'deny')
+        self.assertEqual(fs[str(work)], 'write')
+        for pdf in self.pair.pdfs:
+            self.assertEqual(fs[str(pdf.resolve())], 'read')
+        for path in (self.input, self.pair.folder, *third.pdfs):
+            self.assertNotIn(str(path.resolve()), fs)
+        self.assertNotIn('--sandbox', command)
+
+    def test_missing_endpoint_rejects_before_subprocess(self):
+        self.fake_cli()
+        self.pair.pdfs[1].unlink()
+        with patch.object(runner.subprocess, 'Popen') as launch:
+            with self.assertRaises(ValueError):
+                runner.compare_pair(self.args, self.pair, {})
+            launch.assert_not_called()
+
+    def test_execution_records_bind_isolation_and_material_files(self):
+        self.fake_cli()
+        self.assertEqual(self.quiet_run(), 'done')
+        receipt = json.loads(self.pair.output_path(self.args.output).with_suffix('.execution.json').read_text())
+        self.assertEqual(receipt['isolation_policy'], runner.isolation.identity())
+        self.assertEqual(receipt['attempts'][0]['isolation_policy'], runner.isolation.identity())
+        self.assertEqual(receipt['attempts'][0]['read_files'],
+                         [str(p.resolve()) for p in self.pair.pdfs])
 
 if __name__ == '__main__':
     unittest.main()

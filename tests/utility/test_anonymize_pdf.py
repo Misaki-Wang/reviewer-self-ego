@@ -1,4 +1,5 @@
 """Single-PDF anonymization tests: synthetic PDFs and fake Codex, never a model."""
+from argparse import Namespace
 from contextlib import redirect_stdout, redirect_stderr
 from copy import deepcopy
 import io
@@ -6,6 +7,7 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+import tomllib
 import unittest
 from unittest.mock import patch
 
@@ -72,7 +74,7 @@ class AnonymizeTests(unittest.TestCase):
 import json,pathlib,sys
 argv=sys.argv[1:]
 assert argv[0]=='exec' and '--ephemeral' in argv and '--ignore-user-config' in argv
-assert 'permissions.pdf_anonymization.network.enabled=false' in argv
+assert 'permissions.isolated_files.network.enabled=false' in argv
 assert not any('dangerously' in a for a in argv)
 prompt=sys.stdin.read()
 assert 'PDF skill' in prompt
@@ -124,6 +126,96 @@ print(json.dumps({{'type':'turn.completed','usage':{{'input_tokens':10,'output_t
         self.assertEqual(receipt['token_usage']['reported_totals']['total_tokens'], 30)
         self.assertEqual(len(self.calls.read_text().splitlines()), 2)
         self.assertEqual(self.run_cleaner(), 0)
+        self.assertEqual(len(self.calls.read_text().splitlines()), 2)
+
+    def test_stages_share_only_exact_read_only_materials(self):
+        real_popen = cleaner.subprocess.Popen
+        scopes = []
+
+        def inspect_command(command, **kwargs):
+            work = Path(command[command.index('--cd') + 1])
+            value = next(item for item in command
+                         if item.startswith('permissions.isolated_files.filesystem='))
+            permissions = tomllib.loads(value)['permissions']['isolated_files']['filesystem']
+            self.assertEqual(permissions[':root'], 'deny')
+            self.assertEqual(permissions[str(work)], 'write')
+            self.assertEqual(permissions[str(self.source)], 'read')
+            self.assertNotIn(str(self.source.parent), permissions)
+            self.assertEqual(kwargs['env']['TMPDIR'], str(work))
+            linked = {str(path.relative_to(work)): path.resolve()
+                      for path in work.rglob('*') if path.is_symlink() and path.is_file()}
+            for target in linked.values():
+                self.assertFalse(target.is_relative_to(work))
+                self.assertEqual(permissions[str(target)], 'read')
+            self.assertEqual(kwargs['stdout'].name, str(work / f'{work.name}.jsonl'))
+            self.assertEqual(kwargs['stderr'].name, str(work / f'{work.name}.stderr'))
+            scopes.append((work, linked, permissions))
+            return real_popen(command, **kwargs)
+
+        with patch.object(cleaner.subprocess, 'Popen', side_effect=inspect_command):
+            self.assertEqual(self.run_cleaner(), 0)
+        identify, audit = scopes
+        self.assertEqual(identify[0].name, 'identify')
+        self.assertEqual(audit[0].name, 'audit')
+        self.assertEqual(identify[0].parent, audit[0].parent)
+        before = {'before/page-0001.png', 'before/page-0002.png'}
+        after = {'after/page-0001.png', 'after/page-0002.png'}
+        self.assertEqual(set(identify[1]), {'pages.json'} | before)
+        self.assertEqual(set(audit[1]), {'pages.json', 'candidate.pdf', 'plan.json'} | before | after)
+        self.assertNotIn(str(identify[0]), audit[2])
+        self.assertNotIn(str(identify[0].parent), audit[2])
+        self.assertFalse(any('identify-response' in path or 'identify.jsonl' in path
+                             or 'identify.stderr' in path for path in audit[2]))
+        receipt = json.loads(self.report.read_text())
+        self.assertEqual(receipt['binding']['isolation_policy'], cleaner.isolation.identity())
+        for attempt, (_, links, _) in zip(receipt['attempts'], scopes):
+            self.assertEqual(attempt['isolation_policy'], cleaner.isolation.identity())
+            self.assertEqual(set(attempt['read_files']), {str(self.source)} | {str(p) for p in links.values()})
+
+    def test_attachments_outside_allowlist_fail_before_subprocess(self):
+        outside = self.root / 'other-paper.png'
+        outside.write_bytes(b'private test image')
+        args = Namespace(codex=str(self.fake_cli()), model='gpt-5.5', effort='high', timeout=5)
+        real_command = cleaner.cli_command
+
+        def inject_attachment(args, work, read_files, skill, schema, response, images=()):
+            link = work / 'unapproved.png'
+            link.symlink_to(outside)
+            return real_command(args, work, read_files, skill, schema, response, [link])
+
+        attempts = []
+        with patch.object(cleaner, 'cli_command', side_effect=inject_attachment), \
+                patch.object(cleaner.subprocess, 'Popen') as popen, self.assertRaises(ValueError):
+            cleaner.call_cli(args, self.work, self.source, self.skill, 'identify',
+                             cleaner.PLAN_SCHEMA, cleaner.IDENTIFY, attempts)
+        popen.assert_not_called()
+        self.assertEqual(attempts, [])
+
+    def test_retries_get_fresh_scopes_without_previous_materials_or_logs(self):
+        self.assertEqual(self.run_cleaner(failed_audits=1), 0)
+        receipt = json.loads(self.report.read_text())
+        attempts = receipt['attempts']
+        workdirs = [Path(a['workdir']) for a in attempts]
+        self.assertEqual(len(set(workdirs)), 4)
+        self.assertEqual([p.parent.name for p in workdirs],
+                         ['attempt-1', 'attempt-1', 'attempt-2', 'attempt-2'])
+        for attempt, work in zip(attempts, workdirs):
+            for path in map(Path, attempt['read_files']):
+                self.assertTrue(path == self.source or path.parent == work.parent / 'materials'
+                                or path.parent.parent == work.parent / 'materials')
+                self.assertFalse(path.is_relative_to(work))
+            for previous in workdirs:
+                if previous != work:
+                    self.assertNotIn(str(previous), attempt['read_files'])
+        self.assertNotIn('identify-response', attempts[3]['prompt'])
+        self.assertNotIn('Temporary connection failure', attempts[3]['prompt'])
+
+    def test_cache_requires_same_isolation_policy_identity(self):
+        self.assertEqual(self.run_cleaner(), 0)
+        changed = {**cleaner.isolation.identity(), 'sha256': 'changed-policy'}
+        with patch.object(cleaner.isolation, 'identity', return_value=changed), \
+                redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            self.run_cleaner()
         self.assertEqual(len(self.calls.read_text().splitlines()), 2)
 
     def test_failed_audit_never_publishes_clean_pdf(self):

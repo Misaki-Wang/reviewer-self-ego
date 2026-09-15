@@ -28,6 +28,9 @@ ROOT = HERE.parent
 _usage_spec = importlib.util.spec_from_file_location('_codex_token_usage', ROOT / 'utility/token_usage.py')
 token_usage = importlib.util.module_from_spec(_usage_spec)
 _usage_spec.loader.exec_module(token_usage)
+_isolation_spec = importlib.util.spec_from_file_location('_review_codex_isolation', ROOT / 'utility/codex_isolation.py')
+isolation = importlib.util.module_from_spec(_isolation_spec)
+_isolation_spec.loader.exec_module(isolation)
 
 if not __package__:
     sys.path.insert(0, str(ROOT))
@@ -212,92 +215,22 @@ def render_user(template, other_model, pdf_path, evaluator_model=None):
 
 
 def pdf_skill_path(explicit=None):
-    if explicit:
-        path = Path(explicit).resolve()
-        if path.is_dir():
-            path = path / 'SKILL.md'
-        if not path.is_file():
-            raise ValueError(f'PDF skill not found: {path}')
-        return path
-    home = Path(os.environ.get('CODEX_HOME', str(Path.home() / '.codex')))
-    candidates = [home / 'skills/pdf/SKILL.md',
-                  *home.glob('plugins/cache/*/pdf/*/skills/pdf/SKILL.md')]
-    candidates = [p for p in candidates if p.is_file()]
-    if not candidates:
-        raise ValueError('No installed PDF skill found; provide --pdf-skill PATH')
-    return max(candidates, key=lambda p: p.stat().st_mtime).resolve()
+    return isolation.resolve_pdf_skill(explicit)
 
 
 def permission_options(work, snapshot, skill, codex=None, tool_runtime=None, ripgrep=None):
-    """No broad workspace or host read grant. The exact PDF is read-only."""
-    filesystem = {':root': 'deny', ':minimal': 'read'}
-    if sys.platform == 'darwin':
-        # Codex 0.154's Seatbelt :minimal defaults grant shared temporary
-        # directories. Plain path denials do not override those defaults;
-        # explicit glob denials do. Match each root as well as its descendants
-        # so directory listings cannot disclose other calls' filenames.
-        for path in ('/tmp', '/private/tmp', '/var/tmp', '/private/var/tmp'):
-            filesystem[path + '/**'] = 'deny'
-            filesystem[path[:-1] + '[p]'] = 'deny'
-    filesystem.update({str(work.resolve()): 'write', str(snapshot.resolve()): 'read',
-                       str(skill.parent.resolve()): 'read'})
-    # Explicit interpreter/library exceptions, never the user's home or repository.
-    for path in (Path(sys.executable), Path(sys.executable).resolve(), Path(sys.base_prefix),
-                 Path.home() / '.cache/codex-runtimes/codex-primary-runtime/dependencies'):
-        if path.exists():
-            filesystem[str(path.absolute())] = 'read'
-    executable = shutil.which(codex or 'codex')
-    if executable:
-        # Linux sandbox setup re-executes this exact binary inside its filesystem.
-        filesystem[str(Path(executable).resolve())] = 'read'
-    if tool_runtime:
-        for name in ('python_vendor', 'ghostscript-9.55.0'):
-            filesystem[str((tool_runtime / name).resolve())] = 'read'
-    if ripgrep:
-        filesystem[str(Path(ripgrep).resolve())] = 'read'
-    table = '{' + ', '.join(f'{json.dumps(path)}={json.dumps(access)}'
-                            for path, access in filesystem.items()) + '}'
-    return ['-c', 'default_permissions="review_only"',
-            '-c', 'permissions.review_only.network.enabled=false',
-            '-c', 'permissions.review_only.filesystem=' + table]
+    """Compatibility wrapper for the OS-only sandbox probe."""
+    return isolation.permission_options(work, [snapshot], skill, codex, tool_runtime, ripgrep)
 
 
 def build_command(args, work, system, snapshot):
-    runtime = Path.home() / '.cache/codex-runtimes/codex-primary-runtime/dependencies'
-    path = ':'.join(str(p) for p in (runtime / 'bin/override', runtime / 'python/bin',
-                                    Path('/usr/bin'), Path('/bin')) if p.is_dir())
-    environment = {'PATH': path, 'TMPDIR': str(work), 'TMPPREFIX': str(work / 'zsh'),
-                   'PYTHONNOUSERSITE': '1'}
-    tool_runtime = getattr(args, 'tool_runtime', None)
-    if tool_runtime:
-        gs = tool_runtime / 'ghostscript-9.55.0'
-        environment['PATH'] = str(gs / 'bin') + ':' + path
-        environment['PYTHONPATH'] = str(tool_runtime / 'python_vendor')
-        environment['GS_LIB'] = ':'.join(str(p) for p in (
-            gs / 'share/ghostscript/9.55.0/Resource/Init',
-            gs / 'share/ghostscript/9.55.0/lib',
-            gs / 'share/ghostscript/9.55.0/Resource/Font'))
-    ripgrep = getattr(args, 'ripgrep', None)
-    if ripgrep:
-        environment['PATH'] = str(ripgrep.parent) + ':' + environment['PATH']
-    tool_environment = '{' + ', '.join(f'{json.dumps(k)}={json.dumps(v)}'
-                                      for k, v in environment.items()) + '}'
-    return [args.codex, 'exec', '--json', '--strict-config', '--ignore-user-config', '--ephemeral',
-            '--skip-git-repo-check',
+    flags, _ = isolation.isolation_options(
+        [snapshot], work, codex=args.codex, pdf_skill=args.pdf_skill,
+        tool_runtime=getattr(args, 'tool_runtime', None),
+        ripgrep=getattr(args, 'ripgrep', None))
+    return [args.codex, 'exec', '--json', *flags,
             '--model', args.model, '-c', 'model_reasoning_effort=' + json.dumps(args.effort),
             '-c', 'developer_instructions=' + json.dumps(system),
-            '-c', 'web_search="disabled"',
-            *permission_options(work, snapshot, args.pdf_skill, args.codex, tool_runtime, ripgrep),
-            '-c', 'mcp_servers={}',
-            '-c', 'features.apps=false', '-c', 'features.plugins=false',
-            '-c', 'features.browser_use=false', '-c', 'features.computer_use=false',
-            '-c', 'features.multi_agent=false', '-c', 'features.memories=false',
-            '-c', 'features.workspace_dependencies=false', '-c', 'features.hooks=false',
-            '-c', 'features.skip_host_skill_discovery=true',
-            '-c', 'shell_environment_policy.inherit="none"',
-            '-c', 'shell_environment_policy.set=' + tool_environment,
-            '-c', 'allow_login_shell=false', '-c', 'features.shell_snapshot=false',
-            '-c', 'approval_policy="never"', '-c', 'project_doc_max_bytes=0',
             '--cd', str(work), '--color', 'never', '--output-schema', str(work / 'schema.json'),
             '--output-last-message', str(work / 'response.json'), '-']
 
@@ -336,12 +269,9 @@ def call_codex(args, profile, template, snapshot, work, attempt):
     attempt['developer_message'] = profile.text
     # Preserve both exact messages even if the CLI or response validation fails.
     attempt['ripgrep'] = getattr(args, 'ripgrep_metadata', None)
-    env = os.environ.copy()
-    # Tool subprocesses may create scratch files here, not in a shared /tmp.
-    env['TMPDIR'] = str(work)
-    for key in ('CODEX_THREAD_ID', 'CODEX_SESSION_ID', 'CODEX_INTERNAL_ORIGINATOR_OVERRIDE',
-                'CODEX_APP_TOOLS_PIPE_PATH'):
-        env.pop(key, None)
+    attempt['isolation_policy'] = isolation.identity()
+    attempt['read_files'] = [str(path) for path in isolation.material_paths([snapshot])]
+    env = isolation.child_environment(work)
     process = None
     with (work / 'events.jsonl').open('w+', encoding='utf-8') as events, \
             (work / 'stderr.log').open('w+', encoding='utf-8') as errors:
@@ -378,7 +308,7 @@ def call_codex(args, profile, template, snapshot, work, attempt):
                 if event.get('type') == 'item.completed' and item.get('type') == 'command_execution':
                     activity.append({k: item[k] for k in ('type', 'command', 'exit_code', 'status') if k in item})
             attempt['command_activity'] = activity
-            attempt['permission_profile'] = 'review_only'
+            attempt['permission_profile'] = isolation.PROFILE
             errors.seek(0)
             attempt['stderr_tail'] = errors.read()[-4000:]
             response = work / 'response.json'
@@ -393,7 +323,7 @@ def fingerprint(args, profile, template, checksum, condition=None):
                            'pdf_sha256': checksum, 'model': args.model, 'effort': args.effort,
                            'codex_executable': str(Path(shutil.which(args.codex) or args.codex).resolve()),
                            'schema': profile.schema, 'adapter_version': 3,
-                           'file_access': 'review_only_private_temp_v1',
+                           'isolation_policy': isolation.identity(),
                            'tool_runtime': str(args.tool_runtime) if getattr(args, 'tool_runtime', None) else None,
                            'ripgrep': getattr(args, 'ripgrep_metadata', None),
                            'pdf_skill_sha256': args.pdf_skill_sha256}

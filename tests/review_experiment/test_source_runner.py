@@ -17,6 +17,10 @@ class SourceRunnerTests(unittest.TestCase):
         self.root = self.fixture.root
         self.log = self.root / 'profile_calls.jsonl'
 
+        # Exercise the actual bundled source registry and original venue texts.
+        self.prompts = runner.HERE / 'prompts'
+        self.fixture.profiles, _ = runner.load_prompts(self.prompts)
+
     def cli(self, invalid_score=None):
         path = self.root / 'profile_cli'
         texts = {key: profile.text for key, profile in self.fixture.profiles.items()}
@@ -33,8 +37,9 @@ if {invalid_score!r} is not None:score={invalid_score!r}
 user=sys.stdin.read()
 assert user.endswith('/manuscript.pdf') and '{{PAPER_CONTENT}}' not in user
 result={{'oa':score,'strengths':['Fixture strength'],'weaknesses':['Fixture weakness']}}
-pathlib.Path(args[args.index('--output-last-message')+1]).write_text(json.dumps(result))
-with pathlib.Path({str(self.log)!r}).open('a') as stream:stream.write(json.dumps({{'source':source,'oa_schema':oa}})+'\\n')
+response=json.dumps(result)
+pathlib.Path(args[args.index('--output-last-message')+1]).write_text(response)
+with pathlib.Path({str(self.log)!r}).open('a') as stream:stream.write(json.dumps({{'source':source,'oa_schema':oa,'schema':schema,'developer_message':system,'user_message':user,'raw_response':response}})+'\\n')
 print(json.dumps({{'type':'turn.completed','usage':{{'input_tokens':100,'cached_input_tokens':20,'output_tokens':5}}}}))
 ''')
         path.chmod(0o755)
@@ -43,7 +48,7 @@ print(json.dumps({{'type':'turn.completed','usage':{{'input_tokens':100,'cached_
     def invoke(self, *extra, invalid_score=None):
         args=[str(self.fixture.input),'--output',str(self.fixture.output),
               '--codex',str(self.cli(invalid_score)),'--pdf-skill',str(self.fixture.skill),
-              '--condition','exp1_quality','--retries','0',*extra]
+              '--condition','exp1_quality','--retries','0','--prompts',str(self.prompts),*extra]
         with redirect_stdout(io.StringIO()):
             return runner.main(args)
 
@@ -55,6 +60,14 @@ print(json.dumps({{'type':'turn.completed','usage':{{'input_tokens':100,'cached_
         self.assertEqual(self.invoke('--workers','6'),0)
         calls=[json.loads(line) for line in self.log.read_text().splitlines()]
         self.assertEqual(len(calls),7)
+        self.assertEqual({source: sum(call['source'] == source for call in calls)
+                          for source in sources.values()},
+                         {'iclr2026': 3, 'acl2026': 2, 'tmlr_2025plus': 2})
+        for call in calls:
+            profile = self.fixture.profiles[call['source']]
+            self.assertEqual(call['schema'], profile.schema)
+            self.assertEqual(call['oa_schema'], profile.schema['properties']['oa'])
+            self.assertEqual(call['developer_message'], profile.text)
         expected={'iclr2026':10,'acl2026':3.5,'tmlr_2025plus':4}
         for aid,source in sources.items():
             doc=json.loads((self.fixture.output/aid/'reviews.json').read_text())
@@ -65,6 +78,16 @@ print(json.dumps({{'type':'turn.completed','usage':{{'input_tokens':100,'cached_
                 self.assertEqual(review['result']['oa'],expected[source])
                 self.assertEqual(review['system_prompt']['sha256'],self.fixture.profiles[source].sha256)
                 self.assertEqual(review['system_prompt']['scale_kind'],'experimental_encoding' if source=='tmlr_2025plus' else 'native')
+                profile = self.fixture.profiles[source]
+                self.assertEqual(review['system_prompt'], profile.metadata())
+                attempt = review['attempts'][0]
+                self.assertEqual(attempt['developer_message'], profile.text)
+                call = next(call for call in calls
+                            if call['user_message'] == attempt['user_message'])
+                self.assertEqual(call['source'], source)
+                self.assertEqual(attempt['raw_response'], call['raw_response'])
+                self.assertEqual(json.loads(attempt['raw_response']), review['result'])
+                self.assertEqual(review['token_usage']['reported_totals']['total_tokens'], 105)
         summary=json.loads((self.fixture.output/'run_summary.json').read_text())
         self.assertEqual(summary['inventory']['source_by_paper'],sources)
         before={p: p.read_bytes() for p in self.fixture.output.glob('*/reviews.json')}

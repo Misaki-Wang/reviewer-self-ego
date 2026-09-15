@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import fcntl
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -16,12 +17,14 @@ import subprocess
 import sys
 import threading
 import time
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 if __package__:
     from . import completed_turn as recovery
+    from . import verify_local_batch as audit
 else:
     import completed_turn as recovery
+    import verify_local_batch as audit
 
 
 def now():
@@ -135,6 +138,31 @@ def memory_observation(proc=Path('/proc')):
     return min(samples, key=lambda row: row['free_percent']) if samples else unknown
 
 
+def frozen_pdf_path(config, request):
+    """Use only the explicitly frozen original-version path for an overlay run."""
+    relative = Path(request['arxiv_id']) / f"{request['requested_id']}.pdf"
+    primary = Path(config['pdf_root']) / relative
+    if config.get('source_catalog') != 'data_full':
+        return primary
+    if (not re.fullmatch(r'\d{4}\.\d{4,5}', request['arxiv_id'])
+            or type(request['version']) is not int or request['version'] < 1
+            or request['requested_id'] != f"{request['arxiv_id']}v{request['version']}"):
+        raise ValueError('Invalid frozen original-version PDF identity')
+    fallback = config.get('fallback_pdf_roots', [])
+    value = request.get('pdf_path')
+    if (not isinstance(fallback, list) or not isinstance(value, str)
+            or not value or not Path(value).is_absolute() or '..' in Path(value).parts):
+        raise ValueError('Overlay PDF path and fallback roots must be explicitly frozen')
+    path = Path(value)
+    for value in [config['pdf_root'], *fallback]:
+        if not isinstance(value, str) or not Path(value).is_absolute():
+            raise ValueError('Overlay PDF roots must be absolute paths')
+        root = Path(value)
+        if path == root / relative and path.resolve() == root.resolve() / relative:
+            return path
+    raise ValueError(f'Overlay PDF path is outside the frozen original-version roots: {path}')
+
+
 def validate_cached_pdf(row, frozen_version, prepare):
     path = Path(row['local_path'])
     if path.is_symlink() or not path.is_file():
@@ -195,7 +223,16 @@ class Batch:
         self.scope = read(run / 'scope_input.json')
         sys.path.insert(0, str(run / 'source_snapshot'))
         sys.path.insert(0, str(run / 'source_snapshot/check_diff'))
-        import runner
+        # Unique packages prevent another run's cached runner/schema from crossing snapshots.
+        package_name = '_batch_snapshot_' + hashlib.sha256(str(run.resolve()).encode()).hexdigest()
+        package = ModuleType(package_name)
+        package.__path__ = [str(run / 'source_snapshot/check_diff')]
+        sys.modules[package_name] = package
+        spec = importlib.util.spec_from_file_location(package_name + '.runner',
+            run / 'source_snapshot/check_diff/runner.py')
+        runner = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = runner
+        spec.loader.exec_module(runner)
         import prepare_source_data
         self.runner, self.tokens, self.prepare = runner, runner.token_usage, prepare_source_data
         self.stop = threading.Event()
@@ -234,12 +271,20 @@ class Batch:
         for row in map(json.loads, (run / 'version_inventory.jsonl').read_text().splitlines()):
             self.inventory[row['requested_id']] = row
             self.versions[row['requested_id']] = row['frozen_version_metadata']
-        self.signature = hashlib.sha256(json.dumps({
+        self.isolation_policy = audit.isolation_policy(self.config, audit.Reader(), run)
+        self.isolation_resources = audit.isolation_resources(self.config) if self.isolation_policy else None
+        if self.isolation_policy is not None and runner.isolation.identity() != self.isolation_policy:
+            raise ValueError('Loaded isolation helper differs from the frozen policy')
+        signature_values = {
             'model': self.config['model'], 'effort': self.config['reasoning_effort'],
             'compare': sha(run / 'source_snapshot/check_diff/prompts/compare.md'),
             'rubric': sha(run / 'source_snapshot/check_diff/prompts/rubric.md'),
             'schema': sha(run / 'source_snapshot/check_diff/schema.py'),
-            'scope': sha(run / 'scope_input.json')}, sort_keys=True).encode()).hexdigest()
+            'scope': sha(run / 'scope_input.json')}
+        if self.isolation_policy is not None:
+            signature_values['isolation_policy'] = self.isolation_policy
+            signature_values['isolation_resources'] = self.isolation_resources
+        self.signature = hashlib.sha256(json.dumps(signature_values, sort_keys=True).encode()).hexdigest()
         self.pdfs = {}
         for request in self.plan['requested_pdfs']:
             key = request['requested_id']
@@ -249,7 +294,7 @@ class Batch:
                 self.pdf_states[key] = {'status': 'officially_unavailable', 'evidence': observation}
                 continue
             row = {'requested_id': key, 'arxiv_id': request['arxiv_id'], 'version': request['version'],
-                   'local_path': str(Path(self.config['pdf_root']) / request['arxiv_id'] / f'{key}.pdf'),
+                   'local_path': str(frozen_pdf_path(self.config, request)),
                    'expected_bytes': pdf['bytes'], 'expected_sha256': pdf['sha256'],
                    'expected_pages': observation['page_count']['value']}
             self.pdfs[key] = row
@@ -300,6 +345,8 @@ class Batch:
         if contract.exists() and read(contract).get('execution_signature') != self.signature:
             raise ValueError('Frozen execution contract has changed')
         save(contract, {'execution_signature': self.signature,
+             **({'isolation_policy': self.isolation_policy, 'isolation_resources': self.isolation_resources}
+                if self.isolation_policy else {}),
              'requested_model': self.config['model'], 'requested_reasoning_effort': self.config['reasoning_effort'],
              'unit_count': len(self.unit_pairs), 'comparison_count': len(self.pairs),
              'source_membership_counts': {s: sum(s in v for v in self.scope['record_memberships'].values())
@@ -368,6 +415,7 @@ class Batch:
                     'requested_model': self.config['model'],
                     'requested_reasoning_effort': self.config['reasoning_effort'],
                     'execution_signature': self.signature, 'input_sha256': self.expected_hashes(pair),
+                    **({'isolation_policy': self.isolation_policy} if self.isolation_policy else {}),
                     'token_usage': usage, 'error': 'Previous coordinator ended before archiving this attempt.'}
                 receipt['artifact_sha256'] = {p.name: sha(p) for p in root.iterdir() if p.is_file()}
                 save(root / 'receipt.json', receipt)
@@ -392,7 +440,8 @@ class Batch:
                 if receipt.get('status') != 'completed':
                     continue
                 if (receipt.get('execution_signature') != self.signature or
-                        receipt.get('input_sha256') != self.expected_hashes(pair)):
+                        receipt.get('input_sha256') != self.expected_hashes(pair) or
+                        (self.isolation_policy is not None and receipt.get('isolation_policy') != self.isolation_policy)):
                     raise ValueError(f'Archived completion has different inputs or settings: {receipt_path}')
                 result_path = receipt_path.parent / 'result.json'
                 self.runner.validate_result(read(result_path))
@@ -427,6 +476,8 @@ class Batch:
     def saved_result(self, pair):
         receipt = usable_saved_result(self.output_path(pair), self.signature, self.expected_hashes(pair),
                                       self.runner.validate_result)
+        if receipt and self.isolation_policy is not None and receipt.get('isolation_policy') != self.isolation_policy:
+            raise ValueError('Completed output isolation policy mismatch')
         if receipt and 'recovery' in receipt:
             root = self.run / 'attempts' / pair['key'] / f'attempt-{receipt["attempt"]:03d}'
             if not (root / 'recovery.json').is_file():
@@ -460,6 +511,8 @@ class Batch:
                 'execution_signature': self.signature, 'requested_model': self.config['model'],
                 'requested_reasoning_effort': self.config['reasoning_effort'],
                 'input_sha256': self.expected_hashes(pair), 'turn_completed_count': 1, 'turn_failed_count': 0}
+            if self.isolation_policy is not None:
+                expected['isolation_policy'] = self.isolation_policy
             if any(original.get(k) != v for k, v in expected.items()):
                 raise ValueError('Recovery receipt identity or turn counts mismatch')
             artifacts = original['artifact_sha256']
@@ -490,8 +543,11 @@ class Batch:
             command = recovery.decode(regular(root / 'command.json'))
             settings = SimpleNamespace(codex=self.config['codex_path'], model=self.config['model'],
                                        effort=self.config['reasoning_effort'])
-            if command != {'argv': self.runner.build_command(settings, root / 'work'),
-                           'working_directory': str(root / 'work')}:
+            if self.isolation_policy is not None:
+                audit.validate_isolated_command(self.config, audit.Reader(), self.run, command,
+                    root / 'work', endpoint.pdfs, original.get('isolation_grants'))
+            elif command != {'argv': self.runner.build_command(settings, root / 'work'),
+                             'working_directory': str(root / 'work')}:
                 raise ValueError('Recovery command settings mismatch')
             inputs = {item['requested_id']: item for item in original['inputs']}
             if len(inputs) != len(original['inputs']) or set(inputs) != set(pair['pdf_ids']):
@@ -580,6 +636,8 @@ class Batch:
             'started_at_utc': now(), 'requested_model': self.config['model'],
             'requested_reasoning_effort': self.config['reasoning_effort'],
             'execution_signature': self.signature, 'input_sha256': self.expected_hashes(pair)}
+        if self.isolation_policy is not None:
+            receipt['isolation_policy'] = self.isolation_policy
         # Mark only new attempts; historical receipts keep their exact raw equality contract.
         if callable(getattr(self.runner, 'normalize_result_labels', None)):
             receipt['result_label_normalization'] = 'runner.normalize_result_labels'
@@ -593,10 +651,22 @@ class Batch:
             prompt = self.runner.make_prompt(endpoint_pair)
             (root / 'prompt.txt').write_text(prompt)
             receipt['prompt_sha256'] = sha(root / 'prompt.txt')
-            env = self.runner.task_environment(root / 'cli_state')
+            env = (self.runner.task_environment(root / 'cli_state', self.isolation_resources['pdf_skill'])
+                   if self.isolation_policy else self.runner.task_environment(root / 'cli_state'))
             settings = SimpleNamespace(codex=self.config['codex_path'], model=self.config['model'],
                                        effort=self.config['reasoning_effort'])
-            command = self.runner.build_command(settings, work)
+            if self.isolation_policy is not None:
+                settings.pdf_skill = self.isolation_resources['pdf_skill']
+                settings.tool_runtime = self.isolation_resources['tool_runtime']
+                env = self.runner.isolation.child_environment(work, base_env=env)
+                command = self.runner.build_command(settings, work, endpoint_pair)
+            else:
+                command = self.runner.build_command(settings, work)
+            if self.isolation_policy is not None:
+                receipt['isolation_grants'] = audit.isolated_command_grants({'argv': command})
+                audit.validate_isolated_command(self.config, audit.Reader(), self.run,
+                    {'argv': command, 'working_directory': str(work)}, work, endpoint_pair.pdfs,
+                    receipt['isolation_grants'])
             save(root / 'command.json', {'argv': command, 'working_directory': str(work)})
             with (root / 'events.jsonl').open('w+') as events, (root / 'stderr.log').open('w+') as stderr:
                 with self.process_lock:

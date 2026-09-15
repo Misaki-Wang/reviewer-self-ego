@@ -36,7 +36,10 @@ class SourceFixture(unittest.TestCase):
             name = f'data/index/{source}.json'
             shard = {'dataset': 'source_data', 'schema_version': 'source-data-source-shard-1',
                      'source_id': source, 'record_count': 1,
-                     'records': [{'arxiv_id': f'2501.{number:05d}', 'source_ids': [source]}]}
+                     'records': [{'arxiv_id': f'2501.{number:05d}', 'source_ids': [source],
+                                  'arxiv_url': f'https://arxiv.org/abs/2501.{number:05d}',
+                                  'title': 'Synthetic source', 'source_entries': [],
+                                  'temporal_eligibility': {'status': 'eligible'}}]}
             self.write_json(self.project / name, shard)
             raw = (self.project / name).read_bytes()
             self.index['files'].append({'source_id': source, 'path': f'{source}.json', 'record_count': 1,
@@ -101,6 +104,106 @@ class SourceFixture(unittest.TestCase):
 
 
 class ExportedSourcesTests(SourceFixture):
+    def make_overlay(self):
+        base = self.project / 'data/index/acl2026.json'
+        added = copy.deepcopy(json.loads(base.read_bytes()))
+        added['records'][0]['arxiv_id'] = '2501.00003'
+        delta = self.project / 'data_full/index/acl2026.additions.json'
+        self.write_json(delta, added)
+        index = {'dataset': 'source_data', 'schema_version': 'source-data-index-1',
+            'dataset_metadata': {'dataset': 'source_data', 'record_count': 2},
+            'record_order': ['2501.00003', '2501.00001'],
+            'bases': [{'catalog': 'data', 'source_id': 'acl2026', 'record_count': 1, **provenance.proof(base)}],
+            'files': [{'path': delta.name, 'source_id': 'acl2026', 'record_count': 1, **provenance.proof(delta)}]}
+        self.write_json(self.project / 'data_full/index/index.json', index)
+        self.write_json(self.project / 'data_full/index/provenance/build.json', {'source': 'fixture'})
+        self.repin()
+
+    def declare_data_build_provenance(self, *, index_owner=False):
+        name = 'data/index/provenance/new_min3.json'
+        path = self.project / name
+        self.write_json(path, {'minimum_selected_versions': 3, 'source_id': 'acl2026'})
+        declared = {'path': 'provenance/new_min3.json', **provenance.proof(path)}
+        owner = self.project / (provenance.INDEX_PATH if index_owner else 'data/index/acl2026.json')
+        document = json.loads(owner.read_bytes())
+        (document['dataset_metadata'] if index_owner else document)['build_provenance'] = declared
+        self.write_json(owner, document)
+        self.repin(None if index_owner else 'acl2026')
+        return name
+
+    def test_data_declared_build_provenance_is_frozen_with_its_pin_and_path(self):
+        from utility.prepare_batch import freeze
+        name = self.declare_data_build_provenance()
+        before = self.snapshot()
+        blobs, deployment = self.verify()
+        self.assertEqual(blobs[name], before[name])
+        with tempfile.TemporaryDirectory(prefix='source-proof-freeze-') as temporary:
+            run = Path(temporary)
+            locations = freeze(run, self.project, blobs, deployment, self.manifest['revision'])
+            frozen_name = f'source_snapshot/{name}'
+            self.assertEqual((run / frozen_name).read_bytes(), before[name])
+            self.assertEqual(locations[frozen_name], {'path': str(self.project / name),
+                'source_revision': self.manifest['revision'], **provenance.proof(self.project / name)})
+        self.assertEqual(self.snapshot(), before)
+
+    def test_data_index_declared_build_provenance_is_captured(self):
+        name = self.declare_data_build_provenance(index_owner=True)
+        blobs, _ = self.verify()
+        self.assertEqual(blobs[name], (self.project / name).read_bytes())
+
+    def test_data_declared_build_provenance_missing_or_changed_is_rejected(self):
+        name = self.declare_data_build_provenance()
+        path = self.project / name
+        raw = path.read_bytes()
+        for failure in ('missing_manifest_entry', 'missing_file', 'changed_file', 'changed_pin'):
+            with self.subTest(failure=failure):
+                path.write_bytes(raw)
+                self.repin()
+                if failure == 'missing_manifest_entry':
+                    del self.manifest['files'][name]
+                    self.seal()
+                elif failure == 'missing_file':
+                    path.unlink()
+                else:
+                    path.write_bytes(raw + b' ')
+                    if failure == 'changed_pin':
+                        self.repin()
+                with self.assertRaises(ValueError):
+                    self.verify()
+
+    def test_unrequested_data_build_proof_does_not_expand_legacy_capture(self):
+        name = self.declare_data_build_provenance()
+        (self.project / name).write_text('Unrequested proof changed')
+        self.assert_verified(sources=('iclr2026',))
+
+    def test_overlay_pins_original_base_delta_index_and_provenance_without_writes(self):
+        self.make_overlay()
+        before = self.snapshot()
+        blobs, _ = provenance.verified_sources(self.project, self.project, ['acl2026'],
+                                               self.manifest['revision'], catalog='data_full')
+        for name in ('data/index/acl2026.json', 'data_full/index/index.json',
+                     'data_full/index/acl2026.additions.json', 'data_full/index/provenance/build.json'):
+            self.assertEqual(blobs[name], before[name])
+        self.assertNotIn('data/index/iclr2026.json', blobs)
+        self.assertEqual(before, self.snapshot())
+
+    def test_overlay_changed_base_or_delta_fails_pinned_verification(self):
+        self.make_overlay()
+        for name in ('data/index/acl2026.json', 'data_full/index/acl2026.additions.json'):
+            path = self.project / name
+            raw = path.read_bytes()
+            path.write_bytes(raw + b' ')
+            with self.assertRaisesRegex(ValueError, 'hash/size mismatch'):
+                provenance.verified_sources(self.project, self.project, ['acl2026'],
+                                              self.manifest['revision'], catalog='data_full')
+            path.write_bytes(raw)
+
+    def test_catalog_selector_cannot_traverse_or_select_arbitrary_roots(self):
+        for catalog in ('../data', 'other', '/data_full', None):
+            with self.subTest(catalog=catalog), self.assertRaises(ValueError):
+                provenance.verified_sources(self.project, self.project, ['acl2026'],
+                                              self.manifest['revision'], catalog=catalog)
+
     def test_core_file_contract_and_manifest_map(self):
         self.assertEqual(provenance.CORE_FILES, ('runner.py', 'schema.py', 'prompts/compare.md',
                                                'prompts/rubric.md', 'README.md', 'requirements.txt'))

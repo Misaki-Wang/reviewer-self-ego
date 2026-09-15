@@ -23,3 +23,9 @@ private project scratch and CPU-only Slurm allocations for sustained tests.
 Historical results/configuration remain immutable under res/archive; archived
 absolute paths describe the original environment and may need restoration for
 reproduction. Do not execute archived launchers as the current workflow.
+
+The original three-version data/ catalog is immutable. The two-version data_full/
+catalog references pinned base shards plus disjoint additions; resolve it through
+prepare_source_data.load_source. Keep base/delta/index bytes in frozen source
+snapshots. Existing original PDFs are read-only fallbacks for original-PDF workflows;
+clean-PDF workflows must never silently substitute original PDFs.

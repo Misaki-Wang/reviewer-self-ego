@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 import io
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -33,6 +34,12 @@ class PreparationTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.project = Path(temporary.name).resolve()
+        skill = self.project / 'fixture-pdf-skill/SKILL.md'
+        skill.parent.mkdir()
+        skill.write_text('Offline fixture PDF skill.\n')
+        skill_env = mock.patch.dict(os.environ, {'CHECK_DIFF_PDF_SKILL': str(skill)})
+        skill_env.start()
+        self.addCleanup(skill_env.stop)
         self.code_root = self.project
         self.run = self.project / 'res/pilot'
         self.args = argparse.Namespace(project=self.project,
@@ -40,13 +47,13 @@ class PreparationTests(unittest.TestCase):
             model='gpt-6-astra', effort='max', workers=20, timeout=3600, source_revision=None)
         self.make_fixture(11)
 
-    def make_fixture(self, count):
+    def make_fixture(self, count, days=(0, 30, 31, 61, 62, 93)):
         records, ledger = [], []
         # Deliberately descending IDs: selection must follow metadata, not sort IDs.
         for i in reversed(range(count)):
             aid = f'2501.{i:05d}'
             versions = []
-            for number, day in enumerate((0, 30, 31, 61, 62, 93), 1):
+            for number, day in enumerate(days, 1):
                 path = self.project / f'data/pdf/{aid}/{aid}v{number}.pdf'
                 path.parent.mkdir(parents=True, exist_ok=True)
                 writer = PdfWriter()
@@ -62,7 +69,7 @@ class PreparationTests(unittest.TestCase):
                     'page_count': {'value': 1}, 'official_no_pdf_evidence': None})
             records.append({'arxiv_id': aid, 'arxiv_url': f'https://arxiv.org/abs/{aid}',
                 'title': 'Unchanged original metadata', 'source_ids': ['acl2026', 'unauthorized_source'],
-                'source_entries': [], 'frozen_N': 6, 'versions': versions,
+                'source_entries': [], 'frozen_N': len(days), 'versions': versions,
                 'extra': {'original': [None, 'α']}, 'temporal_eligibility': {'status': 'eligible'}})
         self.records = copy.deepcopy(records)
         pilot.save(self.code_root / 'data/index/acl2026.json',
@@ -88,7 +95,7 @@ class PreparationTests(unittest.TestCase):
                      'metadata_root': 'data/index/metadata'},
             'outputs': {'runs_root': 'res', 'html_root': 'html'},
             'source_manifest': 'utility/source_manifest.json',
-            'runtime': {'python': sys.executable, 'codex': '/offline/fake-codex', 'pythonpath': []},
+            'runtime': {'python': sys.executable, 'codex': sys.executable, 'pythonpath': []},
             'comparison': {'model': 'gpt-6-astra', 'reasoning_effort': 'max', 'workers': 20,
                            'validation_workers': 4, 'timeout_seconds': 3600},
             'paused': True})
@@ -122,6 +129,110 @@ class PreparationTests(unittest.TestCase):
         with mock.patch('subprocess.Popen', side_effect=AssertionError('Unexpected dispatch')):
             return pilot.prepare(self.args)
 
+    def make_overlay(self):
+        self.make_fixture(2, days=(0, 31))
+        base, added = self.records
+        shard = self.project / 'data/index/acl2026.json'
+        pilot.save(shard, {'dataset': 'source_data', 'schema_version': 'source-data-source-shard-1',
+                          'source_id': 'acl2026', 'record_count': 1, 'records': [base]})
+        prior = [json.loads(line) for line in self.ledger_path.read_text().splitlines()]
+        pilot.save_rows(self.ledger_path, [row for row in prior if row['arxiv_id'] == base['arxiv_id']])
+        pilot.save(self.ledger_path.parent / 'provenance.json',
+                   {'files': {'version_metadata.jsonl': pilot.proof(self.ledger_path)}})
+        primary = self.project / 'data_full/pdf'
+        primary.mkdir(parents=True)
+        shutil.move(str(self.project / 'data/pdf' / added['arxiv_id']), str(primary / added['arxiv_id']))
+        delta = self.project / 'data_full/index/acl2026.additions.json'
+        pilot.save(delta, {'dataset': 'source_data', 'schema_version': 'source-data-source-shard-1',
+                          'source_id': 'acl2026', 'record_count': 1, 'records': [added]})
+        pilot.save(self.project / 'data_full/index/index.json', {
+            'dataset': 'source_data', 'schema_version': 'source-data-index-1',
+            'dataset_metadata': {'dataset': 'source_data', 'record_count': 2},
+            'record_order': [added['arxiv_id'], base['arxiv_id']],
+            'bases': [{'catalog': 'data', 'source_id': 'acl2026', 'record_count': 1, **pilot.proof(shard)}],
+            'files': [{'path': delta.name, 'source_id': 'acl2026', 'record_count': 1, **pilot.proof(delta)}]})
+        self.sign_sources()
+        self.args.catalog, self.args.units = 'data_full', 2
+        return base, added
+
+    def test_overlay_reuses_original_pdf_and_freezes_complete_catalog_without_source_store(self):
+        base, added = self.make_overlay()
+        original = {str(p.relative_to(self.project)): p.read_bytes()
+                    for p in (self.project / 'data').rglob('*') if p.is_file()}
+        manifest = self.prepare()
+        self.assertEqual(manifest['status'], 'prepared')
+        self.assertEqual(manifest['source_catalog'], 'data_full')
+        config = pilot.read(self.run / 'run_config.json')
+        self.assertEqual(config['fallback_pdf_roots'], [str(self.project / 'data/pdf')])
+        scope = pilot.read(self.run / 'scope_input.json')
+        self.assertEqual(scope['records'], [added, base])
+        plan = pilot.read(self.run / 'prepared/selection_manifest.json')
+        for request in plan['requested_pdfs']:
+            store = 'data' if request['arxiv_id'] == base['arxiv_id'] else 'data_full'
+            self.assertTrue(Path(request['pdf_path']).is_relative_to(self.project / store / 'pdf'))
+        inventory = pilot.audit.Reader().rows(self.run / 'version_inventory.jsonl')
+        self.assertTrue(all(row['pdf_observation']['pdf']['availability_status'] == 'verified' for row in inventory))
+        for row in inventory:
+            if row['arxiv_id'] == added['arxiv_id']:
+                self.assertIsNone(row['pdf_observation']['prior_ledger_sha256'])
+                self.assertEqual(row['pdf_observation']['prior_ledger_row_status'], 'absent')
+        frozen_prior = pilot.audit.Reader().rows(self.run / 'provenance_version_metadata.jsonl')
+        self.assertEqual(len(frozen_prior), 4)
+        self.assertEqual(sum(row.get('metadata_origin') == 'absent_from_original_ledger' for row in frozen_prior), 2)
+        self.assertEqual(original, {name: (self.project / name).read_bytes() for name in original})
+        for folder in ('data/index', 'data_full/index'):
+            shutil.rmtree(self.project / folder)
+        loaded, _ = pilot.preparation.load_source(self.run / 'source_snapshot/data_full/index/index.json')
+        self.assertEqual(loaded, [added, base])
+        self.assertEqual(pilot.audit.Verifier(self.run).verify()['errors'], [])
+
+    def test_overlay_missing_new_pdf_stays_unresolved_and_blocks_without_resampling(self):
+        base, added = self.make_overlay()
+        path = self.project / 'data_full/pdf' / added['arxiv_id'] / f"{added['arxiv_id']}v1.pdf"
+        path.unlink()
+        with self.assertRaisesRegex(ValueError, 'preparation audit failed'):
+            self.prepare()
+        scope = pilot.read(self.run / 'scope_input.json')
+        self.assertEqual(scope['records'], [added, base])
+        observed = pilot.audit.Reader().rows(self.run / 'version_inventory.jsonl')
+        missing = next(row for row in observed if row['requested_id'] == f"{added['arxiv_id']}v1")
+        self.assertEqual(missing['pdf_observation']['pdf']['availability_status'], 'unresolved')
+        self.assertIsNone(missing['pdf_observation']['page_count']['value'])
+        self.assertTrue(pilot.read(self.run / 'control.json')['pause_dispatch'])
+
+    def test_explicit_clean_store_never_falls_back_to_original_pdfs(self):
+        self.make_overlay()
+        self.args.pdf_root = self.project / 'clean_data/pdf'
+        with self.assertRaisesRegex(ValueError, 'preparation audit failed'):
+            self.prepare()
+        plan = pilot.read(self.run / 'prepared/selection_manifest.json')
+        self.assertEqual(plan['fallback_pdf_roots'], [])
+        self.assertTrue(all(Path(item['pdf_path']).is_relative_to(self.args.pdf_root)
+                            for item in plan['requested_pdfs']))
+        self.assertTrue(all(not item['present_at_plan'] for item in plan['requested_pdfs']))
+
+    def test_two_selected_versions_prepare_one_pair_and_keep_original_history(self):
+        for days, expected in (((0, 31), [1, 2]), ((0, 1, 2, 100), [1, 4])):
+            with self.subTest(days=days):
+                self.make_fixture(1, days=days)
+                self.args.units = 1
+                self.args.run = Path(f'res/pair-{len(days)}')
+                self.run = self.project / self.args.run
+                manifest = self.prepare()
+                plan = pilot.read(self.run / 'prepared/selection_manifest.json')
+                self.assertEqual(plan['selected_units'][0]['selected_version_ids'], expected)
+                self.assertEqual(manifest['summary']['pair_count'], 1)
+                self.assertEqual(pilot.read(self.run / 'scope_input.json')['records'], self.records)
+                self.assertEqual(len(pilot.audit.Reader().rows(self.run / 'version_inventory.jsonl')), len(days))
+                self.assertFalse(manifest['model_execution_performed'])
+
+    def test_exactly_thirty_days_cannot_prepare_a_pair(self):
+        self.make_fixture(1, days=(0, 30))
+        self.args.units = 1
+        with self.assertRaisesRegex(ValueError, 'Fixed unit lacks a resolved eligible sequence'):
+            self.prepare()
+        self.assertFalse(self.run.exists())
+
     def test_core_pin_and_frozen_lowercase_scientific_contract(self):
         self.prepare()
         config = pilot.read(self.run / 'run_config.json')
@@ -148,8 +259,59 @@ class PreparationTests(unittest.TestCase):
         self.assertTrue(control['auto_scale'])
         self.assertTrue(control['pause_dispatch'])
 
+    def test_160_worker_ladder_preserves_scope_provenance_and_paused_freeze(self):
+        self.args.units, self.args.workers = 1, 160
+        self.args.concurrency_ladder = [160, 128, 96, 80, 64, 48]
+        original_project = (self.project / 'utility/project.json').read_bytes()
+        original_manifest = self.manifest_path.read_bytes()
+        manifest = self.prepare()
+        config = pilot.read(self.run / 'run_config.json')
+        self.assertEqual((config['initial_workers'], config['max_workers']), (160, 160))
+        self.assertEqual(config['concurrency_ladder'], [160, 128, 96, 80, 64, 48])
+        self.assertEqual((config['model'], config['reasoning_effort']), ('gpt-6-astra', 'max'))
+        self.assertEqual(config['source_revision'], self.args.source_revision)
+        self.assertEqual(pilot.read(self.run / 'scope_input.json')['records'], self.records[:1])
+        self.assertEqual(manifest['summary']['pair_count'], 3)
+        self.assertFalse(manifest['model_execution_performed'])
+        control = pilot.read(self.run / 'control.json')
+        self.assertEqual(control['workers'], 160)
+        self.assertTrue(control['auto_scale'])
+        self.assertTrue(control['pause_dispatch'])
+        self.assertEqual((self.project / 'utility/project.json').read_bytes(), original_project)
+        self.assertEqual(self.manifest_path.read_bytes(), original_manifest)
+
+    def test_64_and_256_ladders_freeze_exact_scope_and_source_bytes(self):
+        original_project = (self.project / 'utility/project.json').read_bytes()
+        original_manifest = self.manifest_path.read_bytes()
+        for ladder in ([64, 48, 32, 16], [256, 224, 192, 160, 128, 96, 80, 64, 48]):
+            with self.subTest(ladder=ladder):
+                self.args.units, self.args.workers = 1, ladder[0]
+                self.args.concurrency_ladder = list(ladder)
+                self.args.run = Path(f'res/ladder-{ladder[0]}')
+                self.run = self.project / self.args.run
+                manifest = self.prepare()
+                config = pilot.read(self.run / 'run_config.json')
+                self.assertEqual((config['initial_workers'], config['max_workers']),
+                                 (ladder[0], ladder[0]))
+                self.assertEqual(config['concurrency_ladder'], ladder)
+                self.assertEqual((config['model'], config['reasoning_effort']),
+                                 ('gpt-6-astra', 'max'))
+                self.assertEqual(config['source_revision'], self.args.source_revision)
+                self.assertEqual(pilot.read(self.run / 'scope_input.json')['records'], self.records[:1])
+                self.assertEqual(manifest['summary']['pair_count'], 3)
+                self.assertFalse(manifest['model_execution_performed'])
+                control = pilot.read(self.run / 'control.json')
+                self.assertEqual(control['workers'], ladder[0])
+                self.assertTrue(control['auto_scale'])
+                self.assertTrue(control['pause_dispatch'])
+                for name in ('prepare_batch.py', 'workflow.py'):
+                    self.assertEqual((self.run / 'source_snapshot' / name).read_bytes(),
+                                     self.frozen_files[name])
+                self.assertEqual((self.project / 'utility/project.json').read_bytes(), original_project)
+                self.assertEqual(self.manifest_path.read_bytes(), original_manifest)
+
     def test_requested_positive_counts_keep_exact_prefix_and_worker_limits(self):
-        for units, workers in ((1, 1), (7, 48), (11, 64)):
+        for units, workers in ((1, 1), (7, 48), (11, 64), (2, 128), (3, 160), (4, 161), (5, 255), (6, 256)):
             with self.subTest(units=units, workers=workers):
                 self.args.units, self.args.workers = units, workers
                 self.args.run = Path(f'res/units-{units}')
@@ -252,26 +414,48 @@ class PreparationTests(unittest.TestCase):
 
     def test_invalid_counts_and_ladders_fail_before_reading_sources_or_creating_run(self):
         changes = [{'units': value} for value in (0, -1, True, 1.5)]
-        changes += [{'workers': value} for value in (0, 97, True, 1.5)]
+        changes += [{'workers': value} for value in (0, -1, 257, True, False, 1.5)]
         changes += [{'timeout': 0}]
         changes += [{'validation_workers': value} for value in (0, -1, 17, 65, True, 1.5)]
         changes += [{'workers': 64, 'concurrency_ladder': value}
                     for value in ([], [64, 32, 48, 16], [64, 48, 32, 32], [64, 48, 32, 0],
                                   [64.0, 48, 32, 16])]
         changes += [{'workers': 20, 'concurrency_ladder': [64, 48, 32, 16]}]
+        changes += [{'workers': 160, 'concurrency_ladder': value}
+                    for value in (True, (160, 128, 96, 80, 64, 48),
+                                  [160, 96, 128, 80, 64, 48], [160, 128, 96, 80, 64, 64],
+                                  [160.0, 128, 96, 80, 64, 48], [160, True, 96, 80, 64, 48],
+                                  [160, 128, 96, 80, 64, 0])]
+        changes += [{'workers': 128, 'concurrency_ladder': [160, 128, 96, 80, 64, 48]}]
+        changes += [{'workers': 256, 'concurrency_ladder': value}
+                    for value in (True, (256, 224, 192, 160, 128, 96, 80, 64, 48),
+                                  [256, 192, 224, 160, 128, 96, 80, 64, 48],
+                                  [256, 224, 192, 160, 128, 96, 80, 64, 64],
+                                  [256.0, 224, 192, 160, 128, 96, 80, 64, 48],
+                                  [256, True, 192, 160, 128, 96, 80, 64, 48],
+                                  [256, 224, 192, 160, 128, 96, 80, 64, 0],
+                                  [256, 224, 160, 128, 96, 80, 64, 48])]
+        changes += [{'workers': 224, 'concurrency_ladder': [256, 224, 192, 160, 128, 96, 80, 64, 48]}]
         original = vars(self.args).copy()
         for change in changes:
             with self.subTest(change=change):
                 self.args = argparse.Namespace(**{**original, **change})
-                with mock.patch.object(pilot, 'select_scope', side_effect=AssertionError('Invalid configuration read sources')):
+                with mock.patch.object(pilot, 'verified_sources', side_effect=AssertionError('Invalid configuration verified sources')), \
+                        mock.patch.object(pilot, 'select_scope', side_effect=AssertionError('Invalid configuration read sources')):
                     with self.assertRaises(ValueError):
                         self.prepare()
                 self.assertFalse(self.run.exists())
 
     def test_ordered_source_union_deduplicates_without_pdf_sampling(self):
+        for record in self.records:
+            record['source_ids'].append('second')
+        pilot.save(self.code_root / 'data/index/acl2026.json', {'dataset': 'source_data',
+            'schema_version': 'source-data-source-shard-1', 'source_id': 'acl2026',
+            'record_count': 11, 'records': self.records})
         pilot.save(self.code_root / 'data/index/second.json', {'dataset': 'source_data', 'schema_version': 'source-data-source-shard-1',
                                                      'source_id': 'second', 'record_count': 11,
                                                      'records': list(reversed(self.records))})
+        self.sign_sources()
         with mock.patch.object(pilot.preparation, 'validate_pdf', side_effect=AssertionError('PDF sampling')):
             scope = pilot.select_scope(self.code_root, ['second', 'acl2026'], 7)
         self.assertEqual(scope['records'], list(reversed(self.records))[:7])
@@ -295,7 +479,11 @@ class PreparationTests(unittest.TestCase):
     def test_configured_run_root_and_codex_are_frozen_without_model_calls(self):
         self.args.runs_root = Path('res/custom')
         self.args.run = Path('res/custom/custom-pilot')
-        self.args.codex = '/fixture/toolchain/codex'
+        executable = self.project / 'fixture-toolchain/codex'
+        executable.parent.mkdir()
+        executable.write_text('#!/bin/sh\nexit 1\n')
+        executable.chmod(0o755)
+        self.args.codex = str(executable)
         self.run = self.project / self.args.run
         manifest = self.prepare()
         config = pilot.read(self.run / 'run_config.json')
@@ -369,7 +557,7 @@ class PreparationTests(unittest.TestCase):
                              self.helpers[name])
         for name in pilot.FROZEN_FILES:
             folder = ('controller_versions/bundle' if name in pilot.BUNDLE else
-                      'source_snapshot/utility' if name == 'token_usage.py' else 'source_snapshot')
+                      'source_snapshot/utility' if name in ('token_usage.py', 'codex_isolation.py') else 'source_snapshot')
             target = self.run / folder / name
             self.assertEqual(target.read_bytes(), self.frozen_files[name])
             self.assertEqual(manifest['source_file_locations'][str(target.relative_to(self.run))],
@@ -395,10 +583,17 @@ with mock.patch('subprocess.Popen', side_effect=AssertionError('Model dispatch')
     batch = Batch(Path(sys.argv[1]))
     assert len(batch.unit_pairs) == 10 and len(batch.pairs) == 30
     assert batch.summary()['sources']['acl2026']['units'] == 10
-    command = batch.runner.build_command(SimpleNamespace(codex='codex', model='gpt-6-astra', effort='max'), batch.run)
+    for key, row in batch.pdfs.items():
+        batch.pdf_states[key] = batch.prepare.validate_pdf(Path(row['local_path']), row['arxiv_id'], batch.versions[key])
+    endpoint, _ = batch.prepare_pair(batch.pairs[0])
+    work = batch.run / 'command-fixture'
+    work.mkdir()
+    command = batch.runner.build_command(SimpleNamespace(codex=sys.executable, model='gpt-6-astra', effort='max'), work, endpoint)
     assert 'model_reasoning_effort="max"' in command
     assert 'web_search="disabled"' in command
-    assert 'sandbox_workspace_write.network_access=false' in command
+    assert 'permissions.isolated_files.network.enabled=false' in command
+    assert Path(batch.runner.isolation.__file__) == batch.run / 'source_snapshot/utility/codex_isolation.py'
+    assert batch.isolation_policy == batch.runner.isolation.identity()
     assert command[command.index('--model') + 1] == 'gpt-6-astra'
     report = Verifier(batch.run).verify()
     assert report['errors'] == [], report['errors']

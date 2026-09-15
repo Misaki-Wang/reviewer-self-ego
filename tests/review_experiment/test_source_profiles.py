@@ -99,6 +99,21 @@ class SourceProfilesTests(unittest.TestCase):
         self.assertEqual(json.loads(json.dumps(meta)), meta)
         self.assertEqual(profiles['iclr2026'].sha256, manifest['files']['system/iclr2026.txt'])
 
+    def test_optional_manifest_return_preserves_custom_default_contract(self):
+        folder, manifest = self.prompts()
+        default = load_prompts(folder, conditions=['c0'])
+        self.assertEqual(len(default), 2)
+        extended = load_prompts(folder, conditions=['c0'], with_manifest=True)
+        self.assertEqual(len(extended), 3)
+        self.assertEqual(extended[:2], default)
+        # Filtering selects calls, while the returned manifest retains full provenance.
+        self.assertEqual(extended[2], manifest)
+        self.assertEqual(len(extended[2]['conditions']), 4)
+        self.assertEqual(len(extended[1]), 1)
+        extended[2]['systems']['acl2025']['oa_values'].append(99)
+        self.assertNotIn(99, extended[0]['acl2025'].oa_values)
+        self.assertEqual(load_prompts(folder, with_manifest=True)[2], manifest)
+
     def test_profile_is_frozen_and_schema_metadata_are_fresh(self):
         profile = self.profile()
         with self.assertRaises(FrozenInstanceError):
@@ -243,6 +258,7 @@ class SourceProfilesTests(unittest.TestCase):
             lambda d: d['systems']['acl2025'].update(oa_values=[float('inf')]),
             lambda d: d['systems']['iclr2026'].update(file='unhashed.txt'),
             lambda d: d['systems']['iclr2026'].update(scale_kind='unknown'),
+            lambda d: d['systems']['iclr2026'].update(scale_kind='study'),
             lambda d: d['systems']['iclr2026'].update(oa_labels=[]),
             lambda d: d['systems']['iclr2026'].update(oa_labels=['one']),
             lambda d: d['systems']['iclr2026'].update(oa_labels=[1] * 6),

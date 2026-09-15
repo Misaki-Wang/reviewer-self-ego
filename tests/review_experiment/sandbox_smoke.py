@@ -113,7 +113,7 @@ if rg:
 print(json.dumps(result))
 '''
         command = [codex, 'sandbox', *permission_options(work, pdf, skill, codex, ripgrep=ripgrep),
-                   '--permission-profile', 'review_only', '--cd', str(work), '--',
+                   '--permission-profile', 'isolated_files', '--cd', str(work), '--',
                    str(Path(sys.executable).resolve()), '-c', code,
                    str(work), str(pdf), str(outside), str(skill), str(ripgrep or ''), tool_path, shared_tmp]
         completed = subprocess.run(command, text=True, capture_output=True, timeout=30)

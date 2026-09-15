@@ -289,6 +289,155 @@ class WorkflowTests(unittest.TestCase):
         self.preparer.prepare.assert_not_called()
         self.process.assert_not_called()
 
+    def test_prepare_accepts_160_workers_with_optional_ladder_without_dispatch(self):
+        before = self.tree()
+        for extra, ladder in (((), None),
+                              (('--concurrency-ladder', '160', '128', '96', '80', '64', '48'),
+                               [160, 128, 96, 80, 64, 48])):
+            with self.subTest(ladder=ladder):
+                self.preparer.prepare.reset_mock()
+                code, _, error = self.prepare('--workers', '160', *extra)
+                self.assertEqual(code, 0, error)
+                self.preparer.prepare.assert_called_once()
+                args = self.preparer.prepare.call_args.args[0]
+                self.assertEqual(args.workers, 160)
+                self.assertEqual(args.concurrency_ladder, ladder)
+                self.assertEqual((args.source, args.units, args.model, args.effort),
+                                 (['acl2026'], 7, 'gpt-6-astra', 'max'))
+                self.assertEqual(args.source_revision, self.revision)
+                self.assertEqual(self.tree(), before)
+        self.provenance.write_manifest.assert_not_called()
+        self.process.assert_not_called()
+
+    def test_prepare_rejects_invalid_160_ladders_before_preparer_or_writes(self):
+        config = workflow.configuration(self.root)
+        args = workflow.parser().parse_args(['--project', str(self.root), 'prepare',
+            '--source', 'acl2026', '--units', '1', '--run-id', 'new-run', '--workers', '160'])
+        before = self.tree()
+        for ladder in ([], True, (160, 128, 96, 80, 64, 48),
+                       [160, 96, 128, 80, 64, 48], [160, 128, 96, 80, 64, 64],
+                       [160.0, 128, 96, 80, 64, 48], [160, True, 96, 80, 64, 48],
+                       [160, 128, 96, 80, 64, 0], [128, 96, 80, 64, 48]):
+            with self.subTest(ladder=ladder):
+                args.concurrency_ladder = ladder
+                with self.assertRaisesRegex(ValueError, '--concurrency-ladder requires'):
+                    workflow.prepare_run(args, config)
+                self.assertEqual(self.tree(), before)
+        self.preparer.prepare.assert_not_called()
+        self.process.assert_not_called()
+
+    def test_prepare_accepts_expanded_worker_boundaries_and_256_default(self):
+        for workers in (1, 161, 192, 224, 255, 256):
+            with self.subTest(workers=workers):
+                before = self.tree()
+                self.preparer.prepare.reset_mock()
+                code, _, error = self.prepare('--workers', str(workers))
+                self.assertEqual(code, 0, error)
+                self.preparer.prepare.assert_called_once()
+                args = self.preparer.prepare.call_args.args[0]
+                self.assertEqual(args.workers, workers)
+                self.assertIsNone(args.concurrency_ladder)
+                self.assertEqual(self.tree(), before)
+        self.config['comparison']['workers'] = 256
+        self.save_config()
+        before = self.tree()
+        self.preparer.prepare.reset_mock()
+        code, _, error = self.prepare()
+        self.assertEqual(code, 0, error)
+        self.preparer.prepare.assert_called_once()
+        self.assertEqual(self.preparer.prepare.call_args.args[0].workers, 256)
+        self.assertEqual(self.tree(), before)
+        self.provenance.write_manifest.assert_not_called()
+        self.process.assert_not_called()
+
+    def test_prepare_forwards_all_four_exact_ladders_without_dispatch(self):
+        before = self.tree()
+        for ladder in ([64, 48, 32, 16], [96, 80, 64, 48],
+                       [160, 128, 96, 80, 64, 48], [256, 224, 192, 160, 128, 96, 80, 64, 48]):
+            with self.subTest(ladder=ladder):
+                self.preparer.prepare.reset_mock()
+                code, _, error = self.prepare('--workers', str(ladder[0]),
+                                               '--concurrency-ladder', *map(str, ladder))
+                self.assertEqual(code, 0, error)
+                self.preparer.prepare.assert_called_once()
+                args = self.preparer.prepare.call_args.args[0]
+                self.assertEqual(args.workers, ladder[0])
+                self.assertEqual(args.concurrency_ladder, ladder)
+                self.assertEqual((args.source, args.units, args.model, args.effort),
+                                 (['acl2026'], 7, 'gpt-6-astra', 'max'))
+                self.assertEqual(args.source_revision, self.revision)
+                self.assertEqual(self.tree(), before)
+        self.provenance.write_manifest.assert_not_called()
+        self.process.assert_not_called()
+
+    def test_prepare_rejects_invalid_256_ladders_before_preparer_or_writes(self):
+        config = workflow.configuration(self.root)
+        args = workflow.parser().parse_args(['--project', str(self.root), 'prepare',
+            '--source', 'acl2026', '--units', '1', '--run-id', 'new-run', '--workers', '256'])
+        before = self.tree()
+        for ladder in ([], True, (256, 224, 192, 160, 128, 96, 80, 64, 48),
+                       [256, 192, 224, 160, 128, 96, 80, 64, 48],
+                       [256, 224, 192, 160, 128, 96, 80, 64, 64],
+                       [256.0, 224, 192, 160, 128, 96, 80, 64, 48],
+                       [256, True, 192, 160, 128, 96, 80, 64, 48],
+                       [256, 224, 192, 160, 128, 96, 80, 64, 0],
+                       [256, 224, 160, 128, 96, 80, 64, 48]):
+            with self.subTest(ladder=ladder):
+                args.concurrency_ladder = ladder
+                with self.assertRaisesRegex(ValueError, '--concurrency-ladder requires'):
+                    workflow.prepare_run(args, config)
+                self.assertEqual(self.tree(), before)
+        args.workers = 224
+        args.concurrency_ladder = [256, 224, 192, 160, 128, 96, 80, 64, 48]
+        with self.assertRaisesRegex(ValueError, '--concurrency-ladder requires'):
+            workflow.prepare_run(args, config)
+        self.assertEqual(self.tree(), before)
+        self.preparer.prepare.assert_not_called()
+        self.process.assert_not_called()
+
+    def test_prepare_explicit_overlay_preserves_project_defaults_and_passes_catalog(self):
+        self.write('data_full/index/index.json', {'files': [], 'bases': []})
+        before = self.tree()
+        code, output, error = self.prepare('--catalog', 'data_full')
+        self.assertEqual(code, 0, error)
+        args = self.preparer.prepare.call_args.args[0]
+        self.assertEqual(args.catalog, 'data_full')
+        self.assertEqual(args.pdf_root, self.root / 'data_full/pdf')
+        self.assertEqual(args.metadata_dir, self.root / 'data/index/metadata')
+        self.assertEqual(json.loads(output)['index'], str(self.root / 'data_full/index/index.json'))
+        self.assertEqual(self.tree(), before)
+        self.process.assert_not_called()
+
+    def test_frozen_verification_does_not_require_live_catalog_or_metadata(self):
+        self.make_run()
+        shutil.rmtree(self.root / 'data/index')
+        self.process.side_effect = None
+        self.process.return_value = SimpleNamespace(returncode=0)
+        code, _, error = self.invoke('verify', '--run-id', 'new-run')
+        self.assertEqual(code, 0, error)
+        self.process.assert_called_once()
+
+    def test_overlay_snapshot_requires_its_selected_index_and_consistent_identity(self):
+        run, manifest = self.make_run()
+        original = 'source_snapshot/data/index/index.json'
+        (run / original).unlink()
+        (run / 'source_snapshot/data/index').rmdir()
+        (run / 'source_snapshot/data').rmdir()
+        manifest['artifact_sha256'].pop(original)
+        chosen = 'source_snapshot/data_full/index/index.json'
+        path = self.write(f'res/new-run/{chosen}', {'fixture': 'frozen overlay'})
+        manifest['artifact_sha256'][chosen] = hashlib.sha256(path.read_bytes()).hexdigest()
+        manifest['source_catalog'] = 'data_full'
+        manifest['source_index'] = {'path': str(self.root / 'data_full/index/index.json'), **source_provenance.proof(path)}
+        self.write('res/new-run/execution_manifest.json', manifest)
+        self.write('res/new-run/run_config.json', {'source_revision': self.revision,
+            'source_catalog': 'data_full', 'source_index': manifest['source_index']})
+        self.process.side_effect = None
+        self.process.return_value = SimpleNamespace(returncode=0)
+        self.assertEqual(self.invoke('verify', '--run-id', 'new-run')[0], 0)
+        self.write('res/new-run/run_config.json', {'source_revision': self.revision, 'source_catalog': 'data'})
+        self.assertNotEqual(self.invoke('verify', '--run-id', 'new-run')[0], 0)
+
     def test_prepare_explicit_overrides(self):
         code, _, error = self.prepare('--model', 'explicit-model', '--effort', 'high',
             '--workers', '32', '--validation-workers', '2', '--timeout', '90')
@@ -298,10 +447,20 @@ class WorkflowTests(unittest.TestCase):
                          ('explicit-model', 'high', 32, 2, 90))
 
     def test_prepare_rejects_invalid_numeric_scope_and_defaults(self):
-        for flag, value in (('--units', '0'), ('--workers', '97'), ('--validation-workers', '17'), ('--timeout', '0')):
+        for flag, value in (('--units', '0'), ('--workers', '257'), ('--validation-workers', '17'), ('--timeout', '0')):
             with self.subTest(flag=flag):
                 self.assertNotEqual(self.prepare(flag, value)[0], 0)
+        for workers in (0, -1, 257, True, False, 1.5):
+            with self.subTest(default_workers=workers):
+                self.config['comparison']['workers'] = workers
+                self.save_config()
+                before = self.tree()
+                code, _, error = self.prepare()
+                self.assertNotEqual(code, 0)
+                self.assertIn('Invalid positive workers', error)
+                self.assertEqual(self.tree(), before)
         self.preparer.prepare.assert_not_called()
+        self.process.assert_not_called()
 
     def test_prepare_requires_fresh_run_even_if_empty(self):
         (self.root / 'res/new-run').mkdir()
@@ -466,6 +625,28 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.tree(), before)
         self.assertFalse((run / 'tmp').exists())
         self.modules.assert_not_called()
+
+    def test_new_snapshot_cannot_omit_isolation_helper_or_its_pin(self):
+        self.unpause()
+        for marker in ('config', 'runner'):
+            with self.subTest(marker=marker):
+                run, manifest = self.make_run()
+                try:
+                    if marker == 'config':
+                        config = json.loads((run / 'run_config.json').read_text())
+                        config['isolation_policy'] = {'version': 'codex-file-isolation-v1', 'sha256': '0' * 64}
+                        (run / 'run_config.json').write_text(json.dumps(config))
+                    else:
+                        target = run / 'source_snapshot/check_diff/runner.py'
+                        target.write_text('# requires codex_isolation.py\n')
+                        manifest['artifact_sha256']['source_snapshot/check_diff/runner.py'] = hashlib.sha256(target.read_bytes()).hexdigest()
+                        self.write('res/new-run/execution_manifest.json', manifest)
+                    code, _, error = self.invoke('run', '--run-id', 'new-run')
+                    self.assertNotEqual(code, 0)
+                    self.assertIn('codex_isolation.py', error)
+                    self.process.assert_not_called()
+                finally:
+                    shutil.rmtree(run)
 
     def test_immutable_snapshot_rejects_changed_missing_untracked_or_linked_dependencies(self):
         self.unpause()

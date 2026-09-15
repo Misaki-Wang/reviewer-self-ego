@@ -90,7 +90,10 @@ class TokenPersistenceTests(unittest.TestCase):
         self.pair = runner.Pair(folder, '2406.03862', 1, 2)
         for pdf in self.pair.pdfs:
             pdf.write_bytes(b'%PDF-fixture')
-        self.args = SimpleNamespace(output=self.root / 'output', model='fixture', effort='medium',
+        skill = self.root / 'skill/SKILL.md'
+        skill.parent.mkdir()
+        skill.write_text('Synthetic PDF skill')
+        self.args = SimpleNamespace(pdf_skill=skill, output=self.root / 'output', model='fixture', effort='medium',
             codex='must-not-run', timeout=5, retries=1, overwrite=False, workers=2)
         runner.STOP.clear()
         self.addCleanup(runner.STOP.clear)
@@ -155,12 +158,12 @@ sys.exit({exit_code})
         self.assertEqual(receipt['token_usage']['status'], 'partial')
         self.assertEqual(receipt['token_usage']['attempts_without_reported_usage'], 1)
 
-    def test_legacy_execution_record_does_not_break_resuming_a_valid_result(self):
+    def test_legacy_execution_record_blocks_reuse_and_keeps_unknown_usage(self):
         path = self.pair.output_path(self.args.output)
         runner.save_result(path, annotation())
         path.with_suffix('.execution.json').write_text(json.dumps({'status': 'completed'}))
         with contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(runner.run(self.args, [self.pair]), 0)
+            self.assertEqual(runner.run(self.args, [self.pair]), 1)
         report = json.loads((self.args.output / 'token_usage.json').read_text())
         self.assertEqual(report['token_usage']['reported_totals']['total_tokens'], 0)
         self.assertEqual(report['pairs'][0]['token_usage']['status'], 'unavailable')
@@ -170,7 +173,7 @@ sys.exit({exit_code})
         runner.save_result(path, annotation())
         path.with_suffix('.execution.json').write_text('{invalid')
         with contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(runner.run(self.args, [self.pair]), 0)
+            self.assertEqual(runner.run(self.args, [self.pair]), 1)
         report = json.loads((self.args.output / 'token_usage.json').read_text())
         self.assertEqual(report['pairs_without_execution_records'], 1)
         self.assertEqual(len(report['execution_record_errors']), 1)

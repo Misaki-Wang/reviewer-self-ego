@@ -120,11 +120,11 @@ The output keeps the three fields `oa`, `strengths` and `weaknesses`. OA must ma
 | 3B | `exp3_years`, `exp3_months`, `exp3_days` |
 | 4 | `exp4_{self_llm,self_human,other_human}_{very_positive,positive,negative,very_negative}` plus the 8 shared conditions above |
 
-## Existing CLI isolation contract
+## Shared CLI isolation contract
 
-The PDF skill is found from the existing installation or specified with `--pdf-skill PATH`. Tool access uses the `review_only` permission profile: the current scratch directory is writable; the exact PDF snapshot, skill and explicit runtime dependencies are readable. The profile denies broad repository, input-tree, history and home-directory access. The runner does not download missing tools or dependencies.
+The PDF skill is found from the existing installation or specified with `--pdf-skill PATH`. The shared `utility/codex_isolation.py` helper generates the `isolated_files` permission profile: the current call's scratch directory is writable; its exact PDF snapshot, selected skill and necessary explicit runtime dependencies are readable. It denies broad repository, input-tree, history and home-directory access. Every condition, replicate and retry keeps a separate scratch directory. The runner does not download missing tools or dependencies.
 
-On macOS, Codex CLI 0.154.0's `:minimal` policy also grants shared temporary directories. Explicit glob denials block both directory enumeration and descendant access through `/tmp`, `/private/tmp`, `/var/tmp` and `/private/var/tmp`; plain path denials did not override the built-in grants in local tests. Run outputs must therefore live outside those directories, for example under project `res/`. `TMPDIR` and zsh `TMPPREFIX` point into the individual call's scratch directory. The `review_only_private_temp_v1` fingerprint prevents reuse of reviews made under the previous access policy. This macOS change leaves Linux permission rules unchanged.
+Outputs must live outside shared `/tmp`, `/private/tmp`, `/var/tmp` and `/private/var/tmp`. `TMPDIR` and zsh `TMPPREFIX` point into the individual call's scratch directory. Invalid material grants fail before a CLI launch. The helper's policy version and content hash are bound into each review fingerprint and attempt receipt, together with the exact material allowlist; changed policy bytes prevent reuse of prior-policy reviews. New frozen runs load the helper from their own source snapshot; historical snapshots remain unchanged.
 
 Tool networking and web search are disabled; apps, plugins, MCP servers, browser/computer use, multi-agent features, memories and hooks are disabled. Tool environments are controlled, with login shells and shell snapshots disabled. Strict configuration errors do not trigger a less restrictive fallback. `--ignore-user-config` and `project_doc_max_bytes=0` isolate the experiment from user configuration and project instructions without editing them.
 
@@ -193,3 +193,15 @@ The MBZ runtime includes ripgrep 15.2.0 at `utility/.runtime/ripgrep/rg`. Its of
 The review CLI automatically selects this executable, falling back to an existing `rg` on PATH when the project copy is absent. `--ripgrep PATH` selects an explicit executable named `rg`. Before starting reviews, the runner checks executability and `rg --version`, records the binary hash/version in each attempt and the request fingerprint, and adds its directory to the controlled tool PATH. The sandbox grants read access to the exact executable, not its parent directory. Changing the selected binary changes the fingerprint. Frozen runs should retain the selected binary with their runtime and pass its explicit path.
 
 This tool setup does not change prompts, source profiles, score scales or token accounting. Historical frozen runs keep their original environment. `--dry-run` remains inventory-only and does not execute tool preflight or model calls.
+
+
+## Source selection with the expanded catalogs
+
+The catalogs now include ICLR2025, while review system profiles still cover the
+original ten sources. Catalog membership does not create a new review rubric.
+For legacy prepared input layouts, provide the intended supported `--source` or
+the run's frozen source metadata. Automatic fallback to the complete canonical
+catalog currently rejects its unsupported ICLR2025 source. ICLR2025 reviews
+require a separately configured and validated profile; do not substitute another
+venue's profile. This limitation does not affect catalog loading or version
+comparison preparation.

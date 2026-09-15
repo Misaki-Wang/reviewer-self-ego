@@ -17,9 +17,15 @@ class SourceDataTests(unittest.TestCase):
         base = ROOT / 'data/index'
         manifest = json.loads((base / 'index.json').read_bytes())
         self.assertEqual(manifest['schema_version'], 'source-data-index-1')
-        self.assertTrue(manifest['dataset'] == 'source_data' and len(manifest['files']) == 10)
+        self.assertEqual(manifest['dataset'], 'source_data')
+        build_raw = (base / 'provenance/build_metadata.json').read_bytes()
+        build = json.loads(build_raw)
+        historical_sources = {entry['source_id'] for entry in build['original_index']['files']}
+        historical_entries = [entry for entry in manifest['files']
+                              if entry['source_id'] in historical_sources]
+        self.assertEqual(len(historical_entries), 10)
         by_id, appearances, source_counts = ({}, {}, {})
-        for entry in manifest['files']:
+        for entry in historical_entries:
             self.assertEqual(Path(entry['path']).name, entry['path'])
             raw = (base / entry['path']).read_bytes()
             self.assertTrue(len(raw) == entry['bytes'] < 100 * 1024 ** 2)
@@ -39,12 +45,11 @@ class SourceDataTests(unittest.TestCase):
                 by_id[aid] = paper
                 appearances.setdefault(aid, set()).add(sid)
         self.assertEqual(sum(source_counts.values()), 3738)
-        order = manifest['record_order']
+        order = build['original_index']['record_order']
+        self.assertEqual([aid for aid in manifest['record_order'] if aid in by_id], order)
         self.assertTrue(len(order) == len(set(order)) == len(by_id) == 3724)
         self.assertEqual(set(order), set(by_id))
         self.assertTrue(all(appearances[aid] == set(p['source_ids']) for aid, p in by_id.items()))
-        build_raw = (base / 'provenance/build_metadata.json').read_bytes()
-        build = json.loads(build_raw)
         self.assertEqual(manifest['dataset_metadata']['build_provenance'], {
             'path': 'provenance/build_metadata.json', 'bytes': len(build_raw),
             'sha256': hashlib.sha256(build_raw).hexdigest()})
@@ -67,10 +72,6 @@ class SourceDataTests(unittest.TestCase):
         raw = (json.dumps(d, ensure_ascii=False, sort_keys=True, separators=(',', ':')) + '\n').encode('utf-8')
         self.assertEqual(len(raw), original['bytes'])
         self.assertEqual(hashlib.sha256(raw).hexdigest(), original['sha256'])
-        current = {**manifest['dataset_metadata'], 'records': [by_id[aid] for aid in order]}
-        active_raw = (json.dumps(current, ensure_ascii=False, sort_keys=True, separators=(',', ':')) + '\n').encode('utf-8')
-        self.assertEqual(manifest['source_json'], {'filename': 'source_data.json',
-                         'bytes': len(active_raw), 'sha256': hashlib.sha256(active_raw).hexdigest()})
         self.assertEqual(d['schema_version'], 'v1.3-raw-derived-preliminary-release-1')
         self.assertEqual(d['stage'], 'preliminary_only')
         self.assertTrue(d['S2_assessed'] is d['content_screening_performed'] is False)
@@ -140,9 +141,24 @@ class SourceDataTests(unittest.TestCase):
         self.assertEqual(set(build['metadata_files']), {'metadata/provenance.json',
                          'metadata/statistics.json', 'metadata/unavailable_versions.json',
                          'metadata/version_metadata.jsonl'})
+        metadata = json.loads((base / 'metadata/provenance.json').read_bytes())
+        extension_ref = metadata['catalog_extensions'][0]
+        extension_raw = (base / extension_ref['path']).read_bytes()
+        self.assertEqual({'bytes': len(extension_raw), 'sha256': hashlib.sha256(extension_raw).hexdigest()},
+                         {key: extension_ref[key] for key in ('bytes', 'sha256')})
+        extension = json.loads(extension_raw)
+        archived = extension['original_metadata_provenance']
         for relative, expected in build['metadata_files'].items():
             with self.subTest(path=relative):
-                raw = (base / relative).read_bytes()
+                if relative == 'metadata/provenance.json':
+                    raw = (base / archived['path']).read_bytes()
+                    self.assertEqual({key: archived[key] for key in ('bytes', 'sha256')}, expected)
+                else:
+                    raw = (base / relative).read_bytes()
+                    if relative == 'metadata/version_metadata.jsonl':
+                        self.assertEqual(extension['original_ledger_before'], expected)
+                        self.assertGreater(len(raw), expected['bytes'])
+                        raw = raw[:expected['bytes']]
                 self.assertEqual({'bytes': len(raw), 'sha256': hashlib.sha256(raw).hexdigest()}, expected)
 
 

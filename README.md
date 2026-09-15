@@ -14,6 +14,7 @@ utility/             Shared preparation, workflow, verification and configuratio
 data/
    index/            index.json, conference JSON shards, metadata and provenance
    pdf/              Original PDFs: <paper-id>/<paper-id>vN.pdf
+data_full/           Two-version catalog: pinned bases, additions and provenance
 downloads_papers/     Download cache: <conference>/<arxiv_id>/vN.pdf, all versions
 clean_data/          Anonymized PDFs: <conference>/<arxiv_id>/vN.pdf
 res/                 One directory per new run; historical studies under archive/
@@ -22,14 +23,19 @@ html/                Experiment design and result-sharing HTML
 README.md
 ~~~
 
-The code directories are real directories. No dated worktree or old dataset
-alias is required. There is one JSON catalog. New downloads use downloads_papers;
+The code directories are real directories. New downloads use downloads_papers;
 the existing data/pdf store remains supported by the formal frozen-run workflow.
-The catalog contains 3,724 distinct papers and 14,086 original versions across
-ten conference shards. Paper/version values and order are preserved; only the
-active package name, paths and packaging hashes changed. The original PDF store
-contains 14,063 files; 23 versions have recorded official unavailability.
-See [data/index/README.md](data/index/README.md) for counts and source contracts.
+The [data](data/README.md) catalog contains 4,334 unique papers and 16,457 original
+versions across eleven sources under the three-version membership rule. The
+original ten source shards remain byte-identical; ICLR 2025 adds 610 records.
+See [data/index/README.md](data/index/README.md) for metadata and provenance.
+
+The separate [data_full](data_full/README.md) catalog uses the two-version rule
+and resolves 15,331 unique papers and 41,945 original versions from hash-pinned
+base shards plus disjoint additions. Use explicit `--catalog data_full` for formal
+preparation; the default catalog remains `data`. Original PDF availability is
+audited separately from catalog membership. Git tracks both catalogs and their
+provenance; original PDF stores remain on the execution host.
 
 Download all catalogued versions, anonymize each required PDF, then construct pairs offline:
 

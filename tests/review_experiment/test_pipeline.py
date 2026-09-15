@@ -48,8 +48,8 @@ import json, pathlib, sys, time
 args = sys.argv[1:]
 assert args[0] == 'exec'
 assert 'web_search="disabled"' in args
-assert 'permissions.review_only.network.enabled=false' in args
-assert 'default_permissions=\"review_only\"' in args
+assert 'permissions.isolated_files.network.enabled=false' in args
+assert 'default_permissions=\"isolated_files\"' in args
 assert any('filesystem=' in a and '\":root\"=\"deny\"' in a for a in args)
 assert 'approval_policy="never"' in args
 assert '--ephemeral' in args and '--ignore-user-config' in args
@@ -205,7 +205,7 @@ print(json.dumps({{'type':'turn.completed','usage':{{'input_tokens':100,'cached_
         snapshot = self.root / 'snapshot.pdf'
         snapshot.write_bytes(b'%PDF-test')
         command = runner.build_command(args, work, 'system', snapshot)
-        filesystem = next(x for x in command if x.startswith('permissions.review_only.filesystem='))
+        filesystem = next(x for x in command if x.startswith('permissions.isolated_files.filesystem='))
         self.assertIn(json.dumps(str(cli.resolve())) + '="read"', filesystem)
         self.assertIn(json.dumps(str(runtime / 'python_vendor')) + '="read"', filesystem)
         self.assertIn(json.dumps(str(runtime / 'ghostscript-9.55.0')) + '="read"', filesystem)
@@ -214,11 +214,13 @@ print(json.dumps({{'type':'turn.completed','usage':{{'input_tokens':100,'cached_
         environment = next(x for x in command if x.startswith('shell_environment_policy.set='))
         self.assertIn('"PYTHONPATH"=' + json.dumps(str(runtime / 'python_vendor')), environment)
         self.assertIn(str(runtime / 'ghostscript-9.55.0/bin'), environment)
-        self.assertIn('permissions.review_only.network.enabled=false', command)
+        self.assertIn('permissions.isolated_files.network.enabled=false', command)
         self.assertIn('"TMPDIR"=' + json.dumps(str(work)), environment)
         self.assertIn('"TMPPREFIX"=' + json.dumps(str(work / 'zsh')), environment)
 
     def test_macos_shared_temp_denials_are_explicit_globs(self):
+        (self.root / 'work').mkdir()
+        (self.root / 'snapshot.pdf').write_bytes(b'%PDF-fixture')
         with patch.object(runner.sys, 'platform', 'darwin'):
             options = runner.permission_options(self.root / 'work', self.root / 'snapshot.pdf',
                                                 self.skill)
@@ -228,11 +230,73 @@ print(json.dumps({{'type':'turn.completed','usage':{{'input_tokens':100,'cached_
             self.assertIn(json.dumps(path[:-1] + '[p]') + '="deny"', filesystem)
 
     def test_macos_temp_rules_do_not_change_linux_permissions(self):
+        (self.root / 'work').mkdir()
+        (self.root / 'snapshot.pdf').write_bytes(b'%PDF-fixture')
         with patch.object(runner.sys, 'platform', 'linux'):
             options = runner.permission_options(self.root / 'work', self.root / 'snapshot.pdf',
                                                 self.skill)
         self.assertIn('\":minimal\"=\"read\"', options[-1])
         self.assertNotIn('/private/tmp/**', options[-1])
+
+    def test_shared_helper_receives_only_the_current_snapshot(self):
+        from types import SimpleNamespace
+        work = self.root / 'work'
+        snapshot = self.root / 'snapshot.pdf'
+        args = SimpleNamespace(codex='offline-codex', model='fixture', effort='medium',
+                               pdf_skill=self.skill)
+        with patch.object(runner.isolation, 'isolation_options',
+                          return_value=(['--shared-isolation-sentinel'], {})) as options:
+            command = runner.build_command(args, work, 'Exact system', snapshot)
+        options.assert_called_once_with([snapshot], work, codex='offline-codex',
+                                        pdf_skill=self.skill, tool_runtime=None, ripgrep=None)
+        self.assertEqual(command.count('--shared-isolation-sentinel'), 1)
+        self.assertNotIn('--sandbox', command)
+        self.assertEqual(Path(runner.isolation.__file__).resolve(),
+                         (runner.ROOT / 'utility/codex_isolation.py').resolve())
+
+    def test_policy_identity_is_recorded_and_invalidates_resume(self):
+        options = ('--condition', 'exp1_quality', '--version', '1')
+        self.assertEqual(self.run_cli(*options), 0)
+        first = self.result()['versions']['v1']['reviews']['exp1_quality/r1']
+        receipt = first['attempts'][0]
+        self.assertEqual(receipt['permission_profile'], runner.isolation.PROFILE)
+        self.assertEqual(receipt['isolation_policy'], runner.isolation.identity())
+        self.assertEqual(len(receipt['read_files']), 1)
+        self.assertEqual(Path(receipt['read_files'][0]).name, 'snapshot.pdf')
+        self.assertEqual(self.run_cli(*options), 0)
+        self.assertEqual(len(self.count.read_text().splitlines()), 1)
+        changed = dict(runner.isolation.identity(), sha256='0' * 64)
+        with patch.object(runner.isolation, 'identity', return_value=changed):
+            self.assertEqual(self.run_cli(*options), 0)
+        second = self.result()['versions']['v1']['reviews']['exp1_quality/r1']
+        self.assertNotEqual(first['fingerprint'], second['fingerprint'])
+        self.assertEqual(second['attempts'][0]['isolation_policy'], changed)
+        self.assertEqual(len(self.count.read_text().splitlines()), 2)
+
+    def test_child_environment_uses_private_scratch_and_removes_app_origin(self):
+        inherited = {key: 'unrelated-session' for key in (
+            'CODEX_THREAD_ID', 'CODEX_SESSION_ID', 'CODEX_INTERNAL_ORIGINATOR_OVERRIDE',
+            'CODEX_APP_TOOLS_PIPE_PATH')}
+        with patch.dict(os.environ, inherited), \
+                patch.object(runner.subprocess, 'Popen', wraps=runner.subprocess.Popen) as launch:
+            self.assertEqual(self.run_cli('--condition', 'exp1_quality', '--version', '1'), 0)
+        environment = launch.call_args.kwargs['env']
+        command = launch.call_args.args[0]
+        work = command[command.index('--cd') + 1]
+        self.assertEqual(environment['TMPDIR'], work)
+        self.assertEqual(environment['TMPPREFIX'], str(Path(work) / 'zsh'))
+        for key in inherited:
+            self.assertNotIn(key, environment)
+
+    def test_directory_material_is_rejected_before_launch(self):
+        from types import SimpleNamespace
+        args = SimpleNamespace(pdf_skill=self.skill, other_model=None, model='fixture')
+        attempt = {}
+        with patch.object(runner.subprocess, 'Popen') as launch:
+            with self.assertRaises(ValueError):
+                runner.call_codex(args, self.profiles['iclr2026'], '{PAPER_CONTENT}',
+                                  self.input, self.root / 'work', attempt)
+        launch.assert_not_called()
 
     def test_dry_run_has_no_reads_or_results(self):
         with patch.object(runner.Version, 'read', side_effect=AssertionError('PDF read')):

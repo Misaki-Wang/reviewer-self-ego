@@ -81,3 +81,25 @@ Both experiment runners use the single utility/token_usage.py implementation.
 It preserves raw reported usage and the existing aggregation contract. New batch
 snapshots freeze it at source_snapshot/utility/token_usage.py; historical snapshots
 are unchanged. The independent verifier retains its separate arithmetic.
+
+
+## File access isolation
+
+Every new comparison uses `utility/codex_isolation.py`: only the exact two input
+PDFs and the current private work directory are exposed as experimental material.
+The selected PDF skill and required interpreter/PDF runtime are read-only resource
+exceptions. Web search, command networking and auxiliary access channels are off;
+unsupported configurations fail before a model call. Scratch is created under the
+selected output directory, outside shared system temporary directories.
+
+Use `--pdf-skill /absolute/path/to/SKILL.md` or `CHECK_DIFF_PDF_SKILL` for an explicit
+skill. The existing project-private `utility/.runtime/pdf/SKILL.md` is the default
+fallback when the selected Codex home does not expose a PDF skill. No dependency
+installation is performed automatically.
+
+Execution receipts retain the isolation helper identity and selected file paths.
+A pre-existing result is reused only with a completed receipt matching the current
+policy identity. Legacy or mismatched cached results remain untouched and cause a
+clear error; use a fresh output directory or explicitly request `--overwrite`.
+Historical frozen runners retain their original policy and must not be described
+as upgraded by changing the current source files.

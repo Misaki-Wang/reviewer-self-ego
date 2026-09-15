@@ -13,11 +13,13 @@ import argparse
 from collections import Counter
 from datetime import datetime, timezone
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
 import re
 import tempfile
+import tomllib
 from types import ModuleType
 from urllib.parse import urlparse
 
@@ -34,6 +36,7 @@ SUMMARY_FIELDS = ('source', 'status', 'reported_totals', 'attempt_count',
                   'field_report_counts', 'errors')
 SETTLED = {'completed', 'input_unavailable'}
 HASH = re.compile(r'[0-9a-f]{64}')
+ISOLATION_VERSION = 'codex-file-isolation-v1'
 
 
 def now():
@@ -188,12 +191,154 @@ def summarize(attempts):
             'field_report_counts': coverage, 'errors': errors}
 
 
+def isolation_policy(config, reader, run):
+    """Bind new snapshots to their helper; missing files cannot become legacy runs."""
+    helper = run / 'source_snapshot/utility/codex_isolation.py'
+    runner = run / 'source_snapshot/check_diff/runner.py'
+    modern = (helper.exists() or 'isolation_policy' in config or
+              (runner.exists() and b'codex_isolation' in reader.blob(runner)))
+    if not modern:
+        return None  # Old snapshots retain their original, weaker permission semantics.
+    expected = {'version': ISOLATION_VERSION, 'sha256': reader.sha(helper)}
+    if config.get('isolation_policy') != expected:
+        raise ValueError('Frozen isolation policy identity mismatch')
+    return expected
+
+
+
+
+def isolation_resources(config):
+    """Read the immutable runtime allowlist without requiring those paths to exist."""
+    resources = config.get('isolation_resources')
+    if not isinstance(resources, dict) or set(resources) != {'pdf_skill', 'tool_runtime', 'read_paths'}:
+        raise ValueError('Missing or invalid frozen isolation resources')
+    paths = resources['read_paths']
+    if (not isinstance(paths, list) or not paths or any(not isinstance(name, str) for name in paths)
+            or paths != sorted(set(paths))):
+        raise ValueError('Frozen runtime reads must be a sorted unique path list')
+    values = [resources['pdf_skill'], *paths]
+    if resources['tool_runtime'] is not None:
+        values.append(resources['tool_runtime'])
+    for name in values:
+        if (not isinstance(name, str) or not Path(name).is_absolute() or '..' in Path(name).parts
+                or str(Path(name)) != name or name in ('/', str(Path.home()))
+                or any(Path(name).is_relative_to(root) for root in ('/tmp', '/private/tmp', '/var/tmp', '/private/var/tmp'))):
+            raise ValueError(f'Invalid frozen resource path: {name}')
+    if str(Path(resources['pdf_skill']).parent) not in paths:
+        raise ValueError('Frozen PDF skill is not within the approved runtime reads')
+    return resources
+
+
+def freeze_isolation_resources(config, run):
+    """Resolve approved tool resources once, while preparing a new snapshot."""
+    reader = Reader()
+    policy = isolation_policy(config, reader, run)
+    path = run / 'source_snapshot/utility/codex_isolation.py'
+    spec = importlib.util.spec_from_file_location('_frozen_isolation_preparation', path)
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+    if helper.identity() != policy:
+        raise ValueError('Loaded frozen isolation helper identity mismatch')
+    skill = helper.resolve_pdf_skill()
+    runtime = helper.default_tool_runtime()
+    resources = {'pdf_skill': str(skill), 'tool_runtime': str(runtime) if runtime else None,
+        'read_paths': [str(path) for path in helper._runtime_paths(config['codex_path'], skill, runtime, None)]}
+    return isolation_resources({'isolation_resources': resources})
+
+
+def command_settings(argv):
+    """Decode each CLI override, rejecting duplicate options before TOML can merge them."""
+    settings, plain = {}, []
+    index = 0
+    while index < len(argv):
+        item = argv[index]
+        if item != '-c':
+            plain.append(item)
+            index += 1
+            continue
+        key, separator, value = argv[index + 1].partition('=')
+        if not separator or key in settings:
+            raise ValueError('Duplicate or invalid command configuration override')
+        settings[key] = tomllib.loads('value=' + value)['value']
+        index += 2
+    return settings, plain
+
+
+def isolated_command_grants(command):
+    settings, _ = command_settings(command['argv'])
+    return settings['permissions.isolated_files.filesystem']
+
+
+def validate_isolated_command(config, reader, run, command, work, pdfs, grants):
+    """Audit archived permission boundaries without touching work or input PDFs."""
+    if isolation_policy(config, reader, run) is None:
+        raise ValueError('Expected an isolated command policy')
+    runtime = [Path(name) for name in isolation_resources(config)['read_paths']]
+    settings, plain = command_settings(command['argv'])
+    expected_plain = [config['codex_path'], 'exec', '--json', '--strict-config',
+        '--ignore-user-config', '--ephemeral', '--skip-git-repo-check',
+        '--model', config['model'], '--cd', str(work), '--color', 'never',
+        '--output-schema', str(work / 'schema.json'),
+        '--output-last-message', str(work / 'response.json'), '-']
+    if plain != expected_plain or command.get('working_directory') != str(work):
+        raise ValueError('Isolated command switches or working directory mismatch')
+    fixed = {'default_permissions': 'isolated_files',
+        'permissions.isolated_files.network.enabled': False, 'web_search': 'disabled',
+        'mcp_servers': {}, 'features.skip_host_skill_discovery': True,
+        'shell_environment_policy.inherit': 'none', 'allow_login_shell': False,
+        'approval_policy': 'never', 'project_doc_max_bytes': 0,
+        'model_reasoning_effort': config['reasoning_effort']}
+    fixed.update({f'features.{name}': False for name in ('apps', 'plugins', 'browser_use',
+        'computer_use', 'multi_agent', 'memories', 'workspace_dependencies', 'hooks', 'shell_snapshot')})
+    flexible = {'permissions.isolated_files.filesystem', 'shell_environment_policy.set'}
+    if set(settings) != set(fixed) | flexible or any(settings[k] != v for k, v in fixed.items()):
+        raise ValueError('Isolated command security settings mismatch')
+    files = {str(Path(pdf).absolute()) for pdf in pdfs}
+    if len(files) != 2 or any(Path(pdf).is_relative_to(work) for pdf in files):
+        raise ValueError('Expected exactly two external PDF inputs')
+    filesystem = {':root': 'deny', ':minimal': 'read'}
+    for name in ('/tmp', '/private/tmp', '/var/tmp', '/private/var/tmp'):
+        filesystem[name] = 'deny'
+        # Preserve optional stronger macOS alias denials from the archived command.
+        for alias in (name + '/**', name[:-1] + '[p]'):
+            if isinstance(grants, dict) and grants.get(alias) == 'deny':
+                filesystem[alias] = 'deny'
+    for resource in runtime:
+        if any(Path(item).is_relative_to(resource) for item in (*files, str(work))):
+            raise ValueError('Runtime grant overlaps experiment materials')
+        filesystem[str(resource)] = 'read'
+    filesystem[str(work)] = 'write'
+    filesystem.update({name: 'read' for name in sorted(files)})
+    if settings['permissions.isolated_files.filesystem'] != filesystem or grants != filesystem:
+        raise ValueError('Isolated command grants differ from exact pair and runtime allowlist')
+    env = settings['shell_environment_policy.set']
+    if (not isinstance(env, dict) or not {'PATH', 'TMPDIR', 'TMPPREFIX', 'PYTHONNOUSERSITE'} <= env.keys()
+            or set(env) - {'PATH', 'TMPDIR', 'TMPPREFIX', 'PYTHONNOUSERSITE', 'PYTHONPATH', 'GS_LIB'}
+            or env['TMPDIR'] != str(work) or env['TMPPREFIX'] != str(work / 'zsh')
+            or env['PYTHONNOUSERSITE'] != '1'):
+        raise ValueError('Isolated shell environment mismatch')
+    for key in ('PATH', 'PYTHONPATH', 'GS_LIB'):
+        for value in env.get(key, '').split(os.pathsep):
+            if not value:
+                continue
+            item = Path(value)
+            system_bin = key == 'PATH' and item in (Path('/usr/bin'), Path('/bin'))
+            if not system_bin and not any(item == resource or item.is_relative_to(resource)
+                    or (key == 'PATH' and item == resource.parent) for resource in runtime):
+                raise ValueError(f'Unapproved shell environment path: {value}')
+    return filesystem
+
+
 def signature(config, reader, run):
     snapshot = run / 'source_snapshot/check_diff'
     values = {'model': config['model'], 'effort': config['reasoning_effort'],
               'compare': reader.sha(snapshot / 'prompts/compare.md'),
               'rubric': reader.sha(snapshot / 'prompts/rubric.md'),
               'schema': reader.sha(snapshot / 'schema.py'), 'scope': reader.sha(run / 'scope_input.json')}
+    policy = isolation_policy(config, reader, run)
+    if policy is not None:
+        values['isolation_policy'] = policy
+        values['isolation_resources'] = isolation_resources(config)
     return digest(json.dumps(values, sort_keys=True).encode())
 
 
@@ -254,7 +399,14 @@ class Verifier:
                       self.scope['record_count'], self.plan['summary']['paper_count']):
             self.equal(count, len(records), 'unit_count', 'frozen unit counts disagree')
         self.equal(self.plan['source_sha256'], r.sha(run / 'scope_input.json'), 'scope_hash', self.plan_path)
+        self.isolation_policy = isolation_policy(self.config, r, run)
         self.sig = signature(self.config, r, run)
+        if self.isolation_policy is not None:
+            self.equal(self.contract.get('isolation_policy'), self.isolation_policy,
+                       'isolation_policy', 'frozen contract')
+            self.equal(self.contract.get('isolation_resources'), isolation_resources(self.config),
+                       'isolation_resources', 'frozen contract')
+        self.report['isolation_policy'] = self.isolation_policy
         self.report.update(requested_model=self.config['model'],
                            requested_reasoning_effort=self.config['reasoning_effort'],
                            execution_signature=self.sig)
@@ -287,7 +439,7 @@ class Verifier:
                 last_date = date
                 if not selected or (date - selected[-1][1]).total_seconds() > 2592000:
                     selected.append((number, date))
-            self.check(len(selected) >= 3, 'selected_sequence', aid)
+            self.check(len(selected) >= 2, 'selected_sequence', aid)
             unit = units[aid]
             self.equal(unit['selected_version_ids'], [v for v, _ in selected], 'selected_sequence', aid)
             transitions = unit['selected_transitions']
@@ -357,6 +509,8 @@ class Verifier:
         self.result_fields = set(module.SCHEMA['properties'])
 
     def provenance(self, receipt, pair, where):
+        if self.isolation_policy is not None:
+            self.equal(receipt.get('isolation_policy'), self.isolation_policy, 'receipt_isolation_policy', where)
         expected = {'run_id': self.config['run_id'], 'arxiv_id': pair['arxiv_id'],
                     'pair': [pair['before'], pair['after']], 'execution_signature': self.sig,
                     'requested_model': self.config['model'],
@@ -459,6 +613,12 @@ class Verifier:
             prompt = f'{task}\n{r.blob(snapshot / "rubric.md").decode()}\n'
             self.equal(r.sha(root / 'prompt.txt'), digest(prompt.encode()), 'signed_prompt', root)
             self.equal(receipt.get('prompt_sha256'), r.sha(root / 'prompt.txt'), 'prompt_hash', root)
+            if self.isolation_policy is not None:
+                try:
+                    validate_isolated_command(self.config, r, self.run, r.json(root / 'command.json'),
+                        root / 'work', (before, after), receipt.get('isolation_grants'))
+                except (OSError, ValueError, KeyError, IndexError, TypeError) as exc:
+                    self.check(False, 'isolation_command', f'{root}: {exc}')
             if marker is not None:
                 work = root / 'work'
                 expected_argv = [self.config['codex_path'], 'exec', '--json', '--ignore-user-config',
@@ -470,12 +630,22 @@ class Verifier:
                 insertion = expected_argv.index('project_doc_max_bytes=0') - 1
                 current_argv = (expected_argv[:insertion] + ['-c', 'web_search="disabled"',
                     '-c', 'sandbox_workspace_write.network_access=false'] + expected_argv[insertion:])
-                self.check(r.json(root / 'command.json') in (
-                    {'argv': expected_argv, 'working_directory': str(work)},
-                    {'argv': current_argv, 'working_directory': str(work)}), 'recovery_command', root)
+                if self.isolation_policy is None:
+                    self.check(r.json(root / 'command.json') in (
+                        {'argv': expected_argv, 'working_directory': str(work)},
+                        {'argv': current_argv, 'working_directory': str(work)}), 'recovery_command', root)
                 for requested, pdf_path in zip(pair['pdf_ids'], (before, after)):
                     item = inputs[requested]
                     source = Path(self.config['pdf_root']) / pair['arxiv_id'] / f'{requested}.pdf'
+                    if self.config.get('source_catalog') == 'data_full':
+                        request = next(row for row in self.plan['requested_pdfs'] if row['requested_id'] == requested)
+                        source = Path(request['pdf_path'])
+                        roots = [self.config['pdf_root'], *self.config.get('fallback_pdf_roots', [])]
+                        relative = Path(pair['arxiv_id']) / f'{requested}.pdf'
+                        if not source.is_absolute() or not any(
+                                source == Path(root) / relative and source.resolve() == Path(root).resolve() / relative
+                                for root in roots if isinstance(root, str) and Path(root).is_absolute()):
+                            raise ValueError(f'Overlay recovery PDF is outside frozen original-version roots: {source}')
                     self.equal(item.get('path'), str(source.resolve()), 'recovery_input_path', root)
                     self.equal(item.get('pair_path'), str(pdf_path), 'recovery_pair_path', root)
                     pdf = self.inventory[requested]['pdf_observation']['pdf']
@@ -720,6 +890,11 @@ def render_report(report):
               'Input hashes were compared with the frozen per-version ledger; the runner owns live '
               'pre/post PDF checks. Requested settings were verified from receipts and commands, not from an '
               'independently observed provider model identity.', '']
+    if report.get('isolation_policy'):
+        lines.append('File isolation: archived grants and security settings matched the exact pair, private work, '
+                     'and fixed tool resources; policy ' + report['isolation_policy']['version'] + '.')
+    else:
+        lines.append('File isolation: legacy permissions were retained; this audit does not certify pair-only reads.')
     for item in report.get('completed_turn_recoveries', []):
         lines.append(f"Warning: {item['pair']} attempt {item['attempt']}: {item['warning']} "
                      f"exit_code={item['exit_code']}, timed_out={item['timed_out']}.")
