@@ -12,6 +12,11 @@ import subprocess
 import sys
 
 
+if not __package__ and Path(__file__).resolve().parent.name == 'utility':
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    __package__ = 'utility'
+
+
 FROZEN_CONFIG = 'source_snapshot/deployment_provenance/project.json'
 FROZEN_SOURCE_MANIFEST = 'source_snapshot/source_manifest.json'
 IMMUTABLE_ROOTS = ('source_snapshot', 'controller_versions')
@@ -135,6 +140,8 @@ def run_path(config, run_id, *, fresh=False, must_exist=True):
 
 
 def local_module(name):
+    if name == 'prepare_batch' and (Path(__file__).resolve().parent / 'batch').is_dir():
+        name = 'batch.prepare_batch'
     return importlib.import_module(f'{__package__}.{name}' if __package__ else name)
 
 

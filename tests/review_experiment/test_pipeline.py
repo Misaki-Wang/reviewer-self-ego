@@ -252,7 +252,7 @@ print(json.dumps({{'type':'turn.completed','usage':{{'input_tokens':100,'cached_
         self.assertEqual(command.count('--shared-isolation-sentinel'), 1)
         self.assertNotIn('--sandbox', command)
         self.assertEqual(Path(runner.isolation.__file__).resolve(),
-                         (runner.ROOT / 'utility/codex_isolation.py').resolve())
+                         (runner.ROOT / 'utility/codex/codex_isolation.py').resolve())
 
     def test_policy_identity_is_recorded_and_invalidates_resume(self):
         options = ('--condition', 'exp1_quality', '--version', '1')

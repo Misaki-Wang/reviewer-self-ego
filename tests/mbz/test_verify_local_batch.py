@@ -11,8 +11,8 @@ import tempfile
 import unittest
 from unittest import mock
 
-from utility import verify_local_batch as verify
-from utility import prepare_source_data as preparation
+from utility.batch import verify_local_batch as verify
+from utility.data import prepare_source_data as preparation
 
 
 REPO = Path(os.environ.get('SOURCE_CODE_ROOT', Path(__file__).resolve().parents[2])).resolve()

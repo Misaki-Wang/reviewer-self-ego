@@ -19,16 +19,17 @@ import subprocess
 import sys
 import tempfile
 
-if __package__:
-    from . import token_usage
-else:
-    import token_usage
-
-
-ROOT = Path(__file__).resolve().parent.parent
-# Resolve beside this script so frozen runs cannot import the active helper.
+ROOT = Path(__file__).resolve().parents[2]
+# Select one layout in this source tree; a missing helper must fail closed.
+HELPERS = ROOT / 'utility/codex'
+if not HELPERS.exists():
+    HELPERS = ROOT / 'utility'  # Legacy frozen batches keep flat helpers.
+_usage_spec = importlib.util.spec_from_file_location(
+    '_anonymize_token_usage', HELPERS / 'token_usage.py')
+token_usage = importlib.util.module_from_spec(_usage_spec)
+_usage_spec.loader.exec_module(token_usage)
 _isolation_spec = importlib.util.spec_from_file_location(
-    '_anonymize_codex_isolation', Path(__file__).resolve().parent / 'codex_isolation.py')
+    '_anonymize_codex_isolation', HELPERS / 'codex_isolation.py')
 isolation = importlib.util.module_from_spec(_isolation_spec)
 sys.modules[_isolation_spec.name] = isolation
 _isolation_spec.loader.exec_module(isolation)

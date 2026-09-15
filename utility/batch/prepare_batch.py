@@ -17,12 +17,19 @@ import json
 from pathlib import Path
 import re
 import subprocess
+import sys
+
+if not __package__ and Path(__file__).resolve().parent.name == 'batch':
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    __package__ = 'utility.batch'
 
 if __package__:
-    from . import prepare_source_data as preparation
+    from ..data import prepare_source_data as preparation
     from . import verify_local_batch as audit
-    from . import source_provenance
+    from .. import source_provenance
 else:
+    # Frozen batches retain their flat helpers and sibling controller bundle.
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'controller_versions/bundle'))
     import prepare_source_data as preparation
     import verify_local_batch as audit
     import source_provenance
@@ -32,6 +39,19 @@ CORE_FILES = source_provenance.CORE_FILES
 HELPERS = ('prepare_source_data.py', 'prepare_input_data.py', 'source_provenance.py')
 BUNDLE = ('local_batch.py', 'completed_turn.py', 'verify_local_batch.py')
 FROZEN_FILES = HELPERS + BUNDLE + ('prepare_batch.py', 'workflow.py', 'token_usage.py', 'codex_isolation.py')
+# Source locations may change; archived filenames remain part of the run contract.
+FROZEN_SOURCES = {
+    'prepare_source_data.py': 'utility/data/prepare_source_data.py',
+    'prepare_input_data.py': 'utility/data/prepare_input_data.py',
+    'source_provenance.py': 'utility/source_provenance.py',
+    'local_batch.py': 'utility/batch/local_batch.py',
+    'completed_turn.py': 'utility/batch/completed_turn.py',
+    'verify_local_batch.py': 'utility/batch/verify_local_batch.py',
+    'prepare_batch.py': 'utility/batch/prepare_batch.py',
+    'workflow.py': 'utility/workflow.py',
+    'token_usage.py': 'utility/codex/token_usage.py',
+    'codex_isolation.py': 'utility/codex/codex_isolation.py',
+}
 METADATA = 'data/index/metadata'
 
 
@@ -67,7 +87,7 @@ def under(project, value):
 
 def verified_sources(project, code_root, sources, source_revision, metadata_files=(), *, catalog="data"):
     return source_provenance.verified_sources(project, code_root, sources, source_revision,
-        extra_files=tuple(f'utility/{name}' for name in FROZEN_FILES) + metadata_files, catalog=catalog)
+        extra_files=tuple(FROZEN_SOURCES[name] for name in FROZEN_FILES) + metadata_files, catalog=catalog)
 
 def freeze(run, code_root, blobs, deployment, source_revision):
     locations = {}
@@ -277,7 +297,7 @@ def prepare(args):
                     'verify_local_batch.py': Path(audit.__file__),
                     'completed_turn.py': Path(audit.recovery.__file__)}
     for name, path in helper_paths.items():
-        if path.read_bytes() != blobs[f'utility/{name}']:
+        if path.read_bytes() != blobs[FROZEN_SOURCES[name]]:
             raise ValueError(f'Loaded preparation helper differs from the verified source: {name}')
     scope = select_scope(code_root, sources, args.units, catalog)
     # Every selected catalog input must match the verified original bytes.

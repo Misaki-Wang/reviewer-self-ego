@@ -12,8 +12,8 @@ from unittest import mock
 
 from pypdf import PdfWriter
 
-from utility import local_batch as batch
-from utility import prepare_source_data as preparation
+from utility.batch import local_batch as batch
+from utility.data import prepare_source_data as preparation
 
 
 REPO = Path(os.environ.get('SOURCE_CODE_ROOT', Path(__file__).resolve().parents[2])).resolve()
@@ -42,9 +42,9 @@ class BatchTests(unittest.TestCase):
             shutil.copyfile(REPO / 'check_diff' / filename, snapshot / 'check_diff' / filename)
         (snapshot / 'utility').mkdir()
         for name in ('token_usage.py', 'codex_isolation.py'):
-            shutil.copyfile(REPO / 'utility' / name, snapshot / 'utility' / name)
+            shutil.copyfile(REPO / 'utility/codex' / name, snapshot / 'utility' / name)
         for filename in ('prepare_input_data.py', 'prepare_source_data.py'):
-            shutil.copyfile(REPO / 'utility' / filename, snapshot / filename)
+            shutil.copyfile(REPO / 'utility/data' / filename, snapshot / filename)
         self.fake = self.root / 'fake_codex'
         self.fake.write_text(f'''#!{sys.executable}
 import json, pathlib, sys
@@ -529,7 +529,7 @@ print(json.dumps({{'type':'turn.completed','usage':{{'input_tokens':100,'cached_
         self.assertEqual(batch.read(self.run / 'token_usage.json')['token_usage']['reported_totals']['total_tokens'], 240)
 
     def test_scheduler_recovery_passes_independent_verifier(self):
-        from utility import verify_local_batch as verify
+        from utility.batch import verify_local_batch as verify
         config = batch.read(self.run / 'run_config.json')
         config.update(unit_count=1, timeout_seconds=2)
         batch.save(self.run / 'run_config.json', config)

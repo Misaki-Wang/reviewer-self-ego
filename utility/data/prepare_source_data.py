@@ -727,7 +727,9 @@ def main(cleaned=False):
     if args.arxiv_id and args.units is None and args.per_source is None:
         args.all = True
     if cleaned and not args.materialize_plan:
-        project = Path(__file__).resolve().parent.parent
+        directory = Path(__file__).resolve().parent
+        project = (directory.parent.parent if directory.name == 'data'
+                   and directory.parent.name == 'utility' else directory.parent)
         config = json.loads((project / 'utility/project.json').read_text())
         args.source = args.source or project / config['data']['index']
         args.pdf_root = args.pdf_root or project / config['data']['clean_root']

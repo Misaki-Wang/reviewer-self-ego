@@ -77,7 +77,10 @@ def default_tool_runtime(explicit=None):
         if not root.is_dir():
             raise ValueError(f'Invalid tool runtime: {root}')
         return root
-    adjacent = Path(__file__).resolve().parent / '.runtime'
+    utility = Path(__file__).resolve().parent
+    if utility.name == 'codex':
+        utility = utility.parent
+    adjacent = utility / '.runtime'
     if adjacent.is_dir():
         return adjacent.resolve()
     # Frozen callers receive the project runtime through their validated launcher.

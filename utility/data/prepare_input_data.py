@@ -57,4 +57,4 @@ def materialize(source, target, sha256):
 
 
 if __name__ == '__main__':
-    raise SystemExit('Use utility/prepare_source_data.py to prepare v1.3 inputs.')
+    raise SystemExit('Use utility/data/prepare_source_data.py to prepare v1.3 inputs.')

@@ -21,7 +21,7 @@ class CancellationSignalTests(unittest.TestCase):
                 self.run_probe('phase = ' + repr(phase) + '\n' + textwrap.dedent("""
                     import os, signal, threading
                     from types import SimpleNamespace
-                    from utility.local_batch import Batch
+                    from utility.batch.local_batch import Batch
                     b = object.__new__(Batch)
                     b.termination_started = False
                     injected = False

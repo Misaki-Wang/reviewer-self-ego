@@ -17,8 +17,8 @@ from unittest import mock
 
 from pypdf import PdfWriter
 
-from utility import prepare_source_data as pilot
-from utility import prepare_input_data as helpers
+from utility.data import prepare_source_data as pilot
+from utility.data import prepare_input_data as helpers
 
 
 def paper(aid='2501.00001', source_ids=None, days=(0, 1, 31, 62)):

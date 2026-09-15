@@ -122,7 +122,7 @@ The output keeps the three fields `oa`, `strengths` and `weaknesses`. OA must ma
 
 ## Shared CLI isolation contract
 
-The PDF skill is found from the existing installation or specified with `--pdf-skill PATH`. The shared `utility/codex_isolation.py` helper generates the `isolated_files` permission profile: the current call's scratch directory is writable; its exact PDF snapshot, selected skill and necessary explicit runtime dependencies are readable. It denies broad repository, input-tree, history and home-directory access. Every condition, replicate and retry keeps a separate scratch directory. The runner does not download missing tools or dependencies.
+The PDF skill is found from the existing installation or specified with `--pdf-skill PATH`. The shared `utility/codex/codex_isolation.py` helper generates the `isolated_files` permission profile: the current call's scratch directory is writable; its exact PDF snapshot, selected skill and necessary explicit runtime dependencies are readable. It denies broad repository, input-tree, history and home-directory access. Every condition, replicate and retry keeps a separate scratch directory. The runner does not download missing tools or dependencies.
 
 Outputs must live outside shared `/tmp`, `/private/tmp`, `/var/tmp` and `/private/var/tmp`. `TMPDIR` and zsh `TMPPREFIX` point into the individual call's scratch directory. Invalid material grants fail before a CLI launch. The helper's policy version and content hash are bound into each review fingerprint and attempt receipt, together with the exact material allowlist; changed policy bytes prevent reuse of prior-policy reviews. New frozen runs load the helper from their own source snapshot; historical snapshots remain unchanged.
 
@@ -171,7 +171,7 @@ The upstream `smoke_report.json` has been removed from active code and preserved
 
 ## Shared token accounting
 
-Both experiment runners use the single utility/token_usage.py implementation.
+Both experiment runners use the single utility/codex/token_usage.py implementation.
 It preserves raw reported usage and the existing aggregation contract. New batch
 snapshots freeze it at source_snapshot/utility/token_usage.py; historical snapshots
 are unchanged. The independent verifier retains its separate arithmetic.

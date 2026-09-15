@@ -77,7 +77,7 @@ Tests use fake CLI fixtures and do not request live judgments.
 
 ## Shared token accounting
 
-Both experiment runners use the single utility/token_usage.py implementation.
+Both experiment runners use the single utility/codex/token_usage.py implementation.
 It preserves raw reported usage and the existing aggregation contract. New batch
 snapshots freeze it at source_snapshot/utility/token_usage.py; historical snapshots
 are unchanged. The independent verifier retains its separate arithmetic.
@@ -85,7 +85,7 @@ are unchanged. The independent verifier retains its separate arithmetic.
 
 ## File access isolation
 
-Every new comparison uses `utility/codex_isolation.py`: only the exact two input
+Every new comparison uses `utility/codex/codex_isolation.py`: only the exact two input
 PDFs and the current private work directory are exposed as experimental material.
 The selected PDF skill and required interpreter/PDF runtime are read-only resource
 exceptions. Web search, command networking and auxiliary access channels are off;

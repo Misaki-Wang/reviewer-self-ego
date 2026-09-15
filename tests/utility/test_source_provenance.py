@@ -12,6 +12,9 @@ from unittest import mock
 from utility import source_provenance as provenance
 
 EXTRAS = ('utility/prepare_source_data.py', 'utility/prepare_input_data.py', 'utility/source_provenance.py')
+ANONYMIZE_FILES = tuple(f'utility/anonymize/{name}' for name in (
+    '__init__.py', 'anonymize_pdf.py', 'anonymize_pdf_rules.py', 'anonymize_rules.py',
+    'anonymize_rules_audit.py', 'vision_ocr_audit.swift'))
 
 
 def digest(raw):
@@ -60,6 +63,12 @@ class SourceFixture(unittest.TestCase):
     def write_json(self, path, value):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(value), encoding='utf-8')
+
+    def add_anonymize_sources(self):
+        for name in ANONYMIZE_FILES:
+            path = self.project / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(f'# Anonymization fixture: {name}\n')
 
     def snapshot(self):
         return {str(p.relative_to(self.project)): p.read_bytes() for p in self.project.rglob('*') if p.is_file()}
@@ -132,7 +141,7 @@ class ExportedSourcesTests(SourceFixture):
         return name
 
     def test_data_declared_build_provenance_is_frozen_with_its_pin_and_path(self):
-        from utility.prepare_batch import freeze
+        from utility.batch.prepare_batch import freeze
         name = self.declare_data_build_provenance()
         before = self.snapshot()
         blobs, deployment = self.verify()
@@ -353,7 +362,10 @@ class ExportedSourcesTests(SourceFixture):
                      'utility/./bad.py', 'utility\\bad.py', 'utility/a\x00.py',
                      'deployment_provenance/project.json', 'utility/project.json',
                      'utility/source_manifest.json', 'res/log.json', 'html/page.html',
-                     'review_experiment/run.py', 'utility/.runtime/helper.py', 'tests/helper.py'):
+                     'review_experiment/run.py', 'utility/.runtime/helper.py', 'tests/helper.py',
+                     'utility/anonymize/not_source.json', 'utility/anonymize/arbitrary.swift',
+                     'utility/anonymize/nested/code.py', 'utility/other/code.py',
+                     'utility/anonymize/.hidden.py', 'utility/anonymize/../outside.py'):
             with self.subTest(name=name):
                 self.reset()
                 self.manifest['files'][name] = {'bytes': 0, 'sha256': digest(b'')}
@@ -438,6 +450,28 @@ class ExportedSourcesTests(SourceFixture):
         self.assert_verified()
         with self.assertRaisesRegex(ValueError, 'hash/size mismatch'):
             self.verify(sources=['iclr2026'])
+
+    def test_historical_flat_anonymizer_manifest_still_verifies(self):
+        name = 'utility/anonymize_pdf.py'
+        (self.project / name).write_text('# Historical flat anonymizer\n')
+        self.repin()
+        self.assert_verified(extras=(*EXTRAS, name))
+        self.assertFalse((self.project / 'utility/anonymize').exists())
+
+    def test_nested_anonymizer_sources_are_verified_and_stale_hashes_rejected(self):
+        self.add_anonymize_sources()
+        self.repin()
+        extras = (*EXTRAS, *ANONYMIZE_FILES)
+        self.assert_verified(extras=extras)
+        for name in ANONYMIZE_FILES:
+            with self.subTest(path=name):
+                path = self.project / name
+                raw = path.read_bytes()
+                path.write_bytes(raw + b' ')
+                with self.assertRaisesRegex(ValueError, 'hash/size mismatch'):
+                    self.verify(extras=extras)
+                path.write_bytes(raw)
+        self.assert_verified(extras=extras)
 
     def test_literal_extra_filename_is_supported(self):
         name = 'utility/[literal]*.py'
@@ -545,6 +579,55 @@ class ManifestBuilderTests(SourceFixture):
                      'tests/temp.py', 'review_experiment/run.py', 'utility/.runtime/lib.py'):
             self.assertNotIn(name, files)
 
+    def test_manifest_tracks_nested_anonymizer_python_and_ocr_source(self):
+        self.add_anonymize_sources()
+        for name in ('utility/anonymize/README.md', 'utility/anonymize/other.swift',
+                     'utility/anonymize/.hidden.py', 'utility/anonymize/nested/code.py',
+                     'utility/anonymize/__pycache__/cache.py', 'utility/other/code.py'):
+            path = self.project / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('Excluded fixture')
+        first = provenance.build_manifest(self.project)
+        self.assertEqual(set(first['files']) - set(self.manifest['files']), set(ANONYMIZE_FILES))
+        for name in ANONYMIZE_FILES:
+            with self.subTest(path=name):
+                path = self.project / name
+                raw = path.read_bytes()
+                self.assertEqual(first['files'][name], provenance.proof(path))
+                path.write_bytes(raw + b' ')
+                changed = provenance.build_manifest(self.project)
+                self.assertNotEqual(changed['revision'], first['revision'])
+                self.assertEqual(changed['files'][name], provenance.proof(path))
+                path.write_bytes(raw)
+        self.assertEqual(provenance.build_manifest(self.project), first)
+
+    def test_nested_anonymizer_file_and_package_symlinks_are_rejected(self):
+        self.add_anonymize_sources()
+        self.repin()
+        extras = (*EXTRAS, *ANONYMIZE_FILES)
+        for name in ANONYMIZE_FILES:
+            with self.subTest(path=name):
+                path = self.project / name
+                raw = path.read_bytes()
+                target = self.project / 'outside-source'
+                target.write_bytes(raw)
+                path.unlink()
+                path.symlink_to(target)
+                with self.assertRaisesRegex(ValueError, 'Symlink'):
+                    provenance.build_manifest(self.project)
+                with self.assertRaisesRegex(ValueError, 'Symlink'):
+                    self.verify(extras=extras)
+                path.unlink()
+                path.write_bytes(raw)
+        package = self.project / 'utility/anonymize'
+        relocated = self.project / 'relocated-anonymize'
+        package.rename(relocated)
+        package.symlink_to(relocated, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, 'Symlink'):
+            provenance.build_manifest(self.project)
+        with self.assertRaisesRegex(ValueError, 'Symlink'):
+            self.verify(extras=extras)
+
     def test_write_manifest_atomic_repeatable_and_no_temp_leaks(self):
         first = provenance.write_manifest(self.project)
         raw = self.manifest_path.read_bytes()
@@ -608,6 +691,28 @@ class ManifestBuilderTests(SourceFixture):
         with mock.patch.object(provenance, '_read_file', side_effect=raced):
             with self.assertRaisesRegex(ValueError, 'changed during verification'):
                 provenance.build_manifest(self.project)
+
+
+    def test_grouped_utility_packages_are_pinned_without_widening_other_paths(self):
+        names = []
+        for folder in ('data', 'batch', 'codex'):
+            name = f'utility/{folder}/example.py'
+            path = self.project / name
+            path.parent.mkdir()
+            path.write_text(f'# grouped {folder} fixture\n')
+            names.append(name)
+        current = provenance.build_manifest(self.project)
+        for name in names:
+            self.assertIn(name, current['files'])
+            self.assertEqual(current['files'][name]['sha256'], digest((self.project / name).read_bytes()))
+        self.assertNotEqual(current['revision'], self.manifest['revision'])
+        for folder in ('data', 'batch', 'codex'):
+            for suffix in ('other.swift', 'nested/example.py', '.hidden.py', 'config.json'):
+                with self.subTest(folder=folder, suffix=suffix), self.assertRaises(ValueError):
+                    provenance._allowed_name(f'utility/{folder}/{suffix}')
+        before = current['revision']
+        (self.project / names[0]).write_text('# changed grouped source\n')
+        self.assertNotEqual(before, provenance.build_manifest(self.project)['revision'])
 
 
 if __name__ == '__main__':

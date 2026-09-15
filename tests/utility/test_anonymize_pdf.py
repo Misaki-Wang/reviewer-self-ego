@@ -12,7 +12,7 @@ import unittest
 from unittest.mock import patch
 
 import pymupdf as fitz
-from utility import anonymize_pdf as cleaner
+from utility.anonymize import anonymize_pdf as cleaner
 
 
 class AnonymizeTests(unittest.TestCase):

@@ -27,11 +27,14 @@ else:
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
-# Resolve against this source root so frozen runs cannot import a live helper.
-_usage_spec = importlib.util.spec_from_file_location('_codex_token_usage', ROOT / 'utility/token_usage.py')
+# Select one layout in this source tree; a missing helper must fail closed.
+HELPERS = ROOT / 'utility/codex'
+if not HELPERS.exists():
+    HELPERS = ROOT / 'utility'  # Legacy frozen batches keep flat helpers.
+_usage_spec = importlib.util.spec_from_file_location('_codex_token_usage', HELPERS / 'token_usage.py')
 token_usage = importlib.util.module_from_spec(_usage_spec)
 _usage_spec.loader.exec_module(token_usage)
-_isolation_spec = importlib.util.spec_from_file_location('_codex_isolation', ROOT / 'utility/codex_isolation.py')
+_isolation_spec = importlib.util.spec_from_file_location('_codex_isolation', HELPERS / 'codex_isolation.py')
 isolation = importlib.util.module_from_spec(_isolation_spec)
 _isolation_spec.loader.exec_module(isolation)
 STOP = threading.Event()

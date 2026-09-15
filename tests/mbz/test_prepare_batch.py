@@ -17,7 +17,7 @@ from unittest import mock
 
 from pypdf import PdfWriter
 
-from utility import prepare_batch as pilot
+from utility.batch import prepare_batch as pilot
 
 
 REPO = Path(os.environ.get('SOURCE_CODE_ROOT', Path(__file__).resolve().parents[2])).resolve()
@@ -27,7 +27,7 @@ class PreparationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.core = {name: (REPO / 'check_diff' / name).read_bytes() for name in pilot.CORE_FILES}
-        cls.frozen_files = {name: (REPO / 'utility' / name).read_bytes() for name in pilot.FROZEN_FILES}
+        cls.frozen_files = {name: (REPO / pilot.FROZEN_SOURCES[name]).read_bytes() for name in pilot.FROZEN_FILES}
         cls.helpers = {name: cls.frozen_files[name] for name in pilot.HELPERS}
 
     def setUp(self):
@@ -85,7 +85,7 @@ class PreparationTests(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(raw)
         for name, raw in self.frozen_files.items():
-            path = self.code_root / 'utility' / name
+            path = self.code_root / pilot.FROZEN_SOURCES[name]
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(raw)
         self.manifest_path = self.project / 'utility/source_manifest.json'
@@ -561,9 +561,9 @@ class PreparationTests(unittest.TestCase):
             target = self.run / folder / name
             self.assertEqual(target.read_bytes(), self.frozen_files[name])
             self.assertEqual(manifest['source_file_locations'][str(target.relative_to(self.run))],
-                             {'path': str(self.code_root / 'utility' / name),
+                             {'path': str(self.code_root / pilot.FROZEN_SOURCES[name]),
                               'source_revision': self.args.source_revision,
-                              **pilot.proof(self.code_root / 'utility' / name)})
+                              **pilot.proof(self.code_root / pilot.FROZEN_SOURCES[name])})
         for source in (self.ledger_path, self.ledger_path.parent / 'provenance.json'):
             target = self.run / 'source_snapshot' / source.relative_to(self.project)
             self.assertEqual(target.read_bytes(), source.read_bytes())
@@ -579,6 +579,11 @@ from unittest import mock
 sys.path.insert(0, str(Path(sys.argv[1]) / 'controller_versions/bundle'))
 from local_batch import Batch
 from verify_local_batch import Verifier
+sys.path.insert(0, str(Path(sys.argv[1]) / 'source_snapshot'))
+import prepare_batch as frozen_preparer
+for dependency in (frozen_preparer, frozen_preparer.preparation, frozen_preparer.source_provenance,
+                   frozen_preparer.audit, frozen_preparer.audit.recovery):
+    assert Path(dependency.__file__).is_relative_to(Path(sys.argv[1])), dependency.__file__
 with mock.patch('subprocess.Popen', side_effect=AssertionError('Model dispatch')):
     batch = Batch(Path(sys.argv[1]))
     assert len(batch.unit_pairs) == 10 and len(batch.pairs) == 30
@@ -704,14 +709,14 @@ print('Frozen Batch and independent Audit: 10 units, 30 pairs, zero dispatch')
         pinned_revision = self.args.source_revision
         for name in pilot.BUNDLE + ('prepare_batch.py', 'workflow.py'):
             with self.subTest(source=name):
-                path = self.code_root / 'utility' / name
+                path = self.code_root / pilot.FROZEN_SOURCES[name]
                 original = path.read_bytes()
                 try:
                     path.write_bytes(original + b'\n# Unauthorized change after the source pin.\n')
                     with mock.patch.object(pilot, 'freeze', side_effect=AssertionError('Unverified source reached freeze')):
                         with self.assertRaisesRegex(ValueError, 'Source manifest hash/size mismatch') as failure:
                             self.prepare()
-                    self.assertIn('utility/' + name, str(failure.exception))
+                    self.assertIn(pilot.FROZEN_SOURCES[name], str(failure.exception))
                     self.assertFalse(self.run.exists())
                     self.assertEqual(self.args.source_revision, pinned_revision)
                     self.assertEqual(self.manifest_path.read_bytes(), pinned_manifest)
@@ -750,7 +755,7 @@ print('Frozen Batch and independent Audit: 10 units, 30 pairs, zero dispatch')
             'completed_turn.py': Path(pilot.audit.recovery.__file__)}
         for name, loaded_path in loaded_paths.items():
             with self.subTest(module=name):
-                path = self.code_root / 'utility' / name
+                path = self.code_root / pilot.FROZEN_SOURCES[name]
                 original, loaded_bytes = path.read_bytes(), loaded_path.read_bytes()
                 prior_revision = self.args.source_revision
                 try:
@@ -759,8 +764,8 @@ print('Frozen Batch and independent Audit: 10 units, 30 pairs, zero dispatch')
                     self.assertNotEqual(self.args.source_revision, prior_revision)
                     blobs, _ = pilot.verified_sources(self.project, self.code_root,
                                                      ['acl2026'], self.args.source_revision)
-                    self.assertEqual(blobs['utility/' + name], path.read_bytes())
-                    self.assertNotEqual(blobs['utility/' + name], loaded_bytes)
+                    self.assertEqual(blobs[pilot.FROZEN_SOURCES[name]], path.read_bytes())
+                    self.assertNotEqual(blobs[pilot.FROZEN_SOURCES[name]], loaded_bytes)
                     with mock.patch.object(pilot, 'freeze', side_effect=AssertionError('Wrong executing source reached freeze')):
                         with self.assertRaisesRegex(ValueError, 'Loaded preparation helper differs') as failure:
                             self.prepare()

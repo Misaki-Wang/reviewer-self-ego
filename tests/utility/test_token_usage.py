@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 
 from check_diff import runner
-from utility import token_usage
+from utility.codex import token_usage
 
 from tests.check_diff.fixtures import annotation
 

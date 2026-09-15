@@ -8,7 +8,7 @@ import unittest
 from unittest import mock
 
 from tests.mbz import test_verify_local_batch as fixtures
-from utility import result_reuse as reuse
+from utility.batch import result_reuse as reuse
 
 # Deliberately freeze a legacy invocation; current runners require modern helper proof.
 LEGACY_RUNNER_SOURCE = """def build_command(config, work):

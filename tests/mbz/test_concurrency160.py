@@ -3,7 +3,7 @@ import unittest
 from unittest import mock
 from tests.mbz import test_local_batch as scheduler_fixture
 from tests.mbz import test_verify_local_batch as verifier_fixture
-from utility import local_batch as batch
+from utility.batch import local_batch as batch
 
 LADDER = [160, 128, 96, 80, 64, 48]
 

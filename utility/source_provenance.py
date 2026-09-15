@@ -19,6 +19,7 @@ MANIFEST_PATH = 'utility/source_manifest.json'
 PROJECT_PATH = 'utility/project.json'
 INDEX_PATH = 'data/index/index.json'
 CATALOGS = ('data', 'data_full')
+UTILITY_PACKAGES = ('anonymize', 'data', 'batch', 'codex')
 
 
 def catalog_index(catalog='data'):
@@ -152,6 +153,8 @@ def _allowed_name(name):
         raise ValueError(f'Excluded source-manifest path: {name}')
     allowed = (parts[0] == 'check_diff' and len(parts) > 1
                or len(parts) == 2 and parts[0] == 'utility' and parts[-1].endswith('.py')
+               or len(parts) == 3 and parts[0] == 'utility' and parts[1] in UTILITY_PACKAGES
+               and (parts[-1].endswith('.py') or parts[1:] == ['anonymize', 'vision_ocr_audit.swift'])
                or len(parts) == 3 and parts[0] in CATALOGS and parts[1] == 'index' and parts[-1].endswith('.json')
                or len(parts) > 3 and parts[0] in CATALOGS and parts[1] == 'index' and parts[2] in ('metadata', 'provenance'))
     if not allowed:
@@ -178,9 +181,12 @@ def _source_names(project):
             _inside(project, relative)
             if not path.is_dir():
                 names.add(_allowed_name(relative))
-    for folder, pattern in (('utility', '*.py'), ('data/index', '*.json'), ('data_full/index', '*.json')):
+    for folder, pattern in (('utility', '*.py'),
+                            *((f'utility/{name}', '*.py') for name in UTILITY_PACKAGES),
+                            ('utility/anonymize', 'vision_ocr_audit.swift'),
+                            ('data/index', '*.json'), ('data_full/index', '*.json')):
         root = _inside(project, folder)
-        if folder == 'data_full/index' and not root.exists():
+        if (folder.startswith('utility/') or folder == 'data_full/index') and not root.exists():
             continue
         if not root.is_dir():
             raise ValueError(f'Expected a source directory: {root}')
@@ -410,7 +416,7 @@ def verified_sources(project, code_root, sources, source_revision, extra_files=(
             raise ValueError(f'Source manifest hash/size mismatch: {name}')
         blobs[name] = raw
     if __package__:
-        from .prepare_source_data import load_source
+        from .data.prepare_source_data import load_source
     else:
         from prepare_source_data import load_source
     if sources:

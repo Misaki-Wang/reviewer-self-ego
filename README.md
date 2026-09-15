@@ -40,11 +40,11 @@ provenance; original PDF stores remain on the execution host.
 Download all catalogued versions, anonymize each required PDF, then construct pairs offline:
 
 ```sh
-python3.11 -B -m utility.download_papers --conf acl2026
+python3.11 -B -m utility.data.download_papers --conf acl2026
 # Run anonymize_pdf once for each required downloaded PDF, for example:
-python3.11 -B -m utility.anonymize_pdf downloads_papers/acl2026/2305.14299/v1.pdf
+python3.11 -B -m utility.anonymize.anonymize_pdf downloads_papers/acl2026/2305.14299/v1.pdf
 # After all required versions are present in clean_data:
-python3.11 -B -m utility.build_pairs --conf acl2026 --all --output res/NEW_RUN_ID/prepared
+python3.11 -B -m utility.data.build_pairs --conf acl2026 --all --output res/NEW_RUN_ID/prepared
 ```
 
 The download root is configured by `data.downloads_root` in
@@ -56,6 +56,13 @@ no `metadata.json` is required in `clean_data`. Missing clean versions fail pair
 construction without falling back to original downloads. Pair construction
 retains the existing temporal rule and output format.
 See [utility/README.md](utility/README.md) for filters, retries and fixed plans.
+
+Utility modules are grouped under `utility/data/`, `utility/batch/`,
+`utility/codex/` and `utility/anonymize/`; `utility/workflow.py` remains the public
+workflow entry point. Rules-only anonymization produces review candidates outside
+production `clean_data`; see the utility documentation for its independent
+validation stages and the fixed-sample v6 result.
+
 
 ## One configuration and one main workflow
 
@@ -139,7 +146,7 @@ experiment payloads/PDFs are Git-ignored. No GitHub push is implied by local MBZ
 
 ## Review and validation
 
-Shared Codex token accounting lives in [utility/token_usage.py](utility/token_usage.py).
+Shared Codex token accounting lives in [utility/codex/token_usage.py](utility/codex/token_usage.py).
 Both experiment runners use that file; the independent batch verifier retains
 its separate calculation for cross-checking. New frozen runs keep their own copy
 at source_snapshot/utility/token_usage.py, while archived runs remain unchanged.

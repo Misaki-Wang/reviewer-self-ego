@@ -1,6 +1,6 @@
 # source_data preparation and provenance
 
-The active export root contains check_diff/, utility/, data/index and data/pdf.
+The active export root contains check_diff/, utility/, data/, and data_full/.
 Current configuration is utility/project.json. Use its existing runtime settings;
 no new Python dependencies are required.
 
@@ -35,23 +35,36 @@ Failures are recorded in `download_manifest.json` and cause a nonzero exit statu
 rerunning retries failed/missing files. This manifest describes the latest
 invocation's scope; earlier cached papers and their metadata remain in place.
 
+Download concurrency defaults to one worker. `--workers` accepts 1 through 1,024
+concurrent original-version groups; every worker and retry shares the single
+`--interval` admission gate. `--validation-workers` independently bounds
+simultaneous PDF validation (default: download concurrency).
+`--stop-on-retryable-error` drains active work and stops after exhausted transient
+file failures so an external controller can recover. These controls do not start
+model calls.
+
+The persistent 1024 → 512 → 256 → 128 recovery ladder used by the deployed
+download run belongs to its frozen outer controller under
+`res/maintenance-download-acceleration-20260915/run-03/`. A standalone downloader
+CLI invocation does not implement that ladder or restart itself.
+
 From the project root with Python 3.11+ and the existing pypdf dependency:
 
 ```sh
 # Inspect the complete download inventory without network requests or writes.
-python3.11 -B -m utility.download_papers --dry-run
+python3.11 -B -m utility.data.download_papers --dry-run
 
 # Download all catalogued versions for a conference (omit --conf for all sources).
-python3.11 -B -m utility.download_papers --conf acl2026
+python3.11 -B -m utility.data.download_papers --conf acl2026
 
 # Or download all versions of one paper.
-python3.11 -B -m utility.download_papers --conf acl2026 --arxiv-id 2305.14299
+python3.11 -B -m utility.data.download_papers --conf acl2026 --arxiv-id 2305.14299
 
 # Anonymize each needed PDF separately before pairing, for example:
-python3.11 -B -m utility.anonymize_pdf downloads_papers/acl2026/2305.14299/v1.pdf
+python3.11 -B -m utility.anonymize.anonymize_pdf downloads_papers/acl2026/2305.14299/v1.pdf
 
 # Once all required versions are clean, build pairs with the existing pairing rule.
-python3.11 -B -m utility.build_pairs --conf acl2026 --all \
+python3.11 -B -m utility.data.build_pairs --conf acl2026 --all \
   --output res/NEW_RUN_ID/prepared
 ```
 
@@ -90,11 +103,11 @@ existing local Python 3.11 environment includes the required PyMuPDF dependency.
 
 ```sh
 # Inspect the paths first; this makes no model calls or PDF edits.
-python3.11 -B -m utility.anonymize_pdf \
+python3.11 -B -m utility.anonymize.anonymize_pdf \
   downloads_papers/iclr2026/2301.12412/v1.pdf --dry-run
 
 # Process this single PDF (identify, then audit; retry with feedback if needed).
-python3.11 -B -m utility.anonymize_pdf \
+python3.11 -B -m utility.anonymize.anonymize_pdf \
   downloads_papers/iclr2026/2301.12412/v1.pdf --model gpt-5.5 --effort high
 ```
 
@@ -169,12 +182,12 @@ are preserved exactly.
 The maintained preparation module is prepare_source_data.py:
 
 ```sh
-python3.12 -B -m utility.prepare_source_data \
+python3.12 -B -m utility.data.prepare_source_data \
   --source data/index/index.json --pdf-root data/pdf --all --dry-run
-python3.12 -B -m utility.prepare_source_data \
+python3.12 -B -m utility.data.prepare_source_data \
   --source data/index/index.json --pdf-root data/pdf --all \
   --output res/NEW_RUN_ID/prepared --plan-only
-python3.12 -B -m utility.prepare_source_data \
+python3.12 -B -m utility.data.prepare_source_data \
   --materialize-plan res/NEW_RUN_ID/prepared/selection_manifest.json \
   --pdf-root data/pdf --output res/NEW_RUN_ID/prepared
 ```
@@ -214,8 +227,8 @@ preview = build_manifest(project)       # read-only
 manifest = write_manifest(project)      # explicit maintenance write
 blobs, deployment = verified_sources(
     project, project, ["acl2026"], manifest["revision"],
-    extra_files=("utility/prepare_source_data.py",
-                 "utility/prepare_input_data.py",
+    extra_files=("utility/data/prepare_source_data.py",
+                 "utility/data/prepare_input_data.py",
                  "utility/source_provenance.py"),
 )
 ```
@@ -230,8 +243,8 @@ code_root must equal project. The manifest at utility/source_manifest.json is:
 revision is SHA-256 of the UTF-8 encoding of
 json.dumps(files, sort_keys=True, separators=(',', ':'), ensure_ascii=False).
 The manifest pins both byte count and digest. It includes current check_diff
-sources/prompts/core README/requirements, utility/*.py and data/index JSON plus
-metadata/provenance files. It excludes utility/project.json, its own JSON file,
+sources/prompts/core README/requirements, utility/*.py, the anonymize/data/batch/codex
+packages, and the data/data_full indexes and metadata/provenance files. It excludes utility/project.json, its own JSON file,
 .runtime, caches, tests, res, html and review_experiment. Configuration is proofed
 separately to avoid a cyclic content revision.
 
@@ -268,7 +281,7 @@ manifest interface. Workflow and MBZ batch tests are maintained by their owners.
 
 ## Shared token accounting
 
-Both experiment runners use the single utility/token_usage.py implementation.
+Both experiment runners use the single utility/codex/token_usage.py implementation.
 It preserves raw reported usage and the existing aggregation contract. New batch
 snapshots freeze it at source_snapshot/utility/token_usage.py; historical snapshots
 are unchanged. The independent verifier retains its separate arithmetic.
@@ -292,9 +305,17 @@ resolves full records/order and checks every base, addition and index identity.
 Only canonical sibling `data/index/<source_id>.json` bases are supported; ordinary
 shard path restrictions remain unchanged.
 
+The three-version catalog resolves 4,334 papers and 16,457 original versions;
+the two-version catalog resolves 15,331 papers and 41,945 original versions.
+ICLR2025's historical `iclr2025.additions.json` contains the complete 1,900-paper
+two-version result. Its active overlay references the 610-paper base shard and
+the disjoint 1,290-paper `iclr2025.full-only.json` shard. Both local files are
+retained; the older complete file is not the active additions payload. Catalog
+membership and the availability of original PDFs are audited separately.
+
 ```sh
 # Resolve the expanded ICLR catalog without downloading or invoking a model.
-python3.12 -B -m utility.prepare_source_data \
+python3.12 -B -m utility.data.prepare_source_data \
   --source data_full/index/index.json --pdf-root data_full/pdf \
   --fallback-pdf-root data/pdf --all --dry-run
 
@@ -303,7 +324,7 @@ python3.12 -B -m utility.workflow prepare --catalog data_full \
   --source iclr2026 --units 10 --run-id NEW_RUN_ID
 
 # Inspect download scope while directly reusing existing original PDF files.
-python3.12 -B -m utility.download_papers \
+python3.12 -B -m utility.data.download_papers \
   --source data_full/index/index.json --conf iclr2026 \
   --output data_full/pdf --pdf-layout legacy --reference-pdf-root data/pdf --dry-run
 ```
@@ -317,18 +338,18 @@ all selected catalog dependencies; later live catalog changes cannot alter it.
 
 ## Reference compatible historical judgments
 
-`utility.result_reuse` checks frozen pair inputs and execution evidence before
+`utility.batch.result_reuse` checks frozen pair inputs and execution evidence before
 creating a reference to an existing judgment. It does not dispatch models, change
 batch state, or import old attempts into a new run. It preserves historical token
 usage separately; missing historical usage remains unknown.
 
 ```sh
-python3.12 -B -m utility.result_reuse check \
+python3.12 -B -m utility.batch.result_reuse check \
   --source-run res/OLD_RUN --target-run res/NEW_RUN --pair ARXIV_ID__v1_v2
-python3.12 -B -m utility.result_reuse create \
+python3.12 -B -m utility.batch.result_reuse create \
   --source-run res/OLD_RUN --target-run res/NEW_RUN --pair ARXIV_ID__v1_v2 \
   --output data_full/results/ARXIV_ID__v1_v2.reference.json
-python3.12 -B -m utility.result_reuse load \
+python3.12 -B -m utility.batch.result_reuse load \
   data_full/results/ARXIV_ID__v1_v2.reference.json
 ```
 
@@ -365,3 +386,72 @@ The approved runtime path list is not an archive of runtime bytes and must not b
 used as a substitute for the stronger historical resource proof required by
 `result_reuse`. A missing proof remains incompatible; no legacy result is relabeled
 as an isolated result.
+
+
+## Rules-only anonymization candidates
+
+`utility.anonymize.anonymize_pdf_rules` generates a deterministic redaction plan
+from one PDF and its complete original paper metadata, then reuses the Codex
+anonymizer's PDF extraction, redaction and local integrity checks. The rules
+processing path makes no Codex CLI, external model-service or network calls.
+The Codex-assisted processing workflow remains available separately at
+`utility.anonymize.anonymize_pdf`.
+
+```sh
+python3.12 -B -m utility.anonymize.anonymize_pdf_rules \
+  data/pdf/ARXIV_ID/ARXIV_IDv1.pdf --metadata res/SCOPE/metadata/ARXIV_ID.json \
+  --output res/NEW_RULE_TEST/candidates/ARXIV_ID/v1.pdf \
+  --report res/NEW_RULE_TEST/reports/ARXIV_ID/v1.json
+```
+
+The metadata file must contain one complete paper record, not an entire source
+shard. Input identity/version must match that metadata. Outputs, reports and QA
+artifacts must stay outside original stores and production `clean_data`. The
+driver preserves uncertainty and produces review candidates only.
+
+Exit 0 means `rules_passed`; exit 2 means `needs_manual_review` with a candidate;
+exit 1 means validation failed or inputs were invalid. `rules_passed` is not a
+visual-review verdict. Matching rules receipts retain their original status and
+bind the input PDF, metadata, driver, rule version, helper code and PyMuPDF.
+Moving the scripts changed code hashes and can invalidate both rules and Codex
+cache matches; historical receipts and frozen source paths are not relabeled.
+
+The rules v6 pilot used the fixed original ICLR sample: five papers, first/latest
+versions, 10 PDFs and 219 pages. All 10 candidates were accepted after independent
+dual-parser checks, local macOS Vision OCR and agent visual review. Three
+scientific-content matches were retained with explicit review dispositions.
+The processing scripts made zero Codex calls; visual inspection occurred in the
+agent session. The 151 rules, driver and audit regressions passed.
+
+Early pilot iterations contained residual identity clues and a figure-ellipsis
+false positive; those rejected artifacts remain as history. The v6 sample result
+does not establish perfect anonymity for arbitrary papers. The candidate driver,
+independent audit and macOS OCR helper are separate components, not a fully
+automatic production publishing pipeline. Production `clean_data` was not changed.
+Execution evidence is retained on the execution host under
+`res/maintenance-anonymize-rules-v3-20260916/` and
+`res/iclr2026_rules_pilot_20260915T095243Z/`.
+
+## Utility package layout
+
+| Package | Responsibility |
+| --- | --- |
+| `utility/data/` | Catalog preparation, PDF helpers, downloads and clean pair construction |
+| `utility/batch/` | Batch preparation, execution, completed-turn recovery, verification and result reuse |
+| `utility/codex/` | Shared Codex isolation and token accounting |
+| `utility/anonymize/` | Codex/rules PDF anonymization, independent audit and native OCR helper |
+
+`utility/workflow.py` remains the public workflow entry point;
+`utility/source_provenance.py` remains the global content-manifest API.
+Use the grouped module names shown above, or their corresponding direct script
+paths. There are no active flat forwarding modules. Current source locations map
+to the existing frozen runtime layout: `source_snapshot` and `controller_versions`
+paths in completed or running experiments are not moved. Missing helpers in the
+selected source tree fail without loading another checkout.
+
+The directory migration passed 785 related offline tests plus syntax, import,
+CLI and source-preservation checks. This includes utility, MBZ batch, comparison,
+review and benchmark contracts; it excludes the data-packaging suite and is not
+a claim that every repository test passed. Earlier time-limited baseline runs
+are recorded as incomplete. The migration added no dependencies and did not
+launch corpus processing or real model calls.

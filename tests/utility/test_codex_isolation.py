@@ -5,8 +5,9 @@ from pathlib import Path
 import tempfile
 import tomllib
 import unittest
+from unittest.mock import patch
 
-from utility import codex_isolation as isolation
+from utility.codex import codex_isolation as isolation
 
 
 class IsolationTests(unittest.TestCase):
@@ -106,6 +107,14 @@ class IsolationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='isolation-negative-', dir='/tmp') as work:
             with self.assertRaisesRegex(ValueError, 'shared temporary'):
                 isolation.isolation_options(self.pdfs, Path(work), codex=str(self.codex), pdf_skill=self.skill)
+
+    def test_default_runtime_is_under_utility_in_both_helper_layouts(self):
+        runtime = self.root / 'utility/.runtime'
+        runtime.mkdir(parents=True)
+        for layout in ('utility', 'utility/codex'):
+            with self.subTest(layout=layout), patch.object(
+                    isolation, '__file__', str(self.root / layout / 'codex_isolation.py')):
+                self.assertEqual(isolation.default_tool_runtime(), runtime)
 
     def test_missing_cli_fails_closed(self):
         with self.assertRaisesRegex(ValueError, 'Codex executable'):
