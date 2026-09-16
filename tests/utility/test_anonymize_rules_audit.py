@@ -443,6 +443,146 @@ class AuditTests(unittest.TestCase):
         self.assertTrue(report["requires_visual_review"])
         self.assertFalse(report["ready_for_blind_review"])
 
+    def test_figure_before_explicit_references_does_not_poison_citation(self):
+        front = [("Scientific text", 60)]
+        refs = [("Figure 2: Scientific results.", 200), ("References", 450),
+                ("[2] Other Person and Alice Example. A useful method,", 490),
+                ("Nature, 575:607-617, 2019.", 505)]
+        self.pair([front, refs], [front, refs])
+        report = self.run_audit()
+        self.assertTrue(report["passed"], report)
+
+    def test_bare_middle_initial_starts_local_reference_entry(self):
+        front = [("Scientific text", 60)]
+        refs = [("References", 60),
+                ("Bryan R Christ, Alice Example, and Thomas Hartvigsen.", 100),
+                ("2024. A useful method. Conference proceedings.", 115)]
+        self.pair([front, refs], [front, refs])
+        report = self.run_audit()
+        self.assertTrue(report["passed"], report)
+
+    def test_spacing_diacritic_name_starts_local_reference_entry(self):
+        text = "References\nFrano Raji\u02c7c, Alice Example, and Fisher Yu. A method, 2025.\n"
+        page = audit._page_record(text)
+        start = text.index("Alice Example")
+        span = audit._reference_spans([page])[0][0]
+        self.assertIsNotNone(audit._bibliographic_entry(
+            page, start, start + len("Alice Example"), span))
+
+    def test_reference_entry_year_may_continue_on_next_page(self):
+        front = [("Scientific text", 60)]
+        refs = [("References", 60),
+                ("[2] Other Person and Alice Example. A survey on", 700), ("2", 750)]
+        continuation = [("model compression. Conference proceedings, 2025.", 60),
+                        ("[3] Another Author. Different method, 2023.", 100)]
+        self.pair([front, refs, continuation], [front, refs, continuation])
+        report = self.run_audit()
+        self.assertTrue(report["passed"], report)
+
+    def test_reference_continuation_never_borrows_next_entry_year(self):
+        front = [("Scientific text", 60)]
+        refs = [("References", 60),
+                ("[2] Other Person and Alice Example. An incomplete citation.", 700)]
+        next_entry = [("[3] Another Author. A different method, 2025.", 60)]
+        self.pair([front, refs, next_entry], [front, refs, next_entry])
+        report = self.run_audit()
+        self.assertFalse(report["passed"])
+        self.assertEqual([], report["reference_matches"])
+
+    def test_reference_continuation_does_not_cross_appendix_boundary(self):
+        front = [("Scientific text", 60)]
+        refs = [("References", 60),
+                ("[2] Other Person and Alice Example. An incomplete citation.", 700)]
+        appendix = [("Appendix A", 60), ("Additional experiments in 2025.", 100)]
+        self.pair([front, refs, appendix], [front, refs, appendix])
+        report = self.run_audit()
+        self.assertFalse(report["passed"])
+        self.assertEqual([], report["reference_matches"])
+
+    def test_reference_continuation_cannot_hide_figure_example(self):
+        front = [("Scientific text", 60)]
+        refs = [("References", 60),
+                ("[2] Other Person and Alice Example. An incomplete citation.", 700)]
+        figure = [("Synthetic generated text mentions the year 2025.", 60),
+                  ("Figure 3: Citation-shaped examples.", 700)]
+        self.pair([front, refs, figure], [front, refs, figure])
+        report = self.run_audit()
+        self.assertFalse(report["passed"])
+        self.assertEqual([], report["reference_matches"])
+
+    def test_reference_continuation_requires_same_original_evidence(self):
+        front = [("Scientific text", 60)]
+        refs = [("References", 60),
+                ("[2] Other Person and Alice Example. A survey on", 700)]
+        original_tail = [("model compression. Conference proceedings, 2024.", 60)]
+        changed_tail = [("model compression. Conference proceedings, 2025.", 60)]
+        self.pair([front, refs, original_tail], [front, refs, changed_tail])
+        report = self.run_audit()
+        self.assertFalse(report["passed"])
+        self.assertEqual([], report["reference_matches"])
+
+    def test_author_with_attached_affiliation_digits_remains_a_hit(self):
+        pages = [[("A Scientific Paper", 60), ("1Alice Example2", 100),
+                  ("Scientific result x = 42.", 200)]]
+        self.pair(pages, pages)
+        report = self.run_audit()
+        self.assertFalse(report["passed"])
+        self.assertEqual({"pymupdf", "pypdf"}, {x["parser"] for x in report["remaining_hits"]})
+
+    def test_author_match_does_not_expand_into_another_name(self):
+        page = audit._page_record("Alice Exampleton and Malice Example remain ordinary strings.")
+        self.assertEqual([], list(audit._matches(page, audit._vocabulary([self.author], None)[0])))
+
+    def test_graphics_count_matches_low_level_drawings(self):
+        with pymupdf.open() as document:
+            empty = document.new_page()
+            drawn = document.new_page()
+            drawn.draw_rect(pymupdf.Rect(20, 20, 80, 80))
+            drawn.draw_circle(pymupdf.Point(100, 100), 15)
+            expected = []
+            for page in document:
+                rich = page.get_drawings()
+                compact = page.get_cdrawings(extended=False)
+                self.assertEqual(len(rich), len(compact))
+                self.assertEqual(bool(rich), bool(compact))
+                expected.append(len(rich))
+            document.save(self.candidate)
+        with patch.object(pymupdf.Page, "get_drawings",
+                          side_effect=AssertionError("Avoid rich point-object conversion")):
+            report = audit._structure(self.candidate)
+        self.assertEqual(expected, [x["vector_drawing_objects"] for x in report["graphics"]])
+
+
+    def test_short_author_metadata_does_not_match_possessives_or_math(self):
+        self.pair(candidate=[[("The method's score uses s + S = 2.", 200)]])
+        metadata = {"authors": ["Alice Example", "S"]}
+        for arguments in ({"source_metadata": metadata}, {"identity_terms": metadata}):
+            with self.subTest(arguments=arguments):
+                report = audit.audit_pdf(self.source, self.candidate, **arguments)
+                self.assertEqual(["Alice Example"], [x["text"] for x in report["identity_vocabulary"]])
+                self.assertEqual([], report["remaining_hits"])
+                self.assertTrue(any(x["reason"] == "unusable_author_metadata" for x in report["unresolved"]))
+                self.assertFalse(report["passed"])
+                self.assertFalse(report["ready_for_blind_review"])
+        self.assertEqual(["Alice Example", "S"], metadata["authors"])
+
+    def test_short_author_metadata_keeps_real_names_and_explicit_short_terms(self):
+        pages = [[("Alice Example", 90), ("S is an explicit caller-supplied identifier.", 200)]]
+        self.pair(pages, pages)
+        report = audit.audit_pdf(self.source, self.candidate, [{"text": "S", "category": "identity"}],
+                                 source_metadata={"authors": ["Alice Example", "S"]})
+        self.assertEqual({"S", "Alice Example"}, {x["term"] for x in report["remaining_hits"]})
+        self.assertEqual({"pymupdf", "pypdf"}, {x["parser"] for x in report["remaining_hits"]})
+        self.assertEqual(["Alice Example"], [x["text"] for x in report["identity_vocabulary"]
+                                            if x["category"] == "author"])
+
+    def test_short_author_metadata_rejects_non_names_without_changing_other_names(self):
+        authors = ["S", "s.", "1234", "", 123, None, True, {}, {"name": "S"},
+                   "Alice Example", "Li", {"given": "Ada", "family": "Lovelace"}]
+        terms = audit._vocabulary([], {"authors": authors})
+        self.assertEqual(["Alice Example", "Li", "Ada Lovelace"], [x["text"] for x in terms])
+
+
 
 if __name__ == "__main__":
     unittest.main()

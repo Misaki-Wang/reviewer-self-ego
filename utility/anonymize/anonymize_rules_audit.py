@@ -14,7 +14,7 @@ import unicodedata
 import pymupdf
 from pypdf import PdfReader
 
-SCHEMA_VERSION = "anonymize-rules-audit-3"
+SCHEMA_VERSION = "anonymize-rules-audit-6"
 REFERENCE_HEADING = re.compile(
     r"^\s*(?:\d+(?:\.\d+)*[.)]?\s+)?(?:references|bibliography|references and notes)\s*$",
     re.I,
@@ -108,7 +108,30 @@ def normalize_text(text):
     return _normalized(text)[0]
 
 
-def _vocabulary(identity_terms, source_metadata):
+def metadata_author_names(metadata):
+    """Reject unusable global author clues without changing explicit identity terms."""
+    authors = (metadata or {}).get("authors", [])
+    if not isinstance(authors, (list, tuple)):
+        authors = [authors]
+    names, unresolved = [], []
+    for index, author in enumerate(authors):
+        if isinstance(author, dict):
+            author = author.get("name") or " ".join(
+                author[key] for key in ("given", "family")
+                if isinstance(author.get(key), str)
+            ).strip()
+        if (not isinstance(author, str)
+                or sum(char.isalpha() for char in normalize_text(author)) < 2):
+            unresolved.append({
+                "reason": "unusable_author_metadata", "author_index": index,
+                "detail": "Metadata author is not a usable global name; at least two letters are required.",
+            })
+        elif author not in names:
+            names.append(author)
+    return names, unresolved
+
+
+def _vocabulary(identity_terms, source_metadata, unresolved=None):
     if isinstance(identity_terms, dict):
         if any(key in identity_terms for key in ("text", "term", "value")):
             identity_terms = [identity_terms]
@@ -117,16 +140,11 @@ def _vocabulary(identity_terms, source_metadata):
             identity_terms = []
     items = list(identity_terms or ())
     metadata = source_metadata or {}
-    authors = metadata.get("authors", [])
-    if isinstance(authors, str):
-        authors = [authors]
+    authors, author_issues = metadata_author_names(metadata)
+    if unresolved is not None:
+        unresolved.extend(author_issues)
     for author in authors:
-        if isinstance(author, dict):
-            author = author.get("name") or " ".join(
-                str(author.get(key, "")) for key in ("given", "family")
-            ).strip()
-        if author:
-            items.append({"text": str(author), "category": "author", "allow_reference": True})
+        items.append({"text": author, "category": "author", "allow_reference": True})
     for field, category in (
         ("affiliations", "affiliation"), ("emails", "email"),
         ("owned_urls", "owned_url"), ("identity_terms", "identity"),
@@ -170,8 +188,11 @@ def _matches(page, term):
         text, offsets = "".join(text[i] for i in kept), [offsets[i] for i in kept]
         needle = "".join(needle.split())
     suffix = r"(?:v\d+)?" if term["category"] in {"arxiv", "arxiv_id"} else ""
+    # Affiliation markers can be attached to author names after PDF extraction
+    # (e.g. "1Alice Example2"). Extra letters must still reject partial names.
+    boundary = r"[^\W\d_]" if term["category"] == "author" else r"\w"
     pattern = re.compile(re.escape(needle) + suffix if compact else
-                         r"(?<!\w)" + re.escape(needle) + suffix + r"(?!\w)")
+                         r"(?<!" + boundary + ")" + re.escape(needle) + suffix + r"(?!" + boundary + ")")
     for found in pattern.finditer(text):
         start, end = offsets[found.start()], offsets[found.end() - 1] + 1
         if compact:
@@ -282,30 +303,73 @@ def _footnote_like(page, start, end):
     )
 
 
-def _bibliographic_entry(page, start, end, span):
-    """Require local citation syntax, rather than inherited section membership."""
+def _bibliographic_headers(text):
+    # Bare middle initials and extracted spacing diacritics occur in real
+    # author lists; keep the capitalized-name and citation punctuation anchors.
+    name = r"(?:[A-ZÀ-ÖØ-Þ][^\W\d_]*(?:['’\-\u02b0-\u02ff][^\W\d_]+)*|[A-Z]\.)"
+    authors = name + r"(?:\s+(?:" + name + r"|de|van|von|der|da|del)){1,5}(?:\s*[,.]|\s+and\b)"
+    inverted = name + r",\s+(?:[A-Z]\.\s*){1,4}(?:[,;]|\s|$)"
+    return list(re.finditer(r"(?m)^[ \t]*(?:\[\d+\][ \t]*|" + authors + "|" + inverted + r")", text))
+
+
+def _reference_continuations(pages, spans):
+    """Attach at most the next page's same explicit reference region."""
+    for index, page in enumerate(pages[:-1]):
+        if (not spans[index] or not spans[index + 1]
+                or spans[index][-1][1] != len(page["text"])):
+            continue
+        current, following = spans[index][-1], spans[index + 1][0]
+        if (current[3] or following[3] or following[0] != 0
+                or current[2] != following[2]):
+            continue
+        page["reference_continuation"] = {
+            "heading_page": current[2],
+            "text": pages[index + 1]["text"][following[0]:following[1]],
+        }
+
+
+def _bibliographic_entry(page, start, end, span, *, require_year_after=True):
+    """Require source-comparable local citation syntax and publication evidence.
+
+    The default requires a year after the author hit. The optional mode supports
+    review of a venue line later in the same entry; it never grants author or
+    contact exemptions through this API.
+    """
     text = page["text"]
-    # Mixed figure/reference pages need an explicit, source-bound review. A
-    # caption elsewhere on the page is not evidence that a quoted example is a citation.
-    if re.search(r"(?mi)^\s*(?:figure|fig\.?|table)\s+\d+\s*[:.]", text):
+    caption = r"(?mi)^\s*(?:figure|fig\.?|table)\s+\d+\s*[:.]"
+    # A figure before a new explicit References heading is outside this span.
+    # Figures inside an inherited/active reference span remain ambiguous.
+    if re.search(caption, text[span[0]:span[1]]):
         return None
     left = max(span[0], start - 3000)
     right = min(span[1], end + 3000)
-    window = text[left:right]
-    name = r"(?:[A-Z][A-Za-z'’\-]+|[A-Z]\.)"
-    authors = name + r"(?:\s+(?:" + name + r"|de|van|von|der|da|del)){1,5}(?:\s*[,\.]|\s+and\b)"
-    headers = list(re.finditer(r"(?m)^[ \t]*(?:\[\d+\][ \t]*|" + authors + r")", window))
+    headers = _bibliographic_headers(text[left:right])
     possible = [header for header in headers if left + header.start() <= start]
     if not possible:
         return None
     entry_start = left + possible[-1].start()
     year = re.search(r"\b(?:18|19|20)\d{2}[a-z]?\b", text[entry_start:right])
-    if not year or entry_start + year.start() < end:
-        # A year in the preceding citation cannot authorize the next paragraph.
+    if year is None and right == span[1] == len(text):
+        continuation = page.get("reference_continuation")
+        tail = re.sub(r"\n[ \t]*\d{1,3}\s*$", "", text[entry_start:right]).rstrip()
+        later_headers = [h for h in headers if left + h.start() >= end]
+        if (continuation and continuation["heading_page"] == span[2]
+                and tail and tail[-1] not in ".!?;"
+                and not later_headers and not re.search(caption, continuation["text"])):
+            extra = continuation["text"]
+            # A following citation's year cannot complete the unfinished entry.
+            next_headers = _bibliographic_headers(extra)
+            if next_headers:
+                extra = extra[:next_headers[0].start()]
+            extra = extra[:3000]
+            text += "\n" + extra
+            right = len(text)
+            year = re.search(r"\b(?:18|19|20)\d{2}[a-z]?\b", text[entry_start:right])
+    if not year or (require_year_after and entry_start + year.start() < end):
         return None
-    entry_end = entry_start + year.end()
+    entry_end = max(end, entry_start + year.end())
     between = text[entry_start:entry_end]
-    if re.search(r"(?mi)^\s*(?:figure|fig\.?|table)\s+\d+\s*[:.]", between):
+    if re.search(caption, between):
         return None
     return normalize_text(between)
 
@@ -365,7 +429,7 @@ def _structure(path):
             result["graphics"].append({
                 "page": number,
                 "image_placements": len(page.get_image_info()),
-                "vector_drawing_objects": len(page.get_drawings()),
+                "vector_drawing_objects": len(page.get_cdrawings(extended=False)),
             })
     return result
 
@@ -373,12 +437,13 @@ def _structure(path):
 def audit_pdf(source_pdf, candidate_pdf, identity_terms=(), *, source_metadata=None):
     """Return evidence; never change PDFs or invoke external programs/services."""
     source, candidate = Path(source_pdf).resolve(), Path(candidate_pdf).resolve()
-    terms = _vocabulary(identity_terms, source_metadata)
+    author_issues = []
+    terms = _vocabulary(identity_terms, source_metadata, author_issues)
     result = {
         "schema_version": SCHEMA_VERSION,
         "source": str(source), "candidate": str(candidate),
         "identity_vocabulary": terms, "remaining_hits": [], "reference_matches": [],
-        "unresolved": [], "extraction_coverage": {}, "structure": {},
+        "unresolved": author_issues, "extraction_coverage": {}, "structure": {},
         "graphics": [], "requires_visual_review": True, "ready_for_blind_review": False,
         "ocr": {
             "performed": False, "status": "unavailable_to_this_auditor",
@@ -430,6 +495,8 @@ def audit_pdf(source_pdf, candidate_pdf, identity_terms=(), *, source_metadata=N
                 "source_pages": len(originals), "candidate_pages": len(candidates),
             })
         original_refs, candidate_refs = _reference_spans(originals), _reference_spans(candidates)
+        _reference_continuations(originals, original_refs)
+        _reference_continuations(candidates, candidate_refs)
         for number, page in enumerate(candidates, 1):
             original = originals[number - 1] if number <= len(originals) else _page_record("")
             spans = original_refs[number - 1] if number <= len(original_refs) else []

@@ -147,8 +147,16 @@ print(json.dumps({{'type':'turn.completed','usage':{{'input_tokens':10,'output_t
             for target in linked.values():
                 self.assertFalse(target.is_relative_to(work))
                 self.assertEqual(permissions[str(target)], 'read')
-            self.assertEqual(kwargs['stdout'].name, str(work / f'{work.name}.jsonl'))
-            self.assertEqual(kwargs['stderr'].name, str(work / f'{work.name}.stderr'))
+            evidence_root = self.report.parent / (self.report.name + '.evidence')
+            for channel, suffix in (('stdout', 'jsonl'), ('stderr', 'stderr')):
+                path = Path(kwargs[channel].name)
+                self.assertEqual(path.name, f'{work.name}.{suffix}')
+                self.assertEqual(path.parent.parent, evidence_root)
+                self.assertFalse(path.is_relative_to(work))
+                self.assertFalse(any(
+                    not scope.startswith(':') and access in ('read', 'write')
+                    and path.is_relative_to(Path(scope))
+                    for scope, access in permissions.items()))
             scopes.append((work, linked, permissions))
             return real_popen(command, **kwargs)
 

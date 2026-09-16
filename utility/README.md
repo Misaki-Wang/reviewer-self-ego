@@ -397,6 +397,16 @@ processing path makes no Codex CLI, external model-service or network calls.
 The Codex-assisted processing workflow remains available separately at
 `utility.anonymize.anonymize_pdf`.
 
+The rules driver's default `--scope regions` masks the first-page title and
+byline block, actual running headers/footers, explicit acknowledgments and
+author-contribution statements. It uses the observed PDF layout, including
+source-template variations, rather than assuming that every version uses its
+eventual venue's template. Scientific body text, body URLs, reference entries,
+figures and technical "Our Contributions" sections remain outside this scope.
+`--scope identifiers` explicitly selects the earlier whole-document identifier
+rules. These scopes have separate receipt bindings and cannot reuse each other's
+cached outputs.
+
 ```sh
 python3.12 -B -m utility.anonymize.anonymize_pdf_rules \
   data/pdf/ARXIV_ID/ARXIV_IDv1.pdf --metadata res/SCOPE/metadata/ARXIV_ID.json \
@@ -408,6 +418,9 @@ The metadata file must contain one complete paper record, not an entire source
 shard. Input identity/version must match that metadata. Outputs, reports and QA
 artifacts must stay outside original stores and production `clean_data`. The
 driver preserves uncertainty and produces review candidates only.
+Regional candidates must pass blank-region and outside-region preservation
+checks. Ambiguous title, credit or graphics boundaries remain review items;
+technical validation alone does not certify complete regional coverage.
 
 Exit 0 means `rules_passed`; exit 2 means `needs_manual_review` with a candidate;
 exit 1 means validation failed or inputs were invalid. `rules_passed` is not a

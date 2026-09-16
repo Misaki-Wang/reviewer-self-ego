@@ -23,6 +23,10 @@ else:
     import anonymize_rules as rules
 
 ROOT = Path(__file__).resolve().parents[2]
+REDACTION_MODE = 'matched-text-and-evidenced-objects-v3'
+REGION_REDACTION_MODE = 'filled-regions-v1'
+REGION_SCOPE = 'frontmatter-margins-credits-v1'
+VALIDATION_MODE = 'protected-content-certificate-v2'
 
 
 def encoded(value):
@@ -51,8 +55,14 @@ def validate_paths(source, paper, output, report, work):
     return number
 
 
-def anonymize(source, paper, output, report, work=None):
+def anonymize(source, paper, output, report, work=None, *, scope='regions', image_manifest=None, image_ocr_evidence=None):
     import pymupdf
+    import pypdf
+    if scope not in {'regions', 'identifiers'}:
+        raise ValueError('Scope must be regions or identifiers')
+    regional = scope == 'regions'
+    if regional and (image_manifest is not None or image_ocr_evidence is not None):
+        raise ValueError('Regional masking uses its authorized regions, not legacy image/OCR evidence')
     source = Path(source).resolve(strict=True)
     if not source.is_file():
         raise ValueError('Expected one original PDF')
@@ -63,14 +73,30 @@ def anonymize(source, paper, output, report, work=None):
         raise ValueError('QA directory must not traverse symlinks')
     work = work.resolve()
     version = validate_paths(source, paper, output, report, work)
+    if bool(image_manifest) != bool(image_ocr_evidence):
+        raise ValueError('Image manifest and OCR evidence must be supplied together')
+    image_plan = {'binding': None, 'image_operations': [], 'form_operations': [], 'uncertain': []}
+    if image_manifest:
+        if __package__:
+            from . import anonymize_image_rules as image_rules
+        else:
+            import anonymize_image_rules as image_rules
+        image_plan = image_rules.plan_image_redactions(
+            source, paper, image_manifest, image_ocr_evidence)
     binding = {
-        'backend': 'rules', 'rules_version': rules.RULES_VERSION,
+        'backend': 'rules',
+        'rules_version': rules.REGION_RULES_VERSION if regional else rules.RULES_VERSION,
+        'scope': REGION_SCOPE if regional else 'legacy-identifiers',
+        'redaction_mode': REGION_REDACTION_MODE if regional else REDACTION_MODE,
+        'validation_mode': VALIDATION_MODE,
         'source_sha256': pdf.digest(source),
         'paper_metadata_sha256': hashlib.sha256(encoded(paper)).hexdigest(),
         'rules_source_sha256': pdf.digest(Path(rules.__file__)),
         'pdf_helpers_sha256': pdf.digest(Path(pdf.__file__)),
         'driver_sha256': pdf.digest(Path(__file__)),
         'pymupdf': pymupdf.VersionBind,
+        'pypdf': pypdf.__version__,
+        'image_plan_binding': image_plan['binding'],
     }
     if output.exists():
         previous = json.loads(report.read_text()) if report.exists() else {}
@@ -85,6 +111,7 @@ def anonymize(source, paper, output, report, work=None):
     started = time.monotonic()
     receipt = {
         'schema_version': 'rules-anonymization-report-1', 'backend': 'rules',
+        'scope': binding['scope'],
         'status': 'in_progress', 'arxiv_id': paper['arxiv_id'], 'version': version,
         'input': str(source), 'output': str(output), 'report': str(report),
         'qa_directory': str(work), 'binding': binding, 'cache_hit': False,
@@ -96,26 +123,47 @@ def anonymize(source, paper, output, report, work=None):
     try:
         pages = pdf.inspect_pdf(source, work)
         receipt['physical_pages'] = len(pages)
-        plan = rules.build_plan(source, paper)
+        receipt['planner_diagnostics'] = {}
+        plan = (rules.build_region_plan(source, paper, diagnostics=receipt['planner_diagnostics'])
+                if regional else rules.build_plan(source, paper))
         if (not isinstance(plan, dict) or not isinstance(plan.get('uncertain'), list)
                 or any(not isinstance(item, str) for item in plan['uncertain'])):
             raise ValueError('Rules returned malformed uncertainty metadata')
         receipt['plan'] = plan
+        receipt['image_plan'] = image_plan
+        object_operations = image_plan['image_operations'] + image_plan.get('form_operations', [])
+        receipt['image_redaction_count'] = len(image_plan['image_operations'])
+        receipt['form_redaction_count'] = len(image_plan.get('form_operations', []))
         receipt['redaction_count'] = len(plan.get('redactions', []))
         receipt['redaction_categories'] = dict(Counter(r['category'] for r in plan.get('redactions', [])))
-        receipt['changed_pages'] = sorted({r['page'] for r in plan.get('redactions', [])})
+        receipt['changed_pages'] = sorted({r['page'] for r in plan.get('redactions', [])}
+                                          | {r['page'] for r in object_operations})
         # Keep uncertainty in the original plan and receipt. This is a quarantined
         # candidate flow, never the Codex pipeline's completed/clean publication.
         apply_plan = {**plan, 'uncertain': []}
         pdf.validate_plan(apply_plan, pages)
+        validation_plan = {**apply_plan, 'redactions': list(apply_plan['redactions']) + [
+            {'page': op['page'], 'rect': op['rect'], 'category': op['category'], 'text': ''}
+            for op in object_operations]}
+        pdf.validate_plan(validation_plan, pages)
+        receipt['validation_plan'] = validation_plan
         pdf.write_json(work / 'plan.json', plan)
+        pdf.write_json(work / 'validation-plan.json', validation_plan)
         if pdf.digest(source) != binding['source_sha256']:
             raise ValueError('Original PDF changed during rule generation')
         candidate = work / 'candidate.pdf'
-        pdf.redact_pdf(source, candidate, apply_plan, pages)
+        redaction_options = ({'region_mode': True} if regional else {
+            'text_only': True, 'image_operations': image_plan['image_operations'],
+            'form_operations': image_plan.get('form_operations', [])})
+        receipt['redaction_details'] = pdf.redact_pdf(
+            source, candidate, apply_plan, pages, **redaction_options)
         receipt['candidate_path'] = str(candidate)
         receipt['candidate_sha256'] = pdf.digest(candidate)
-        receipt['local_validation'] = pdf.check_pdf(source, candidate, apply_plan, work)
+        validation_options = {'allow_text_rounding': True}
+        if regional:
+            validation_options['require_blank_regions'] = True
+        receipt['local_validation'] = pdf.check_pdf(
+            source, candidate, validation_plan, work, **validation_options)
         if pdf.digest(source) != binding['source_sha256']:
             raise ValueError('Original PDF changed during validation')
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -131,7 +179,9 @@ def anonymize(source, paper, output, report, work=None):
         finally:
             temporary.unlink(missing_ok=True)
         receipt['output_sha256'] = receipt['candidate_sha256']
-        receipt['status'] = 'needs_manual_review' if plan['uncertain'] else 'rules_passed'
+        unresolved = receipt['planner_diagnostics'].get('unresolved', [])
+        receipt['status'] = ('needs_manual_review' if plan['uncertain'] or image_plan['uncertain'] or unresolved
+                             else 'rules_passed')
     except Exception as exc:
         receipt.update(status='failed_validation', error=f'{type(exc).__name__}: {exc}')
     finally:
@@ -153,19 +203,28 @@ def main(argv=None):
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--report', required=True, type=Path)
     parser.add_argument('--work-dir', type=Path)
+    parser.add_argument('--scope', choices=('regions', 'identifiers'), default='regions',
+                        help='Default: title block, headers/footers and explicit credits; identifiers retains the legacy rules')
+    parser.add_argument('--image-manifest', type=Path)
+    parser.add_argument('--image-ocr-evidence', type=Path, action='append')
     parser.add_argument('--dry-run', action='store_true')
     args = parser.parse_args(argv)
     try:
         paper = json.loads(args.metadata.read_text())
+        if args.scope == 'regions' and (args.image_manifest is not None or args.image_ocr_evidence is not None):
+            raise ValueError('Regional masking does not accept legacy image/OCR inputs')
+        if bool(args.image_manifest) != bool(args.image_ocr_evidence):
+            raise ValueError('Image manifest and OCR evidence must be supplied together')
         if args.dry_run:
             source = args.input.resolve(strict=True)
             output, report = pdf.regular_destination(args.output), pdf.regular_destination(args.report)
             work = (args.work_dir or report.parent / (report.stem + '-qa')).resolve()
             validate_paths(source, paper, output, report, work)
-            print(json.dumps({'backend': 'rules', 'input': str(source), 'output': str(output),
+            print(json.dumps({'backend': 'rules', 'scope': args.scope, 'input': str(source), 'output': str(output),
                               'codex_cli_calls': 0, 'model_api_calls': 0, 'writes': False}))
             return 0
-        receipt = anonymize(args.input, paper, args.output, args.report, args.work_dir)
+        receipt = anonymize(args.input, paper, args.output, args.report, args.work_dir,
+                            scope=args.scope, image_manifest=args.image_manifest, image_ocr_evidence=args.image_ocr_evidence)
         print(json.dumps({k: receipt[k] for k in
               ('status', 'output', 'report', 'codex_cli_calls', 'model_api_calls', 'cache_hit')}))
         return {'rules_passed': 0, 'needs_manual_review': 2, 'failed_validation': 1}[receipt['status']]
