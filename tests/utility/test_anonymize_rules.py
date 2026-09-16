@@ -4461,47 +4461,49 @@ class RegionalLayoutScopeTests(unittest.TestCase):
         return rules._propose_frontmatter_and_margins(pages,[(600,800)]*len(pages),paper=self.paper,graphics_by_page=gs,rules_module=rules)
     def touches(self,result,item,page=1):
         return any(x['page']==page and rules._region_overlap(x['rect'],item['rect']) for x in result['regions'])
-    def test_title_and_unknown_frontmatter_are_covered_body_is_not(self):
-        self.first.insert(0,_region_test_line('North Research Branding',18))
+    def test_title_is_preserved_and_proved_frontmatter_is_removed(self):
+        self.first.insert(0,_region_test_line('North University',18))
         out=self.run_plan();self.assertFalse(out['unresolved'])
-        for i in range(4):self.assertTrue(self.touches(out,self.first[i]))
+        self.assertFalse(self.touches(out,self.first[1]))
+        for i in (0,2,3):self.assertTrue(self.touches(out,self.first[i]))
         for i in range(4,len(self.first)):self.assertFalse(self.touches(out,self.first[i]))
     def test_later_caption_in_shared_block_does_not_swallow_abstract(self):
         for item in self.first:item['block']=0
         self.first.append(_region_test_line('Figure 1. A later scientific caption.',350,block=0))
         out=self.run_plan(graphics={1:[{'rect':[50,300,550,335]}]})
-        self.assertTrue(self.touches(out,self.first[0]))
+        self.assertFalse(self.touches(out,self.first[0]))
         self.assertFalse(self.touches(out,self.first[3]))
         self.assertFalse(self.touches(out,self.first[-1]))
-    def test_title_icon_is_inside_title_region(self):
+    def test_title_icon_does_not_authorize_title_redaction(self):
         out=self.run_plan(graphics={1:[{'rect':[65,48,90,73]}]})
-        self.assertTrue(any(rules._region_overlap(x['rect'],[65,48,90,73]) for x in out['regions'] if x['target']=='title_block'))
+        self.assertFalse(self.touches(out,self.first[0]))
+        self.assertTrue(self.touches(out,self.first[1]))
     def test_teaser_before_abstract_stops_title_region(self):
         self.first[3]['rect']=[60,460,200,474]
         self.first[4]['rect']=[60,490,540,502];self.first[5]['rect']=[60,530,540,542]
         self.first.insert(3,_region_test_line('Figure 1. A Scientific Paper diagram.',415))
         out=self.run_plan(graphics={1:[{'rect':[45,150,555,400]}]})
-        self.assertTrue(self.touches(out,self.first[0]));self.assertFalse(self.touches(out,self.first[3]))
-        self.assertTrue(all(x['rect'][3]<150 for x in out['regions'] if x['target']=='title_block'))
+        self.assertFalse(self.touches(out,self.first[0]));self.assertFalse(self.touches(out,self.first[3]))
+        self.assertTrue(all(x['rect'][3]<150 for x in out['regions'] if x['target']=='frontmatter_identity'))
     def test_unlabelled_abstract_inside_panel_is_not_bridged(self):
         self.first=[x for x in self.first if x['text']!='Abstract']
         out=self.run_plan(graphics={1:[{'rect':[50,160,550,720]}]})
-        self.assertTrue(self.touches(out,self.first[0]))
+        self.assertFalse(self.touches(out,self.first[0]))
         self.assertFalse(self.touches(out,self.first[3]))
-        self.assertTrue(all(x['rect'][3]<160 for x in out['regions'] if x['target']=='title_block'))
+        self.assertTrue(all(x['rect'][3]<160 for x in out['regions'] if x['target']=='frontmatter_identity'))
     def test_title_named_abstract_is_not_its_own_body_boundary(self):
         self.paper['title']='Abstract Reasoning';self.first[0]['text']='Abstract Reasoning'
-        out=self.run_plan();self.assertTrue(self.touches(out,self.first[0]));self.assertFalse(self.touches(out,self.first[3]))
+        out=self.run_plan();self.assertFalse(self.touches(out,self.first[0]));self.assertFalse(self.touches(out,self.first[3]))
     def test_metadata_title_mentioned_only_in_body_cannot_move_header_boundary(self):
         self.paper['title']='A New Scientific Title'
         self.first[0]['text']='An Earlier Scientific Title'
         self.first[4]['text']='Our experiment considers A New Scientific Title as a scientific example.'
         out=self.run_plan()
-        self.assertTrue(self.touches(out,self.first[0]))
+        self.assertFalse(self.touches(out,self.first[0]))
         self.assertFalse(self.touches(out,self.first[3]))
         self.assertFalse(self.touches(out,self.first[4]))
     def test_unknown_graphics_abstains_on_broad_title(self):
-        out=self.run_plan(graphics={1:None});self.assertTrue(out['unresolved']);self.assertFalse(any(x['target']=='title_block' for x in out['regions']))
+        out=self.run_plan(graphics={1:None});self.assertTrue(out['unresolved']);self.assertFalse(any(x['target']=='frontmatter_identity' for x in out['regions']))
     def test_missing_body_boundary_is_not_a_guessed_fraction(self):
         self.first=self.first[:3]
         out=self.run_plan();self.assertTrue(out['unresolved']);self.assertFalse(out['regions'])
@@ -4556,7 +4558,7 @@ class RegionalNativePlanTests(unittest.TestCase):
     make_pdf=RuleTests.make_pdf
     apply=RuleTests.apply
 
-    def test_regional_plan_masks_title_but_has_no_body_url_targets(self):
+    def test_regional_plan_preserves_title_and_removes_authors_not_body_urls(self):
         self.make_pdf(extra=[('Our code is available at https://github.com/lab/body-code',260)])
         before=self.source.read_bytes();diagnostics={}
         plan=rules.build_region_plan(self.source,self.paper,diagnostics=diagnostics)
@@ -4564,10 +4566,12 @@ class RegionalNativePlanTests(unittest.TestCase):
         self.assertEqual(plan['forbidden_strings'],[])
         self.assertTrue(plan['redactions'])
         self.assertTrue(all(item['text']=='' for item in plan['redactions']))
-        self.assertEqual(diagnostics['scope'],'frontmatter-margins-credits-v1')
-        self.assertTrue(any(item['region_type']=='title_block' for item in diagnostics['regions']))
+        self.assertEqual(diagnostics['scope'],'authors-margins-credits-v2')
+        self.assertTrue(any(item['region_type']=='frontmatter_identity' for item in diagnostics['regions']))
         cleaned=self.apply(plan)
-        self.assertNotIn(self.paper['title'],cleaned)
+        self.assertIn(self.paper['title'],cleaned)
+        self.assertNotIn('Alice Example',cleaned)
+        self.assertNotIn('Example University',cleaned)
         self.assertIn('Our scientific result is x = 42.',cleaned)
         self.assertIn('https://github.com/lab/body-code',cleaned)
         self.assertEqual(self.source.read_bytes(),before)
@@ -4791,7 +4795,7 @@ class RegionalActualFailureRegressionTests(unittest.TestCase):
         stamp=_region_test_line('arXiv:2501.12345v1 [cs.LG] 1 Jan 2025',215,x=11,right=38,size=20)
         stamp['rect'][3]=560
         self.first.insert(4,stamp)
-        out=self.plan();title=next(x for x in out['regions'] if x['target']=='title_block')
+        out=self.plan();title=next(x for x in out['regions'] if x['target']=='frontmatter_identity')
         self.assertGreater(title['rect'][3],self.first[3]['rect'][3])
         self.assertLess(title['rect'][3],250)
         self.assertTrue(any(x['category']=='identifier' and x['rect'][3]>560 for x in out['regions']))
@@ -4799,14 +4803,14 @@ class RegionalActualFailureRegressionTests(unittest.TestCase):
         self.first[3]['rect']=[60,210,540,230]
         tall=_region_test_line('A protected scientific vertical label',225,x=11,right=38,size=10)
         tall['rect'][3]=560;self.first.insert(4,tall)
-        out=self.plan();title=next(x for x in out['regions'] if x['target']=='title_block')
+        out=self.plan();title=next(x for x in out['regions'] if x['target']=='frontmatter_identity')
         self.assertLess(title['rect'][3],210)
         self.assertFalse(any(x['category']=='identifier' for x in out['regions']))
     def test_graphic_blocked_stamp_cannot_authorize_cut_exemption(self):
         stamp=_region_test_line('arXiv:2501.12345v1 [cs.LG]',215,x=11,right=38,size=20)
         stamp['rect'][3]=560;self.first.insert(4,stamp)
         out=self.plan(graphics={1:[{'rect':[10,210,39,570]}]})
-        title=next(x for x in out['regions'] if x['target']=='title_block')
+        title=next(x for x in out['regions'] if x['target']=='frontmatter_identity')
         self.assertLess(title['rect'][3],211)
         self.assertFalse(any(x['category']=='identifier' for x in out['regions']))
     def test_repeated_a_preprint_is_a_margin_label(self):
@@ -4841,11 +4845,14 @@ class RegionalCompactJournalTitleTests(unittest.TestCase):
     def plan(self):
         return rules._propose_frontmatter_and_margins([self.rows],[(600,800)],paper=self.paper,
             graphics_by_page={1:[]},rules_module=rules)
-    def title(self):return [x for x in self.plan()['regions'] if x['target']=='title_block']
+    def title(self):return [x for x in self.plan()['regions'] if x['target']=='frontmatter_identity']
     def test_styled_small_title_with_stale_metadata_preserves_run_in_abstract(self):
         targets=self.title();self.assertEqual(len(targets),1)
         self.assertGreater(targets[0]['rect'][3],self.rows[1]['rect'][3])
         self.assertLess(targets[0]['rect'][3],self.rows[2]['rect'][1])
+        out=self.plan()
+        self.assertEqual(out['preserved_titles'][0]['text'],self.rows[0]['text'])
+        self.assertFalse(any(rules._region_overlap(x['rect'],self.rows[0]['rect']) for x in out['regions']))
     def test_unknown_and_mixed_sources_cannot_enable_fallback(self):
         self.paper['source_ids']=[];self.assertFalse(self.title())
         self.paper['source_ids']=['tmlr_2025plus','icml2026'];self.assertFalse(self.title())
@@ -5269,10 +5276,138 @@ class RegionalProceedingsCitationPreservationTests(unittest.TestCase):
         rows[0]['rect']=[320,74,560,84];rows[-1]['rect']=[320,112,560,122]
         rows[2]['rect']=[60,96,280,106];rows[1]['block']=8
         self.assertFalse(rules._region_bibliographic_publication(rows,2))
-    def test_real_recurring_header_remains_on_reference_pages(self):
+    def test_title_header_and_bibliography_are_preserved_on_reference_pages(self):
         pages=[]
         for n in (2,3):pages.append([_region_test_line('A Scientific Paper',35,x=210,right=400,size=9,block=9),*self.page()])
         out=self.plan(pages[0],[pages[1]])
         for n in (2,3):
-            self.assertTrue(any(x['page']==n and rules._region_overlap(x['rect'],pages[n-2][0]['rect']) for x in out['regions']))
+            self.assertFalse(any(x['page']==n and rules._region_overlap(x['rect'],pages[n-2][0]['rect']) for x in out['regions']))
             self.assertFalse(any(x['page']==n and rules._region_overlap(x['rect'],pages[n-2][3]['rect']) for x in out['regions']))
+
+
+class TitlePreservingRegionTests(unittest.TestCase):
+    def fixture(self,title='A Scientific Paper'):
+        paper={'title':title,'authors':['Mira Chen','Bob Park'],'arxiv_id':'2501.12345'}
+        rows=[_region_test_line(title,50,size=18),_region_test_line('Mira Chen1 and Bob Park2',95,size=11),
+              _region_test_line('1North University 2South Institute',120),_region_test_line('mira@north.edu',138),
+              _region_test_line('Abstract',185,size=12),_region_test_line('Scientific abstract and metric 74.1 remain.',210)]
+        return paper,rows
+    def plan(self,paper,pages,graphics=None,slices=None):
+        return rules._propose_frontmatter_and_margins(pages,[(612,792)]*len(pages),paper=paper,
+            graphics_by_page=graphics or {i:[] for i in range(1,len(pages)+1)},rules_module=rules,slice_boxes=slices)
+    def touch(self,result,row,page=1):
+        return any(x['page']==page and rules._region_overlap(x['rect'],row['rect']) for x in result['regions'])
+    def test_multiline_actual_title_is_protected_and_author_rows_removed(self):
+        paper,rows=self.fixture('A Scientific Paper with a Second Title Line')
+        rows[0]['text']='A Scientific Paper with';rows.insert(1,_region_test_line('a Second Title Line',73,size=18))
+        for row in rows[2:]:row['rect'][1]+=25;row['rect'][3]+=25
+        out=self.plan(paper,[rows]);self.assertFalse(out['unresolved'])
+        self.assertFalse(self.touch(out,rows[0]));self.assertFalse(self.touch(out,rows[1]))
+        self.assertTrue(self.touch(out,rows[2]));self.assertTrue(self.touch(out,rows[3]))
+        self.assertFalse(self.touch(out,rows[-2]));self.assertEqual(len(out['preserved_titles'][0]['rects']),2)
+    def test_author_name_inside_the_actual_title_is_not_a_removal_target(self):
+        paper,rows=self.fixture('Learning with Mira Chen')
+        out=self.plan(paper,[rows]);self.assertFalse(self.touch(out,rows[0]));self.assertTrue(self.touch(out,rows[1]))
+    def test_blank_pre_title_space_and_ornamental_rule_are_not_masked(self):
+        paper,rows=self.fixture();out=self.plan(paper,[rows],graphics={1:[{'rect':[50,25,560,27]}]})
+        self.assertTrue(out['regions']);self.assertTrue(all(x['rect'][1]>rows[0]['rect'][3] for x in out['regions']))
+    def test_unproved_pre_title_institution_label_is_preserved(self):
+        paper,rows=self.fixture();label=_region_test_line('Another University',20,size=10);rows.insert(0,label)
+        out=self.plan(paper,[rows]);self.assertFalse(self.touch(out,label));self.assertFalse(self.touch(out,rows[1]))
+    def test_title_only_headers_survive_while_separate_author_headers_are_masked(self):
+        paper,first=self.fixture();pages=[first]
+        for n in (2,3):
+            pages.append([_region_test_line(paper['title'],30,x=50,right=220,size=9,block=0),
+                          _region_test_line('Mira Chen and Bob Park',30,x=360,right=560,size=9,block=1),
+                          _region_test_line('Scientific body remains visible.',75,block=2)])
+        out=self.plan(paper,pages)
+        for n in (2,3):
+            self.assertFalse(self.touch(out,pages[n-1][0],n));self.assertTrue(self.touch(out,pages[n-1][1],n))
+        self.assertEqual(len(out['preserved_title_headers']),2)
+    def mixed(self,suffix,title='A Scientific Paper',slices=True):
+        paper,first=self.fixture(title);pages=[first]
+        for n in (2,3):
+            text=title+' | '+suffix
+            pages.append([_region_test_line(text,30,x=50,right=50+len(text)*4,size=9,block=0),
+                          _region_test_line('Scientific body remains visible.',75,block=1)])
+        def box(number,line,a,z,*,padding=.35):
+            return [[line['rect'][0]+a*4,line['rect'][1],line['rect'][0]+z*4,line['rect'][3]]]
+        return paper,pages,self.plan(paper,pages,slices=box if slices else None)
+    def test_same_line_title_and_authors_use_only_exact_author_slices(self):
+        paper,pages,out=self.mixed('Mira Chen and Bob Park')
+        self.assertFalse(out['unresolved'])
+        title_right=50+len(paper['title'])*4
+        self.assertTrue(all(x['rect'][0]>title_right for x in out['regions'] if x['page']>1))
+        self.assertTrue(any(x['page']==2 for x in out['regions']))
+        self.assertTrue(all(x['text']==paper['title'] for x in out['preserved_title_headers']))
+    def test_mixed_title_containing_an_author_name_preserves_its_first_occurrence(self):
+        paper,pages,out=self.mixed('Mira Chen',title='Learning with Mira Chen')
+        title_right=50+len(paper['title'])*4
+        self.assertTrue(all(x['rect'][0]>title_right for x in out['regions'] if x['page']>1))
+    def test_same_line_title_and_publication_status_preserve_title(self):
+        paper,pages,out=self.mixed('A PREPRINT')
+        self.assertFalse(out['unresolved']);self.assertTrue(any(x['page']==2 for x in out['regions']))
+        self.assertTrue(all(x['rect'][0]>50+len(paper['title'])*4 for x in out['regions'] if x['page']>1))
+    def test_unknown_mixed_header_or_missing_glyph_proof_remains_unresolved(self):
+        for suffix,slices in [('Unclassified Person',True),('Mira Chen',False)]:
+            _,_,out=self.mixed(suffix,slices=slices);self.assertTrue(out['unresolved'])
+            self.assertFalse(any(x['page']>1 for x in out['regions']))
+    def test_unknown_teaser_cannot_resolve_an_uncovered_byline(self):
+        paper,rows=self.fixture();out=self.plan(paper,[rows],graphics={1:[{'rect':[45,80,560,175]}]})
+        self.assertTrue(out['unresolved']);self.assertFalse(self.touch(out,rows[0]));self.assertFalse(self.touch(out,rows[1]))
+
+class TitlePreservingNativeTests(unittest.TestCase):
+    setUp=RuleTests.setUp
+    def make_document(self,title='A Scientific Paper',mixed=False):
+        self.paper={'title':title,'authors':['Mira Chen','Bob Park'],'arxiv_id':'2501.12345'}
+        with fitz.open() as document:
+            page=document.new_page(width=612,height=792)
+            page.insert_text((72,70),title,fontsize=16)
+            page.insert_text((72,105),'Mira Chen1 and Bob Park2',fontsize=11)
+            page.insert_text((72,125),'North University; South Institute',fontsize=10)
+            page.insert_text((72,145),'mira@north.edu',fontsize=10)
+            page.insert_text((72,185),'Abstract',fontsize=12)
+            page.insert_text((72,210),'Scientific body and https://example.org/science remain.',fontsize=10)
+            if mixed:
+                for _ in range(2):
+                    page=document.new_page(width=612,height=792)
+                    page.insert_text((72,40),title+' | Mira Chen and Bob Park',fontsize=9)
+                    page.insert_text((72,90),'Scientific body remains visible.',fontsize=10)
+            document.save(self.source)
+    def validate(self,plan):
+        work=Path(self.temp.name)/'qa';work.mkdir();(work/'source').mkdir();pages=pdf_helpers.inspect_pdf(self.source,work/'source')
+        target=Path(self.temp.name)/'candidate.pdf'
+        pdf_helpers.redact_pdf(self.source,target,{**plan,'uncertain':[]},pages,region_mode=True)
+        verification=work/'validation';verification.mkdir()
+        pdf_helpers.check_pdf(self.source,target,{**plan,'uncertain':[]},verification,require_blank_regions=True)
+        with fitz.open(target) as doc:return [page.get_text() for page in doc]
+    def test_visible_source_title_remains_and_authors_do_not(self):
+        self.make_document();diagnostics={};plan=rules.build_region_plan(self.source,self.paper,diagnostics=diagnostics)
+        self.assertFalse(plan['uncertain']);self.assertEqual(diagnostics['scope'],'authors-margins-credits-v2')
+        texts=self.validate(plan);self.assertIn(self.paper['title'],texts[0]);self.assertNotIn('Mira Chen',texts[0]);self.assertNotIn('North University',texts[0]);self.assertIn('https://example.org/science',texts[0])
+    def test_native_same_line_running_title_and_author_split(self):
+        self.make_document(mixed=True);diagnostics={};plan=rules.build_region_plan(self.source,self.paper,diagnostics=diagnostics)
+        self.assertFalse(plan['uncertain'],plan['uncertain']);texts=self.validate(plan)
+        for text in texts:self.assertIn(self.paper['title'],text);self.assertNotIn('Mira Chen',text)
+        self.assertEqual(len(diagnostics['preserved_title_headers']),2)
+    def test_final_guard_blocks_any_later_region_that_touches_primary_title(self):
+        self.make_document()
+        fake={'regions':[{'page':1,'rect':[60,45,500,90],'target':'acknowledgment','heading':'fake'}], 'unresolved':[],'rejected':[]}
+        with patch.object(rules,'_propose_credit_regions',return_value=fake):plan=rules.build_region_plan(self.source,self.paper)
+        self.assertTrue(any('protected title' in x for x in plan['uncertain']))
+        self.assertFalse(any(x['category']=='acknowledgment' for x in plan['redactions']))
+
+class DominantPrimaryTitleRegressionTests(unittest.TestCase):
+    def test_repeated_small_running_title_does_not_replace_larger_primary_title(self):
+        paper={'title':'A Scientific Paper with a Second Title Line','authors':['Mira Chen']}
+        lines=[_region_test_line(paper['title'],25,size=9),
+               _region_test_line('A Scientific Paper with',80,size=18),
+               _region_test_line('a Second Title Line',103,size=18),
+               _region_test_line('Mira Chen',145,size=11),
+               _region_test_line('North University',165,size=10),
+               _region_test_line('Abstract',200,size=12)]
+        out=rules._propose_frontmatter_and_margins([lines],[(612,792)],paper=paper,graphics_by_page={1:[]},rules_module=rules)
+        self.assertEqual(out['preserved_titles'][0]['source_line_indexes'],[1,2])
+        for line in lines[:3]:self.assertFalse(any(rules._region_overlap(x['rect'],line['rect']) for x in out['regions']))
+        self.assertTrue(any(rules._region_contains(x['rect'],lines[3]['rect']) for x in out['regions']))
+        self.assertFalse(out['unresolved'])

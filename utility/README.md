@@ -397,15 +397,17 @@ processing path makes no Codex CLI, external model-service or network calls.
 The Codex-assisted processing workflow remains available separately at
 `utility.anonymize.anonymize_pdf`.
 
-The rules driver's default `--scope regions` masks the first-page title and
-byline block, actual running headers/footers, explicit acknowledgments and
-author-contribution statements. It uses the observed PDF layout, including
-source-template variations, rather than assuming that every version uses its
-eventual venue's template. Scientific body text, body URLs, reference entries,
-figures and technical "Our Contributions" sections remain outside this scope.
+The rules driver's default `--scope regions` preserves the manuscript title and
+title-only running headers. It masks the author/affiliation block, identifying
+running headers/footers, explicit acknowledgments and author-contribution
+statements. It uses the observed PDF layout, including source-template
+variations, rather than assuming that every version uses its eventual venue's
+template. Scientific body text, body URLs, reference entries, figures and
+technical "Our Contributions" sections remain outside this scope.
 `--scope identifiers` explicitly selects the earlier whole-document identifier
-rules. These scopes have separate receipt bindings and cannot reuse each other's
-cached outputs.
+rules. Regional rule version `anonymize-regions-7` uses receipt scope
+`authors-margins-credits-v2`; it cannot reuse earlier title-removing regional
+outputs or identifier-scope outputs.
 
 ```sh
 python3.12 -B -m utility.anonymize.anonymize_pdf_rules \
@@ -428,6 +430,17 @@ visual-review verdict. Matching rules receipts retain their original status and
 bind the input PDF, metadata, driver, rule version, helper code and PyMuPDF.
 Moving the scripts changed code hashes and can invalidate both rules and Codex
 cache matches; historical receipts and frozen source paths are not relabeled.
+
+
+The title-preserving integration suite passed 784 tests. A frozen current-code
+pilot sampled one major-improvement pair per source: 22 PDFs from 11 sources.
+After source-based coverage and preservation review, 18 PDFs were accepted,
+two remained pending review and two failed quality checks. The four unaccepted
+ICLR candidates exposed missed credit/header regions, a bibliography line
+removed by mistake and a table ruling changed outside the planned masks.
+These candidates remain review artifacts; the pilot does not establish full
+coverage for either ICLR source or arbitrary papers. No rule changes or PDF
+reruns were made after inspecting these pilot outcomes.
 
 The rules v6 pilot used the fixed original ICLR sample: five papers, first/latest
 versions, 10 PDFs and 219 pages. All 10 candidates were accepted after independent

@@ -4021,6 +4021,54 @@ def _region_bibliographic_publication(lines,index):
            other['rect'][1]>=bottom and other['rect'][1]-bottom<=max(24,line['size']*3)]
     return any(int(anchor(right).group(1))==int(anchor(left).group(1))+1 for left in before for right in after)
 
+def _region_phrase_spans(text,phrases,api):
+    """Map normalized source phrases back to exact raw character intervals."""
+    wanted={api._normal(x) for x in phrases if api._normal(x)}
+    if not wanted:return []
+    words=list(re.finditer(r'[^\W_]+',text));limit=max(len(x.split()) for x in wanted)+2
+    found=[]
+    for i,word in enumerate(words):
+        for last in words[i:min(len(words),i+limit)]:
+            a,z=word.start(),last.end()
+            if api._normal(text[a:z]) in wanted:found.append((a,z))
+    return sorted((a,z) for a,z in set(found) if not any(
+        b<=a and z<=e and (b,e)!=(a,z) for b,e in found))
+
+
+def _region_title_header_parts(line,title_phrases,names,api):
+    """Separate proved title text from own names or typed publication fields."""
+    text=line['text'];titles=_region_phrase_spans(text,title_phrases,api)
+    if not titles:return None
+    def outside(a,z):return not any(max(a,b)<min(z,e) for b,e in titles)
+    identities=set(_region_phrase_spans(text,names,api))
+    identities.update(match.span() for pattern in api._region_note_name_patterns(names) for match in pattern.finditer(text))
+    identities.update(match.span() for pattern in (api.EMAIL,api.ORCID) for match in pattern.finditer(text))
+    identities={span for span in identities if outside(*span)}
+    boundaries=[(0,titles[0][0])]+[(titles[i][1],titles[i+1][0]) for i in range(len(titles)-1)]+[(titles[-1][1],len(text))]
+    for a,z in boundaries:
+        raw=text[a:z];trimmed=raw.strip(' \t:;,.|–—-()[]')
+        if not trimmed:continue
+        start=a+raw.index(trimmed)
+        if api.VENUE.search(trimmed) or _REGION_MARGIN_STATUS.fullmatch(trimmed):
+            identities.add((start,start+len(trimmed)))
+    # Remove redundant nested intervals without broadening the source targets.
+    identities=sorted((a,z) for a,z in identities if not any(
+        b<=a and z<=e and (b,e)!=(a,z) for b,e in identities))
+    remaining=list(text)
+    for a,z in [*titles,*identities]:remaining[a:z]=' '*(z-a)
+    value=api._normal(''.join(remaining))
+    rest=re.sub(r'\b(?:\d{1,3}|authors?|and|et|al|by|correspondence|to|email)\b','',value).strip()
+    return {'titles':titles,'identities':identities,'unclassified':bool(rest)}
+
+
+def _region_pre_title_identity(line,names,api,affiliations=()):
+    text=line['text']
+    return bool(api._byline_only(text,names) or api.EMAIL.search(text) or api.ORCID.search(text) or
+                api.VENUE.search(text) or
+                ((api.AFFILIATION.search(api._normal(text)) or api._LAYOUT_AFFILIATION.search(text)) and api._region_footer_noun_card(text) and
+                 any(' '+api._normal(text)+' ' in ' '+api._normal(re.sub(r'\b\d+(?=[^\W\d_])','',value))+' ' for value in affiliations)))
+
+
 def _region_primary_structure(pages,sizes,paper,api):
     first=pages[0];width,height=sizes[0];names=api._author_names(paper)
     metadata_title=api._normal(paper.get('title') or '')
@@ -4030,6 +4078,14 @@ def _region_primary_structure(pages,sizes,paper,api):
     candidate_end=min(preliminary) if preliminary else height*.4
     candidates=[x for x in first if x['rect'][3]<=candidate_end]
     selected=api._title_indexes(candidates,api._normal(paper.get('title') or ''))
+    if selected and all(candidates[i]['rect'][1]<height*.08 for i in selected):
+        header_size=max(candidates[i]['size'] for i in selected)
+        matches=api._matched_lines(candidates,[metadata_title])-api._caption_indexes(candidates)
+        larger=[i for i in matches if candidates[i]['size']>=header_size*1.2 and candidates[i]['rect'][1]>max(candidates[j]['rect'][3] for j in selected)]
+        if header_size<=12 and larger:
+            start=min(larger);preferred=api._title_indexes(candidates[start:],metadata_title)
+            if preferred and all(candidates[start+i]['size']>=header_size*1.2 for i in preferred):
+                selected={start+i for i in preferred}
     if not selected:
         journal_titles=_region_journal_title_indexes(first,sizes[0],paper,candidate_end,names,api)
         title_objects={id(first[i]) for i in journal_titles}
@@ -4087,17 +4143,34 @@ def _propose_frontmatter_and_margins(pages,sizes,*,paper,graphics_by_page,rules_
     first=pages[0];width,height=sizes[0];structure=_region_primary_structure(pages,sizes,paper,api)
     names=api._author_names(paper);graphics=_region_graphics(graphics_by_page.get(1))
     titles=structure.get('title_indexes',[]);authors=structure.get('author_indexes',[])
-    body=structure.get('body_boundary');title_box=None
+    body=structure.get('body_boundary');identity_box=None
+    preserved_titles=[{'page':1,'source_line_indexes':list(titles),
+        'text':'\n'.join(first[i]['text'] for i in titles),
+        'rects':[list(first[i]['rect']) for i in titles],
+        'evidence':structure.get('reason')}] if titles else []
+    preserved_title_headers=[]
     lateral_identifiers={i for i in range(len(first)) if _region_lateral_identifier(first,i,sizes[0],paper,graphics,api)}
     if not titles or body is None:
         unresolved.append('First-page title area has no confirmed title-to-body boundary.')
     elif graphics is None:
-        unresolved.append('First-page graphic bounds are unresolved; broad title region preserved.')
+        unresolved.append('First-page graphic bounds are unresolved; author region preserved.')
     else:
-        top=structure['title_top'];end=structure['title_end'];upper=0;lower=body-.8
+        top=structure['title_top'];end=structure['title_end'];upper=end+.8;lower=body-.8
+        following_tops=[x['rect'][1] for i,x in enumerate(first) if i not in titles and end<x['rect'][1]<body]
+        if following_tops:upper=min(upper,(end+min(following_tops))/2)
         captions=[x for x in first if _REGION_CAPTION.match(x['text'])]
-        above=[x for x in captions if x['rect'][3]<=top]
-        if above:upper=max(x['rect'][3] for x in above)+.8
+        # Pre-title identity text needs its own proof. Blank space and purely
+        # ornamental rules are left intact rather than blanking the whole band.
+        affiliation_evidence=[line['text'] for line in first if end<=line['rect'][1]<body and api.AFFILIATION.search(api._normal(line['text'])) and api._region_footer_noun_card(line['text'])]
+        for i,line in enumerate(first):
+            if i in titles or line['rect'][3]>=top-.3 or not _region_pre_title_identity(line,names,api,affiliation_evidence):continue
+            if _region_protected_context(first,i):continue
+            box=_region_clip(_region_box([line],.35),sizes[0])
+            if any(_region_overlap(box,first[j]['rect']) for j in titles):continue
+            if any(_region_overlap(box,g) and g[3]-g[1]>max(18,line['size']*2) for g in graphics):
+                unresolved.append('Pre-title identity text overlaps protected graphics.');continue
+            regions.append({'page':1,'rect':box,'target':'frontmatter_identity','category':'other_identity',
+                'source_line_evidence':[i],'boundary_evidence':'source_proved_pre_title_identity'})
         identity_bottom=max([end]+[first[i]['rect'][3] for i in authors])
         for row in first:
             if row['rect'][1]<identity_bottom or row['rect'][1]>=body:continue
@@ -4124,18 +4197,29 @@ def _propose_frontmatter_and_margins(pages,sizes,*,paper,graphics_by_page,rules_
                        if i not in titles and i not in lateral_identifiers and line['rect'][1]<lower<line['rect'][3]]
             if not crossings:break
             lower=min(crossings)
-        if lower>=end+.2 and upper<top:
-            title_box=_region_clip([0,upper,width,lower],sizes[0])
-            regions.append({'page':1,'rect':title_box,'target':'title_block','category':'other_identity',
-                'source_line_evidence':[i for i,x in enumerate(first) if _region_overlap(x['rect'],title_box)],
-                'boundary_evidence':structure['reason']})
-            if any(first[i]['rect'][3]>lower for i in authors):
-                unresolved.append('Scientific teaser boundary leaves some confirmed byline rows outside the title region.')
-        else:unresolved.append('Primary title touches a protected body/graphic boundary; no broad title mask.')
+        if lower>upper:
+            identity_box=_region_clip([0,upper,width,lower],sizes[0])
+            crossed=[i for i,line in enumerate(first) if i not in titles and i not in lateral_identifiers and
+                     line['rect'][1]<upper<line['rect'][3]]
+            if crossed:
+                identity_box=None
+                unresolved.append('Author rows overlap the protected title boundary; no rectangular author mask.')
+            elif any(i not in titles and _region_overlap(x['rect'],identity_box) for i,x in enumerate(first)):
+                regions.append({'page':1,'rect':identity_box,'target':'frontmatter_identity','category':'other_identity',
+                    'source_line_evidence':[i for i,x in enumerate(first) if _region_overlap(x['rect'],identity_box)],
+                    'boundary_evidence':structure['reason'],'title_excluded':True})
+            else:identity_box=None
+            if any(not any(x['page']==1 and _region_contains(x['rect'],first[i]['rect']) for x in regions) for i in authors):
+                unresolved.append('Confirmed byline rows remain outside the author regions.')
+        else:unresolved.append('The author area touches a protected title/body/graphic boundary.')
     # Reuse actual recurring source header evidence; never search all body names.
     author_headers=api._source_author_headers(pages,sizes,names)
     status_headers=api._source_status_headers(pages,sizes,paper.get('title') or '')
     primary=' '.join(api._normal(first[i]['text']) for i in titles)
+    primary_variants={primary,api._normal(api._flat('\n'.join(first[i]['text'] for i in titles)))}-set([''])
+    title_phrases=list(primary_variants)+[api._normal(first[i]['text']) for i in titles if len(api._normal(first[i]['text']).split())>=3]
+    short_titles={api._normal(match.group(1)) for i in titles if (match:=re.match(r'^([A-Za-z][A-Za-z0-9-]{1,20}):',first[i]['text'].strip()))}
+    header_names=api._header_author_names(first,names)
     repeated={}
     for number,lines in enumerate(pages,1):
         w,h=sizes[number-1]
@@ -4146,7 +4230,7 @@ def _propose_frontmatter_and_margins(pages,sizes,*,paper,graphics_by_page,rules_
     for number,lines in enumerate(pages,1):
         w,h=sizes[number-1];page_graphics=_region_graphics(graphics_by_page.get(number))
         for i,line in enumerate(lines):
-            if number==1 and title_box and _region_contains(title_box,line['rect']):continue
+            if number==1 and (i in titles or any(item['page']==1 and item['target']=='frontmatter_identity' and _region_contains(item['rect'],line['rect']) for item in regions)):continue
             text=line['text'];value=api._normal(text);top=line['rect'][1]<h*.13;bottom=line['rect'][3]>h*.9
             if _region_protected_context(lines,i) or any(x['block']==line['block'] and _REGION_CAPTION.match(x['text']) for x in lines):continue
             own_arxiv=_region_lateral_identifier(lines,i,sizes[number-1],paper,page_graphics,api)
@@ -4154,9 +4238,43 @@ def _propose_frontmatter_and_margins(pages,sizes,*,paper,graphics_by_page,rules_
                            for n,_,x,y in repeated.get(value,[]))
             below=[x for x in lines if x is not line and x['rect'][1]>=line['rect'][3] and not re.fullmatch(r'\d{1,3}',x['text'].strip())]
             separated=bool(below and min(x['rect'][1] for x in below)-line['rect'][3]>=5)
-            title_repeat=bool(primary and len(value.split())>=3 and value in primary and recurrence and top and line['size']<=12 and separated)
             margin_status=bool(_REGION_MARGIN_STATUS.fullmatch(text.strip()) and recurrence and (top or bottom) and line['size']<=11 and (bottom or separated))
-            recognized=((number,i) in author_headers or (number,i) in status_headers or title_repeat or own_arxiv or margin_status)
+            title_only=(any(value==variant or len(value.split())>=3 and ' '+value+' ' in ' '+variant+' ' for variant in primary_variants) or value in short_titles and recurrence)
+            if (top or bottom) and line['size']<=12 and title_only:
+                preserved_title_headers.append({'page':number,'source_line_indexes':[i],'text':text,
+                    'rects':[list(line['rect'])],'evidence':'actual_primary_title_match'})
+                continue
+            parts=None
+            if (top or bottom) and line['size']<=12 and recurrence and (bottom or separated) and not _region_bibliographic_publication(lines,i):
+                parts=_region_title_header_parts(line,title_phrases,header_names,api)
+            if parts:
+                title_boxes=[]
+                if slice_boxes is not None:
+                    for a,z in parts['titles']:title_boxes.extend(slice_boxes(number,line,a,z,padding=0))
+                if not title_boxes:
+                    preserved_title_headers.append({'page':number,'source_line_indexes':[i],'text':text,
+                        'rects':[list(line['rect'])],'evidence':'unresolved_mixed_title_header'})
+                    unresolved.append(f'Page {number}: mixed title header needs exact source glyph geometry.')
+                    continue
+                preserved_title_headers.append({'page':number,'source_line_indexes':[i],
+                    'text':' | '.join(text[a:z] for a,z in parts['titles']),'rects':title_boxes,
+                    'source_char_ranges':[list(x) for x in parts['titles']],'evidence':'exact_mixed_header_title_slices'})
+                if parts['unclassified']:
+                    unresolved.append(f'Page {number}: mixed title header has unclassified non-title content.')
+                for a,z in parts['identities']:
+                    boxes=slice_boxes(number,line,a,z)
+                    if not boxes:
+                        unresolved.append(f'Page {number}: mixed header identity glyph bounds are unresolved.')
+                    for raw in boxes:
+                        box=_region_clip(raw,sizes[number-1])
+                        if (box is None or page_graphics is None or any(_region_overlap(box,r) for r in title_boxes) or
+                                any(_region_overlap(box,g) and g[3]-g[1]>max(18,line['size']*2) for g in page_graphics)):
+                            unresolved.append(f'Page {number}: mixed header identity touches protected content.');continue
+                        regions.append({'page':number,'rect':box,'target':'header' if top else 'footer','category':'other_identity',
+                            'source_line_evidence':[i],'source_char_range':[a,z],
+                            'boundary_evidence':'source_proved_non_title_running_header_field'})
+                continue
+            recognized=((number,i) in author_headers or (number,i) in status_headers or own_arxiv or margin_status)
             publication=bool((api.VENUE.search(text) or number==1 and _region_source_footer_notice(lines,i,sizes[0],paper,api)) and not api.ARXIV.search(text) and
                              not _region_bibliographic_publication(lines,i) and (top or bottom) and line['size']<=11 and
                              not re.match(r'^Copyright and privacy\b',text,re.I))
@@ -4222,7 +4340,8 @@ def _propose_frontmatter_and_margins(pages,sizes,*,paper,graphics_by_page,rules_
                 any(_region_overlap(box,g) and g[3]-g[1]>max(18,line['size']*2) for g in graphics)):continue
         regions.append({'page':1,'rect':box,'target':'footer','category':'venue',
                         'source_line_evidence':[index],'boundary_evidence':'source_publication_note'})
-    return {'regions':regions,'unresolved':list(dict.fromkeys(unresolved)),'structure':structure}
+    return {'regions':regions,'unresolved':list(dict.fromkeys(unresolved)),'structure':structure,
+            'preserved_titles':preserved_titles,'preserved_title_headers':preserved_title_headers}
 
 def _region_page_profiles(pages,sizes,graphics_by_page,source_family=None):
     """Describe each page's own prose columns; source family is only a prior."""
@@ -4518,6 +4637,7 @@ def _propose_credit_regions(pages, page_sizes, *, names, source_profiles, rules_
         profile = source_profiles.get(p, {})
         for heading in sorted(rows, key=lambda r: (r["rect"][1], r["rect"][0])):
             kind = _region_credit_kind(heading, rules)
+            if any(member['index'] in profile.get('layout_evidence',{}).get('preserved_title_rows',[]) for member in heading['members']):continue
             if not kind or any((p, m["index"]) in used for m in heading["members"]):
                 continue
             if not profile.get("confirmed"):
@@ -4610,8 +4730,8 @@ def _propose_credit_regions(pages, page_sizes, *, names, source_profiles, rules_
             record("unresolved", p, heading, "No proven section end; no EOF or float-spanning guess.")
     return result
 
-REGION_RULES_VERSION = 'anonymize-regions-6'
-REGION_SCOPE = 'frontmatter-margins-credits-v1'
+REGION_RULES_VERSION = 'anonymize-regions-7'
+REGION_SCOPE = 'authors-margins-credits-v2'
 
 
 def _region_extract_lines(page):
@@ -4740,16 +4860,16 @@ def _region_native_graphics(page,size):
 
 
 def build_region_plan(source: Path,paper: dict,*,diagnostics=None) -> dict:
-    """Plan only source-confirmed title, margins and explicit credit regions."""
+    """Preserve source titles while removing author, identifying margin and credit regions."""
     import pymupdf as fitz
     import sys
     from types import SimpleNamespace
     if not isinstance(paper,dict):raise ValueError('Paper metadata must be an object')
     if diagnostics is not None and not isinstance(diagnostics,dict):raise TypeError('Planner diagnostics must be a dictionary')
     details={} if diagnostics is None else diagnostics
-    for key in ('regions','unresolved','scope','planner_version','source_layout_profile','page_layout','rejected_sections','profile_id','profile_schema'):
+    for key in ('regions','unresolved','scope','planner_version','source_layout_profile','page_layout','rejected_sections','profile_id','profile_schema','preserved_titles','preserved_title_headers'):
         details.pop(key,None)
-    details.update(scope=REGION_SCOPE,planner_version=REGION_RULES_VERSION,regions=[],unresolved=[])
+    details.update(scope=REGION_SCOPE,planner_version=REGION_RULES_VERSION,regions=[],unresolved=[],preserved_titles=[],preserved_title_headers=[])
     plan={'redactions':[],'forbidden_strings':[],'uncertain':[]}
     api=sys.modules.get(__name__) or SimpleNamespace(**globals())
     with fitz.open(source) as document:
@@ -4759,6 +4879,7 @@ def build_region_plan(source: Path,paper: dict,*,diagnostics=None) -> dict:
         structure=_region_primary_structure(pages,sizes,paper,api) if pages[0] else {}
         names=_author_names(paper)
         title=' '.join(_normal(pages[0][i]['text']) for i in structure.get('title_indexes',[]))
+        title_aliases=[title,_normal(_flat('\n'.join(pages[0][i]['text'] for i in structure.get('title_indexes',[]))))]
         drawing_pages={1}
         drawing_pages.update(number for number,_ in _source_author_headers(pages,sizes,names))
         drawing_pages.update(number for number,_ in _source_status_headers(pages,sizes,paper.get('title') or ''))
@@ -4770,7 +4891,7 @@ def build_region_plan(source: Path,paper: dict,*,diagnostics=None) -> dict:
                     if number<len(pages):drawing_pages.add(number+1)
                 if (line['rect'][1]<height*.14 or line['rect'][3]>height*.87 or line['rect'][2]<width*.08 or line['rect'][0]>width*.92):
                     value=_normal(line['text'])
-                    if VENUE.search(line['text']) or _REGION_MARGIN_STATUS.fullmatch(line['text'].strip()) or ARXIV.search(line['text']) or title and len(value.split())>=3 and value in title:
+                    if VENUE.search(line['text']) or _REGION_MARGIN_STATUS.fullmatch(line['text'].strip()) or ARXIV.search(line['text']) or title and (len(value.split())>=3 and value in title or _region_phrase_spans(line['text'],title_aliases,api)):
                         drawing_pages.add(number)
         graphics={number:_region_native_graphics(document[number-1],sizes[number-1]) for number in sorted(drawing_pages)}
         profile=_select_layout_profile(paper,pages,sizes,first_graphics=graphics.get(1),first_page_evidence=structure)
@@ -4782,7 +4903,7 @@ def build_region_plan(source: Path,paper: dict,*,diagnostics=None) -> dict:
             page_profiles[number]['layout_evidence']['run_in_heading_rows']=run_in
         details['page_layout']=page_profiles
         character_lines={}
-        def slice_boxes(number,line,start,end):
+        def slice_boxes(number,line,start,end,*,padding=.35):
             if number not in character_lines:
                 raw=document[number-1].get_text('rawdict',flags=fitz.TEXTFLAGS_RAWDICT & ~fitz.TEXT_PRESERVE_IMAGES)
                 character_lines[number]=[item for block in raw['blocks'] if block['type']==0 for item in block['lines']]
@@ -4803,12 +4924,14 @@ def build_region_plan(source: Path,paper: dict,*,diagnostics=None) -> dict:
                     else:others.append(char['bbox'])
                 offset=stop
             if not selected:return []
-            box=_region_padded_slice_box(selected,others)
+            box=_region_padded_slice_box(selected,others,padding=padding)
             return [box] if box is not None else []
         fronts=_propose_frontmatter_and_margins(pages,sizes,paper=paper,graphics_by_page=graphics,
             rules_module=api,slice_boxes=slice_boxes,footer_name_slices=_region_footer_author_name_slices,
             footer_affiliation_slices=_region_footer_affiliation_slices)
         for number,layout in page_profiles.items():
+            title_rows={index for item in fronts.get('preserved_titles',[])+fronts.get('preserved_title_headers',[]) if item['page']==number for index in item['source_line_indexes']}
+            layout['layout_evidence']['preserved_title_rows']=sorted(title_rows)
             for region in fronts['regions']:
                 if region['page']==number and region['target'] in {'header','footer'}:
                     layout['protected_regions'].append({'rect':region['rect'],'kind':'running_margin'})
@@ -4819,6 +4942,9 @@ def build_region_plan(source: Path,paper: dict,*,diagnostics=None) -> dict:
                                        box['rect'][2]>=line['rect'][2] and box['rect'][3]>=line['rect'][3]
                                        for box in layout['protected_regions']) for line in content):
                     layout['confirmed']=True;layout['layout_evidence']['figure_only']=True
+        details['preserved_titles']=fronts.get('preserved_titles',[])
+        details['preserved_title_headers']=fronts.get('preserved_title_headers',[])
+        protected_titles=details['preserved_titles']+details['preserved_title_headers']
         proposals=list(fronts['regions']);unresolved=list(fronts['unresolved'])
         if '_propose_credit_regions' in globals():
             credits=_propose_credit_regions({i:lines for i,lines in enumerate(pages,1)},
@@ -4832,15 +4958,22 @@ def build_region_plan(source: Path,paper: dict,*,diagnostics=None) -> dict:
             if rect is None:continue
             target=proposal.get('target');key=(number,tuple(rect))
             if key in seen:continue
-            if target not in {'title_block','header','footer','acknowledgment','contribution'}:
+            if target not in {'frontmatter_identity','header','footer','acknowledgment','contribution'}:
                 unresolved.append('Unrecognized regional target was preserved.');continue
+            if any(item['page']==number and any(_region_overlap(rect,box) for box in item['rects']) for item in protected_titles):
+                unresolved.append(f'Page {number}: a proposed identity region touches protected title glyphs.');continue
             seen.add(key);index=len(plan['redactions'])
             category=proposal.get('category') or ('acknowledgment' if target=='acknowledgment' else 'other_identity')
             plan['redactions'].append({'page':number,'rect':rect,'category':category,'text':''})
             details['regions'].append({'plan_index':index,'region_type':target,
                 'source_evidence':{k:v for k,v in proposal.items() if k not in {'rect','category','target'}}})
-        if not any(x['region_type']=='title_block' for x in details['regions']):
-            unresolved.append('Required primary first-page title area was not resolved.')
+        for index in fronts.get('structure',{}).get('author_indexes',[]):
+            if not any(item['page']==1 and _region_contains(item['rect'],pages[0][index]['rect']) for item in plan['redactions']):
+                unresolved.append('A required source byline row is not fully covered by the final plan.')
+        if not details['preserved_titles']:
+            unresolved.append('Required source primary-title preservation was not resolved.')
+        if not any(x['region_type']=='frontmatter_identity' for x in details['regions']):
+            unresolved.append('Required first-page author information area was not resolved.')
         if not plan['redactions']:unresolved.append('No safe regional target was selected.')
         details['rejected_sections']=credits.get('rejected',[]) if '_propose_credit_regions' in globals() else []
         details['unresolved']=unresolved

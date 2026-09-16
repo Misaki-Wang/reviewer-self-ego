@@ -25,7 +25,7 @@ else:
 ROOT = Path(__file__).resolve().parents[2]
 REDACTION_MODE = 'matched-text-and-evidenced-objects-v3'
 REGION_REDACTION_MODE = 'filled-regions-v1'
-REGION_SCOPE = 'frontmatter-margins-credits-v1'
+REGION_SCOPE = 'authors-margins-credits-v2'
 VALIDATION_MODE = 'protected-content-certificate-v2'
 
 
@@ -129,6 +129,8 @@ def anonymize(source, paper, output, report, work=None, *, scope='regions', imag
         if (not isinstance(plan, dict) or not isinstance(plan.get('uncertain'), list)
                 or any(not isinstance(item, str) for item in plan['uncertain'])):
             raise ValueError('Rules returned malformed uncertainty metadata')
+        if regional and receipt['planner_diagnostics'].get('scope') != REGION_SCOPE:
+            raise ValueError('Regional planner scope does not match the requested title-preserving policy')
         receipt['plan'] = plan
         receipt['image_plan'] = image_plan
         object_operations = image_plan['image_operations'] + image_plan.get('form_operations', [])

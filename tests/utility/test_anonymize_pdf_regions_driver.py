@@ -41,14 +41,14 @@ class RegionalDriverTests(unittest.TestCase):
             doc.set_metadata({'author': 'Alice Example', 'title': 'A Scientific Method'})
             doc.save(self.source)
         self.plan = {'redactions': [
-            {'page': 1, 'rect': [0, 0, 612, 155], 'category': 'other_identity', 'text': ''},
+            {'page': 1, 'rect': [0, 75, 612, 155], 'category': 'other_identity', 'text': ''},
             {'page': 1, 'rect': [65, 345, 510, 405], 'category': 'acknowledgment', 'text': ''}],
             'forbidden_strings': [], 'uncertain': []}
         self.diagnostics = {'regions': [
-            {'plan_index': 0, 'region_type': 'title_block', 'source_evidence': {'body_boundary': 178}},
+            {'plan_index': 0, 'region_type': 'frontmatter_identity', 'source_evidence': {'body_boundary': 178}},
             {'plan_index': 1, 'region_type': 'acknowledgment', 'source_evidence': {'next_heading': 'References'}}],
                             'source_layout_profile': {'source_family': 'iclr', 'variant': 'single_column'},
-                            'scope': 'frontmatter-margins-credits-v1', 'unresolved': []}
+                            'scope': 'authors-margins-credits-v2', 'unresolved': []}
 
     def execute(self, **kwargs):
         def planner(source, paper, *, diagnostics):
@@ -62,7 +62,7 @@ class RegionalDriverTests(unittest.TestCase):
         before = self.source.read_bytes()
         result = self.execute()
         self.assertEqual(result['status'], 'rules_passed', result.get('error'))
-        self.assertEqual(result['binding']['scope'], 'frontmatter-margins-credits-v1')
+        self.assertEqual(result['binding']['scope'], 'authors-margins-credits-v2')
         self.assertEqual(result['binding']['redaction_mode'], 'filled-regions-v1')
         self.assertEqual(result['planner_diagnostics'], self.diagnostics)
         self.assertEqual(set(result['plan']), {'redactions', 'forbidden_strings', 'uncertain'})
@@ -70,7 +70,7 @@ class RegionalDriverTests(unittest.TestCase):
         self.assertFalse(result['published_to_clean_data'])
         with fitz.open(self.output) as doc:
             text = doc[0].get_text()
-            self.assertNotIn('A Scientific Method', text)
+            self.assertIn('A Scientific Method', text)
             self.assertNotIn('alice@example.edu', text)
             self.assertNotIn('Funded by Example Institute', text)
             self.assertIn('Alice Example is cited in this scientific discussion.', text)
@@ -85,6 +85,21 @@ class RegionalDriverTests(unittest.TestCase):
         self.assertTrue(cached['cache_hit'])
         self.assertEqual(cached['planner_diagnostics'], self.diagnostics)
         self.assertEqual(cached['binding'], result['binding'])
+
+    def test_old_title_removing_scope_cannot_be_reused(self):
+        self.assertEqual(self.execute()['status'], 'rules_passed')
+        receipt = json.loads(self.report.read_text())
+        receipt['binding']['scope'] = 'frontmatter-margins-credits-v1'
+        self.report.write_text(json.dumps(receipt))
+        with self.assertRaises(FileExistsError):
+            self.execute()
+
+    def test_old_planner_scope_is_rejected(self):
+        self.diagnostics['scope'] = 'frontmatter-margins-credits-v1'
+        result = self.execute()
+        self.assertEqual(result['status'], 'failed_validation')
+        self.assertIn('planner scope', result['error'])
+        self.assertFalse(self.output.exists())
 
     def test_scope_change_cannot_reuse_regional_candidate_as_legacy(self):
         self.assertEqual(self.execute()['status'], 'rules_passed')
