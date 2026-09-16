@@ -63,7 +63,8 @@ The initialized workflow state is false / not_started / null. False means no ver
 copy is linked here; it does not assert that no anonymized copy exists elsewhere.
 Preserve workflow state on refresh. Mark completed/true only after verifying the output
 and the receipt's binding to its input. Keep false for pending or failed processing.
-Use explicit output paths in a fresh experiment directory outside original PDF stores.
+Use explicit output paths under data/anonymized/pdf/<arxiv_id>/<arxiv_id>v<version>.pdf.
+Keep original input PDFs under data/pdf unchanged.
 Store portable, account-neutral relative paths; keep private execution logs separate
 from shareable PDF references. Update every occurrence of a shared paper_version_id
 consistently and regenerate SHA256SUMS whenever the index changes.
@@ -71,3 +72,12 @@ consistently and regenerate SHA256SUMS whenever the index changes.
 Paper titles and arXiv identities are intentionally retained for archive lookup. This
 is a paper archive, not a blinded reviewer manifest. Prepare a separate blinded manifest
 and supply anonymized PDFs when conducting blind reviews.
+
+## Directory location
+
+This index lives at data/anonymized/major_imp_index/. The sibling directory
+data/anonymized/pdf/ is reserved for verified anonymized PDFs. The project root
+remains the base for every stored path: moving this index does not change original
+PDF references. The output template in pdf_index describes future destinations;
+anonymized_pdf_path stays null until the corresponding artifact is available and
+verified. This directory migration does not start anonymization or review.
