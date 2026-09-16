@@ -33,7 +33,7 @@ The selection retains 41 A2_before=no and 26 A2_after=no pair observations.
 ## Files and provenance
 
 Each source.json contains a counts/provenance envelope and the full pair objects in results.
-Rows preserve every field value; JSON formatting and grouping are derived.
+Rows preserve every original field value and add pdfs.before / pdfs.after references.
 Original judgment/raw/receipt links, when present, are relative to the originating
 res/published/{package}/ directory. The provenance URL template resolves them at
 the pinned source commit independently of the local workspace layout.
@@ -42,3 +42,41 @@ SHA256SUMS covers these source files and this README.
 
 This is a data-only derived index. Its creation makes no model calls or scientific reassessments.
 The original catalogs and published results retain their bytes.
+
+## PDF references and reserved anonymization state (schema v2)
+
+The selected pairs reference **2,882 distinct original PDF versions**.
+Both endpoints are indexed; original before/after integer fields remain unchanged.
+Each results[].pdfs.before and results[].pdfs.after object contains:
+
+| Field | Meaning |
+| --- | --- |
+| paper_version_id | Stable arXiv ID with version suffix; deduplicate by this across all pairs and sources. |
+| version | Original arXiv version number. |
+| original_pdf_path | POSIX path relative to the MBZ AI-reviewer project root, e.g. data/pdf/2202.03482/2202.03482v1.pdf. |
+| original_pdf_available | Whether the original file was found at the recorded inventory time. |
+| original_pdf_bytes | File size observed during the inventory. |
+| is_anonymized | Initially false: no verified anonymized copy is linked by this index. |
+| anonymization_status | Initially not_started; allowed values: not_started, in_progress, completed, failed. |
+| anonymized_pdf_path | Initially null; fill with the verified anonymized PDF path relative to the project root. |
+| anonymization_report_path | Initially null; fill with the matching completed anonymization receipt/report path. |
+
+The original files live on MBZ; Git and the local index mirror do not contain the PDFs.
+Resolve original_pdf_path against the MBZ project root or a mirror with the same layout,
+not against the index JSON directory. The inventory checks existence, nonzero size and
+the %PDF- header; it does not rerun PDF parsing, scientific screening, anonymization or review.
+Availability is a timestamped observation. Recheck the file before processing it.
+
+False does not assert that no anonymized copy exists elsewhere: it describes this index's
+linked workflow state. Set is_anonymized=true and status=completed only after validating
+the anonymized output and its completed receipt against the original input. Keep false
+for not_started, in_progress or failed states. Use fresh output/report paths under an
+experiment directory outside data/, data_full/ and other original stores, as required by
+utility/anonymize; preserve the original PDF bytes. Only the nullable fields are reserved
+here; no anonymization or review has been started.
+
+A PDF version may occur in multiple pair rows and source files. Process it once by
+paper_version_id, then update every corresponding reference consistently. Failed or
+unvalidated outputs must not be marked completed. Regenerate SHA256SUMS after state edits.
+The v1 enrichment helper is intentionally one-shot and refuses existing v2 state,
+preventing future refreshes from silently resetting completed anonymization work.
