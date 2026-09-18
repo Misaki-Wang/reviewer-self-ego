@@ -1,0 +1,105 @@
+{
+  "schema_version": "check-diff-recent-source-independent-audit-1",
+  "created_at_utc": "2026-09-18T22:00:37.367407+00:00",
+  "status": "passed",
+  "model_calls": 0,
+  "pdf_contents_read": false,
+  "working_directory": "/Users/misaki/Documents/ChatGPT/AI-reviewer",
+  "exact_validation_command": [
+    "python3",
+    "-c",
+    "\nimport pathlib,json,collections,hashlib,runpy,datetime\nroot=pathlib.Path('worktrees/publish-checkdiff5conf-20260919');snap=pathlib.Path('experiments/runs/20260919_checkdiff5conf_github_publish/snapshots');schema=runpy.run_path(str(root/'res/published/data_extra_check_diff_terminal_provider_refusal_20260917/schema.py'));results={};errors=[]\ndef sha(b):return hashlib.sha256(b).hexdigest()\nfor conf in ['eccv2026','cvpr2026']:\n p=snap/conf; manifest=json.loads((p/'SNAPSHOT.json').read_text());pins={x['path']:x for x in manifest['files']};checked=set();local_errors=[]\n def read(rel):\n  rel=str(rel);b=(p/rel).read_bytes();pin=pins.get(rel)\n  if pin is None or pin['sha256']!=sha(b) or pin['bytes']!=len(b):local_errors.append(['snapshot_pin_mismatch',rel])\n  checked.add(rel);return json.loads(b)\n states=list(map(json.loads,(p/'pair_status.jsonl').read_text().splitlines()));receipts={str(f.relative_to(p)):read(f.relative_to(p)) for f in (p/'attempts').glob('*/*/receipt.json')};embedded=set();normalized=[];blocked=[];failed=[];reported=collections.Counter();unknown=0\n for rel,r in receipts.items():\n  if r['status']!='completed':failed.append({'receipt':rel,'sha256':pins[rel]['sha256'],'status':r['status'],'model_dispatched':r.get('model_dispatched'),'reported_usage_records':len(r['token_usage']['records']),'error':r.get('error')})\n  recs=r['token_usage']['records'];unknown+=int(not recs)\n  for t in recs:reported.update(t['usage'])\n for r in states:\n  key=r['key'];stem=f\"output/{r['arxiv_id']}/diff_v{r['before']}_v{r['after']}\"\n  if r['status']!='completed':\n   no_output=not (p/(stem+'.json')).exists();no_attempts=not list((p/'attempts'/key).glob('*'));blocked.append({'key':key,'status':r['status'],'attempt_count':r['attempt_count'],'no_canonical_judgment':no_output,'no_attempt_directories':no_attempts,'reason':r.get('reason')})\n   if r['attempt_count']!=0 or not no_output or not no_attempts:local_errors.append(['blocked_has_attempt_or_judgment',key])\n   continue\n  result=read(stem+'.json');e=read(stem+'.execution.json');base=f\"attempts/{key}/attempt-{e['attempt']:03d}\";raw=read(base+'/response.raw.json');accepted=read(base+'/receipt.json');schema['validate_result'](result)\n  if schema['normalize_result_labels'](raw)!=result:local_errors.append(['normalized_raw_result_diff',key])\n  if raw!=result:normalized.append(key)\n  if sha((p/(stem+'.json')).read_bytes())!=r['output_sha256'] or r['output_sha256']!=e['output_sha256'] or r['output_sha256']!=accepted['result_sha256']:local_errors.append(['canonical_link_hash',key])\n  if sha((p/(base+'/response.raw.json')).read_bytes())!=accepted['artifact_sha256']['response.raw.json']:local_errors.append(['accepted_raw_link_hash',key])\n  if len(e['attempts'])!=r['attempt_count']:local_errors.append(['attempt_count',key])\n  for er in e['attempts']:\n   rp=f\"attempts/{key}/attempt-{er['attempt']:03d}/receipt.json\";embedded.add(rp)\n   if receipts.get(rp)!=er:local_errors.append(['embedded_receipt_mismatch',rp])\n  if not any(er==accepted for er in e['attempts']):local_errors.append(['accepted_receipt_missing',key])\n if embedded!=set(receipts):local_errors.append(['unaccounted_receipt_paths',sorted(set(receipts)-embedded),sorted(embedded-set(receipts))])\n usage=read('token_usage.json')['token_usage'];reported['total_tokens']=reported['input_tokens']+reported['output_tokens'];reported['non_cached_input_tokens']=reported['input_tokens']-reported['cached_input_tokens']\n if dict(reported)!=usage['reported_totals']:local_errors.append(['reported_usage_totals_mismatch',dict(reported),usage['reported_totals']])\n if len(receipts)!=usage['attempt_count'] or unknown!=usage['attempts_without_reported_usage']:local_errors.append(['usage_coverage_mismatch'])\n cat={r['arxiv_id']:r for r in json.loads((root/f'data_5conf/index/{conf}.json').read_text())['records']};ids={r['arxiv_id'] for r in states};duplicates={k:n for k,n in collections.Counter(r['key'] for r in states).items() if n>1}\n if set(cat)!=ids or duplicates:local_errors.append(['catalog_or_duplicate_mismatch',sorted(set(cat)-ids),sorted(ids-set(cat)),duplicates])\n for r in states:\n  vs={v['version']:v for v in cat[r['arxiv_id']]['versions']};dt=lambda v:datetime.datetime.fromisoformat(v['submitted_at'].replace('Z','+00:00'))\n  if r['before'] not in vs or r['after'] not in vs or (dt(vs[r['after']])-dt(vs[r['before']])).total_seconds()<=2592000:local_errors.append(['endpoint_or_gap',r['key']])\n results[conf]={'catalog_papers':len(cat),'pair_status_counts':dict(collections.Counter(r['status'] for r in states)),'snapshot_hash_validated_files':len(checked),'receipt_status_counts':dict(collections.Counter(r['status'] for r in receipts.values())),'all_receipts_reconciled_to_canonical_execution_histories':embedded==set(receipts),'all_failed_receipts':failed,'blocked_no_model_states':blocked,'normalization_changed_raw_count':len(normalized),'normalization_changed_raw_keys':normalized,'reported_usage_totals_reconciled':dict(reported)==usage['reported_totals'],'attempts_without_reported_usage':unknown,'errors':local_errors};errors.extend([[conf,*x] for x in local_errors])\nprint(json.dumps({'status':'passed' if not errors else 'failed','conferences':results,'errors':errors}))\n"
+  ],
+  "methodology": [
+    "Validate local snapshot manifest pins for all canonical judgments, accepted raw responses, canonical execution records, every successful/failed attempt receipt, and token summary.",
+    "Validate the full scientific output schema and compare historical-normalized raw JSON to canonical results.",
+    "Reconcile every physical receipt with canonical execution attempt histories and batch raw reported token totals; retain missing usage as unknown.",
+    "Verify blocked input rows have zero attempts, no attempt directory and no canonical scientific judgment.",
+    "Verify current conference paper coverage, duplicate-free historical pair keys, valid original endpoints and strict temporal gaps."
+  ],
+  "results": {
+    "status": "passed",
+    "conferences": {
+      "eccv2026": {
+        "catalog_papers": 633,
+        "pair_status_counts": {
+          "completed": 775,
+          "blocked_input": 1
+        },
+        "snapshot_hash_validated_files": 3101,
+        "receipt_status_counts": {
+          "completed": 775
+        },
+        "all_receipts_reconciled_to_canonical_execution_histories": true,
+        "all_failed_receipts": [],
+        "blocked_no_model_states": [
+          {
+            "key": "2604.02546__v1_v2",
+            "status": "blocked_input",
+            "attempt_count": 0,
+            "no_canonical_judgment": true,
+            "no_attempt_directories": true,
+            "reason": "A fixed selected endpoint officially has no PDF."
+          }
+        ],
+        "normalization_changed_raw_count": 0,
+        "normalization_changed_raw_keys": [],
+        "reported_usage_totals_reconciled": true,
+        "attempts_without_reported_usage": 0,
+        "errors": []
+      },
+      "cvpr2026": {
+        "catalog_papers": 943,
+        "pair_status_counts": {
+          "completed": 1143,
+          "blocked_input": 2
+        },
+        "snapshot_hash_validated_files": 4574,
+        "receipt_status_counts": {
+          "completed": 1143,
+          "failed": 1
+        },
+        "all_receipts_reconciled_to_canonical_execution_histories": true,
+        "all_failed_receipts": [
+          {
+            "receipt": "attempts/2505.17476__v1_v2/attempt-001/receipt.json",
+            "sha256": "c33da4e0eb34dd02339c7929feb9b5ec222ed7a7d7824e2240f11332659f590d",
+            "status": "failed",
+            "model_dispatched": true,
+            "reported_usage_records": 0,
+            "error": "RuntimeError: Codex execution failed (exit=1, timeout=False): [{\"type\": \"error\", \"message\": \"{\\n  \\\"type\\\": \\\"error\\\",\\n  \\\"error\\\": {\\n    \\\"type\\\": \\\"invalid_request_error\\\",\\n    \\\"code\\\": \\\"unsupported_parameter\\\",\\n    \\\"message\\\": \\\"The access_programs parameter is not enabled for this organization.\\\",\\n    \\\"param\\\": \\\"access_programs.cyber\\\"\\n  },\\n  \\\"status\\\": 400\\n}\"}, {\"type\": \"turn.failed\", \"error\": {\"message\": \"{\\n  \\\"type\\\": \\\"error\\\",\\n  \\\"error\\\": {\\n    \\\"type\\\": \\\"invalid_request_error\\\",\\n    \\\"code\\\": \\\"unsupported_parameter\\\",\\n    \\\"message\\\": \\\"The access_programs parameter is not enabled for this organization.\\\",\\n    \\\"param\\\": \\\"access_programs.cyber\\\"\\n  },\\n  \\\"status\\\": 400\\n}\"}}] "
+          }
+        ],
+        "blocked_no_model_states": [
+          {
+            "key": "2505.04594__v1_v5",
+            "status": "blocked_input",
+            "attempt_count": 0,
+            "no_canonical_judgment": true,
+            "no_attempt_directories": true,
+            "reason": "A fixed selected endpoint has frozen missing-input evidence."
+          },
+          {
+            "key": "2505.04594__v5_v6",
+            "status": "blocked_input",
+            "attempt_count": 0,
+            "no_canonical_judgment": true,
+            "no_attempt_directories": true,
+            "reason": "A fixed selected endpoint has frozen missing-input evidence."
+          }
+        ],
+        "normalization_changed_raw_count": 0,
+        "normalization_changed_raw_keys": [],
+        "reported_usage_totals_reconciled": true,
+        "attempts_without_reported_usage": 1,
+        "errors": []
+      }
+    },
+    "errors": []
+  },
+  "limitations": [
+    "Read-only local artifact audit; remote snapshot transfer was separately verified by the leader.",
+    "All failed-attempt preservation means the complete attempt history of the supplied ECCV run and CVPR r2 run. Earlier abandoned runs outside these frozen snapshots are not included in these counts.",
+    "No PDFs were read and no human scientific-reference labels were used."
+  ]
+}

@@ -5,6 +5,7 @@ runs, input PDFs, caches and historical archives are not included here.
 
 | Experiment | Scope | Selected payload | Report |
 | --- | --- | ---: | --- |
+| [Five-conference check_diff responses](check_diff_5conf_20260919/README.md) | ICLR2026, ICML2026, ACL2026, ECCV2026, CVPR2026; 6,959 papers; 9,092 pairs; 9,066 responses; 25 unavailable inputs and 1 provider refusal | Exact responses, judgments, merged pair ledgers, and provenance | [Counts and source history](check_diff_5conf_20260919/summary.json) |
 | [ICLR2026](iclr2026_full_20260913/README.md) | 706 units; 1,588 judgments; 11 unavailable pairs | 37.86 MB | [Self-contained HTML](../../html/ICLR2026-check-diff-summary.html) |
 | [Review experiment pilot](review_exp_iclr2026_pilot/README.md) | Independent review pilot; see its package README | See package | [HTML](../../html/review-exp-iclr2026-pilot.html) |
 | [Multisource review pilot](review_exp_multisource_pilot_20260914/README.md) | 10 sources; 100 papers; 364 versions; 4,368 reviews | See package | [HTML](../../html/review-exp-multisource-pilot-20260914.html) |
