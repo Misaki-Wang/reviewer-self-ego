@@ -7,7 +7,8 @@ const root = path.resolve(__dirname, '..');
 const ui = JSON.parse(fs.readFileSync(path.join(__dirname, 'ui_en.json'), 'utf8'));
 const app = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8').replace('__UI__', JSON.stringify(ui));
 const staticKeys = [...fs.readFileSync(path.join(__dirname, 'template.html'), 'utf8').matchAll(/data-translate="([^"]+)"/g)].map(m=>m[1]);
-const readPayload = i => JSON.parse(fs.readFileSync(path.join(root, `html/human-evaluation/evaluator-0${i}.html`), 'utf8').match(/<script id="study-data" type="application\/json">([\s\S]*?)<\/script>/)[1]);
+const evaluatorNames = ['haomin', 'xinyue', 'han', 'kwesi', 'dang'];
+const readPayload = i => JSON.parse(fs.readFileSync(path.join(root, `html/human-evaluation/${evaluatorNames[i-1]}.html`), 'utf8').match(/<script id="study-data" type="application\/json">([\s\S]*?)<\/script>/)[1]);
 
 function setup(payload, {stored=null, failStorage=false, confirm=true, locale='zh-CN', preference=null}={}) {
   const elements = new Map(), store = new Map(), blobs = [], downloads = [];
@@ -85,7 +86,7 @@ function setup(payload, {stored=null, failStorage=false, confirm=true, locale='z
   assert.equal(Object.keys(exported.answers).length,40);
   assert.equal(exported.completed_pairs,1);
   assert.equal(exported.answers[payload.pairs[1].id].overall,null);
-  assert(h.downloads[0].includes('E01-in_progress')); checks++;
+  assert(h.downloads[0].includes('haomin-in_progress')); checks++;
   const imported=setup(payload);
   await imported.importValue(exported);
   assert.equal(imported.run('completeCount()'),1);

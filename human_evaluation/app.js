@@ -7,7 +7,7 @@ try { const preference = localStorage.getItem("paper-trace-language"); if (["en"
 const tr = text => language === "zh" ? text : (UI[text] ?? text);
 function localizeChrome() {
   document.documentElement.lang = language === "zh" ? "zh-CN" : "en";
-  document.title = `Paper Trace · ${language === "zh" ? "人工评估" : "Human evaluation"} ${STUDY.evaluator_id}`;
+  document.title = `Paper Trace · ${language === "zh" ? "人工评估" : "Human evaluation"} ${STUDY.evaluator_name}`;
   document.querySelectorAll("[data-translate]").forEach(el => {el.textContent = tr(el.dataset.translate);});
   document.getElementById("language").value = language;
   document.getElementById("language").setAttribute("aria-label", tr("语言"));
@@ -214,6 +214,7 @@ function makeExport() {
   output.total_pairs = STUDY.pairs.length;
   output.status = output.completed_pairs === output.total_pairs ? "complete" : "in_progress";
   output.interface_language = language;
+  output.evaluator_name = STUDY.evaluator_name;
   output.presentation_version = STUDY.presentation_version;
   output.presentation_hash = STUDY.presentation_hash;
   output.response_options = {accuracy: Object.fromEntries(ACCURACY.map(x => [x[0], {en:UI[x[1]], zh:x[1]}])), overall: Object.fromEntries(QUALITY.map(x => [x[0], {en:UI[x[1]], zh:x[1]}])), evidence_scope: Object.fromEntries(EVIDENCE.map(x => [x[0], {en:UI[x[1]], zh:x[1]}]))};
@@ -225,7 +226,7 @@ document.getElementById("export-button").addEventListener("click", () => {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `${STUDY.study_id}-${STUDY.evaluator_id}-${output.status}-${output.exported_at.replace(/[:.]/g,"-")}.json`;
+  link.download = `${STUDY.study_id}-${STUDY.evaluator_name}-${output.status}-${output.exported_at.replace(/[:.]/g,"-")}.json`;
   document.body.appendChild(link); link.click(); link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 10000);
   lastExportRevision = revision;

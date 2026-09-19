@@ -1,7 +1,7 @@
 """Build reproducible, label-blinded, standalone human evaluation forms.
 
 Run from any directory: python3 human_evaluation/build.py
-Only distribute html/human-evaluation/evaluator-*.html to evaluators.
+Distribute each named HTML in html/human-evaluation/ to its evaluator.
 """
 from collections import Counter, defaultdict
 from hashlib import sha256
@@ -17,6 +17,7 @@ SOURCE = ROOT / "res/published/check_diff_5conf_20260919"
 OUT = ROOT / "html/human-evaluation"
 SEED = 20260918
 STUDY = "paper-trace-human-v1"
+EVALUATOR_NAMES = ["haomin", "xinyue", "han", "kwesi", "dang"]
 CONFERENCES = ["iclr2026", "icml2026", "acl2026", "cvpr2026", "eccv2026"]
 LABELS = ["major improvement", "minor improvement"]
 DIMENSIONS = [
@@ -160,6 +161,7 @@ def build():
         assert Counter(r["rating_count"] for r in records) == {1: 20, 2: 20}
         payload = {"study_id": STUDY, "schema_version": 1, "evaluator_id": f"E{ri + 1:02}", "dimensions": [dict(zip(("id", "name", "english", "help"), d)) for d in DIMENSIONS], "pairs": [json.loads(json.dumps(r["participant"])) for r in records]}
         payload["assignment_hash"] = sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+        payload["evaluator_name"] = EVALUATOR_NAMES[ri]
         # Preserve the original task hash and browser-storage key: English
         # source claims, allocations, options and question meanings are fixed.
         # Track bilingual presentation separately from task identity.
@@ -172,10 +174,10 @@ def build():
             pair["descriptions_zh"] = translations[pair["id"]]
         payload["presentation_version"] = "bilingual-v1"
         payload["presentation_hash"] = sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
-        html = template.replace("__EVALUATOR__", payload["evaluator_id"]).replace("__PAYLOAD__", safe_embed(payload)).replace("__APP__", app)
-        filename = f"evaluator-{ri + 1:02}.html"
+        html = template.replace("__EVALUATOR__", payload["evaluator_name"]).replace("__PAYLOAD__", safe_embed(payload)).replace("__APP__", app)
+        filename = f"{payload['evaluator_name']}.html"
         (OUT / filename).write_text(html)
-        forms.append({"evaluator_id": payload["evaluator_id"], "file": filename, "assignment_hash": payload["assignment_hash"], "pair_ids": [r["id"] for r in records], "html_sha256": sha256(html.encode()).hexdigest()})
+        forms.append({"evaluator_id": payload["evaluator_id"], "evaluator_name": payload["evaluator_name"], "file": filename, "assignment_hash": payload["assignment_hash"], "pair_ids": [r["id"] for r in records], "html_sha256": sha256(html.encode()).hexdigest()})
     manifest = {"study_id": STUDY, "seed": SEED, "source": str(SOURCE.relative_to(ROOT)), "source_hashes": input_hashes, "sampling": "Within each conference, sample 15 distinct papers per overall label, major then minor without replacement across the study; choose one eligible pair uniformly per sampled paper. Five of each 15 are double-rated. Conference-balanced purposive strata, not a prevalence sample.", "shared_counts": {"/".join(k): v for k, v in sorted(shared.items())}, "forms": forms, "pairs": [{k: v for k, v in r.items() if k != "participant"} for r in sampled]}
     (HERE / "organizer-manifest.json").write_text(json_text(manifest))
     with zipfile.ZipFile(OUT / "evaluator-pages.zip", "w", zipfile.ZIP_DEFLATED) as archive:

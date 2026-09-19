@@ -8,7 +8,7 @@ import re
 import unittest
 import zipfile
 
-from build import ROOT, HERE, OUT, CONFERENCES, LABELS, DIMENSIONS, safe_embed, sanitize_description
+from build import ROOT, HERE, OUT, CONFERENCES, LABELS, DIMENSIONS, EVALUATOR_NAMES, safe_embed, sanitize_description
 
 # Original Chinese-only forms: upgrading presentation must preserve task
 # identity, original English claims, question meanings and assignment order.
@@ -66,7 +66,7 @@ class BuildTests(unittest.TestCase):
             presentation = {k: v for k, v in payload.items() if k != "presentation_hash"}
             self.assertEqual(sha256(json.dumps(presentation, sort_keys=True, ensure_ascii=False).encode()).hexdigest(), payload["presentation_hash"])
             original = json.loads(json.dumps(payload))
-            for key in ("assignment_hash", "presentation_hash", "presentation_version"):
+            for key in ("assignment_hash", "presentation_hash", "presentation_version", "evaluator_name"):
                 original.pop(key)
             for dimension in original["dimensions"]:
                 dimension.pop("help_en")
@@ -118,7 +118,7 @@ class BuildTests(unittest.TestCase):
             self.assertNotIn("__UI__", html)
             self.assertEqual(html.count('<script'), 2)
         with zipfile.ZipFile(OUT / "evaluator-pages.zip") as z:
-            self.assertEqual(sorted(z.namelist()), [f"evaluator-{i:02}.html" for i in range(1, 6)])
+            self.assertEqual(sorted(z.namelist()), sorted(f"{name}.html" for name in EVALUATOR_NAMES))
             for name in z.namelist():
                 self.assertEqual(z.read(name), (OUT / name).read_bytes())
 
