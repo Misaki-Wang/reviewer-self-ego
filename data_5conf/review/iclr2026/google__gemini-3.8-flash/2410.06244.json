@@ -1,0 +1,98 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Addresses an important and challenging problem in generative modeling: long-horizon, multi-frame story visualization (up to 100 frames) with subject and interaction consistency.",
+        "The framework is training-free and plug-and-play, directly utilizing existing pre-trained text-to-image diffusion models and IP-Adapter weights without requiring expensive fine-tuning on story datasets.",
+        "The global reference cross-attention (GRCA) successfully compresses image context via CLIP tokens, mitigating the severe memory growth associated with spatial consistent self-attention (CSA) across long frame sequences.",
+        "Provides extensive qualitative comparisons, showing clear visual progression across iterations and improvements in handling multi-character interactions compared to autoregressive baselines."
+      ],
+      "weaknesses": [
+        "Misleading computational cost framing: The paper argues that Story-Adapter is computationally efficient by comparing single-pass FLOPs against StoryDiffusion in Figure 8. However, Story-Adapter requires running full diffusion inference (50 DDIM steps) iteratively for L = 10 rounds across all B frames (e.g., generating 1,000 images for a 100-frame story). This results in an order-of-magnitude increase in total wall-clock runtime compared to single-pass baselines, which is not transparently evaluated or discussed.",
+        "Limited technical novelty: The core mechanism largely amounts to chaining standard IP-Adapter cross-attention across global story frames through a multi-pass iterative generation loop with a linear weight ramp.",
+        "Evaluation scale on long stories is relatively narrow: The quantitative benchmarking for long stories in Table 2 is conducted on only 20 GPT-4o-curated stories (ten 50-frame and ten 100-frame stories), which is a very small sample size.",
+        "Potential character/identity bleeding: When concatenating tokens from all B frames (Bn tokens in total) into a single key-value sequence without explicit character segmentation or masking, there is an inherent risk of identity leakage/averaging across different characters in multi-character narratives. The paper lacks formal analysis or ablation addressing how identity disentanglement is maintained in such cases."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Addresses an important and challenging problem: maintaining character consistency, fine-grained interactions, and avoiding error accumulation in long story visualization (up to 100 frames).",
+        "The proposed framework is training-free and plug-and-play, cleverly leveraging pre-trained CLIP and IP-Adapter attention weights to achieve cross-frame guidance.",
+        "Using global CLIP embeddings (a few tokens per reference image) avoids the quadratic memory explosion across frames that plagues intermediate feature self-attention (such as CSA in StoryDiffusion).",
+        "Comprehensive qualitative illustrations and ablations exploring the weighting factor, number of iterations, and cross-attention variants."
+      ],
+      "weaknesses": [
+        "Substantial inference overhead: The framework requires running multiple complete diffusion generation processes (default is 10 iterations, each requiring 50 DDIM steps). This results in 500+ sampling steps per story frame—roughly an order of magnitude slower than single-pass methods like StoryDiffusion or AR-LDM. The paper does not report total wall-clock time or end-to-end latency comparisons.",
+        "Unfair/unclear baseline comparisons: In Table 1, Table 2, and the Table 5 human evaluation, the base Story-Adapter is consistently outperformed by StoryDiffusion across most metrics (e.g., in Table 1, StoryDiffusion achieves 0.765 aCCS and 14.84 aFID, whereas Story-Adapter achieves 0.760 aCCS and 16.52 aFID). Story-Adapter only surpasses StoryDiffusion when using the XL variant (Story-AdapterXL), but the paper does not clarify whether StoryDiffusion was evaluated with SD 1.5 or SDXL.",
+        "Limited dataset scale for long story evaluation: The quantitative and qualitative evaluation for long stories is based on only 20 GPT-4o generated stories (ten 50-sentence and ten 100-sentence stories), which represents a very small test sample.",
+        "Technical novelty is somewhat incremental: The core mechanism primarily strings together existing IP-Adapter cross-attention layers in an iterative loop across all generated images with a simple linear schedule."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Addresses an important and challenging problem in generative modeling: maintaining character and scene consistency across long visual narratives (up to 100 frames).",
+        "Training-free design: By utilizing pre-trained text-to-image backbones and pre-trained IP-Adapter projection weights, the method requires no additional model training or fine-tuning.",
+        "Comprehensive qualitative demonstrations: The paper provides extensive visual examples (Figures 1, 4, 5, and 10–16) illustrating character consistency across many frames in multiple artistic styles.",
+        "Ablation studies and human evaluation: The authors conduct ablations on the iterative weighting schedule, initialization choices, and number of iterations, supplemented by a human evaluation study."
+      ],
+      "weaknesses": [
+        "Severe inference-time computational overhead: The framework requires full multi-round regeneration of the entire story sequence (defaulting to L = 10 iterations). Generating a 100-frame story with 50 DDIM steps requires 50,000 diffusion forward passes (10x the wall-clock time and total compute of single-pass methods). Presenting the method as 'computationally efficient' by only reporting single-step UNet FLOPs in Figure 8 is misleading because it omits the 10x multiplier in total generation latency.",
+        "Limited technical novelty: The core mechanism primarily amounts to taking generated frames from iteration i-1, extracting CLIP visual tokens via an existing pre-trained IP-Adapter module, concatenating all frames' tokens into the cross-attention key/value memory, and linearly ramping the IP-Adapter scale factor lambda across 10 complete generation loops.",
+        "Indiscriminate global attention and feature contamination: In Global Reference Cross-Attention (GRCA), every frame attends to all tokens across all B frames indiscriminately. In multi-character or multi-scene stories where different characters appear at different times or the setting transitions drastically, pooling all frames globally risks cross-character leakage and scene contamination. The qualitative experiments almost exclusively focus on single-character, homogeneous-environment settings.",
+        "Marginal or mixed quantitative performance: In Table 1 (StorySalon benchmark), the base Story-Adapter is outperformed by StoryDiffusion across all metrics (CLIP-T: 0.305 vs 0.311; aCCS: 0.760 vs 0.765; aFID: 16.52 vs 14.84). The method only marginally surpasses StoryDiffusion when switching to the much larger Story-AdapterXL backbone (SDXL), confounding model capacity with methodological advantage. In Table 2, IP-Adapter achieves a lower aFID than Story-Adapter (93.70 vs 98.51).",
+        "Prompt drift across iterations: As shown in Table 6, repeated iterations cause a continuous drop in text-image alignment (CLIP-T falls from 0.330 down to 0.297 by iteration 15), indicating that the feedback loop progressively overrides text controllability in favor of visual persistence."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 6,
+      "strengths": [
+        "Conceptual novelty: The proposed external iterative paradigm reframes long-story generation as a multi-round global refinement process rather than single-pass autoregression or fixed-reference conditioning, effectively mitigating error accumulation and reference flaw propagation.",
+        "Training-free and modular design: By leveraging pre-trained CLIP image embeddings and reusing pre-trained IP-Adapter cross-attention projection weights, Global Reference Cross-Attention (GRCA) provides a plug-and-play, training-free solution for sequence-level consistency.",
+        "Strong empirical performance across story lengths: Story-Iter demonstrates solid quantitative and qualitative improvements on both standard benchmarks (StorySalon) and challenging extended narratives (up to 100 frames) across multiple visual styles.",
+        "Thorough ablations and extensions: The paper includes meaningful ablations on context modeling strategies (sliding window vs. mean-pooling vs. GRCA), iteration counts, and scheduling schemes, as well as practical extensions (Story-Iter-Fast with LCM and Story-Iter-ControlNet)."
+      ],
+      "weaknesses": [
+        "Substantial computational overhead: Requiring multiple external iterations (typically 10 rounds of full story diffusion passes) inherently multiplies the inference cost (e.g., 250 minutes for 100 frames in Story-IterXL). While Story-Iter-Fast alleviates this to 20 minutes, the requirement of multi-round generation remains a notable practical bottleneck.",
+        "Limited scale of the long-story benchmark: The introduced benchmark for 50–100 frame narratives consists of only 20 stories generated by GPT-4o, which is relatively small to establish a robust and comprehensive evaluation testbed.",
+        "Risk of diversity suppression: Progressively increasing the global reference conditioning weight (lambda) across iterations improves consistency but inherently trades off prompt adherence and action/scene diversity, as indicated by declining CLIP-T scores at higher iterations.",
+        "Global CLIP embedding bottlenecks: Relying on global CLIP image embeddings can struggle with complex scenes featuring multiple newly interacting characters, as global representations may conflate multi-character attributes compared to dense spatial features."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Training-free and plug-and-play design: The proposed Story-Iter paradigm cleverly reuses pre-trained Stable Diffusion models and IP-Adapter cross-attention weights without requiring additional training or fine-tuning.",
+        "Effective scaling to long narratives: The framework successfully demonstrates consistent generation for up to 100 frames, substantially exceeding the sequence lengths typically supported by existing auto-regressive or fixed-reference approaches.",
+        "Comprehensive empirical evaluation: The paper conducts thorough experiments spanning regular-length benchmarks (StorySalon) and long-story setups, including quantitative metrics (CLIP-T, aCCS, aFID), user preference studies, and ablation analyses on the weighting schedule and attention design.",
+        "Practical extensions: The authors demonstrate modular compatibility by showcasing both an accelerated variant (Story-Iter-Fast with SDXL-LCM) and layout/pose controllability (Story-Iter-ControlNet)."
+      ],
+      "weaknesses": [
+        "High computational overhead during inference: The external iterative paradigm requires performing full diffusion sampling rounds across all frames multiple times (default 10 iterations), resulting in substantial computation (e.g., 250 minutes on an NVIDIA RTX A6000 for a 100-frame story). While the LCM variant mitigates this, it exhibits noticeable degradation in consistency metrics (aFID increases from 94.30 to 109.13).",
+        "Limited dataset scale for the long-story benchmark: The long-story evaluation relies on only 20 GPT-4o-generated stories (10 stories of 50 frames and 10 of 100 frames), which is relatively small to establish definitive statistical conclusions across diverse narrative genres.",
+        "Inherent trade-off between consistency and prompt fidelity/diversity: As shown in Table 11, running more iterations progressively reduces text-image alignment (CLIP-T drops from 0.330 to 0.297), indicating that repeated cross-attention conditioning on global embeddings tends to homogenize scenes and suppress fine-grained local prompt dynamics.",
+        "Incremental technical novelty: The core attention block (GRCA) largely reuses IP-Adapter projections across concatenated frame representations, making the algorithmic novelty modest compared to prior literature on reference-based diffusion adapters."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Addresses an important and challenging problem: maintaining character and semantic consistency across extended narrative sequences (up to 100 frames), where existing autoregressive and reference-image paradigms tend to suffer from error accumulation or rigid reference bias.",
+        "The framework is training-free and plug-and-play, cleverly utilizing pretrained IP-Adapter weights and global CLIP image embeddings to provide cross-frame visual conditioning without requiring custom dataset training or fine-tuning.",
+        "Extensive qualitative demonstrations and visualizations across a wide variety of narrative genres, art styles (e.g., film, realistic, comic, monochrome), and conditioning modes (including ControlNet pose guidance).",
+        "Comprehensive empirical analysis covering regular-length stories (StorySalon), long stories, single-subject consistency, ablation studies of aggregation strategies (GRCA vs. sliding window vs. CSA), and human evaluation."
+      ],
+      "weaknesses": [
+        "High computational complexity and inference latency: Executing 10 full external iterations over an entire story sequence multiplies the generation cost by tenfold. For a 100-frame story at 50 diffusion steps, this requires generating 1,000 complete images (taking ~250 minutes on an NVIDIA RTX A6000). While the SDXL-LCM fast variant reduces runtime to 20 minutes, its consistency metrics degrade noticeably (aFID worsens from 94.30 to 109.13 in Table 3, performing worse on aFID than StoryDiffusion).",
+        "Limited methodological novelty: The approach primarily relies on concatenating the CLIP global representations of all frames from the previous iteration into IP-Adapter's existing cross-attention layers, and repeatedly regenerating the sequence while linearly ramping the conditioning weight $\\lambda$. The outer iteration behaves essentially as a heuristic relaxation process without theoretical convergence guarantees or deeper algorithmic integration into the diffusion sampling trajectory.",
+        "Small test suite for the long story benchmark: The newly introduced long story benchmark contains only 20 stories in total (10 stories with 50 frames and 10 stories with 100 frames). This sample size is too limited to draw statistically robust conclusions or establish a standardized benchmark.",
+        "Risk of semantic drift and diversity reduction: By conditioning every frame on global CLIP embeddings of all other frames across 10 iterations with a fixed random seed, distinct scenes and environments within a long narrative risk visual homogenization or blending across narrative chapters.",
+        "Presentation and formatting errors: In Table 8 (Long Story Visualization), the method name 'Story-Iter' is duplicated twice with different scores (the second presumably being Story-IterXL). In Table 11, the direction arrow for aFID is erroneously printed as $\\uparrow$ (higher is better), contradicting the standard definition and earlier tables where it is marked as $\\downarrow$."
+      ]
+    }
+  }
+}

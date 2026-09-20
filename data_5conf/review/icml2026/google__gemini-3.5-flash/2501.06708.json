@@ -1,0 +1,89 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "The idea of using the alignment between per-sample gradients and the vector pointing towards a pretrained reference model in weight space is intuitive and mathematically clean.",
+        "The paper evaluates the proposed method across two diverse and challenging setups: simulated label noise on six image classification datasets, and large-scale web-crawled multimodal data (DataComp small and medium scales) for CLIP training.",
+        "The proposed framework integrates both online gradient reweighting (Stage 1) and offline data selection via weak supervision (Stage 2), showing a complete pipeline from training to dataset curation."
+      ],
+      "weaknesses": [
+        "There is a critical typo/error in the core formulation. Equation (2) and Algorithm 1 define the normalized weight as $\\bar{m}_{i,t} \\propto e^{-m_{i,t}/\\tau}$. Since a larger (more positive) $m_{i,t}$ represents better alignment with the reference model, using a negative sign in the exponent actually downweights the highly aligned (helpful) samples and amplifies the misaligned (noisy) ones. This contradicts the stated goal and shows a lack of rigorous proofreading.",
+        "The computational and memory overhead of computing per-sample gradients is not discussed. Computing per-sample gradients is notoriously slow and memory-intensive in deep learning. Furthermore, for CLIP's contrastive loss, the gradients are batch-dependent, making the definition and computation of independent 'per-sample' gradients even more challenging. The authors need to clarify how these gradients were computed and report the wall-clock training time overhead of Grad-Mimic compared to standard SGD.",
+        "The practical utility of the method is somewhat constrained by the requirement of a high-quality reference model. For the DataComp experiments, the authors use a CLIP model trained on 1.4 billion samples as the reference to filter a 10M or 100M dataset. In real-world scenarios where one wishes to train a state-of-the-art model, such a superior reference model is often unavailable. The paper lacks analysis on how the performance of Grad-Mimic degrades when using a weaker or smaller reference model."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Introduces a novel and conceptually intuitive metric (Mimic Score) that bridges weight-space geometry (alignment with a reference model) and data selection.",
+        "Proposes a complete two-stage framework (Grad-Mimic) that handles both online gradient reweighting during training and offline robust filter construction using weak supervision aggregation (Snorkel).",
+        "Validates the approach thoroughly on both controlled synthetic label noise across 6 image datasets and realistic large-scale multimodal pretraining using DataComp-10M and DataComp-100M datasets.",
+        "Provides comprehensive and insightful analysis, including correlation studies with human heuristics (caption lengths), CLIP scores, and direct visualization of the score distributions over training."
+      ],
+      "weaknesses": [
+        "Computing per-sample gradients for individual weight updates typically introduces significant computational and memory overhead. The manuscript lacks a detailed discussion or empirical analysis of the wall-clock time and memory consumption overhead compared to standard training.",
+        "The method relies heavily on the availability of a high-quality pretrained reference model in a more optimal part of the weight space. In specialized or highly novel domains where such reference models do not exist, this requirement could limit the method's applicability.",
+        "There appears to be a mathematical contradiction or typo in Equation (2). If higher mimic scores ($m_{i,t}$) indicate better alignment with the reference model, then the softmax normalization should use $e^{m_{i,t}/\tau}$ instead of $e^{-m_{i,t}/\tau}$ to amplify helpful samples and down-weight unhelpful ones."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "Intuitive Concept: The idea of using the trajectory in weight space towards a pretrained reference model to evaluate sample utility is interesting and intuitive.",
+        "Weak Supervision Integration: Aggregating filtering decisions across different epochs/steps using weak supervision frameworks (like Snorkel) is a creative way to capture training dynamics.",
+        "Extensive Evaluation Scenarios: The authors evaluate their approach on both controlled label noise scenarios (across six image datasets) and large-scale multimodal pretraining (DataComp 10M and 100M scales)."
+      ],
+      "weaknesses": [
+        "Mathematical Contradiction in Equation (2) and Algorithm 1: The paper contains a critical mathematical error. The alignment score $m_{i,t}$ is defined in Eq. (1) as the projection of $-g_{i,t}$ onto $v_t$. A higher $m_{i,t}$ indicates better alignment towards the reference model (high utility). However, Eq. (2) normalizes this score as $\\bar{m}_{i,t} = \\frac{e^{-m_{i,t}/\\tau}}{\\sum_j e^{-m_{j,t}/\\tau}}$. Due to the negative sign in the exponent, samples with higher alignment (larger $m_{i,t}$) are assigned smaller weights $\\bar{m}_{i,t}$. This directly contradicts the textual description of prioritizing highly-aligned samples.",
+        "Weak Standalone Performance: In Table 4, the standalone performance of the Mimic Score filter is significantly lower than the standard CLIP Score baseline. For instance, on the Small scale (3M budget), Mimic Score Top 30% achieves an average of 0.135, whereas CLIP Score Top 30% achieves 0.165 (a 3% absolute gap). On the Medium scale, the gap is even larger (0.268 vs. 0.321). This suggests that as a primary data selection tool, the proposed metric is suboptimal.",
+        "High Computational Overhead: The proposed framework is computationally impractical for large-scale settings. It requires running a first full training run (Stage 1) to collect mimic scores, which involves expensive per-sample gradient computations, followed by a second full training run from scratch (Stage 2) on the filtered dataset. The paper does not provide wall-clock time comparisons or discuss the significant cost of training models twice.",
+        "Unrealistic Oracle Setup in Simulations: In the simulation experiments (Sec 5.1), the reference model is trained on the clean (noise-free) dataset. This represents an unrealistic oracle scenario, as having access to clean data for training a reference model defeats the purpose of filtering a noisy dataset. It is unclear how the method performs when the reference model itself is trained on noisy data."
+      ]
+    }
+  },
+  "v3": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "The core idea of using the weight space direction pointing towards a pretrained reference model (\\(\\theta_{ref} - \\theta_t\\)) as a target direction for gradient alignment is highly intuitive, elegant, and avoids the need for clean validation datasets.",
+        "The proposed method is computationally much more efficient than prior model-based approaches like Rho-Loss or influence functions, as it does not require full forward passes on a reference model or validation set gradient computations.",
+        "Comprehensive experimental evaluation across six simulated noisy image datasets as well as large-scale web-crawled multimodal datasets (DataComp-10M and DataComp-100M) demonstrates strong performance and robust convergence speedup (20.7% fewer steps).",
+        "Excellent ablation studies investigate the choice of layers to mimic, temperature hyperparameters, and the impact of corrupted/weaker reference models, showing the method's robustness."
+      ],
+      "weaknesses": [
+        "The method fundamentally relies on the availability of a well-performing pretrained reference model. In entirely novel domains or tasks where no reference model exists, the applicability of this method is limited.",
+        "According to Figure 7, there is still a noticeable wall-clock overhead per batch for Grad-Mimic compared to standard mini-batch SGD (0.671s vs 0.031s, a ~20x slowdown), likely due to the calculation of per-sample gradients. Since the paper highlights a 20.7% reduction in training steps, this wall-clock training overhead per step should be discussed more transparently as a limitation.",
+        "It is worth clarifying if the alignment score computation can be optimized. If only the last layer's weights are mimicked, the alignment scores \\(m_{i, t}\\) can be computed using only last-layer activations and gradients. One could then multiply the per-sample losses by \\(m_{i, t}\\) and perform a single standard backpropagation pass to update the entire model. It would be highly beneficial to explain whether this optimization was used and if it can mitigate the wall-clock overhead."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Novel and intuitive formulation: The proposed 'Mimic Score' geometrically aligns sample gradients with a target vector pointing towards a reference model in the weight space. This is a clean, lightweight alternative to using clean validation sets or costly influence functions.",
+        "Strong efficiency advantages: The paper demonstrates significantly lower computational overhead (per-batch runtime and GPU memory) compared to loss-based (e.g., Rho-Loss) or validation-based influence methods, making it highly practical.",
+        "Robust empirical verification: The approach is extensively tested on both controlled label-noise benchmarks (6 datasets) and real-world large-scale multimodal pretraining (DataComp 10M and 100M), demonstrating consistent accuracy gains and faster convergence (e.g., 20.7% fewer steps).",
+        "Thorough theoretical and ablation analysis: Includes a theoretical convergence analysis under L-smoothness assumptions and comprehensive ablations regarding reference model quality, noise injection, temperature settings, and different layers to mimic."
+      ],
+      "weaknesses": [
+        "Architectural constraint of the reference model: The method requires the model being trained and the reference model to share the same weight space (or at least the evaluated layers, typically the last layer). This restricts its applicability to situations where a same-architecture model is already available.",
+        "Scalability of the Snorkel-based aggregation: For massive datasets (such as 100M+ samples), saving and aggregating the binary decision matrix of size $N \\times T$ using Snorkel might introduce non-trivial storage and computation overheads. The paper would benefit from a more detailed discussion on the scalability of the offline stage.",
+        "Potential for bias propagation: Because the data selection is guided directly by the reference model, any inherent biases, limitations, or domain shifts present in the reference model's weights will likely be propagated and reinforced in the curated training dataset."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Intriguing and novel concept: Leveraging a pretrained reference model's weight vector as a guide in the weight space to score training samples is a creative alternative to typical loss-based or validation-set-influence-based data selection.",
+        "Comprehensive evaluation: The paper validates the proposed metric on both simulated label noise settings (across six image datasets) and a large-scale multimodal pre-training benchmark (DataComp 10M and 100M scales).",
+        "Thorough analytical and empirical analysis: The authors provide convergence guarantees for their online re-weighting scheme (Theorem A.4) and conduct numerous ablation studies regarding temperature, weight corruption, and the choice of layer.",
+        "Complementary filtering performance: The offline filter built using aggregated mimic scores successfully complements CLIP score-based filters, improving final model performance while using fewer samples."
+      ],
+      "weaknesses": [
+        "Severe computational overhead per batch: Although the authors claim Grad-Mimic is compute-efficient compared to other gradient-based baselines, Figure 7 reveals that Grad-Mimic has a per-batch runtime of 0.671 seconds compared to standard Mini-batch SGD's 0.031 seconds. This represents a ~21.6x slowdown per step. A 20.7% reduction in training steps does not compensate for a 2000% increase in training time per step, making the online batch re-weighting computationally impractical for standard training from scratch.",
+        "Reliance on the final layer to bypass permutation symmetries: The proposed weight alignment metric assumes that the current model and the reference model reside in a compatible weight space. For deep networks, permutation symmetries mean that matching full-model weights directly is generally ineffective. The authors bypass this by only mimicking the final MLP/linear layer. While this is a clever design choice, it means the metric relies heavily on the final classification/projection layer's gradients, which may not fully capture the utility of a sample for learning complex intermediate features.",
+        "Dependency of Offline Selection (Stage 2): To build the offline filter, the model must first be trained while collecting mimic scores across steps. This means one must endure the highly expensive Stage 1 training run (with the 21x per-batch slowdown) just to curate a dataset for a subsequent run. This limits the practicality of the two-stage approach unless the curated dataset is reused heavily."
+      ]
+    }
+  }
+}

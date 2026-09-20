@@ -1,0 +1,96 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Addresses an important and practical problem in LLM deployment: harvesting idle GPU resources during non-peak or bursty periods for offline batch inference without hurting latency SLOs of online interactive requests.",
+        "The proposed architecture is well-designed, combining layer-wise preemption safepoints, incremental asynchronous KV-cache checkpointing to host memory, and an SLO-aware budget scheduler based on offline profiling.",
+        "The evaluation includes realistic bursty traces (BurstGPT) as well as controlled synthetic loads (varying coefficient of variation and arrival rate), with an informative ablation study (Figure 8) breaking down individual contributions of each optimization component.",
+        "The algorithms and system workflows are clearly formulated and easy to understand."
+      ],
+      "weaknesses": [
+        "Evaluation scope is limited: experiments are conducted only on a single 7B parameter model (Llama-2-7B) on a single NVIDIA A100-40GB GPU. While distributed execution and tensor parallelism are discussed in the design, there is no empirical evaluation on multi-GPU setups or larger modern models (e.g., 70B+ models or MoEs) where collective communication and higher KV-cache volume could significantly alter preemption latency and host memory transfer overheads.",
+        "Noticeable drafting inconsistency: in Figures 5(c), 6, and 7, the proposed system is labeled as 'Concerto' instead of 'ConServe', indicating leftover terminology from an earlier draft.",
+        "Host memory and PCIe bandwidth contention is not sufficiently characterized; continuously streaming KV cache checkpoints across PCIe streams while executing decode/prefill kernels can potentially cause memory bus contention under high concurrent batch loads.",
+        "Baseline comparison is restricted to standard vLLM and an author-implemented priority queue variant (vLLM++); comparison against or discussion of other advanced scheduling/co-location frameworks under mixed workloads is limited."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Addresses an important and practical problem in LLM infrastructure: co-serving latency-critical online requests and throughput-oriented offline requests to maximize GPU utilization without violating strict latency SLOs.",
+        "The combination of layer-wise preemption safepoints, asynchronous incremental KV-cache checkpointing, and SLO-budgeted scheduling provides an effective end-to-end solution for mitigating head-of-line blocking and recomputation overheads.",
+        "Comprehensive ablation study in Section 6.4 clearly isolates the latency and throughput benefits contributed by each component (SLO-aware scheduler, incremental checkpointing, background prefetching).",
+        "Evaluation demonstrates significant reductions in tail latency (84x reduction in P99 TTFT compared to the naive co-location baseline) while achieving near-optimal throughput."
+      ],
+      "weaknesses": [
+        "Evaluation is limited to a single GPU (1x NVIDIA A100-40GB) and a single model architecture/size (Llama-2-7B). Although the paper discusses support for tensor and pipeline parallelism across multiple workers, distributed execution and collective synchronization overheads (e.g., NCCL preemption broadcast) are not empirically validated.",
+        "Baselines are somewhat narrow: the primary comparison is against the authors' custom priority-augmented baseline (vLLM++). Comparisons against other modern LLM serving architectures that address interference (such as chunked prefill systems like Sarathi-Serve or disaggregated systems like DistServe/Splitwise) are discussed qualitatively but lack direct experimental comparison.",
+        "Presentation carelessness with system naming: Figures 5(c), 6, and 7 refer to the proposed system as 'Concerto' rather than 'ConServe' in legends and subcaptions, indicating unpolished revisions from an earlier draft.",
+        "Limited analysis of host DRAM capacity and PCIe bus contention: Incremental checkpointing continuously streams KV cache blocks across the PCIe bus; the paper lacks a detailed stress test examining whether PCIe saturation interferes with token computation or weight transfers during heavy multi-tenant loads."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Addresses an important and practical problem in LLM infrastructure: harvesting stranded GPU capacity from overprovisioned online serving instances to execute best-effort offline batch workloads without compromising latency SLOs.",
+        "The incremental KV cache checkpointing mechanism cleverly exploits the append-only, autoregressive property of LLM generation, amortizing host-device memory transfer overheads across iterations and avoiding bursty swap stalls during preemption.",
+        "Layer-grained preemption via safepoints offers a pragmatic balance between millisecond-scale preemption responsiveness and execution overhead compared to kernel-level or iteration-level preemption.",
+        "Detailed ablation study (§6.4) that effectively decomposes the individual gains from the SLO-aware scheduler, incremental checkpointing, and background prefetching, alongside profiling safepoint latency."
+      ],
+      "weaknesses": [
+        "Severely limited hardware and model evaluation: Despite claiming support for tensor and pipeline parallelism across multiple workers/GPUs in the design (§4.3, §5), the empirical evaluation is conducted exclusively on a single NVIDIA A100-40GB GPU running a single 7B parameter model (Llama-2-7B). Large language model serving systems in production predominantly deploy larger models (e.g., 70B, MoE architectures) across multi-GPU setups where collective communication (NCCL barriers) and interconnect contention significantly alter preemption and checkpointing dynamics.",
+        "Comparison baseline is essentially an internal strawman: ConServe is compared only against standard vLLM (serving online only) and vLLM++ (an author-modified priority scheduler atop vLLM). Comparisons against other relevant preemption, swapping, or disaggregated/co-serving frameworks (e.g., Llumnix, FastGen, or general GPU-sharing schedulers adapted for LLMs) are lacking.",
+        "Presentation and polish issues: Multiple figures (Figure 5(c), Figure 6, and Figure 7) label the proposed system as 'Concerto' rather than 'ConServe', indicating an incomplete rebranding/revision.",
+        "Heavy reliance on static offline profiling: The SLO-aware scheduler assumes that model execution time and swap latencies can be accurately predicted offline as a function of batch size and token counts. The paper does not evaluate scheduler robustness under runtime execution variance, variable GPU frequency/thermal throttling, or memory fragmentation.",
+        "Lack of evaluation on PCIe interconnect contention: Asynchronous checkpointing streams KV cache data over PCIe continuously. Under high offline decoding concurrency and heavy KV transfer, the impact of PCIe bus saturation on concurrent CPU-GPU operations and scheduling responsiveness is not thoroughly quantified."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Compelling problem formulation: Harvesting idle GPU cycles from bursty online LLM serving by co-locating offline batch workloads addresses a major real-world efficiency challenge in AI infrastructure.",
+        "Well-motivated fine-grained system design: The three core mechanisms—SLO-aware token-level scheduling via a polynomial performance model, sub-iteration layer-wise preemption via safepoints, and incremental token-level KV cache checkpointing/prefetching—form a cohesive and effective architecture.",
+        "Thorough and rigorous evaluation: Evaluated on realistic setups (DGX H100 with Llama-3.1 8B/70B and Qwen-2.5 14B) across real-world traces (BurstGPT) and diverse offline datasets (DuReader, MultiNews, VCSUM), comparing against robust baselines including preemptive adaptations of Sarathi and DistServe.",
+        "Comprehensive microbenchmarking and ablations: The manuscript carefully isolates the latency and throughput contributions of each component and profiles runtime overheads (safepoint latency, PCIe checkpointing bandwidth)."
+      ],
+      "weaknesses": [
+        "Handling of offline prefill KV checkpointing: While incremental checkpointing is highly effective and lightweight for decode steps (generating one token/page at a time), it is less clear how the system handles the bursty KV state generated during massive offline prefill chunks when preempted mid-iteration.",
+        "Safepoint granularity trade-offs: Safepoints are placed every 4 layers to achieve an empirical balance between responsiveness (~13ms) and overhead (~1.1%), but the paper lacks a systematic exploration of safepoint interval sensitivity across different layer counts or architectures.",
+        "Applicability to Mixture-of-Experts (MoE) architectures: The cost model and scheduling logic assume relatively predictable iteration latencies. In sparse MoE models (e.g., DeepSeek, Mixtral), dynamic routing and expert load imbalances could introduce variance that challenges the polynomial execution time predictor."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Tackles an important and timely systems problem: bridging the gap between low-latency online LLM serving and high GPU utilization by harvesting idle cycles for latency-tolerant offline batch workloads.",
+        "The technical design is cohesive and addresses key bottlenecks across the entire serving lifecycle: SLO-aware token-level scheduling via a context-aware latency cost model, sub-iteration layer-wise preemption, and asynchronous incremental KV cache checkpointing.",
+        "The layer-wise preemption with safepoints and the append-only incremental KV cache streaming effectively circumvent the classic swap-versus-recompute dilemma, reducing preemption delays from hundreds of milliseconds to single-digit milliseconds.",
+        "Comprehensive and rigorous evaluation on high-end hardware (8x H100 GPUs) across multiple modern models (Llama-3.1 8B/70B, Qwen-2.5 14B) under both real-world traces (BurstGPT, DuReader, MultiNews, VCSUM) and synthetic stress tests, demonstrating significant tail-latency reductions and offline throughput improvements.",
+        "Clear, well-structured paper with informative motivational profiling, clean diagrams, and thorough ablation and microbenchmark studies."
+      ],
+      "weaknesses": [
+        "The analytical performance model assumes dense transformer architectures with uniform per-token compute and memory characteristics; its applicability to Mixture-of-Experts (MoE) architectures (e.g., Mixtral, DeepSeek-V3), where expert routing and activation introduce dynamic compute and all-to-all communication variance, is unaddressed.",
+        "The evaluation relies exclusively on high-end DGX H100 servers with 64 GB/s PCIe Gen5 and large host RAM (2 TB). The impact of PCIe bus contention, NUMA boundaries, and host memory bandwidth saturation on continuous incremental KV checkpointing under lower-tier or multi-tenant hardware (e.g., PCIe Gen4) remains insufficiently characterized.",
+        "The evaluation focuses predominantly on aggregate offline throughput (tokens/sec) and online tail latencies (TTFT/TBT), leaving the individual job completion times (JCT) and potential starvation/fairness dynamics of long-running offline requests during prolonged online traffic bursts unexamined.",
+        "While the paper demonstrates inserting safepoints every 4 layers in vLLM's piecewise execution, details on implementation complexity and performance implications inside end-to-end captured CUDA Graphs or heavily fused runtime graphs (such as TensorRT-LLM) are limited."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Compelling problem formulation: Co-serving latency-critical online LLM requests with latency-tolerant offline batch inference within the same engine is a highly practical and cost-effective approach to tackling GPU underutilization.",
+        "Comprehensive and co-designed system architecture: ConServe addresses the core bottlenecks across the full serving lifecycle through three mutually reinforcing mechanisms—an analytical cost-model-driven token scheduler, layer-wise sub-iteration preemption, and asynchronous incremental KV cache checkpointing.",
+        "Solid end-to-end implementation and rigorous evaluation: The system is implemented atop vLLM (over 9,000 lines of C++/Python) and evaluated on modern hardware (NVIDIA H100 GPUs) across multiple representative models (Llama-3.1 8B/70B, Qwen-2.5 14B) and real-world traces (BurstGPT, DuReader, MultiNews, VCSUM).",
+        "Strong empirical results: The evaluation convincingly demonstrates that ConServe maintains near-optimal online P99 TTFT and TBT (within 19-25% of the Online-Only baseline) while achieving over 78-88% of the throughput-optimal offline baseline, significantly outperforming state-of-the-art baselines like Sarathi-P and DistServe-P."
+      ],
+      "weaknesses": [
+        "Handling of preempted mid-iteration compute: When an offline request is preempted mid-iteration at a layer safepoint, its intermediate activations are discarded and the token must be recomputed from layer 0 upon resumption. While the paper discusses the safepoint overhead itself (10-167 µs), it does not quantify the amount of discarded partially-completed layer computation under high preemption frequencies.",
+        "Applicability to modern Mixture-of-Experts (MoE) architectures: The evaluation and cost model focus exclusively on dense autoregressive architectures. Given that state-of-the-art production models (e.g., DeepSeek-V3/R1, Mixtral) heavily employ sparse MoE routing and all-to-all communications, it is unclear whether the polynomial latency regression model and layer-wise safepoints transfer seamlessly without routing-induced variance.",
+        "Host memory and PCIe bus contention: Incremental KV cache checkpointing continuously streams data to host memory over PCIe. Although the theoretical bandwidth appears sufficient on an H100 DGX system, the paper lacks an in-depth analysis of PCIe bus contention when scaling to higher concurrencies or when concurrent prompt transfers compete for the same interconnect bandwidth."
+      ]
+    }
+  }
+}

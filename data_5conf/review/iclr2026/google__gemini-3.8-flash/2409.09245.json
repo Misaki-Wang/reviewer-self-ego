@@ -1,0 +1,96 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Formulating the dequantization/reconstruction step as a ridge regression problem with a closed-form solution ($a = \\frac{\\text{Cov}(x, q)}{\\text{Var}(q) + \\lambda}$, $b = \\bar{x} - a\\bar{q}$) is mathematically neat and provides a smooth regularization mechanism controlled by $\\lambda$.",
+        "Demonstrates stable training from scratch at ultra-low bitwidths (down to 1-bit weights and activations) across ResNet-50 and Transformer architectures without needing specialized architectural modifications or complex scheduling tricks.",
+        "The paper provides clear, concise reference implementations in JAX illustrating how the quantization and reconstruction operations are computed."
+      ],
+      "weaknesses": [
+        "Practical deployment feasibility for dynamic activation quantization is unclear: computing $a$ and $b$ requires $\\text{Cov}(x, q)$, which depends on the full-precision input $x$. At inference time, calculating mean, variance, and covariance over small blocks (e.g., 128 elements) on full-precision activations before quantized matrix multiplication introduces substantial computational overhead and diminishes the benefits of low-bit integer operations.",
+        "No wall-clock latency, throughput, or memory profiling on real hardware is reported. Given that Eq. (12) introduces multiple cross-terms and dynamic block-level statistics, empirical verification of real-world inference speedup is essential.",
+        "The evaluation scope is limited and somewhat dated. Despite heavily emphasizing Generative AI and Large Language Models (LLMs) in the introduction, the experiments are restricted to ResNet-50 on ImageNet and a translation Transformer on WMT datasets; there are no evaluations on autoregressive LLMs (e.g., LLaMA) or modern vision architectures (e.g., ViT).",
+        "The connection to biological neural networks and spiking neural networks in Sections 2.2 and 5.1.3 is tangential and oversold, as the authors acknowledge that the model neither simulates spike generation nor considers spike frequency."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3,
+      "strengths": [
+        "The formulation of dequantization as a ridge regression problem to regularize the scaling factor and suppress quantization perturbation is simple, intuitive, and easy to implement.",
+        "The paper provides an interesting perspective on interpolating between a coarse, piecewise-constant backbone (when regularizing heavily) and full-precision reconstruction.",
+        "Empirical evaluations show training stability down to low bitwidths (e.g., 1-bit weights and activations) on ResNet-50 and WMT Transformer without requiring complex multi-stage training schedules."
+      ],
+      "weaknesses": [
+        "Overstated theoretical contributions: Propositions 1 and 2 are elementary limits of one-dimensional ridge regression (taking $\\lambda \\to \\infty$ and $\\lambda=0, \\delta=0$), providing little substantive theoretical guarantee regarding optimization landscape, gradient variance, or convergence bounds for non-convex neural network training.",
+        "Unaddressed inference and runtime overhead: The proposed denoising affine transform requires computing block-wise means, variances, and covariances dynamically for activations during the forward pass. Computing these statistics across blocks of size 32 or 128 elements in floating-point introduces significant memory and arithmetic overhead, conflicting with the primary motivation of achieving high-throughput low-bit integer matrix multiplication.",
+        "Incomplete empirical evaluation and missing baselines: Despite the introduction heavily motivating the work with Large Language Models (LLMs), experiments are restricted to ResNet-50 and small Transformer translation models on WMT. Furthermore, for ResNet-50, no comparison is provided for 1-bit or 2-bit models against dedicated BNN literature (e.g., Bi-Real Net, ReActNet, PokeBNN), even though 1-bit training is claimed as a core contribution.",
+        "Misleading connections to biological/spiking neural networks: Framing 1-bit activation Transformers as 'quasi-spiking neural networks' and claiming to bridge the gap between artificial and biological networks (Sections 1, 2.2, 5.1.3) is an unsupported stretch, as standard Transformer forward passes do not model membrane potentials, spike timing, or event-driven neuromorphic dynamics."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Conceptual Simplicity: The formulation of quantization as additive perturbation combined with a regularized linear reconstruction (ridge regression) is conceptually neat and can be implemented concisely in standard deep learning frameworks.",
+        "Training Stability Across Low Bitwidths: The proposed regularized affine reconstruction effectively prevents division-by-zero/numerical explosion during training when block variances collapse, enabling training from scratch at ultra-low precisions (e.g., A1W1) without divergence.",
+        "Extensive Bitwidth Configurations: The paper reports experimental results across a wide spectrum of weight and activation precisions (A4W4 down to A1W1) on ResNet-50 and WMT Transformers, accompanied by ablations on block size and the regularization hyperparameter lambda."
+      ],
+      "weaknesses": [
+        "Severe Practical Inference Bottleneck: The proposed reconstruction parameters a = Cov(x, q) / (Var_q + lambda) and b = E[x] - a E[q] require computing the statistics of the full-precision activation tensor x at inference time. Calculating the covariance Cov(x, q) requires an element-wise dot product between the unquantized float vector x and the quantized vector q before the linear layer. This defeats the primary hardware purpose of activation quantization, which is to avoid floating-point operations and eliminate the need to retain full-precision activations.",
+        "Excessive GEMM Decomposition Overhead and Lack of Hardware Benchmarks: Eq. (12) reveals that evaluating the quantized matrix multiplication requires computing four separate matrix/vector products (the quantized core product plus three rank-1 correction terms). Combined with fine-grained sub-channel blocking (e.g., block size 128 or 32), this adds significant runtime and memory overhead. The paper presents no actual hardware latency, throughput, or memory consumption benchmarks to prove that this formulation yields real-world acceleration.",
+        "Overstated Theoretical Claims: Propositions 1 and 2 are presented as formal theoretical justifications, but their proofs are merely straightforward limit evaluations and basic algebraic identities. Proposition 1 does not rigorously prove algorithmic convergence of the neural network under gradient descent; it merely states that the reconstructed representation approaches the block mean as lambda tends to infinity.",
+        "Superficial Connection to Biological / Spiking Neural Networks: The paper repeatedly claims to bridge the gap between artificial and biological neural networks by treating 1-bit transformer activations as 'quasi-spiking neural networks'. This claim is unsupported, as the model includes no temporal dynamics, leaky integrate-and-fire mechanisms, membrane potentials, or spike-timing mechanisms typical of neuromorphic systems.",
+        "Evaluation Outdated for Modern Efficient Computing: While the introduction heavily motivates the technique using Large Language Models (LLMs), the empirical evaluation is restricted to ResNet-50 on ImageNet and standard Transformers on WMT14/2017. Modern quantization literature expects evaluations on open-source LLMs (e.g., LLaMA families) or contemporary Vision Transformers."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Principled Formulation: The paper frames quantization-aware training (QAT) through an additive perturbation model and derives a closed-form denoising dequantization transform via ridge regression. The connection drawn between this transform and normalization layers (such as LayerNorm and RMSNorm) is insightful.",
+        "Efficient Matrix Multiplication Formulation: Theorem 1 provides an elegant algebraic simplification of two-sided channel-wise affine quantized GEMM into an integer matrix multiplication accompanied by two rank-1 corrections, reducing the computational overhead typically associated with affine quantization.",
+        "Broad Experimental Coverage: The empirical investigation spans a wide variety of setups, including toy transformers (nanoGPT), medium-scale models (GPT-2 Small), modern open LLMs (Gemma 1B and 4B), machine translation (WMT Transformers), and computer vision (ResNet-50)."
+      ],
+      "weaknesses": [
+        "Mischaracterization of the Estimator ('Non-Straight-Through'): The paper repeatedly claims to propose a 'non-straight-through method' that solves the STE blind spot. However, Code Snippet 1 explicitly shows that the rounding error is detached using `delta = jax.lax.stop_gradient(jnp.round(scaled_x) - scaled_x)` with `q = scaled_x + delta`. This is the exact textbook implementation of the Straight-Through Estimator for the rounding operator. The method actually introduces a dynamic, data-dependent affine reconstruction layer after STE rounding, rather than replacing STE itself.",
+        "Fairness of Baseline Comparisons: The authors state that all hyperparameters (learning rate, warmup, optimizer) were kept identical to the full-precision BF16 baseline across all methods. Baselines such as BitNet and ParetoQ were specifically designed with tailored optimization recipes (e.g., learning rate scaling, specific weight decay, and norm configurations). Evaluating them under standard BF16 hyperparameters without tuning makes it unclear whether their reported divergence/instability is due to inherent method flaws or simply suboptimal hyperparameter choices.",
+        "Lack of Downstream LLM Benchmarks: For the Gemma 1B and 4B experiments, the evaluation relies solely on C4 validation accuracy/loss. Standard practice in low-bit LLM training and quantization literature requires reporting performance on standard zero-shot/few-shot downstream benchmarks (e.g., ARC, HellaSwag, PIQA, MMLU, GSM8K) to ensure that generation and reasoning capabilities are truly retained at ultra-low bitwidths (e.g., A1W1).",
+        "Runtime Overhead of Dynamic Activation Dequantization: In Eq. (3) and Code Snippet 2, the scale $s_g$ and offset $b_g$ depend on online statistics of unquantized input $x$ and quantized $q$ (namely $\\text{Cov}_{xq}$ and $\\text{Var}_q$). Computing elementwise products and reductions on unquantized activations prior to matrix multiplication introduces non-trivial memory traffic and latency overhead on real hardware accelerators, which is omitted in the analysis.",
+        "Oversimplified Energy Metric: The hardware-agnostic energy proxy ($\text{Sparsity} \\times A_{\\text{bits}} \\times W_{\\text{bits}} \\times \\text{Ops}$) accounts purely for theoretical arithmetic operations and neglects memory access/data movement, which is the dominant contributor to energy consumption in LLM inference."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Principled and elegant formulation: Framing dequantization as a regularized ridge regression reconstruction problem provides closed-form expressions for scales and offsets, naturally connecting dequantization to normalization layers (LayerNorm/RMSNorm) and offering intuitive stability via the regularization parameter lambda.",
+        "Efficient affine quantization shortcut: Theorem 1 provides an elegant algebraic decomposition that reduces the naive 4-term expansion of two-sided affine matrix multiplication to a single integer matrix multiplication plus two rank-1 corrections, substantially alleviating the computational barrier of affine quantization.",
+        "Broad empirical validation: The framework is tested across multiple architectures and settings, including nanoGPT, GPT-2 on OpenWebText, Gemma 1B and 4B pre-training on C4, ResNet-50 on ImageNet, and Transformer on WMT translation tasks.",
+        "Enhanced training stability: The method demonstrates clear convergence advantages over standard STE, BitNet, and ParetoQ in challenging ultra-low-precision regimes (notably A1W1 and sparse ternary configurations) without requiring bespoke hyperparameter tuning or exotic learning rate warmup schedules."
+      ],
+      "weaknesses": [
+        "Characterization of the estimator: The paper claims to introduce a 'non-straight-through method' (Section 1), yet Stage 2 (Eq. 1 and Code Snippet 1) explicitly detaches the rounding error via stop_gradient(round(f(x)) - f(x)), which is functionally identical to the Straight-Through Estimator for the rounding operation. The gradient awareness arises from differentiating through the data-dependent dequantization transform g(q, x). Framing this as entirely abandoning STE is somewhat misleading.",
+        "Lack of standard downstream LLM benchmarks: The Gemma 1B and 4B evaluation is based solely on validation accuracy/loss on the C4 dataset. Evaluating on standard zero-shot downstream benchmarks (e.g., ARC, HellaSwag, MMLU, GSM8k) would provide a much more convincing demonstration of preserved model capability in extreme compression regimes.",
+        "Absence of real hardware latency and memory benchmarks: The computational and energy gains are primarily supported by theoretical O(·) complexity and a simplified hardware-agnostic proxy (Eq. 9). In practical inference engines, computing unquantized row/column statistics on activations and applying post-GEMM rank-1 corrections can introduce memory bandwidth bottlenecks and impede kernel fusion.",
+        "Missing statistical significance: The training loss curves and table results (e.g., Gemma pre-training, nanoGPT) appear to be based on single runs without reporting error bars or variance over multiple random seeds."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Principled mathematical formulation: Deriving the dequantization scaling and offset via a regularized ridge regression objective provides an elegant, closed-form reconstruction with a natural regularization parameter (lambda) that prevents numerical instability in low-variance blocks.",
+        "Efficient affine matrix multiplication shortcut (Theorem 1): The algebraic decomposition of two-sided affine matrix multiplication into a standard integer GEMM plus two rank-1 outer product corrections is theoretically sound and neatly addresses the computational complexity of affine dequantization.",
+        "Extensive empirical scope across scales and domains: The empirical evaluation covers a wide spectrum, including small transformers (nanoGPT), modern LLMs (Gemma 1B and 4B up to 26B tokens), vision models (ResNet-50 on ImageNet), and machine translation (Transformer on WMT14/WMT17).",
+        "Comprehensive ablation and supplementary analysis: The appendix provides valuable analyses, including sensitivity to the regularization parameter lambda, sub-channel block sizes, comparisons between INT4 and FP4, integration with structured N:M sparsity, and centered Hadamard transforms."
+      ],
+      "weaknesses": [
+        "Misleading characterization as a 'non-straight-through' method: The authors claim to propose a non-straight-through approach that replaces STE. However, Code Snippet 1 and Section 3.2 clearly show that the rounding operation uses `stop_gradient(round(scaled_x) - scaled_x) + scaled_x`, which is the standard implementation of the Straight-Through Estimator. The proposed method adds a learned/adaptive dequantization layer after the STE quantizer, rather than replacing the surrogate gradient itself.",
+        "Unanalyzed gradient leakage through continuous activation statistics: Because the dequantization transform g(q, x) explicitly depends on the unquantized input x via the mean x_bar and Cov(x, q), gradients flow back to x directly through these statistics, bypassing the discrete quantized path q entirely. The paper lacks theoretical or empirical gradient decomposition to demonstrate whether stability arises from 'quantization-aware' gradients through q or simply from this continuous skip-connection bypass to x.",
+        "Practical inference overhead and hardware feasibility: To compute the activation scale s_X at inference time via Eq. 3, the model must compute the covariance between the unquantized activation X and quantized activation Q_X, which requires full-precision floating-point operations over the continuous activations prior to the GEMM. This requirement means activations cannot remain entirely in low-precision integer format, and the rank-1 floating-point corrections introduce non-negligible memory traffic and latency during memory-bound autoregressive LLM decoding (where batch size M=1).",
+        "Incomplete LLM evaluation: The Gemma 1B and Gemma 4B models are evaluated solely on validation accuracy on the C4 dataset. Standard evaluation suites for language models (such as zero-shot/few-shot accuracy on MMLU, HellaSwag, ARC, Winogrande, or GSM8K) and perplexity evaluations are omitted.",
+        "Questionable baseline tuning and recipe consistency: In the nanoGPT experiments, the authors enforce full-precision hyperparameters (learning rate, AdamW settings, schedule) across all baselines, noting that BitNet and ParetoQ diverge. However, ultra-low-bit architectures like BitNet explicitly require specialized architectural components (e.g., RMSNorm, SwiGLU) and adjusted learning rate recipes. Evaluating these baselines outside their intended configurations may unfairly hinder their convergence.",
+        "Absence of real hardware latency and energy profiling: All efficiency and energy claims rely on a theoretical first-order proxy (the product of operand bit-widths), which deliberately ignores data movement, kernel launch overheads, and the cost of calculating dynamic activation statistics. Empirical latency or energy benchmarks on physical hardware (GPU, TPU, or edge devices) are missing."
+      ]
+    }
+  }
+}

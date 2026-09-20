@@ -1,0 +1,104 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Addresses a highly practical and overlooked problem: distributed Transformer inference across bandwidth-constrained edge/consumer networks (10–100 Mbps), where communication overhead typically negates the benefits of multi-device parallelization.",
+        "The core idea of Mixed-Precision Attention—transmitting compact vector-quantized token indices between devices while keeping local computations in full precision—effectively cuts communication volume by up to orders of magnitude.",
+        "Well-motivated accuracy preservation techniques: the Distributed Class Token design neatly resolves the spatial/device asymmetry for classification models (supported by both variance reduction analysis and clear empirical gains in Table 6), and Noise-Augmented VQ provides useful regularization during fine-tuning.",
+        "Extensive empirical benchmarking across varying network bandwidths (10 to 500 Mbps), device counts (2 to 8), and sequence lengths (256 to 4096), convincingly showing that ASTRA achieves speedup where existing sequence and tensor parallelism baselines suffer severe slowdowns."
+      ],
+      "weaknesses": [
+        "Requires model fine-tuning: Unlike standard parallel inference techniques (e.g., Tensor Parallelism, Sequence Parallelism) or post-training quantization, ASTRA requires joint fine-tuning of the Transformer layers and layer-wise VQ codebooks with commitment loss, which hinders drop-in deployment for large-scale modern models.",
+        "Limited applicability to autoregressive decoding: As noted in Section 3.1, ASTRA parallelizes only the prompt encoding / prefill stage; once prefill is done, token-by-token generation runs sequentially on a single device. Because memory-bound autoregressive decoding is often the primary bottleneck in generative LLM serving, this severely narrows the framework's acceleration scope for decoder models.",
+        "Noticeable degradation in zero-shot generalization: When evaluating GPT2 on out-of-distribution data (Table 3), perplexity degrades significantly (e.g., from 43.22 to 62.29 for GPT2-Medium at G=32), demonstrating that discrete codebook representations compromise the model's transferability.",
+        "Idealized theoretical proofs: Theorems 1 and 2 rely on strong simplifying assumptions that do not fully hold in practice, such as exact Gaussianity of latent activations and residuals (Appendix B) and mutual independence of quantization errors across non-local tokens and devices (Appendix C).",
+        "Minor presentation flaw: The Abstract ends abruptly with a truncated sentence ('ASTRA is open-sourced at ')."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper addresses an important practical problem: communication overhead as the dominant bottleneck for multi-device Transformer inference in bandwidth-constrained edge/wireless environments.",
+        "The core idea of combining sequence parallelism with mixed-precision attention—computing full-precision attention locally while vector-quantizing remote token embeddings—is well-motivated and provides large communication reduction.",
+        "The empirical latency analysis is extensive, exploring variations across bandwidth (10–500 Mbps), device counts (2–8), and token sequence lengths.",
+        "The paper provides helpful ablation studies examining the impact of the commitment loss weight, noise magnitude, and distributed class tokens."
+      ],
+      "weaknesses": [
+        "Flawed assumptions in theoretical proofs: In Appendix C (proof of Theorem 2), the derivation assumes that the error vectors across devices $\\delta^{(i)}$ are independent and identically distributed. However, for $N > 2$ devices, different receiving devices receive the exact same quantized embeddings for overlapping non-local partitions, meaning their quantization errors are correlated rather than independent. Thus, the exact $1/N$ variance reduction factor does not rigorously hold. Furthermore, Theorem 1 (Appendix B) relies on strict Gaussianity assumptions and proves distributional fidelity for the noise-augmented representation $\\tilde{X}$, whereas at test time noise is removed and the model operates on $\\hat{X}$.",
+        "Generative inference is only partially parallelized: As stated in Section 3.1, for generative models (GPT-2), ASTRA only parallelizes the prompt prefill/encoding stage, while autoregressive decoding runs sequentially on a single device. In most latency-critical LLM applications, token-by-token generation is the primary latency bottleneck, substantially curtailing the real-world utility of the framework for decoder models.",
+        "Significant zero-shot performance drop: In zero-shot evaluation on Wikitext-103 (Table 3), GPT2-M perplexity degrades substantially from 43.22 to 62.29 (with 32 groups) and 96.99 (with 1 group), showing that VQ introduces severe distribution-shift penalties on unseen data.",
+        "Requirement for fine-tuning versus exact baselines: Unlike standard distributed inference baselines (e.g., Megatron-LM, Sequence Parallelism) which preserve original model weights exactly and require no training, ASTRA requires end-to-end task-specific fine-tuning with learned codebooks (e.g., 32 epochs on CIFAR-100, 4 epochs on ImageNet).",
+        "Baselines are restricted to FP32: Standard distributed deployments typically use FP16/BF16 or INT8 activation transfer. Comparing 10-bit VQ representations against full 32-bit baseline transmissions exaggerates the communication gains over standard practice.",
+        "Evaluated architectures are relatively dated and small (ViT-Base, GPT2-S/M) tested in a simulated/emulated desktop GPU setting, without evaluation on modern LLM or Vision Transformer architectures."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a practical and important bottleneck in edge computing: parallel transformer inference over low-bandwidth commodity networks (e.g., Wi-Fi, 10–100 Mbps), where communication time easily dominates execution latency.",
+        "The proposed Mixed-Precision Attention effectively leverages the asymmetry between local full-precision computation and remote compressed communication, achieving substantial bit-rate reduction.",
+        "The empirical evaluation is extensive across system dimensions, testing a wide range of bandwidths (10–500 Mbps), sequence lengths (256–4096), and device counts (2–8).",
+        "Ablation experiments clearly demonstrate the utility of individual components, including the noise injection during quantization and the distributed class token design."
+      ],
+      "weaknesses": [
+        "Mathematical flaws in theoretical justifications: (1) In Theorem 1 and Appendix B, the closed-form Bures-Wasserstein metric (Eq. 8) is only valid for Gaussian distributions, yet it is applied directly to discrete vector-quantized distributions without justification. (2) In Theorem 2 and Appendix C, the proof assumes that device output error vectors $\\delta^{(i)}$ are independent and identically distributed. In reality, devices share the vast majority of non-local tokens (which share identical quantization error vectors), so their errors are positively correlated, invalidating the exact $1/N$ variance reduction derivation.",
+        "Absence of quantized-communication baselines: Baselines such as Sequence Parallelism (SP) and Tensor Parallelism (TP) are evaluated using uncompressed FP32 communication. Comparing against FP32 communication artificially inflates speedup claims (e.g., 171.82× over SP). The paper should compare against standard activation compression baselines (such as per-token INT8 or FP8 allgather).",
+        "Fine-tuning overhead vs. lossless baselines: Existing parallel inference techniques (TP, SP) require no retraining and introduce zero accuracy loss. ASTRA requires end-to-end fine-tuning with VQ codebooks and commitment losses for every target task, which limits practical deployment flexibility.",
+        "Severe out-of-domain degradation: On zero-shot next-token prediction (Table 3), perplexity degrades drastically (from 43.22 to 62.29 with 32 groups, and to 96.99 with 1 group for GPT-2 Medium), indicating that the discrete codebook representation struggles significantly with out-of-distribution generalization.",
+        "Outdated and small-scale model evaluation: Experiments are restricted to ViT-Base and GPT-2 (Small/Medium), which are small enough to fit comfortably on a single modern edge GPU. Demonstrating the approach on larger modern models (e.g., 7B+ LLMs) where sequence parallelism is practically motivated would substantially strengthen the paper.",
+        "Ambiguity in deployment testbed: Section 4.1 states that the authors 'simulate distributed inference on personal laptops provisioned with an NVIDIA 1660Ti GPU'. It is unclear whether physical multi-device networking was implemented across independent machines using network traffic control (`tc`), or if latency was analytically modeled/simulated on a single machine."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Addresses a critical and practical bottleneck in edge/collaborative inference: standard sequence and tensor parallelism incur prohibitive communication overheads over constrained network connections (e.g., sub-100 Mbps Wi-Fi).",
+        "The proposed framework (Mixed-Precision Attention via Vector Quantization, Noise-Augmented VQ, and Distributed Class Tokens) is well-motivated, elegant, and directly targets the dominant communication cost.",
+        "Comprehensive empirical validation across encoder and decoder architectures (ViT-Base, GPT2-S/M, and Llama-3-8B), covering vision classification, language modeling, downstream NLP tasks, and realistic network conditions (such as packet loss and time-varying bandwidth traces).",
+        "Solid ablations that systematically investigate each design choice: noise scale $\\lambda$, distributed class tokens vs. single class token, commitment loss weight $\\beta$, codebook size $K$, and memory footprint.",
+        "Transparent discussion of limitations, including the zero-shot generalization gap and the distinction between prefill acceleration versus sequential autoregressive decoding in LLMs."
+      ],
+      "weaknesses": [
+        "Fine-tuning and adaptation dependency: ASTRA requires fine-tuning intermediate VQ codebooks and attention masks for specific device counts. In dynamic edge environments where participating devices join or leave frequently, maintaining separate configurations or retraining could add operational friction.",
+        "Scope limited to prefill in generative models: For decoder-only language models, sequence parallelism primarily accelerates the prompt/prefill phase; autoregressive token generation remains largely sequential on a single device unless coupled with other decoding parallelism schemes.",
+        "Stylized theoretical assumptions: The proofs for Theorems 3.1 and 3.2 rely on standard simplifying assumptions (such as Gaussianity and i.i.d. isotropic quantization noise, along with first-order Taylor approximations of the softmax Jacobian), which serve as helpful intuitions but may not fully capture complex non-linear token interactions in deep Transformers."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Well-motivated problem: Addressing the prohibitive inter-device communication overhead in distributed Transformer inference under low-bandwidth network environments (e.g., <=100 Mbps Wi-Fi/edge networks) is practically significant and often overlooked by existing parallel inference frameworks.",
+        "Sound and effective methodology: The integration of sequence parallelism with Mixed-Precision Attention—using local full-precision tokens and vector-quantized remote tokens—along with Noise-Augmented Vector Quantization (NAVQ) and Distributed Class Tokens provides an elegant compromise between communication volume and numerical fidelity.",
+        "Comprehensive empirical validation: Evaluates diverse Transformer architectures (ViT-Base, GPT-2, and Llama-3-8B) across vision and language tasks, demonstrating dramatic latency reductions (up to 2.64× over single-device and up to 15.25× over prior distributed baselines at 10–20 Mbps).",
+        "Thorough system and robustness analysis: Evaluates practical edge challenges including device heterogeneity, random packet loss (5%), dynamic network bandwidth traces, and compatibility with weight quantization (INT8/INT4).",
+        "Solid theoretical motivation and ablation studies: Provides analytical backing for noise augmentation (via Wasserstein distance) and distributed class tokens (variance reduction), corroborated by systematic ablations on hyperparameters (λ, β, K, and group counts)."
+      ],
+      "weaknesses": [
+        "Fine-tuning requirement and partition rigidity: ASTRA requires offline fine-tuning to train the VQ codebooks and align token representations. Crucially, models must be adapted separately for different device counts due to the fixed token partitioning, hindering plug-and-play deployment in ad-hoc edge clusters where participating devices fluctuate.",
+        "Scope limited to prefill for generative LLMs: For decoder-only models (e.g., Llama-3-8B), ASTRA only parallelizes the prefill (prompt encoding / time-to-first-token) phase. Autoregressive token decoding remains sequential on a single device, leaving the decode latency unaccelerated.",
+        "Degradation on zero-shot / out-of-distribution generalization: The discretization introduced by VQ leads to noticeable performance drops in out-of-distribution evaluation (e.g., GPT2-M zero-shot perplexity degrades from 43.22 to 62.29 with 32 groups, and to 96.99 with 1 group).",
+        "Idealized theoretical assumptions: Theoretical derivations rely on simplifying assumptions (e.g., Gaussianity of embedding distributions in Theorem 3.1 and mutually independent, identically distributed quantization errors across tokens in Theorem 3.2), which may not strictly hold across deep Transformer representations in practice."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Addresses a practical bottleneck in distributed edge inference: existing sequence/tensor/block parallelism baselines degrade severely when network bandwidth drops below 100 Mbps (typical for Wi-Fi), whereas ASTRA demonstrates viable speedups down to 10 Mbps.",
+        "The core idea—combining sequence parallelism with mixed-precision attention where local tokens remain full precision and non-local tokens are compressed via Vector Quantization (VQ)—is clean, effective, and well-tailored to the communication bottleneck.",
+        "Comprehensive empirical evaluation covering both vision (ViT on CIFAR-100 and ImageNet-1K) and NLP models (GPT-2, Llama-3-8B), evaluating latency scaling across bandwidth (10–500 Mbps), device counts (2–8), sequence lengths, packet loss, and dynamic bandwidth traces.",
+        "Thorough ablation studies verifying the impact of each component, including the noise magnitude in NAVQ, distributed class tokens vs. single class token, codebook size K, and commitment loss weight beta.",
+        "Transparent discussion of limitations in Section 5, clearly acknowledging the scope of acceleration for generative models (prefill only), the need for fine-tuning, and zero-shot generalization drops."
+      ],
+      "weaknesses": [
+        "Generative model acceleration is restricted to the prefill stage: because sequence parallelism is partitioned across prompt tokens, ASTRA accelerates time-to-first-token but does not accelerate token-by-token autoregressive decoding, which dominates latency in long-generation workloads.",
+        "Full model replication is required on all devices: each participating edge device must host the entire model parameters and codebooks locally, which limits deployment on severely memory-constrained edge hardware compared to tensor parallelism or pipeline parallelism.",
+        "Deployment inflexibility due to fine-tuning requirements: the model must be fine-tuned with VQ codebooks, and changing the number of devices changes the token partitioning scheme, requiring separately adapted models for different device configurations.",
+        "Significant degradation on out-of-distribution / zero-shot language tasks: as shown in Table 3, zero-shot perplexity on Wikitext-103 jumps substantially (e.g., from 43.22 to 62.29 for GPT2-Medium at G=32, and to 96.99 at G=1), indicating that aggressive discrete quantization impairs representation diversity for unseen domains.",
+        "Theoretical derivations rely on restrictive assumptions: the proof for Theorem 3.1 assumes i.i.d. Gaussian residual distributions and diagonal covariances, and Theorem 3.2 assumes error independence across distributed class token replicas, which simplifies away complex inter-token correlations inherent to Transformer attention."
+      ]
+    }
+  }
+}

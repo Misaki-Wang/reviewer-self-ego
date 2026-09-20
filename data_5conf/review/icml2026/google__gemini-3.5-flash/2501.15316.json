@@ -1,0 +1,92 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Novel and elegant approach: Converting dense models to MoE by discovering overlapping experts via dynamic structural pruning—without updating the core weights—is a clever and effective way to bypass expensive pre-training or extensive fine-tuning.",
+        "Training efficiency: Keeping the original weights frozen and only learning routing/projection modules (via Straight-Through Gumbel-Sigmoid/Softmax) makes the training highly efficient, requiring very few extra parameters (~0.27% of the base model) and no extra GPU memory for gradient storage of model weights.",
+        "Thorough empirical validation: The method is validated across multiple LLM families (Phi-2, LLaMA-2/3, Qwen-2.5) of different sizes (up to 14B) on both language modeling (perplexity) and five zero-shot downstream tasks.",
+        "Strong results: ToMoE consistently and significantly outperforms competitive structural and semi-structured pruning baselines at equivalent active parameter budgets.",
+        "Detailed analytical ablation studies: The paper includes useful visualizations showing training dynamics, layer-wise model widths, and token routing behavior, proving that the learned experts align with syntactic and semantic structures."
+      ],
+      "weaknesses": [
+        "Memory footprint vs. Structural Pruning trade-off: ToMoE is compared directly against structural pruning methods (like SliceGPT, LLM-Surgeon, etc.) based on 'active parameters'. However, structural pruning physically removes parameters, reducing both computational FLOPs and the VRAM memory footprint. ToMoE's MoE approach keeps the entire dense model in memory (since different tokens require different experts). This critical trade-off regarding memory-bound LLM serving should be explicitly discussed in the main text.",
+        "Lack of real-world latency/throughput benchmarks: The paper relies on 'Active Parameters' as a proxy for efficiency. Since the experts are overlapping slices of the original MLP matrices, executing them dynamically per token can introduce kernel launch overhead or memory alignment issues. Real-world latency or throughput measurements on standard hardware (e.g., using vLLM or specialized MoE serving frameworks) are missing.",
+        "Missing baseline comparisons with alternative dense-to-MoE methods: While the related works mention dense-to-MoE conversion (such as LLaMA-MoE or SparseUpcycling), a direct comparison is absent. A brief discussion or quantitative comparison of the trade-offs (performance vs. training budget/tokens) with these methods would further contextualize the contributions."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "An innovative concept that frames dense-to-Mixture-of-Experts (MoE) conversion as a dynamic structural pruning problem, keeping the original weights frozen while learning dynamic routing and selection matrices.",
+        "Strong and consistent empirical results across multiple LLM families (LLaMA-2, LLaMA-3, Qwen-2.5, and Phi-2) on both language modeling (perplexity) and zero-shot downstream tasks.",
+        "Efficient training process since the original weights are completely frozen, and only low-rank/projection/router parameters are optimized via in-place self-distillation.",
+        "Unlike traditional dynamic pruning methods that result in variable token-by-token computational budgets, the proposed formulation enforces a strict per-token compute budget which makes it more compatible with standard LLM serving."
+      ],
+      "weaknesses": [
+        "While ToMoE reduces the number of active parameters (FLOPs), it does not reduce the overall memory footprint of the model during inference, as all experts (the entire original dense model) must still reside in GPU RAM. In contrast, static structural pruning permanently deletes weights, saving GPU memory. This crucial trade-off between memory footprint and compute (FLOPs) is not sufficiently emphasized.",
+        "The paper lacks real-world hardware latency or throughput measurements. MoE layers introduce routing and memory bandwidth overheads; hence, showing actual Wall-clock speedups compared to the dense baselines or other pruning methods would strengthen the paper.",
+        "The optimization process is relatively complex, introducing several training modules (hypernetworks, projection layers, routers) and multiple regularization losses (Union of Experts, Parameter, Load Balancing) with several hyperparameters (alpha, beta, gamma) that might require non-trivial tuning."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Highly efficient training formulation: ToMoE freezes the original model weights and only trains a hypernetwork, routers, and projection layers, representing less than 0.3% of the total parameter count. This avoids the extremely expensive continuous pre-training required by other dense-to-MoE conversion methods.",
+        "Strong empirical performance: The method consistently outperforms state-of-the-art structural and semi-structured pruning baselines (such as DISP-LLM, ModeGPT, LLM Surgeon, and Wanda) across various model families (LLaMA-2/3, Qwen-2.5, Phi-2) in both perplexity and zero-shot downstream accuracy.",
+        "Comprehensive analysis: The paper is well-written and provides valuable qualitative and quantitative analyses, including expert routing visualizations, layer-wise width distributions, and ablation studies on individual regularization losses."
+      ],
+      "weaknesses": [
+        "Memory footprint limitation: In standard structural pruning, parameters are physically removed to reduce both memory usage and computation. However, ToMoE uses a 'Union of Experts Regularization' to ensure almost all of the dense model's parameters are preserved (the union is close to 1.0). Since the entire dense weight matrix needs to be kept in memory to support different experts, this approach does not reduce the storage/GPU memory footprint, which is often the primary bottleneck for deploying LLMs on resource-constrained devices.",
+        "Lack of hardware serving benchmarks: The paper lacks wall-clock latency or throughput evaluation. Converting dense layers into dynamic, token-level MoE structures introduces execution overheads (such as routing overhead and smaller, fragmented GPU kernel launches) that might offset the theoretical FLOP savings.",
+        "Complex optimization objective: The loss function relies on multiple competing regularization terms (parameter limit, union of experts, and load balancing) controlled by multiple hyperparameters (alpha, beta, gamma). The optimization stability and sensitivity to these hyperparameters should be more thoroughly discussed."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Innovative Methodology: The paper presents a novel approach that elegantly bridges dynamic structural pruning and dense-to-MoE conversion, optimizing expert construction and routing joint-optimization in a single stage.",
+        "Resource-Efficient Training: By freezing the massive dense LLM weights and only training lightweight router and projection layers, the proposed method reduces the heavy computational overhead typical of other MoE conversion or continual pre-training methods.",
+        "Strong Empirical Results: ToMoE consistently outperforms existing state-of-the-art structural pruning methods (like SliceGPT, LLM Surgeon, ModeGPT) and MoE conversion methods (like LLaMA-MoE, G-MoEfication) across a wide range of LLMs (Phi-2, LLaMA-2, LLaMA-3, Qwen-2.5) on multiple downstream benchmarks.",
+        "Insightful Analysis and Design Choices: The paper provides a clear justification for its design choices, such as using static pruning for query/key projections in MHA to maintain attention dimension consistency, and provides thorough ablation studies validating each loss component and parameter sensitivity."
+      ],
+      "weaknesses": [
+        "Expert Overlap and Diversity: The experts are constructed by dynamically selecting sub-networks from the same pre-trained dense MLP. Since the main weights are frozen, the physical parameters of these experts overlap heavily. The paper would benefit from a deeper discussion or constraint on how to encourage expert diversity and minimize redundant overlap, as highly overlapping experts might limit the capacity benefits of MoE.",
+        "Wasted Computation due to Max-Padding: To maintain a uniform computational cost across experts during inference, the authors adjust the width of all experts to match the maximum size among them. This means that if one expert needs to be large, all other experts are padded to that size, which could lead to wasted computation and compromise the actual efficiency gains of the pruned model.",
+        "System and Hardware Realization: Although the authors report throughput (tokens/s) in Table 15, dynamic routing in MoE often suffers from high communication overhead and memory access patterns. More detailed analysis regarding how the proposed structured pruning format affects actual hardware latency under highly batched real-world serving scenarios would make the work more convincing."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Innovative Methodology: Unifying expert construction and router training into a single stage using dynamic structural pruning is a clever and elegant approach. Leveraging straight-through Gumbel operations allows differentiable joint optimization while keeping the heavy LLM weights completely frozen.",
+        "Outstanding Empirical Performance: ToMoE consistently outperforms SOTA structural pruning baselines (such as ShortGPT, SliceGPT, ModeGPT, and DISP-LLM) and existing MoE conversion techniques (such as LLaMA-MoE and G-MoEfication) across several diverse architectures, including LLaMA-2, LLaMA-3, Qwen-2.5, and Phi-2.",
+        "High Training Efficiency: While conventional MoE construction often demands massive continual pre-training (on the order of billions of tokens), ToMoE requires only about 0.02B tokens to train the router and projection layers, making it highly accessible and resource-friendly.",
+        "Actual Hardware Speedup: The authors validate the practical utility of their approach by demonstrating real-world inference throughput improvements (tokens/sec) in hardware evaluations, rather than relying solely on theoretical FLOPs reduction.",
+        "Rigorous Analysis and Visualization: The paper is exceptionally thorough, presenting exhaustive ablation studies, training dynamics, semantic visualization of experts, and structural analysis of the converted model."
+      ],
+      "weaknesses": [
+        "Lack of Explicit GPU Memory Footprint Analysis: Although the active parameter count during inference is significantly reduced, the paper does not explicitly detail the total physical GPU memory footprint of the final MoE model. Since the experts are constructed via overlapping sub-networks and subsequently padded/adjusted to the maximum expert width, clarification on the final model size in memory (active + inactive parameters) compared to the original dense model would be highly valuable.",
+        "Details on the Inference Implementation: While Table 15 showcases impressive throughput gains, the specific engineering setup, libraries, or custom kernels (e.g., DeepSpeed, vLLM, or Megatron-LM) used to run the shared-weight MoE are not fully detailed. Providing these details is crucial for guaranteeing exact implementation reproducibility.",
+        "Complexity of Regularization Hyperparameters: The loss function incorporates multiple regularizations ($R_P, R_U, R_L$) governed by hyperparameters $\\alpha, \\beta, \\gamma$. While the chosen parameters work well, a systematic sensitivity analysis of these parameters would help establish the robustness and ease of tuning for ToMoE on new, unseen architectures."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Unified Formulation: The proposed method cleverly unifies expert construction (neuron selection) and router training into a single end-to-end differentiable stage using dual straight-through estimators (Gumbel-Softmax for routing and Gumbel-Sigmoid for masking).",
+        "Strong Performance against MoE Baselines: ToMoE consistently outperforms prior dense-to-MoE conversion methods (such as G-MoEfication, LLaMA-MoE, and CMoE) across several benchmarks, while keeping the original model weights frozen.",
+        "Generalizability: The method is evaluated on a diverse set of prominent open-source LLMs (Phi-2, LLaMA-2, LLaMA-3, Qwen-2.5) of varying sizes (from 2.7B to 14B), demonstrating its robustness across architectures.",
+        "Insightful Analysis: The paper includes extensive analytical sections, such as layer-wise width distribution, expert similarity, token-expert routing visualization, and ablation studies on crucial hyper-parameters."
+      ],
+      "weaknesses": [
+        "Unfair and Misleading Comparison with Structural Pruning: In Tables 1, 2, and 3, ToMoE is compared directly against structural pruning methods (e.g., LLM-Pruner, SliceGPT, ShortGPT) at equal 'Active Parameter' rates. However, pruning permanently discards weights, reducing both active and total parameters (saving 30%-50% GPU memory). In contrast, ToMoE's 'Union of Experts' spans nearly 100% of the original model (as shown in Figure 6a), meaning it saves almost zero GPU storage/memory footprint. Directly comparing these on active parameters without highlighting the massive difference in physical memory requirements is misleading.",
+        "Omission of Small Batch Size Throughput: In Table 15, throughput is only reported for extremely large batch sizes (512 to 1536) where MoEs perform best. In real-world deployment, LLMs are frequently served at small batch sizes (e.g., BS=1, 4, 8) where memory bandwidth is the bottleneck. Since ToMoE does not reduce the model's memory footprint (almost all weights must reside in GPU memory), the throughput benefits at small batch sizes are likely minimal or negative due to routing overhead. The paper lacks throughput/latency results for these realistic small batch scenarios.",
+        "Optimization Instability of Dual ST Estimators: Simultaneously training a Straight-Through Gumbel-Softmax (for routing) and a Straight-Through Gumbel-Sigmoid (for masking) is mathematically complex and often highly unstable. The paper does not thoroughly discuss the optimization landscape, convergence stability, or sensitivity to the temperature hyperparameter τ and bias b during the early phases of training.",
+        "Hidden Training Cost of Self-Knowledge Distillation: The 'in-place knowledge distillation' requires passing inputs through the model twice per iteration (once for the frozen teacher logits, once for the student). While it avoids loading a separate teacher model into memory, it effectively doubles the training FLOPs, which is a significant computational overhead that is downplayed in the text."
+      ]
+    }
+  }
+}

@@ -1,0 +1,91 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "The paper addresses a clear bottleneck in convolutional sequence models: the generation speed and KV/state cache requirements during autoregressive decoding.",
+        "The core idea of exploiting the linear, time-invariant nature of the context convolution to precompute future impulse responses via FFT (termed FutureFill) is clean, elegant, and mathematically straightforward.",
+        "The paper presents clear asymptotic runtime analyses for both prompt-based generation and online generation from scratch."
+      ],
+      "weaknesses": [
+        "Limited novelty relative to classical signal processing literature: Precomputing output blocks using FFT and combining them with direct time-domain sums of recent inputs is fundamentally equivalent to overlap-add/overlap-save and partitioned/block convolution techniques extensively studied in real-time digital signal processing (e.g., Gardner, 1995). The paper lacks positioning and discussion regarding this literature.",
+        "Extremely weak empirical evaluation: The experimental section consists solely of a synthetic CPU timing benchmark on a single isolated 1D convolution layer. There are no evaluations on actual trained models (such as Hyena, SGConv, or STU language models), no GPU implementations, and no wall-clock throughput/latency benchmarks in realistic generation pipelines.",
+        "Lack of discussion on multi-layer deep sequence models: Modern convolutional architectures (e.g., Hyena hierarchy) alternate convolutions with non-linearities and input-dependent gating. The paper does not adequately detail how FutureFill integrates across deep multi-layer stacks during autoregressive decoding or address hardware/kernel execution constraints on modern accelerators (GPUs/TPUs).",
+        "Missing comparisons with practical baselines: The paper compares only against naive time-domain convolution rather than optimized state-space distillations (e.g., Massaroli et al., 2024), FlashFFTConv, or optimized chunked/recurrent inference baselines."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "The core idea is conceptually clean and elegant: decomposing the autoregressive convolution into a precomputed prompt-filter correlation (computed efficiently via FFT) and a dynamic residual over newly generated tokens.",
+        "Unlike distillation approaches (e.g., distilling convolutional models into recurrent SSMs like Laughing Hyena), FutureFill is mathematically exact and guarantees identical outputs without approximation error.",
+        "The theoretical complexity bounds are well-derived, reducing the prompt cache requirement from $O(L)$ to $O(K)$ when $K \\ll L$, and reducing online generation step complexity from $O(L)$ to $O(\\sqrt{L \\log L})$."
+      ],
+      "weaknesses": [
+        "The empirical evaluation is very preliminary. Experiments are restricted to a single-layer synthetic microbenchmark run on CPU. There is no evaluation on actual pretrained models (e.g., Hyena, STU, LongConv) on realistic tasks (language modeling, Long Range Arena) or modern GPU hardware.",
+        "Unclear practical speedup on modern hardware (GPUs): The overhead of periodic FFT kernel launches and memory bandwidth often dominates computational savings on accelerators unless supported by dedicated, highly-optimized CUDA/Triton kernels. Without wall-clock comparisons against FlashAttention KV-cache decoding or recurrent SSMs (e.g., Mamba), practical utility remains unverified.",
+        "Incomplete treatment of deep, gated convolutional architectures: In multi-layer models or architectures with gating/elementwise multiplications between stages (such as the full Hyena hierarchy $y = x_N \\cdot (h_N * (x_{N-1} \\dots))$), intermediate activations depend on the newly decoded tokens at every step. The paper does not thoroughly explain how FutureFill cascades through such multi-layer non-linear hierarchies during token-by-token generation.",
+        "Missing connections to classic signal processing literature: Block-wise convolution and partitioned convolution (e.g., uniform and non-uniform partitioned block FFT filters, well-studied in real-time audio processing) solve similar low-latency online convolution problems; contextualizing FutureFill with respect to these classical DSP methods is missing."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper is clearly written and provides straightforward asymptotic complexity analyses for the proposed pre-caching and online generation schemes.",
+        "The theoretical observation that the prompt's contribution to future autoregressive steps can be precomputed via FFT, reducing the prefill cache size requirement to O(K) rather than O(L), is clean and intuitive."
+      ],
+      "weaknesses": [
+        "The algorithmic novelty is quite limited. Decomposing a 1D convolution into the prompt contribution and the newly generated tokens is an elementary algebraic splitting of the convolution sum. Furthermore, the idea of splitting convolutions into block FFTs and direct time-domain sums is closely related to classic low-latency partitioned convolution methods (e.g., Gardner's non-uniform partitioned convolution in DSP), which are not acknowledged or compared against.",
+        "The empirical evaluation is extremely weak. The only experiment provided is a synthetic, single-layer benchmark executed on a CPU comparing against an unoptimized naive loop. There is no evaluation on real-world datasets, no experiments on modern GPU hardware, and no testing on standard deep convolutional sequence models (e.g., trained Hyena, LongConv, or STU models on language modeling benchmarks).",
+        "The practical feasibility across deep multi-layer architectures is largely unaddressed. In multi-layer convolutional networks with non-linear activations, gating, and projections between layers, token generation is tightly coupled across layers. The paper does not thoroughly discuss or evaluate how the caching strategy scales in terms of memory footprint, kernel fusion, and wall-clock latency across an entire multi-layer network.",
+        "The practical speedup claims are questionable under realistic inference regimes. In autoregressive decoding on modern accelerator hardware (GPUs/TPUs), decoding is typically memory-bandwidth bound rather than FLOP bound for small batch sizes. Without kernel implementations or roofline/hardware-aware analysis, it is unclear whether the asymptotic gains translate to real-world latency improvements."
+      ]
+    }
+  },
+  "v3": {
+    "exp1_quality": {
+      "oa": 6,
+      "strengths": [
+        "The paper tackles a clear and significant bottleneck in convolution-based sequence models (such as STUs and Hyena): the quadratic $O(L^2)$ cost of autoregressive generation during inference.",
+        "The theoretical framework is sound and provides two exact (lossless) algorithms with distinct time-memory trade-offs: Epoched-FutureFill achieving $O(L^{3/2} \\sqrt{\\log L})$ time with $O(\\sqrt{L \\log L})$ memory, and Continuous-FutureFill achieving $O(L \\log^2 L)$ time with $O(L)$ memory.",
+        "The analysis of prompt-based generation is practically valuable, showing that the cache size scales with the generation length $O(K)$ rather than the full context $O(L+K)$.",
+        "The empirical evaluation is thorough, testing isolated convolutions as well as deep convolutional models (FlashSTU-T up to ~826M parameters) across multiple context lengths, prompt sizes, and layer/width ablations on modern hardware (NVIDIA H100)."
+      ],
+      "weaknesses": [
+        "The algorithmic principle underlying Continuous-FutureFill is essentially equivalent to online/relaxed polynomial multiplication (e.g., van der Hoeven, 1997/2002) and partitioned convolution in digital signal processing (e.g., Gardner, 1995). While the authors acknowledge independent concurrent work (Oncescu et al., 2024), the contextualization within classical algorithms literature could be more thorough.",
+        "Continuous-FutureFill ($O(L \\log^2 L)$), which represents the primary asymptotic contribution of the paper, is only tested on synthetic 1D convolutions. For all deep model experiments (FlashSTU-T), only Epoched-FutureFill is evaluated, presumably due to kernel launch overheads and non-uniform FFT sizes on GPU hardware. The paper should explicitly analyze and benchmark the practical hurdles of Continuous-FutureFill in deep models.",
+        "The practical speedups over the naive baseline only emerge at very long sequences ($L \\ge 16k - 32k$ tokens), whereas at shorter lengths (e.g., 4k tokens), the proposed method is often slower due to FFT/FutureFill overheads. A discussion on hybrid strategies (switching from naive to FutureFill dynamically) would strengthen the practical impact."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Addresses an important and timely bottleneck: while convolutional sequence models (e.g., STUs, Hyena) achieve $O(L \\log L)$ parallel training, their exact autoregressive decoding has historically suffered from quadratic $O(L^2)$ time complexity or required lossy state-space distillation.",
+        "The proposed FutureFill framework provides an elegant and mathematically sound formulation for exact online convolution, offering both an $O(L \\log^2 L)$ divide-and-conquer algorithm (Continuous-FutureFill) and a tunable memory-runtime tradeoff (Epoched-FutureFill).",
+        "Solid theoretical guarantees: the proofs of correctness and computational complexity for both algorithms and prompt-based prefill are clearly presented and rigorous.",
+        "Extensive hardware benchmarking: the authors evaluate deep FlashSTU and hybrid models up to ~826M parameters on NVIDIA H100 GPUs across large context lengths (up to ~130k tokens), showing tangible wall-clock speedups (up to 2x) and verifying theoretical scaling behavior."
+      ],
+      "weaknesses": [
+        "Connections to prior literature in computer algebra and digital signal processing: Online (or relaxed) convolution using FFT and divide-and-conquer binary decomposition has long roots (e.g., Joris van der Hoeven's relaxed multiplication of power series, Gardner's non-uniform partitioned convolution). While the paper appropriately cites the concurrent machine learning work by Oncescu et al. (2024), a clearer discussion of classic online convolution literature would better situate the algorithmic novelty.",
+        "Continuous-FutureFill is not evaluated on deep models: the neural network experiments in Section 5.2 exclusively evaluate Epoched-FutureFill, stating it is more practical. Evaluating Continuous-FutureFill on deep models or detailing its practical GPU scheduling bottlenecks (e.g., overhead from frequent kernel launches across dyadic scales) would make the empirical analysis much more complete.",
+        "Modest practical wall-clock speedup: despite the asymptotic improvement from $O(L^2)$ to sub-quadratic/quasilinear, the measured end-to-end wall-clock speedup on modern GPUs tops out around 1.5x–2x even at 126k sequence length, reflecting GPU memory bandwidth and kernel launch overheads.",
+        "Lack of numerical precision and downstream perplexity verification: although the method is mathematically exact in exact arithmetic, FFTs over sequences of length 130k in float32/bfloat16 can accumulate rounding errors. The paper does not report verification of numerical parity (e.g., max absolute error vs. naive) or downstream evaluation (e.g., perplexity or generation benchmarks) to verify stability."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Clear and theoretically sound presentation: The formulation of online convolution via the FutureFill primitive provides an intuitive way to frame exact autoregressive decoding for long-convolution sequence models.",
+        "Comprehensive asymptotic analysis: The paper neatly characterizes the compute and memory trade-offs between the two variants—Epoched-FutureFill ($O(L^{3/2} \\sqrt{\\log L})$ time, $O(\\sqrt{L \\log L})$ memory) and Continuous-FutureFill ($O(L \\log^2 L)$ time, $O(L)$ memory)—as well as the prompt-based generation setting where cache size is reduced to $O(K)$.",
+        "Detailed runtime profiling: The authors carry out extensive benchmarking across multiple model scales (up to ~826M parameters), varying depths, widths, context lengths, and prompt lengths on modern hardware (NVIDIA H100)."
+      ],
+      "weaknesses": [
+        "Limited algorithmic novelty: The underlying technique of using divide-and-conquer FFTs to achieve $O(L \\log^2 L)$ online convolution is well-known in computer algebra and signal processing (often termed relaxed/online polynomial multiplication, dating back to Fischer & Paterson (1974) and van der Hoeven (2002)), and has been independently adapted to convolutional sequence models by Oncescu et al. (2024).",
+        "Lack of deep model evaluation for the flagship algorithm: Continuous-FutureFill (Algorithm 2), which achieves the primary theoretical quasilinear bound ($O(L \\log^2 L)$), is only evaluated on isolated 1D synthetic convolutions. It is omitted entirely from the deep language model experiments (Section 5.2) because its frequent, irregular FFT operations are difficult to map efficiently onto GPUs, leaving only the sub-optimal Epoched-FutureFill tested on real models.",
+        "Unfavorable crossover points in practical regimes: Autoregressive token generation in practice typically involves contexts where generation length $L_{\\text{gen}} \\le 8,192$. As shown in Tables 3, 4, 5, and 7, Epoched-FutureFill is noticeably slower than the naive baseline for shorter sequences ($L \\le 8,192$) due to FFT launch and padding overheads. The speedup only emerges at very large generation lengths ($L \\ge 32,768$), which represents a narrow practical regime.",
+        "Missing comparisons with established baselines: While the authors position the method as exact decoding, convolutional models in deployment are commonly distilled into equivalent or near-equivalent recurrent state-space models (e.g., Laughing Hyena Distillery). Comparing inference throughput against distilled SSMs would be valuable to understand the practical cost of exactness.",
+        "Unrealistic Transformer baseline: The experimental comparison with Transformers in Appendix B is conducted on a toy network with 2 layers and a hidden dimension of only 32, which does not reflect realistic LLM execution dynamics (such as memory-bandwidth bounds vs. compute bounds on modern accelerators)."
+      ]
+    }
+  }
+}

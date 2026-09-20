@@ -1,0 +1,93 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "The paper explores the application of MLP-Mixer architectures to multivariate time series anomaly detection, providing an alternative to computationally heavier transformer-based approaches.",
+        "The proposed cluster-aware multi-embedding leverages spectral clustering on channel correlation profiles to create block-structured embeddings, effectively reducing the parameter count in the projection layer.",
+        "Comprehensive experimental evaluation across six standard benchmark datasets (SWaT, WADI, PSM, SMD, MSL, SMAP) alongside multiple ablation studies analyzing modular contributions and clustering variants.",
+        "The paper is generally well-structured and easy to follow, with clear architectural diagrams and algorithms."
+      ],
+      "weaknesses": [
+        "Confounded evaluation between architecture and scoring mechanism: The overall framework couples the neural model with a sequential evidence accumulation (CUSUM-style) and backward onset/offset search. As shown in Table 3, this sequential post-processing accounts for substantial gains (e.g., +0.059 F1 on PSM, +0.062 on MSL, +0.037 on SMD). However, the baseline methods in Table 2 are taken directly from prior papers without this post-processing, making it unclear how much of the reported improvement stems from the proposed CCM-TAD architecture versus the sequential scoring heuristic.",
+        "Discrepancy between 'online' claims and retroactive backward search: The authors emphasize real-time online detection and criticize offline baselines, yet the onset search (Eq. 16) retroactively flags points back to $t_a^*$ after an alarm is triggered at $t_a$. In a practical real-time setting, this corresponds to detection latency rather than immediate point detection. The manuscript does not evaluate detection delay or examine how performance holds strictly at the point of real-time alert generation.",
+        "Oracle threshold selection: The statistical significance parameter $\\alpha$ and detection threshold $h$ are tuned via Optuna to directly maximize the test set F1 score. Test-set threshold optimization is known to yield overly optimistic evaluations in time-series anomaly detection literature.",
+        "Limited theoretical and mechanistic justification for causal masking in reconstruction: Since the model takes a sliding window $X_L = [x_{t-L+1}, \\dots, x_t]$ to reconstruct only the current point $x_t$ at step $L$, and the causal mask retains all inputs $i \\le L$ at the final position $L$, the causal restriction only impacts intermediate prefix representations. The manuscript does not provide clear analytical or mechanistic intuition for why restricting intermediate lookahead improves reconstruction of the final time step.",
+        "Channel isolation is only partial: The cluster-aware multi-embedding partitions the initial linear projection, but all channel representations are subsequently mixed globally in the embedding mixer and linear head layer, limiting the degree to which channel independence is truly preserved."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "The paper tackles two important and practical challenges in multivariate time series anomaly detection: handling spurious inter-channel correlations and designing lightweight MLP-based architectures.",
+        "The empirical evaluation is extensive, spanning six widely used benchmark datasets (SWaT, WADI, PSM, SMD, SMAP, and MSL) and comparing against a broad set of 15 baselines.",
+        "The ablation study is thorough in examining component contributions (modular ablations in Table 4 and clustering variants in Table 5)."
+      ],
+      "weaknesses": [
+        "Conceptual flaw in the formulation of causality: The paper motivates the causal temporal mixer by stating that existing MLP-Mixers violate causality because tokens interact with subsequent tokens within the look-back window $X_L = \\{x_{t-L+1}, \\dots, x_t\\}$. However, in an online sliding-window setting, all observations within $X_L$ have already been observed at time $t$; there is no leakage from the actual future ($> t$). Moreover, because the model only uses the final reconstructed position $\\hat{x}_t$ at index $L$, and the causal mask definition in Equation (11) sets $\\gamma_{i,L} = 1/L \\neq 0$ for all $i \\le L$, the output at position $L$ attends to every single time step in the window anyway. The claim that this mechanism enforces temporal causality relative to the real-time stream is conceptually ungrounded.",
+        "The retrospective backward search contradicts the claimed 'online' nature and biases baseline comparisons: Equations (16)–(17) perform a backward search to relabel historical points from $t_a^*$ to $t_a$ as anomalous once an alarm is triggered at $t_a$. In a real-time/online deployment, past alerts cannot be retroactively issued without incurring operational delay, which is neither quantified nor formalized. Furthermore, comparing this sequence-expansion post-processing against baselines evaluated on standard raw point-wise reconstruction errors (MSE) creates an unlevel playing field; Table 3 confirms that this scoring mechanism alone accounts for a significant portion of the reported F1 improvements.",
+        "Flawed evaluation protocol via test-set threshold optimization: Appendix D notes that hyperparameters $\\alpha$ and detection threshold $h$ are searched to maximize the F1 score on the test set ('We search for the best $\\alpha$ and $h$ values for the anomaly detection method to get the best F1 score'). Optimizing decision thresholds directly on test data rather than a validation set produces overly optimistic performance estimates and is widely discouraged in anomaly detection benchmarks.",
+        "Limited algorithmic novelty: The individual components are modest adaptations of known concepts—the causal linear layer is a masked dense layer (similar to MADE / autoregressive MLPs) with an ad-hoc $1/j$ scaling factor, the channel grouping is standard spectral clustering applied to Pearson correlation vectors, and the sequential evidence score is a variant of the classical CUSUM/Page-Hinkley test."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3,
+      "strengths": [
+        "The proposed cluster-aware multi-embedding mechanism is intuitive, principled, and well-motivated: partitioning channels via spectral clustering on correlation profiles reduces parameters and limits spurious cross-channel interference, as demonstrated empirically in Table 8.",
+        "The empirical evaluation avoids the widely criticized point-adjustment (PA) heuristic and compares against 15 competitive baselines across six standard multivariate time series anomaly detection benchmarks.",
+        "The manuscript is well-structured and easy to follow, with comprehensive ablation studies isolating the effects of clustering variants and mixer modules."
+      ],
+      "weaknesses": [
+        "Conceptual contradiction in the 'online' detection claim: The paper positions CCM-TAD as an online anomaly detector suitable for real-time applications (criticizing offline baselines like SensitiveHUE), but the proposed sequential anomaly detection method relies on a retrospective backward search (Equations 16 and 17). When an alarm is triggered at time t_a, the algorithm retroactively re-labels previous time steps back to t_a^* as anomalous, and also adjusts the offset t_b^* retrospectively. In an actual real-time streaming environment, those points would not have been flagged at their arrival time, introducing detection latency. Table 3 shows that this sequential detection post-processing accounts for substantial portions of the performance gains over point-based detection.",
+        "Weak motivation and formulation of the causal mixer: In a sliding-window reconstruction setting where the window spans x_{t-L+1} to x_t, there are no future observations beyond the current point x_t. The head layer extracts only the final representation at position L, which already has access to all preceding positions under the causal mask. Furthermore, the 1/j scaling factor in the masking matrix Gamma (Equation 11) is heuristic and lacks theoretical or empirical justification.",
+        "Evaluation and hyperparameter tuning leakage: The training data consists exclusively of nominal points, meaning the validation set contains no labeled anomalies. However, the authors state that Optuna is used to search for parameters including alpha and threshold h to maximize the F1 score. This implies that the threshold and significance parameter alpha are tuned directly on the test set, reporting oracle 'best F1' scores rather than operationally determined thresholds, which limits real-world validity.",
+        "Inaccurate claims regarding temporal mixer expansion: In Appendix H, the authors claim that 'an expansion factor greater than 1 in the temporal mixer does not maintain causality.' Causality in multi-layer linear projections can be preserved with any hidden expansion dimension via block triangular matrices or standard masked linear projections; this statement indicates a conceptual misunderstanding."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "The paper addresses a practically relevant problem: detecting multivariate time series anomalies in an online streaming setting using efficient MLP-based architectures.",
+        "The proposed cluster-aware multi-embedding strategy provides a principled way to partition channels by correlation profiles, reducing embedding parameters while grouping functionally related channels.",
+        "The experimental evaluation is extensive, spanning six standard benchmark datasets (SWaT, WADI, PSM, SMD, SMAP, MSL) under three different multi-entity evaluation protocols, and comparing against 23 baseline models across multiple metrics (F1, PR_AUC, VUS_PR, VUS_ROC).",
+        "The paper provides helpful ablation studies, including analysis of channel clustering variants, parameter sensitivity, and computational complexity (GFLOPs, latency, parameters)."
+      ],
+      "weaknesses": [
+        "Conceptual overclaim regarding 'causality' and 'future information leakage': The paper claims that standard MLP-Mixers suffer from future information leakage. However, the model input is explicitly defined as a look-back window up to the current time $t$, $X_L = \\{x_{t-L+1}, \\dots, x_t\\}$, and the task is strictly to reconstruct the latest observation $x_t$. Because no observations beyond time $t$ exist in the input window, there is no future information to leak. Furthermore, at the final token position $L$ (which corresponds to $x_t$), the causal mask does not restrict any past positions ($i \\le L$ holds for all $i$). Thus, the causal mask merely restricts intermediate representations at past indices $j < L$, rather than preventing leakage of unobserved future data. The gradient analysis in Figure 3 (evaluating loss at intermediate time $t=15$) is misleading because intermediate tokens are not used as the reconstruction target.",
+        "Contradiction between 'Online' claims and evaluation / post-processing methodology: The paper criticizes SensitiveHUE for requiring test-set-wide statistics, yet evaluates CCM-TAD using the Best-F1 metric obtained by sweeping threshold $h$ and parameter $\\alpha$ over the test set using ground-truth labels. Additionally, the boundary correction mechanism (Equations 16 and 17) uses retrospective backward search to locate $t_a^*$ and $t_b^*$, which requires waiting for an anomaly sequence to finish (observing $\\delta$ negative evidences) before revising the anomaly onset and offset. This is an offline segment-refinement process rather than instantaneous real-time detection.",
+        "Limited novelty and lack of attribution to classical sequential analysis: The sequential evidence accumulation scoring mechanism (Equations 14 and 15) and its drift analysis under normal conditions (Appendix A) are essentially the classic Cumulative Sum (CUSUM) / Sequential Probability Ratio Test (SPRT) procedure applied to empirical p-values. The paper presents this formulation as novel without acknowledging foundational literature on CUSUM (Page, 1954) or SPRT (Wald, 1945). Similarly, causal masking of linear layers is a well-known technique (e.g., MADE, Germain et al., 2015).",
+        "Inconsistent gains across comprehensive metrics: While the model achieves high best-F1 and PR_AUC on certain benchmarks, its performance on VUS_ROC (Table 10) is noticeably lower than baselines on datasets such as SWAT (0.758 vs 0.828 for SensitiveHUE), PSM (0.545 vs 0.676), SMD (0.750 vs 0.801), and WADI (0.822 vs 0.861)."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Clear motivation and well-scoped contributions: The paper addresses genuine limitations of MLP-Mixer architectures when applied to multivariate time series anomaly detection, namely future information leakage, spurious inter-channel dependencies, and point-wise scoring noise.",
+        "Extensive and rigorous experimental validation: The authors evaluate across six widely adopted benchmarks against 23 baselines. Notably, they carefully categorize and evaluate under all three prevailing evaluation protocols for multi-entity datasets, ensuring fair and transparent comparisons.",
+        "Comprehensive ablation and diagnostic analysis: The paper includes a thorough ablation of modular components, an analysis of clustering variants, nearest-neighbor representation separability metrics, and an empirical gradient check (Figure 3) confirming that causal masking strictly prevents future leakage.",
+        "Practical focus on online evaluation: The paper appropriately criticizes post-hoc, test-set-wide normalizations used in prior work (such as SensitiveHUE) that violate online streaming requirements, and provides an online-compatible sequential scoring mechanism."
+      ],
+      "weaknesses": [
+        "Latency vs. online boundary refinement: Although the alarm condition ($s_t > h$) operates in an online streaming fashion, the retroactive boundary refinement (Equations 16 and 17) requires waiting for the sequence to conclude (via $\\delta$ consecutive negative evidence steps) before identifying $t_b^*$. The paper should explicitly discuss the practical latency and implications of retroactive label adjustment in mission-critical real-time settings.",
+        "Incremental novelty of individual modules: While their combination is effective and well-tuned, the individual building blocks are relatively standard adaptations—triangular causal masking is standard in causal sequence models, spectral clustering on correlation profiles is classical, and evidence accumulation is essentially a variant of the CUSUM / sequential probability ratio test.",
+        "Reliance on test-set threshold sweeping (Best-F1): Although standard across the time-series anomaly detection literature, evaluating best-F1 via grid search over $\\alpha$ and $h$ on the test set creates an optimistic estimate. For a method emphasizing online deployment, reporting performance using thresholds calibrated strictly on the validation set would significantly strengthen the empirical claim."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Extensive experimental evaluation: The paper evaluates the proposed model on six widely used multivariate time series benchmarks (SWaT, WADI, PSM, SMD, MSL, SMAP) and benchmarks against 23 baseline methods across three distinct multi-entity evaluation protocols.",
+        "Well-motivated channel clustering module: Grouping channels via spectral clustering on Pearson correlation profiles and assigning dedicated lower-dimensional embedding layers effectively reduces parameter counts in the projection layer while mitigating spurious cross-channel correlations.",
+        "Comprehensive empirical analysis and ablations: The manuscript provides extensive supplementary experiments, including nearest-neighbor separability (NN-sep) analysis, runtime/GFLOPs comparisons, and clustering/masking ablations."
+      ],
+      "weaknesses": [
+        "Conceptual flaw regarding 'causality' and 'future leakage' in end-of-window reconstruction: The model takes a look-back window X_L = {x_{t-L+1}, ..., x_t} and is trained to reconstruct the latest observation x_t at position L. Because all observations in the look-back window are already historical relative to x_t, there is no future information beyond x_t in the input. For the final output neuron at position L, the causal mask Gamma does not mask out any time steps (gamma_{i,L} = 1/L for all i <= L). The gradient analysis in Figure 3 artificially evaluates gradients at an intermediate time step (t=15 of 24), which is not the output used during deployment. Thus, framing the triangular linear weight restriction as 'eliminating future information leakage' for online reconstruction is conceptually unconvincing.",
+        "Conflict between the 'Online' claim and retrospective boundary correction: The paper emphasizes online, real-time anomaly detection. However, the proposed sequential scoring mechanism relies on backward search (Equations 16 and 17) to expand anomaly segments backwards to t*_a <= t_a after an alarm is triggered at t_a. In a strict online streaming application, retroactive relabeling of past observations cannot be utilized for immediate real-time intervention without introducing detection lag, creating a discrepancy between the stated setting and the evaluation protocol.",
+        "Over-reliance on oracle Best-F1 threshold sweeping on test labels: The primary metric Best-F1 is determined by sweeping both the significance parameter alpha and threshold h on the test set ground truth (Equation 24). Optimizing multiple detection hyperparameters directly on the test labels provides an overly optimistic performance estimate and weakens the practical validity of the proposed unsupervised online detector.",
+        "Incremental methodological novelty: The individual building blocks—spectral clustering of correlation matrices for partitioned embedding, upper/lower triangular masking in linear layers (masked MLP), and CUSUM-style log p-value accumulation—are largely straightforward adaptations of existing techniques rather than significant architectural or algorithmic innovations."
+      ]
+    }
+  }
+}

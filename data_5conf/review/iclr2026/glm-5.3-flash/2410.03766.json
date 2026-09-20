@@ -1,0 +1,117 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "The core idea is clean, exact, and general: pre-computing a K-element cache via a single FFT during prefill enables provably exact autoregressive generation from convolutional models with O(L log L + K^2) total time and O(K) cache, improving the previously known quadratic/O(L) results (Massaroli et al., 2024) without any approximation or distillation.",
+        "The algorithm is simple, easy to implement, and applies to a broad class of convolutional sequence models (SSMs, STUs, LongConv/SGConv, Hyena-style operators), including models trained arbitrarily.",
+        "The theoretical analysis (Lemmas 1-2, Corollary 3) is correct as far as I can verify: the runtime decomposition into cache computation via one FFT plus O(tau) per-step incremental sums is sound, and the amortized O(sqrt(L log L)) result for online prediction is a nice consequence.",
+        "The application to online spectral filtering is a genuinely useful side-contribution: it improves the per-iteration runtime of the spectral filtering algorithm (Hazan et al., 2017) from O(L) to O(sqrt(L)) while preserving the same regret guarantees.",
+        "The comparison tables clearly situate the contribution relative to standard convolution and attention implementations."
+      ],
+      "weaknesses": [
+        "The technical contribution is modest: the method is essentially a standard blocking/chunking of convolution with cached FFT evaluations. The proofs are short and straightforward, and the main insight (future dependence on the prompt is fixed and can be precomputed) is intuitive. The novelty may not clear the bar at a top-tier venue on its own.",
+        "The empirical evaluation is very weak. Experiments use a single layer of a convolutional model on a synthetic task, on CPU, with no real pretrained models (e.g., Hyena or STU language models), no quality metrics, and no comparison against competing approaches such as the Laughing Hyena distillery. The authors themselves concede that optimized timing was not attempted, leaving the practical impact unsubstantiated.",
+        "The practical significance of the asymptotic gains is questionable. At realistic context lengths (e.g., L = 8k-64k), sqrt(L log L) constants, FFT overheads, and the inability to use highly optimized GPU kernels for the incremental per-step computation may negate the theoretical advantage; the paper provides no evidence at realistic scales.",
+        "Applicability claims are broader than what is analyzed. The formal treatment covers linear filters with a single prefill; models with gating, element-wise products between convolutions (Hyena), or multiple interleaved layers are only mentioned to 'work in a straightforward manner' without analysis of how caches compose through nonlinearities or across layers.",
+        "The setting where the method is most relevant (models without recurrent forms) is already partially addressed: SSMs admit O(1) per-token generation, so the impact is limited to non-recurrent convolutional models, and the paper does not discuss when the added cache/complexity trade-off is preferable to simply using a recurrent surrogate.",
+        "Presentation issues: several typos ('immidiately', 'particulary', 'the given an input'), inconsistent notation between algorithms (K defined differently in Algorithm 2 vs. Algorithm 3), and Figure 1 is low-information. The paper also reads as a short/workshop-length contribution with limited content per section.",
+        "No ablations (e.g., sensitivity to cache size K, effect of multi-channel filters on memory footprint) and no released code, which limits reproducibility of the experimental claims."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper addresses a genuine and well-motivated problem: exact auto-regressive generation from convolutional sequence models (Hyena, LongConv, STU) currently requires O(L) time per token, hindering practical inference.",
+        "The proposed FutureFill cache is technically correct: the decomposition of each prediction into a precomputed prompt-dependent term (computed once via FFT) and a short recent-window term is valid, and the lemmas' proofs are sound.",
+        "The results are exact (no approximation), architecture-agnostic for linear convolutional filters, and improve both per-token time (O(√(L log L)) amortized) and cache size (O(K)), which are meaningful asymptotic gains over the O(L) time / O(L) cache baselines.",
+        "The connection to online learning is nice: applying the technique to spectral filtering yields the same regret bounds with improved amortized runtime (Corollary 3).",
+        "The paper is clearly written and well organized, with the comparison tables (Tables 1a/1b) crisply positioning the contribution."
+      ],
+      "weaknesses": [
+        "The core algorithmic idea is quite simple: it is essentially a block decomposition of a convolution (precompute cross-correlations of the prompt with the filter in one FFT, then add the short recent-window term). The analysis (Lemmas 1–2) follows from direct summation and does not involve any nontrivial technical depth. The contribution may be better suited to a short paper or a systems/optimization venue.",
+        "The experimental evaluation is far too weak to support a top-tier AI conference submission. Only a synthetic generation task with a single layer on CPU is reported; there is no evaluation on a trained model (e.g., Hyena or STU language model), no end-to-end generation, no quality/correctness measurement on real data, and the authors explicitly decline to provide optimized-hardware timings. The provided plots are small, hard to read, and only validate the already-proven asymptotic scaling.",
+        "There are no meaningful baselines beyond naive decoding. In particular, no comparison against Laughing Hyena Distillery (Massaroli et al., 2024), which is the main prior work cited, nor against SSM/recurrent inference despite the discussion in the introduction.",
+        "Practical significance is under-argued. Per-token decode time is O(K), which is still worse than the O(1) per-token time of recurrent SSMs (as the paper itself admits), so the method only helps in the regime K << L and for models that cannot be converted to recurrence. The end-to-end benefit in realistic pipelines (multi-layer, nonlinear/gated blocks, Hyena's element-wise products interleaved with convolutions) is not worked out, despite the claim that the method applies 'to any convolutional model' — extension to Hyena-style compositions and nonlinearities is asserted rather than demonstrated.",
+        "The claimed advantage of O(K) cache vs. O(L) for attention is somewhat overstated: standard attention KV cache is O(L + K) and per-token decode is O(L), so the comparison is favorable only in the specific regime assumed (K < L); the practical tradeoffs (e.g., repeated FFT recomputation for long generations) are not analyzed.",
+        "Reproducibility is limited: no code or detailed experimental setup (model dimensions, hardware, number of runs) is provided, and small presentation issues (unreadable figure axes, typo '{C_1 ... C_k}' vs C_K, unclear gradient-update notation in Algorithm 3 line 10) further reduce clarity.",
+        "The overall package — a short, technically elementary observation with toy experiments — falls short of the novelty and evaluation bar for a 30%-acceptance venue."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Clear and well-defined problem: exact (approximation-free) auto-regressive generation from convolutional sequence models, improving the previously best-known O(L) per-token / O(LK) total-time results of Massaroli et al. (2024) to O(L log L + K^2) total time with O(K) cache for prompt-based generation, and O(sqrt(L log L)) amortized per-step time for online generation.",
+        "The core algorithm (FutureFill) is simple, general, and provably correct: pre-computing the convolution contributions of the prefill/past context in blocks via FFT and only paying for the recent-token contributions at each step is a clean amortization argument, and the proofs of Lemmas 1–2 are correct and easy to verify.",
+        "Good positioning and related work covering SSMs, convolutional models (Hyena, LongConv/SGConv), and spectral filtering; the application to spectral filtering (Algorithm 3, Corollary 3) is a nice bonus, improving the amortized per-iteration cost of Hazan et al. (2017) from O(L) to O(sqrt(L log L)) while preserving regret guarantees.",
+        "The method is architecture-agnostic for linear convolutional filters and requires no retraining or approximation, which makes it practically attractive for models that lack compact recurrent forms.",
+        "Experiments qualitatively confirm the predicted asymptotics: the amortized step time scales sublinearly and matches the fitted O(sqrt(T log T)) curve versus O(T) for naive decoding."
+      ],
+      "weaknesses": [
+        "Limited empirical evaluation: the experiments use a single convolutional layer on CPU in a synthetic online decoding loop. There is no end-to-end evaluation on a real generative model (e.g., a Hyena/H3-based language model), no wall-clock comparison against existing optimized decoding pipelines (e.g., Laughing Hyena Distillery), and no numerical verification of the claimed exactness of generation (outputs identical to naive decoding).",
+        "Generality claims are overstated relative to what is shown: the abstract and intro claim the method 'applies to any sequence prediction algorithm based on convolutional operators', but the algorithm is derived only for a single linear filter (Eq. 2). For architectures like Hyena, which interleave convolutions with element-wise products/nonlinearities, the cache precomputation does not trivially survive the nonlinearity, and no derivation or experiment demonstrates the extension. The claimed speedup 'from O(L) to O(sqrt(L))' for 'all the models below' is therefore not substantiated for the nonlinear cases.",
+        "The practical significance of the improvement is questionable in realistic regimes: gains over naive decoding are asymptotic and the reported experiment shows only modest constant-factor improvements; meanwhile SSMs (which the authors themselves note) achieve O(1) per-token generation, so the main beneficiaries are limited to convolutional models without efficient recurrent forms.",
+        "Novelty is somewhat incremental: the contribution is essentially a block-decomposition/amortization of convolution evaluation using FFT, which is a relatively straightforward observation once framed; the paper would benefit from a deeper discussion of why this was not achieved before and how it compares to other caching/blocked-convolution schemes.",
+        "Reproducibility is weak: no code release, minimal implementation details (model dimensions, filter length, number of FFT-based blocks, hardware), and no error/variance reporting in the timing plots.",
+        "Presentation issues: several typos ('immidiately', 'particulary'), a largely decorative Figure 1, and the case-study section (4.1) ends abruptly with only Corollary 3 and no experimental validation of Algorithm 3 or the regret claim in practice.",
+        "The comparison table (b) pits FutureFill against 'Standard Conv' and 'Standard Attn.' but omits recurrent/SSM inference and the distillation approach of Massaroli et al. (2024) from the table, which weakens the claimed state-of-the-art positioning."
+      ]
+    }
+  },
+  "v3": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Clear and well-motivated algorithmic contribution: FutureFill reduces exact auto-regressive generation in convolutional sequence models from quadratic to quasilinear time, with a clean primitive, two algorithmic variants (Epoched- and Continuous-FutureFill), and a principled runtime/memory trade-off (Theorem 2)",
+        "Improved cache complexity for prompt-conditioned generation (O(K) instead of O(L+K) with respect to context length), which is practically relevant for long-context inference",
+        "Theory is supported by full proofs (Appendix E), and the algorithms are exact rather than approximation-based, distinguishing them from distillation approaches like Laughing Hyena",
+        "Empirical ablations are fairly thorough (generation length, depth, width, cache size K, with/without prefill), and the empirical optimum of K matches the theoretical prediction (Figure 2b)",
+        "Honest and clearly stated limitations section, and transparent acknowledgment of independent concurrent work [24] with the same complexity result"
+      ],
+      "weaknesses": [
+        "Novelty is substantially diminished by concurrent work [24] (Flash Inference), which already achieves the same O(L log^2 L) generation complexity for convolutional models; the paper's main theoretical contribution is therefore largely an independent rediscovery, with the delta being the Epoched variant and memory trade-offs",
+        "Empirical speedups are modest: only 1.5-1.7x at the largest generation lengths (126,976 tokens) on academic-sized models (<830M params), and the practical significance at realistic generation lengths (4k-32k) appears small",
+        "No evaluation of output quality or downstream task performance: filters are initialized uniformly at random, so the paper cannot verify that generation correctness is preserved in a trained-model setting, only wall-clock timing",
+        "Baseline is weak: comparisons are against naive online convolution; there is no comparison against SSM-based generation (O(1) per token), which the authors themselves note is more efficient for generation, or against other exact methods, making it hard to gauge practical competitiveness",
+        "The Transformer comparison in Appendix B uses a trivial 2-layer, hidden-dimension-32 model, which is not informative for assessing practical relevance",
+        "Continuous-FutureFill (the theoretically better algorithm) is not evaluated on deep language models; all deep-model experiments use only Epoched-FutureFill",
+        "The scope is narrow: gains apply only to convolutional (largely STU-based) models, a niche architecture class, and the method does not address quantization or hardware-specific factors that dominate real inference workloads"
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "The core algorithmic idea (FutureFill) is simple, clearly presented, and well-motivated: online convolution with total runtime O(L log^2 L) and O(L log L + K log^2 K) for prefill+generation, versus the previous O(L^2) and O(L log L + LK + K^2).",
+        "The runtime/memory trade-off offered by Epoched-FutureFill (O(L^{3/2} sqrt(log L)) time with O(sqrt(L log L)) memory) is a genuinely useful addition for memory-constrained settings, and the theory (Theorems 2-3, proofs in Appendix E) appears careful and correct.",
+        "Experiments go beyond isolated convolution primitives: they evaluate on reasonably sized (up to ~826M parameter) convolutional and hybrid language models, sweep generation length, depth, width, prompt length, and the epoch length K, and the empirical results are consistent with the theoretical claims (e.g., optimal K matches Theorem 2).",
+        "The paper is transparent and honest: it explicitly acknowledges the independent concurrent work [24] that achieves the same O(L log^2 L) bound, states limitations (quantization, hardware factors), and carefully separates exact methods from approximation-based ones."
+      ],
+      "weaknesses": [
+        "Limited novelty of the headline result: the quasi-linear O(L log^2 L) generation bound was simultaneously obtained by [24] (Flash Inference). What remains is a trade-off variant and a 'more practical implementation,' which weakens the paper's claim to a primary algorithmic contribution.",
+        "Practical impact is modest. The demonstrated end-to-end speedups are only 1.5x-1.7x, and only at very long generation lengths (65k-127k tokens); at more common lengths the gains appear marginal. The asymptotic advantage needs extremely large L to materialize.",
+        "Baselines are weak. The main comparison is against naive online convolution. There is no comparison against the strongest existing exact method [24], no comparison with approximate/cache-compression methods (dismissed as a 'different class' without empirical grounding), and the Transformer comparison (Appendix B) uses a trivial 2-layer, hidden-dim-32 model, which is not informative.",
+        "No evaluation of output quality or downstream performance: filters are initialized randomly and only wall-clock time is measured. The claim of exact generation is never validated numerically in the deep models (e.g., perplexity or logit agreement with naive convolution), which is essential for an efficiency paper.",
+        "Practical relevance relative to recurrent SSMs is not adequately addressed. SSM/Mamba-style models generate in O(1) per token; the paper's justification for staying with convolutional models (approximation gaps in distillation) is asserted but never empirically demonstrated.",
+        "Missing details on overhead: Continuous-FutureFill requires O(L) cache and per-step FFTs with non-trivial constants; Figure 1 shows it only on isolated convolutions and it is never evaluated end-to-end in the deep models, leaving the practical value of the theoretically best algorithm unclear."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Clean and well-motivated algorithmic contribution: the FutureFill primitive yields exact (non-approximate) autoregressive generation for any convolutional sequence model, with a provably quasi-linear O(L log^2 L) total runtime from scratch and an attractive O(L log L + K log^2 K) runtime with only O(K) cache when generating from a prompt",
+        "The Epoched-FutureFill variant provides a principled compute/memory trade-off (O(L^{3/2} sqrt(log L)) time with O(sqrt(L log L)) memory), which is a practically useful point on the runtime/memory spectrum",
+        "The theoretical analysis is careful and complete, with correctness and runtime proofs provided in the appendix (including a non-trivial binary-decomposition argument for Continuous-FutureFill)",
+        "The cache-size advantage over attention/convolutional baselines (O(K) vs O(L+K)) is a genuine and well-articulated benefit for long-prompt inference",
+        "Honest and transparent positioning: the paper explicitly acknowledges the concurrent independent work [24] achieving the same O(L log^2 L) result, and experiments include a K ablation that empirically validates the theoretically optimal cache length"
+      ],
+      "weaknesses": [
+        "Limited novelty of the headline result: the quasi-linear generation result was independently obtained in [24] (FlashInference) via relaxed polynomial interpolation; the remaining novel contribution (the Epoched trade-off) is comparatively incremental",
+        "Empirical gains are modest relative to the theoretical claims: only 1.5x-1.7x speedup over the naive quadratic baseline even at ~127K generated tokens and 690M parameters, suggesting that convolution compute is not the bottleneck and the asymptotic advantage may not translate to practical impact",
+        "Weak baselines: comparison is only against naive online convolution; no comparison against SSM distillation approaches (e.g., Laughing Hyena [22]), which is the stated state of the art for convolutional model inference and an obvious practical competitor",
+        "Evaluation is throughput-only: no downstream quality/accuracy evaluation, and several ablations use randomly initialized filters rather than trained models, leaving correctness of generation in realistic settings unverified",
+        "Scope limitations acknowledged but not addressed: no quantization support, hardware-sensitivity concerns, and the method is demonstrated only on STU-based architectures of academic scale",
+        "Continuous-FutureFill (the theoretically optimal variant) is not evaluated on deep models; experiments focus on Epoched-FutureFill, so the practical value of the main theoretical result is untested"
+      ]
+    }
+  }
+}

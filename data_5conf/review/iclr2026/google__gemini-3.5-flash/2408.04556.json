@@ -1,0 +1,95 @@
+{
+  "v6": {
+    "exp1_quality": {
+      "oa": 8,
+      "strengths": [
+        "Compelling and principled motivation: The paper tackles 'Catastrophic Inheritance' (the propagation of pre-training noise and biases) in PEFT, which is an important and often overlooked safety/robustness aspect of fine-tuning.",
+        "Comprehensive and systematic deconstruction: By breaking down the problem into Knowledge Drift, Representation Collapse, and Overfitting to Noise, the authors propose a set of three targeted output-space regularizers that are conceptually clean and well-structured.",
+        "Extensive empirical evaluations: Testing on a very diverse set of benchmarks for both NLG (GSM8K, MATH, HumanEval, MBPP, MT-Bench) and NLU (GLUE) across multiple model architectures (LLaMA-2, Mistral, Mixtral, Gemma, DeBERTa, T5, RoBERTa) demonstrates the robust generality of the approach.",
+        "Strong validation of the central thesis: The controlled pre-training noise experiment comparing T5 (noisy) and RoBERTa (clean) nicely validates the core hypothesis, showing that BA-LoRA's gains are amplified when dealing with noisier pre-trained models."
+      ],
+      "weaknesses": [
+        "Mathematical degeneracy of the SVD Regularizer in NLU: For NLU classification tasks on GLUE (e.g., SST-2, QNLI, MRPC, RTE), the class size $D$ is typically 2 or 3. If the batch-wise logit matrix $Z_F \\in \\mathbb{R}^{N \\times D}$ has at most $D$ singular values, setting the SVD rank hyperparameter to $k=5$ (as stated in Section 3.1) means the numerator sum $\\sum_{i=1}^k \\sigma_i$ equals the denominator sum $\\sum_{j=1}^{\\min(N,D)} \\sigma_j$. Consequently, the ratio is always exactly 1.0, and the loss $\\mathcal{L}_{SVDR\\_NLU}$ simplifies to a constant $-1$ with zero gradient. The authors should clarify this degeneracy and explain how the SVD loss behaves on low-dimensional classification logits.",
+        "Memory and computational overhead: Enforcing these three regularizers in the output space introduces non-trivial overhead. For instance, the consistency regularizer likely requires a parallel forward pass (or logit caching) of the frozen pre-trained teacher model, and the SVD regularizer on NLG requires approximating SVD on large logit matrices ($M \\times |V|$). As shown in Table 5, this leads to an additional ~11 GB memory footprint and a ~12% increase in training time.",
+        "Increased hyperparameter complexity: The introduction of multiple new hyperparameters (regularization weights $\\lambda_1, \\lambda_2, \\lambda_3$, SVD rank $k$, entropy top-$k$, distillation temperature $T$) makes tuning on new datasets and models potentially more tedious, although the sensitivity analysis provides some guidance."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "A well-structured and principled approach that deconstructs 'Catastrophic Inheritance' into three concrete subproblems: Knowledge Drift, Representation Collapse, and Overfitting to Noise.",
+        "The formulation of targeted regularizers is highly tailored to the differences between NLU (classification) and NLG (generation) tasks, such as focusing the entropy-based diversity regularizer solely on the top-K vocabulary to maintain text coherence.",
+        "Comprehensive empirical evaluation across a wide range of NLG benchmarks (GSM8K, MATH, HumanEval, MBPP, MT-Bench) and NLU benchmarks (GLUE), showing consistent and substantial improvements over strong recent baselines like CorDA++ and PiSSA.",
+        "The controlled study comparing RoBERTa (clean pre-training) vs. T5 (noisy C4 pre-training) provides compelling validation of the core hypothesis that the method specifically mitigates pre-trained noise.",
+        "Exhaustive ablation studies, hyperparameter sensitivity analyses, and clear t-SNE visualizations under simulated class imbalance successfully demonstrate the synergy of the three regularizers."
+      ],
+      "weaknesses": [
+        "The proposed method introduces non-trivial computational overhead. Table 5 indicates a noticeable increase in peak GPU memory usage (+16% over PiSSA/LoRA) and a slight increase in training time, which is likely caused by logging the outputs of both the student and the frozen teacher model, as well as computing randomized SVD during training.",
+        "There is some hyperparameter complexity, as the method introduces three new weighting coefficients (lambda_1, lambda_2, lambda_3) along with other parameters like temperature and SVD rank. This may require extra tuning efforts for new datasets.",
+        "Although the paper is titled 'Bias-Alleviating', it primarily evaluates downstream generalization under noise and class imbalance rather than evaluating on standard societal or demographic bias benchmarks (e.g., CrowS-Pairs, BOLD). Clarifying this terminology in the paper would prevent potential misalignment of expectations."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper is well-written, easy to follow, and includes clear figures that explain the proposed BA-LoRA framework.",
+        "Comprehensive experiments are conducted across both NLU (GLUE) and NLG (GSM8K, MATH, HumanEval, etc.) benchmarks, showing strong performance improvements over PiSSA and LoRA.",
+        "The paper includes detailed ablation studies, hyperparameter sensitivity analyses, and computational cost analyses."
+      ],
+      "weaknesses": [
+        "Conceptual Contradiction regarding 'Catastrophic Inheritance': The paper's core motivation is to mitigate the inheritance of pre-training biases and noise. However, the proposed Consistency Regularizer (L_CR) is a knowledge distillation loss that forces the fine-tuned model to mimic the pre-trained model. If the pre-trained model is the source of the noise and biases, L_CR will actively enforce and preserve these flaws, which directly contradicts the goal of mitigating catastrophic inheritance. The authors seem to confuse 'Knowledge Drift' (catastrophic forgetting of pre-trained knowledge) with 'Catastrophic Inheritance' (inheriting pre-training flaws).",
+        "Invalid Controlled Study on Pre-training Noise: In Section 3.2.2, the authors compare RoBERTa-base (encoder-only, masked language modeling) and T5-base (encoder-decoder, text-to-text denoising) to argue that BA-LoRA's gains are amplified on noisier pre-training data. This is not a controlled study. Since RoBERTa and T5 differ fundamentally in architecture, pre-training objectives, vocabulary, and optimization, any difference in performance gains cannot be solely attributed to the cleanliness of their pre-training corpora.",
+        "Counter-intuitive GSM8K Results: In Table 4, adding the consistency regularizer L_CR (mimicking the pre-trained LLaMA-2-7B base model) to the PiSSA baseline improves GSM8K performance from 51.48% to 54.25%. Since the LLaMA-2-7B base model has very poor mathematical capabilities, forcing the fine-tuned model to mimic its output distribution should theoretically degrade math performance. The fact that it improves performance significantly raises concerns about the actual mechanism of this regularizer or potential evaluation discrepancies.",
+        "Limited Algorithmic Novelty: The proposed regularizers—KL divergence for distillation, logit covariance penalization for diversity (similar to VICReg), and SVD spectral energy maximization (similar to Batch Spectral Penalization)—are well-established techniques in the literature. Combining them and applying them to the output logits of a PEFT model offers limited algorithmic novelty.",
+        "Clarity on Seq2Seq Models: For seq2seq models like T5-base on GLUE (Table 3), it is unclear how the NLU-specific regularizers (which rely on class-wise logits Z_F in R^(N x D) where D is the number of classes) were implemented. If a classification head was added to T5, or if vocabulary-level logits were used, this should be explicitly explained."
+      ]
+    }
+  },
+  "v7": {
+    "exp1_quality": {
+      "oa": 8,
+      "strengths": [
+        "Comprehensive and Strong Empirical Results: The proposed BA-LoRA achieves substantial improvements over state-of-the-art PEFT methods (such as CorDA++, DoRA, PiSSA) across a wide range of NLG tasks (GSM8K, MATH, HumanEval, MBPP, MT-Bench) and NLU benchmarks (GLUE).",
+        "Well-Motivated Three-Pronged Strategy: Decomposing catastrophic inheritance into knowledge drift, representation collapse, and noise overfitting, and addressing them with three distinct, theoretically grounded regularizers (consistency, diversity, and SVD-based) is intuitive and structurally elegant.",
+        "Thorough and Insightful Analysis: The authors include useful analytical experiments, such as testing on models pre-trained on clean vs. noisy web datasets (RoBERTa vs. T5), demonstrating that the benefit of BA-LoRA is larger when dealing with inherited noise. The t-SNE representation collapse visualization and quantitative silhouette analysis on imbalanced datasets are excellent.",
+        "Extensive Model Generalizability: Experiments span multiple model families (LLaMA-2, LLaMA-3, Mistral, Mixtral, Gemma, Qwen, DeBERTa, RoBERTa, T5) and include quantized variants, confirming the broad applicability of the framework."
+      ],
+      "weaknesses": [
+        "Conceptual Framing vs. General Regularization: While the paper frames the method as mitigating 'Catastrophic Inheritance' (biases/noise inherited from pre-training), most of the regularizers act as general-purpose SFT regularization (e.g., preventing overfitting to downstream training noise, preventing representation collapse on downstream imbalanced datasets, and keeping the model close to the pre-trained weights). The connection to pre-training bias mitigation relies on the T5 vs. RoBERTa comparison, which is confounded by architecture and objective differences (as the authors acknowledge in Section D.2).",
+        "Novelty of Individual Components: The individual regularizers themselves (KL self-distillation, covariance-based feature decorrelation, and batch-wise SVD spectral concentration) are adapted from existing works in representation learning and self-distillation. The novelty lies primarily in their combination and adaptation to the PEFT context.",
+        "Computational Overhead: Computing the regularizers over the full output logit space (especially the SVD and KL divergence over the vocabulary size V, which is 32k or larger) introduces non-trivial overhead. Table 5 shows a ~16% increase in peak memory and ~12% increase in training time over PiSSA. This could be a bottleneck when scaled to much larger batch sizes or longer sequence lengths.",
+        "Minor Writing/Presentation Issues: There are several incomplete sentences where text appears cut off (e.g., '...Code is available a' in the Abstract, Section 1, and Appendix D.8). Furthermore, Figure 1 contains corrupted or overlapping text labels (e.g., in subfigure c), which harms readability."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper addresses an important and timely challenge in parameter-efficient fine-tuning (PEFT): the tendency of LLMs to propagate and amplify pre-training biases, noise, and imbalances (Catastrophic Inheritance) during downstream adaptation.",
+        "The manuscript is well-structured and written clearly, presenting the mathematics of the proposed regularizers (consistency, diversity, and SVD-based) in a formal and accessible manner.",
+        "The authors conduct extensive experiments across diverse benchmarks for both Natural Language Understanding (NLU) and Natural Language Generation (NLG) tasks using multiple model backbones."
+      ],
+      "weaknesses": [
+        "Conceptual Contradiction on 'Catastrophic Inheritance': The paper claims to alleviate the inheritance of pre-trained biases and noise. However, one of the three core regularizers is Consistency Regularization, implemented via Kullback-Leibler (KL) divergence from the pre-trained model's output logits. This forces the fine-tuned model to mimic the pre-trained model. Conceptually, if the pre-trained model possesses biased, noisy, or unsafe priors, this distillation objective will actively force the fine-tuned model to inherit and preserve those biases, directly contradicting the paper's main motivation.",
+        "Lack of Algorithmic Novelty: The proposed 'BA-LoRA' is conceptually and architecturally identical to PiSSA (Meng et al., 2024). The only difference is the addition of three highly standard, off-the-shelf loss terms in the output logit space: standard self-distillation (Consistency), covariance decorrelation / entropy maximization (Diversity), and singular value/spectral energy maximization (SVD). Combining existing regularizers does not represent a significant technical contribution to PEFT design.",
+        "Uncontrolled Baseline Comparisons for Noise Mitigation: In Section 3.2.2, the authors compare RoBERTa-base (curated pre-training data) and T5-base (noisy web-scale pre-training data) to show that BA-LoRA is more beneficial under noisy pre-training. However, RoBERTa is an encoder-only model trained with Masked Language Modeling (MLM), whereas T5 is an encoder-decoder model trained with a text-to-text span-corruption objective. Because of these massive confounding factors in architecture and pre-training objectives, the differences in relative performance gains cannot be scientifically attributed to the quality of the pre-training corpora.",
+        "Anomalous MBPP Coding Performance: In Table 1, on the MBPP dataset, BA-LoRA achieves a score of 36.86%, whereas PiSSA gets 23.84% and Full Fine-Tuning gets 23.64%. A massive 13-point absolute improvement on a coding benchmark purely from general-purpose logit-space regularizers (such as KD and SVD) is highly anomalous and raises concerns about potential evaluation discrepancies, hyperparameter tuning imbalances, or data contamination.",
+        "High Computational and Memory Overhead: Computing randomized SVD on the logit space $Z \\in \\mathbb{R}^{M \\times |V|}$ (where $|V| = 32,000$ or more for modern LLMs) at every single training step is extremely resource-intensive. Table 5 shows that peak memory consumption increases from 66.59 GB (PiSSA) to 77.34 GB (BA-LoRA) on LLaMA-2-7B. This ~16% increase in peak memory overhead directly compromises the core benefit of PEFT, which is resource efficiency, and poses scalability bottlenecks for larger models like LLaMA-3-70B.",
+        "Misleading Nomenclature: The framework is named BA-LoRA (Bias-Alleviating Low-Rank Adaptation), implying a new low-rank parameterization or parameter-space adapter. However, the method is essentially standard PiSSA with auxiliary output-space regularization terms."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "High empirical performance: BA-LoRA achieves substantial and consistent performance improvements on both Natural Language Generation (GSM8K, MATH, HumanEval, MBPP) and Natural Language Understanding (GLUE) benchmarks compared to competitive baselines such as PiSSA and CorDA++.",
+        "Well-motivated and systematic framework: The decomposition of the 'Catastrophic Inheritance' problem into three core aspects (Knowledge Drift, Representation Collapse, and Overfitting to Noise) is logically sound and mapped directly to appropriate, targeted output-space regularizers.",
+        "Insightful analysis of noise/bias mitigation: The paper goes beyond standard benchmarking by providing controlled experiments on pre-training data quality (curated RoBERTa vs. web-scale T5) and class imbalance (MNLI under severe skew). These analyses directly support the core claims of the paper with qualitative (t-SNE) and quantitative (Silhouette scores, minority recall) evidence.",
+        "Broad applicability and robustness: The authors demonstrate that their regularization framework is model-agnostic and consistently boosts performance when applied to different adapter architectures (LoRA, DoRA, PiSSA) and scales (up to 70B models)."
+      ],
+      "weaknesses": [
+        "Computational and Memory Overhead: Implementing the consistency regularizer requires obtaining logits from the pre-trained 'teacher' model. This typically necessitates either storing an additional frozen copy of the model in GPU memory or performing dual forward passes. Although Table 5 shows manageable overhead for LLaMA-2-7B, this could become a significant bottleneck when scaling to 70B+ models.",
+        "Hyperparameter Complexity: Introducing three distinct loss functions brings several new hyperparameters (coefficients $\\lambda_1, \\lambda_2, \\lambda_3$, SVD rank $k$, entropy top-$K$, and temperature $T$). While the authors provide robust defaults and guidelines in the appendix, the necessity of balancing four total loss terms might make optimization more complex on new, out-of-domain datasets.",
+        "Confounding Factors in Noise Comparison: The evaluation on RoBERTa-base (curated) and T5-base (noisy web C4) is illustrative but not fully controlled, as the models differ in architecture (encoder-only vs. encoder-decoder) and pre-training objectives (MLM vs. sequence-to-sequence denoising). These architectural differences, rather than purely the pre-training noise, could influence the relative improvement margins."
+      ]
+    }
+  }
+}

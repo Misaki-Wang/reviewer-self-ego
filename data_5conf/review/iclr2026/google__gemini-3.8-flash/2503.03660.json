@@ -1,0 +1,99 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "The paper explores an interesting direction: using a causal Transformer as a multi-step critic architecture in continuous control, predicting returns for action sequences of varying lengths.",
+        "Comprehensive empirical testing across all 50 tasks in Meta-World ML1 as well as dense and sparse Box-Pushing environments.",
+        "The appendix provides extensive per-task training curves across all 50 Meta-World tasks, which supports empirical transparency."
+      ],
+      "weaknesses": [
+        "Theoretical soundness and off-policy bias: The method computes $n$-step returns directly from replay buffer trajectories without any off-policy correction (e.g., importance sampling, V-trace, or Tree-backup). Because actions $a_{t+1}, \\dots, a_{t+n-1}$ were drawn from past behavior policies, multi-step targets $G^{(n)}$ are biased with respect to the current policy. The paper dismisses the need for importance sampling without theoretical or empirical justification of this off-policy discrepancy.",
+        "Flawed mathematical justification for variance reduction: Section 2.3 and Appendix B derive the variance of an explicitly averaged target $\\bar{G}^{(N)} = \\frac{1}{N}\\sum_{i=1}^N G^{(i)}$. However, the proposed method does not predict this averaged target; instead, the Transformer critic outputs $n$ distinct heads/predictions $Q_\\phi(s_t, a_t, \\dots, a_{t+i})$ trained against individual $G^{(i+1)}$ targets (Eq. 6). Claiming that multi-task gradient averaging in the shared trunk inherits the exact variance reduction of Eq. (4) is mathematically unfounded.",
+        "Confounding experimental factors: As seen in Tables 2, 3, and 4, T-SAC uses drastically different training hyperparameters compared to the baselines. For example, in Meta-World, T-SAC uses 100 critic epochs per update, a tiny buffer size of 5,000, and AdamW, whereas SAC uses 1,000 critic epochs, a 1e6 buffer, and standard Adam. In Box-Pushing, T-SAC uses massive policy hidden layers ($[512 \\times 4]$) and different learning rates. These discrepancies make it difficult to determine whether gains stem from the proposed Transformer critic or from tuned UTD ratios, network capacity, and buffer dynamics.",
+        "Clarity and presentation of ablations: In Figure 2, the ablation plots lack individual legends for each subplot, and the six labels shared above the three subfigures make it very difficult to discern which curve corresponds to which variant. Furthermore, the role and necessity of the policy modifications (detached mean action into the covariance network and layer normalization) distract from the core critic contribution."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3,
+      "strengths": [
+        "Investigates an interesting direction of using Transformer architectures within the critic network for continuous control in Soft Actor-Critic (SAC).",
+        "Evaluates performance across a wide set of manipulation benchmarks, including all 50 tasks from Meta-World ML1 as well as dense and sparse Box-Pushing environments.",
+        "Provides ablation experiments investigating specific policy design choices such as layer normalization, covariance network augmentation, and entropy regularization."
+      ],
+      "weaknesses": [
+        "Theoretical disconnect in variance reduction claims: Section 2.3 and Appendix B analyze the variance of the averaged multi-step return target \\bar{G}^{(N)} using the Central Limit Theorem. However, the authors explicitly state in Section 3.1 that they do not average the return targets, but instead compute individual losses for each horizon and backpropagate their gradients. Averaging gradients across multi-task sequence outputs in a neural network does not mathematically inherit the variance reduction properties derived for an averaged scalar return estimator.",
+        "Misleading conceptual framing around 'Action Chunking': In standard RL and imitation learning literature, action chunking refers to executing sequences of actions emitted by the policy. In the proposed method, the policy outputs single actions, and policy updates strictly evaluate the 1-step value estimate Q_\\phi(s_t, a_t). The critic merely processes trajectory segments sampled from the replay buffer to predict multi-horizon returns as auxiliary objectives. Framing this as 'shifting action chunking to the critic' is inaccurate.",
+        "Mathematical errors and missing formulations: In Equation (6), the critic loss sums over i from 0 to n-1, but the target is written as G^{(n)} rather than G^{(i+1)}. Furthermore, the calculation of the bootstrapped target value V_{\\phi_{tar}}(s_{t+n}) in Equation (5) is never defined for the Transformer critic, leaving a critical algorithmic step unspecified.",
+        "Unfair baseline comparisons and hyperparameter disparities: As shown in Tables 2–4, baseline algorithms are subjected to vastly different hyperparameters that likely degrade their performance. For instance, in Box Pushing, SAC has `learning starts` set to 100,000 steps (for a 100-step episode task) compared to 5,000 for T-SAC, and SAC uses an initial policy std of 1.0 while T-SAC uses 0.01. Baselines like CrossQ and SAC obtain near 0% success on tasks where standard implementations typically learn, indicating inadequate tuning.",
+        "Evaluation and statistical rigor: Table 1 reports single mean success rates without confidence intervals, standard errors, or mention of the number of random seeds evaluated. Additionally, requiring 20 million environment interactions (Figure 2 and Figures 3–4) for Meta-World tasks is unusually sample inefficient compared to standard benchmarks (typically evaluated at 1–3 million steps).",
+        "Draft quality and formatting issues: The manuscript appears unpolished, featuring duplicate title/summary pages (Page 1 and Page 2), a persistent 'Cover Page' running header on all pages, incorrect cross-references (e.g., referring to non-existent 'Figure 4.2' and referencing 'Figure 6' for Meta-World tasks when Figure 6 is Box Pushing), and informal writing such as 'Paragraph 3.1'."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper explores an interesting conceptual direction: incorporating sequence modeling (via Transformers) directly into the critic to predict multi-step returns rather than restricting temporal abstraction solely to the actor.",
+        "Comprehensive evaluation across 50 manipulation tasks in Meta-World ML1, demonstrating solid empirical gains over standard baseline implementations on many tasks.",
+        "The paper provides an extensive appendix with detailed hyperparameters and per-task learning curves."
+      ],
+      "weaknesses": [
+        "Theoretical Soundness of Off-Policy Multi-Step Returns: In off-policy RL with replay buffers, multi-step rollouts $(a_t, a_{t+1}, \\dots, a_{t+n-1})$ contain actions generated by historical behavior policies rather than the current policy $\\pi_\theta$. The paper asserts that it learns from $N$-step returns 'without the need of importance sampling', but does not provide theoretical justification or off-policy correction (e.g., Tree-Backup, Retrace, or V-trace) to account for target policy mismatch in future actions. Furthermore, because policy improvement only queries $Q(s_t, a_t)$ (the 1-step prediction), the exact mechanism through which predicting subsequent off-policy action values benefits the reactive policy remains theoretically unclear.",
+        "Flawed Theoretical Motivation for Variance Reduction: The variance analysis in Section 2.3 and Appendix B relies on the assumption that trajectory rewards are independent and identically distributed ($r_k \\sim \\text{i.i.d.}(\\mu, \\Sigma)$). In reinforcement learning, rewards are governed by state transitions under Markovian dynamics and are strongly auto-correlated; hence, invoking the Central Limit Theorem under an i.i.d. assumption is fundamentally inappropriate. Additionally, claiming that 'averaging gradients instead of returns' provides unique variance reduction over averaging returns conflates gradient aggregation with multi-task objective weighting (since $\\frac{1}{n} \\sum \\nabla_\\phi L_i(\\phi) = \\nabla_\\phi [\\frac{1}{n} \\sum L_i(\\phi)]$).",
+        "Unsupported and Contradicted Claims: The paper claims on Page 1 and Page 7 that T-SAC achieves state-of-the-art results on 'Box-Pushing Sparse'. However, Table 1 directly contradicts this claim: gSDE achieves 60% success rate on Box Pushing Sparse, whereas T-SAC achieves 58%.",
+        "Confounding Architectural and Optimization Factors: T-SAC introduces multiple substantial modifications beyond the Transformer critic, including feeding detached mean actions to the covariance network, adding Layer Normalization, changing activation functions to LeakyReLU, using AdamW, distinct learning starts, and a completely different update-to-data (UTD) schedule (100 critic updates followed by 20 policy updates). It is difficult to isolate whether gains stem from the Transformer critic chunking or from these significant optimization and policy architecture tweaks.",
+        "Notation and Equation Inconsistencies: In Equation (6), the target is written as $G^{(n)}(s_t^k, a_t^k, \\dots, a_{t+i}^k)$ while the summation runs over $i \\in [0, n-1]$, creating an index mismatch between the $n$-step notation and the $i$-step partial sequences.",
+        "Formatting and Presentation Issues: Every single page of the submission displays the running header '| Cover Page'. The text contains broken cross-references (e.g., 'Figure 4.2' on page 7 does not exist; Figure 6 is cited on page 15 as describing MetaWorld tasks when Figure 6 is actually the Box Pushing task), and punctuation errors (e.g., 'Figure 2..' on page 7)."
+      ]
+    }
+  },
+  "v3": {
+    "exp1_quality": {
+      "oa": 6,
+      "strengths": [
+        "The core idea of shifting temporal sequence modeling to the critic rather than chunking policy actions allows the method to retain reactive single-step policy execution while benefiting from multi-step temporal credit assignment.",
+        "Formulating the sequence critic to predict prefix-conditioned values directly avoids the need for off-policy importance sampling on intermediate actions, simplifying the training objective.",
+        "The empirical evaluation is extensive, spanning 50 Meta-World ML1 tasks, dense/sparse Box-Pushing manipulation tasks, and standard MuJoCo locomotion benchmarks.",
+        "Ablation studies systematically evaluate the necessity of the Transformer backbone compared to recurrent architectures (GRU/LSTM) and MLPs, as well as the impact of causal masking and supervision window lengths.",
+        "The paper includes solid theoretical justification (Appendices C and D) analyzing the variance reduction properties of gradient-level multi-horizon averaging."
+      ],
+      "weaknesses": [
+        "The algorithmic novelty is somewhat incremental given TOP-ERL (Li et al., 2024a), which previously used a causally masked Transformer critic for multi-step return prediction from replay without importance sampling; T-SAC adapts this concept from episodic/movement-primitive control to step-based SAC.",
+        "Because the actor update only optimizes the one-step value Q(s_t, a), the extended horizon outputs Q(s_t, a_{t:t+i-1}) primarily act as an auxiliary sequence-modeling regularizer for the critic representation; the paper could provide deeper analysis isolating this representation effect versus value accuracy.",
+        "Performance on standard MuJoCo locomotion benchmarks (Gymnasium) is mixed: while it performs well on HumanoidStandup and HalfCheetah, it visibly lags behind standard SAC/TD3/CrossQ on Hopper and Walker2d due to high trajectory variability.",
+        "Many baseline results for Meta-World were taken directly from prior publications rather than re-tuned under an identical modern protocol, whereas T-SAC benefits from targeted tuning (such as specific policy standard deviation initializations)."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Principled approach to off-policy multi-step learning: By training a causal Transformer critic conditioned on realized action prefixes from the replay buffer, the method enables multi-step credit assignment without requiring per-decision importance sampling for intermediate actions.",
+        "Extensive empirical evaluation: The paper evaluates across 50 Meta-World ML1 tasks, Box-Pushing (both dense and sparse variants), and Gymnasium MuJoCo benchmarks, using aggregate IQM metrics with bootstrap confidence intervals and adequate random seeds.",
+        "Comprehensive ablation studies: Figure 5 thoroughly analyzes key design choices on Box-Pushing, isolating the effects of causal masking, self-attention, multi-horizon supervision windows, sample count per step, and comparing against recurrent baselines (GRU/LSTM) and MLP critics with action chunking.",
+        "Strong performance on complex manipulation: T-SAC demonstrates clear improvements on difficult multi-phase Meta-World tasks (e.g., Assembly, Disassemble, Hammer, Stick-Pull) and achieves state-of-the-art results on Box-Pushing under tight tolerances with significantly fewer environment interactions than episodic methods."
+      ],
+      "weaknesses": [
+        "Incremental algorithmic novelty relative to TOP-ERL: The core idea of using a lightweight causal Transformer to predict prefix-conditioned multi-step returns without importance sampling is directly inherited from TOP-ERL (Li et al., 2024a). The main contribution is transplanting this critic design into a step-based SAC framework rather than episodic movement primitives.",
+        "Underperformance and heavy hand-tuning on locomotion benchmarks: On Gymnasium MuJoCo (Figure 4), T-SAC noticeably lags behind standard SAC, TD3, and CrossQ on Ant, Hopper, and Walker2d. Furthermore, as detailed in Table 4, Hopper and Walker2d required aggressive task-specific manual tuning (e.g., setting initial log standard deviation to -10 and changing target entropy to -4 * dim(A)), yet still failed to match standard baselines.",
+        "Mischaracterization of 'target-free' training: Section 4.4 claims to achieve 'target-free training' via a critic parameter-freezing schedule. Periodically snapshotting parameters and freezing them for K steps is functionally the classical hard target network update introduced in DQN (Van Hasselt et al., 2016). Framing this as 'target-free' like CrossQ (which truly operates without separate target parameters) is conceptually inaccurate.",
+        "Disconnect between theoretical analysis and actual algorithm: Appendix C details variance reduction bounds for target-level averaged N-step returns, but Section 3 explicitly notes that T-SAC does not average N-step targets, and Appendix E (Figure 10b) demonstrates that target-level averaging causes severe training collapse. The theoretical derivations in Appendix C therefore analyze a variant that the authors find unviable in practice.",
+        "Increased computational and memory overhead: Maintaining trajectory segments in the replay buffer and evaluating causal multi-head attention over sequences incurs notable computational overhead. As shown in Figure 2, T-SAC is approximately 2x slower in wall-clock time compared to standard SAC per 1M environment steps."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Clear motivation and intuitive design: Framing the critic as a sequence model over action prefixes provides a neat way to utilize multi-step TD targets in off-policy RL without suffering from the high variance or bias of importance sampling.",
+        "Extensive empirical evaluation: The paper tests across 57 distinct tasks (50 Meta-World ML1 tasks, Box-Pushing dense/sparse, and 5 MuJoCo environments), following rigorous evaluation protocols (IQM, 95% bootstrap confidence intervals, and multiple random seeds).",
+        "Thorough ablation study: The experiments on Box-Pushing systematically dissect the design components, including causal masking, self-attention layers, window lengths, target sampling frequencies, and comparisons with RNN/LSTM baselines."
+      ],
+      "weaknesses": [
+        "Limited conceptual novelty over TOP-ERL: The core idea of training a causal Transformer critic on action prefixes with multi-step bootstrapped targets without importance sampling is directly adapted from TOP-ERL (Li et al., 2024a). While the adaptation from episodic policy search to step-based SAC is sensible, the algorithmic and architectural contribution is relatively incremental.",
+        "Mixed performance and sensitivity on standard locomotion benchmarks: On Gymnasium MuJoCo (Figure 4), T-SAC does not show consistent improvements; it underperforms standard SAC, CrossQ, and TD3 on Hopper and Walker2d. The authors note that high trajectory variability and masking hurt performance, showing that the sequence-conditioned critic is not universally beneficial for standard continuous control.",
+        "Heuristic and task-dependent hyperparameter tuning: Achieving competitive results on MuJoCo requires notable task-specific interventions (e.g., initial policy log-standard deviation hand-tuned to -5 on 일부 tasks and -10 on Hopper/Walker2d; target entropy altered to -4 * dim(A) specifically for Hopper and Walker2d; target-free freezing schedule disabled on sparse Box-Pushing due to instability). This reduces confidence in T-SAC as a robust, general drop-in replacement.",
+        "Idealized theoretical assumptions: The variance reduction proofs in Appendices C and D rely heavily on exchangeable/equicorrelated models across time steps and horizon gradients. In non-stationary RL dynamics with complex temporal dependencies, these exchangeability assumptions rarely hold, making the theoretical guarantees primarily illustrative rather than practically predictive.",
+        "Unclear exposition regarding N-step target averaging: The transition between Section 3 (discussing target-level averaged N-step returns and variance bounds, only to conclude 'we did not average N-step returns') and Section 4.1.1 (introducing gradient-level averaging, which is simply standard empirical loss averaging across tokens) is disjointed and creates unnecessary confusion."
+      ]
+    }
+  }
+}

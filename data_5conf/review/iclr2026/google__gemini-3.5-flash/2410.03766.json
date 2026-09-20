@@ -1,0 +1,92 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 6,
+      "strengths": [
+        "Addresses a fundamental bottleneck in convolutional sequence models: the slow (quadratic in context length) auto-regressive generation speed.",
+        "Provides a provably exact generation algorithm (no approximation or distillation required) that reduces the amortized generation complexity per token from $O(L)$ to $O(\\sqrt{L \\log L})$.",
+        "For prompt-based generation of $K$ tokens with prompt length $L$, it reduces the cache size from $O(L)$ to $O(K)$, which is highly beneficial when $K \\ll L$.",
+        "The proposed FutureFill algorithm is mathematically elegant, clean, and easy to implement.",
+        "The paper is well-written and the theoretical proofs are clear and sound."
+      ],
+      "weaknesses": [
+        "The experimental validation is limited, conducted only on CPU for a single layer on a synthetic task. In modern sequence modeling, memory bandwidth, GPU kernel fusion, and hardware-specific parallelization dictate the actual wall-clock latency. It remains unclear whether the theoretical speedups materialize on modern GPU architectures for large-scale models.",
+        "The $O(\\sqrt{L \\log L})$ complexity is amortized. Every $K$ steps, there is a latency spike of $O(L \\log L)$ due to the FFT computation, while intermediate steps are cheap ($O(K)$). This chunking/jitter can be highly problematic for interactive or real-time streaming applications where consistent token-to-token latency is required. The paper does not address how to overlap or pipeline the FFT computation to mitigate this.",
+        "For the prompt-based setting (Algorithm 1), the generation length $K$ must be predetermined. If the model generates an end-of-sequence (EOS) token early, some FFT pre-computation is wasted; conversely, if generation needs to extend beyond $K$, the cache must be recomputed.",
+        "The paper lacks a discussion on how this approach relates to classical block-convolutions and streaming filtering algorithms in the digital signal processing (DSP) literature (e.g., overlap-save/overlap-add methods)."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "The paper introduces an interesting algorithmic trick to perform exact autoregressive generation in convolutional sequence models with an amortized cost of $O(\\sqrt{L \\log L})$ per token, bypassing the standard $O(L)$ per-token cost without resorting to SSM approximations.",
+        "The proposed method is mathematically exact and preserves the original representation of the trained convolutional model, avoiding any approximation or distillation error.",
+        "The paper is generally well-written, with clear pseudocode (Algorithms 1, 2, and 3) and detailed theoretical complexity proofs."
+      ],
+      "weaknesses": [
+        "The experimental evaluation is extremely weak. The authors only profile a single layer on a CPU. In modern deep learning, evaluations must be performed on GPUs (using CUDA/Triton) to prove that the theoretical gains translate to actual wall-clock speedups on parallel hardware. The overhead of launching periodic FFT kernels on GPU might paint a very different picture.",
+        "The proposed method introduces significant latency jitter. In Algorithm 2, an expensive FFT of size $O(L)$ is computed every $K$ steps. This causes a massive latency spike at regular intervals. For real-time applications (such as chatbot deployment), tail latency (max latency per token) is often more critical than amortized/average latency, and this periodic stuttering is a major practical drawback.",
+        "The generation time in the prompt-based setting (Algorithm 1) scales quadratically with the number of generated tokens, $O(K^2)$. While this is efficient when the generation length $K$ is very small, it becomes a major bottleneck for long-form generation tasks where $K$ is large.",
+        "The practical motivation is not fully convincing. The authors argue that SSM distillation (e.g., Massaroli et al., 2024) is lossy, but they do not provide any empirical evidence (e.g., downstream task accuracy) showing that exact convolution actually outperforms SSM-distilled models or modern native SSMs like Mamba in a way that justifies the extra inference complexity and latency spikes of FutureFill."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3,
+      "strengths": [
+        "The paper addresses a highly relevant problem: accelerating the exact autoregressive generation of convolutional sequence models (e.g., Hyena, STUs) without relying on distillation or state-space approximations.",
+        "The mathematical exposition is very clean, and the algorithms (Algorithms 1, 2, and 3) are clearly presented with correct complexity and correctness proofs.",
+        "The proposed method achieves a clear theoretical speedup over the naive $O(L)$ per-step decoding."
+      ],
+      "weaknesses": [
+        "The core algorithmic contribution is a rediscovery of a suboptimal version of a classic and well-studied technique in digital signal processing (DSP). The problem of exact autoregressive generation in convolutional sequence models is mathematically identical to real-time, zero-latency causal FIR filtering. In DSP, this is solved using 'partitioned convolution' (e.g., Gardner, 1995).",
+        "While FutureFill is equivalent to a 2-level uniform partitioned convolution achieving $O(\\sqrt{L \\log L})$ amortized complexity per step, non-uniform (multi-level) partitioned convolution algorithms in the DSP literature can achieve $O(\\log L)$ or $O(\\log^2 L)$ amortized complexity per step. The paper misses this connection and presents a suboptimal complexity bound as its main result.",
+        "The empirical evaluation is extremely limited. It only evaluates a single layer on CPU using synthetic data. Modern LLM inference is highly bottlenecked by GPU memory bandwidth, kernel launch overheads, and batching. The paper does not address how FutureFill scales on GPUs, how it handles batching, or its wall-clock speedup on real sequence modeling datasets with actual architectures like Hyena or STUs.",
+        "There is a lack of qualitative or quantitative comparison against existing distillation-based approaches (like Massaroli et al., 2024) in terms of generation speed and accuracy/perplexity trade-offs on real-world tasks."
+      ]
+    }
+  },
+  "v3": {
+    "exp1_quality": {
+      "oa": 8,
+      "strengths": [
+        "Addresses a key bottleneck of convolutional sequence models by reducing the exact autoregressive generation complexity from quadratic $O(L^2)$ to quasilinear $O(L \\log^2 L)$.",
+        "Introduces an elegant and intuitive primitive ('FutureFill') which allows for flexible trade-offs between memory and runtime (e.g., Epoched-FutureFill with $O(\\sqrt{L \\log L})$ memory).",
+        "Provides complete and mathematically rigorous proofs of correctness and complexity for the proposed algorithms.",
+        "Demonstrates practical efficiency gains (up to 2x speedup) on modern GPU hardware (H100) using realistically sized models (up to ~820M parameters)."
+      ],
+      "weaknesses": [
+        "The deep learning experiments in Section 5.2 only evaluate Epoched-FutureFill (Algorithm 1). It would be highly beneficial to see how the theoretically faster Continuous-FutureFill (Algorithm 2) performs in practice on GPUs. It is unclear if it suffers from high constant overheads or parallelization bottlenecks.",
+        "A more detailed comparison with the concurrent work [24] (Flash Inference) would clarify the practical and theoretical advantages of the FutureFill formulation over the relaxed polynomial interpolation approach."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper addresses a highly relevant bottleneck in convolutional sequence models: the quadratic time complexity of auto-regressive decoding.",
+        "The theoretical analysis of the computation and memory complexities is clean, providing clear trade-offs between runtime and cache size.",
+        "The reduction of prefill cache size from O(L+K) to O(K) when generating from a prompt of length L is mathematically elegant and well-justified.",
+        "The appendix contains extensive empirical ablations across different model sizes, depths, and prompt lengths."
+      ],
+      "weaknesses": [
+        "Algorithmic Novelty and Attribution: The core algorithm (Continuous-FutureFill / Algorithm 2) is mathematically identical to the classical 'online multiplication of power series' (often referred to as 'relaxed multiplication' or 'online convolution') popularized by Joris van der Hoeven (1997, 2002) and traced back to Brent (1976). Presenting this as a novel primitive called 'FutureFill' without citing or positioning it relative to this rich classical literature is a significant oversight.",
+        "Poor Practical Speed and High GPU Overhead: In modern deep learning, Wall-clock time on GPUs is heavily dominated by kernel launch overheads and memory bandwidth. The absolute generation speeds reported are extremely slow (e.g., taking over 1000 seconds to generate 126k tokens for a small 670M model on an enterprise H100 GPU). Furthermore, the proposed method is actually slower than the naive $O(L^2)$ baseline for all sequence lengths under 32,768.",
+        "Incomplete Evaluation of the Main Algorithm: The main quasilinear algorithm, Continuous-FutureFill (Algorithm 2, $O(L \\log^2 L)$), is omitted from the deep language model experiments. Only the epoched variant (Algorithm 1) is evaluated, presumably because the constant factors and GPU overheads of Continuous-FutureFill make it impractical. This weakens the connection between the primary theoretical contribution and the empirical results.",
+        "Missing Baselines (SSMs): The main justification for convolutional models over State-Space Models (SSMs) like Mamba is that they represent a more general framework during training. However, during inference, SSMs achieve $O(1)$ time and memory complexity per step. A rigorous comparison should include the inference throughput and latency of equivalent SSMs to show if exact convolutional decoding is a competitive alternative to state-space recurrent models."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "A clean, elegant, and mathematically rigorous solution to a critical bottleneck in convolutional sequence models (the quadratic complexity of autoregressive generation).",
+        "Introduces the 'FutureFill' concept, which provides an intuitive perspective on online convolutions and leads to two useful algorithms (Epoched-FutureFill and Continuous-FutureFill) with different memory/compute trade-offs.",
+        "Shows how to achieve a prompt generation cache size of O(K) (where K is the number of generated tokens) instead of O(L+K) (where L is the prompt length), which is extremely valuable for long-context applications.",
+        "Solid empirical verification on both synthetic benchmarks and realistic deep sequence prediction models (FlashSTU-T, up to 826M parameters) showing clear sub-quadratic scaling and practical speedups of up to 1.7x–2x."
+      ],
+      "weaknesses": [
+        "A minor but critical typo in Algorithm 2 (Line 6): The index for the filter \\phi is written as 1:2^{k(t)}+1 instead of 1:2^{k(t)+1}. Having the '+1' on the baseline instead of in the exponent makes the algorithm mathematically incorrect. For example, at t=2, it would access \\phi_{1:3} instead of \\phi_{1:4}, causing the generated output at t=4 to miss the u_1 \\phi_4 term. This is confirmed by the correct exponentiation notation \\phi[1:2^{i_j+1}] used in the proofs in Appendix E.2.",
+        "A minor spelling typo in the table header on Page 2: 'Prefill+Genertation Runtime' should be 'Prefill+Generation Runtime'.",
+        "While the theoretical speedup is quadratic-to-quasilinear, the actual wall-clock speedup (up to 1.7x–2x) is somewhat limited by hardware-specific factors, such as the overhead of launching multiple FFT kernels on GPU. The authors acknowledge this in the limitations, but further discussion on a custom hardware-aware implementation (e.g., via Triton) could have further bridged this gap."
+      ]
+    }
+  }
+}

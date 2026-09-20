@@ -1,0 +1,92 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Simple and Intuitive Idea: The idea of updating parameters with the largest momentum magnitudes (momentum-based BCD) to minimize parameter drift and prevent catastrophic forgetting is simple, intuitive, and easy to implement.",
+        "No Pre-training Data or Loss Modification Required: Unlike replay-based or regularization-based methods, MoFO is a purely optimizer-level modification that doesn't alter the loss landscape or require access to original pre-training datasets.",
+        "Strong Empirical Results in Preserving General Capabilities: On both instruction fine-tuning and continual fine-tuning, MoFO demonstrates a strong ability to preserve general capabilities (MMLU, Commonsense, HumanEval) while achieving competitive performance on the target fine-tuning tasks compared to full parameter fine-tuning.",
+        "Insightful Toy Example: Section 4 provides a helpful 2D toy example and visualization illustrating how coordinate-wise updates can avoid the interference of multiple attractors and converge closer to the pre-trained initialization."
+      ],
+      "weaknesses": [
+        "Unaddressed Computational Overhead (Wall-Clock Time): Selecting the top-alpha% elements of the momentum vector at every iteration for each parameter block requires sorting or selection (e.g., torch.topk) on large tensors. This operation is computationally expensive on GPUs and can introduce significant latency and synchronization overhead. The paper lacks any runtime or throughput (e.g., tokens/sec, steps/sec) comparison with Full FT or standard Adam.",
+        "No Memory Savings: Because MoFO requires computing the gradients for all parameters and tracking the running momentum (m_t, v_t) globally to identify the top-alpha% parameters, it has the same memory footprint as full Adam. This makes it less practical than Parameter-Efficient Fine-Tuning (PEFT) methods like LoRA, which significantly reduce both memory and compute.",
+        "Missing Critical Baselines (LoRA and Child-Tuning): LoRA is the de facto standard for fine-tuning LLMs while mitigating forgetting, yet it is completely missing from the main results (Tables 2 and 3). Additionally, prior work like Child-Tuning (specifically Child-Tuning-D) also dynamically selects a subset of parameters to update at each step based on gradients/fisher information. A comparison and discussion of MoFO against Child-Tuning is necessary.",
+        "Highly Simplified Theoretical Analysis: The convergence analysis (Theorem 1) is conducted on a simplified gradient descent version of MoFO (Algorithm 2) without any momentum. This simplified version is mathematically equivalent to coordinate descent with the Gauss-Southwell greedy selection rule, whose convergence is already a well-established classical result. The proof does not capture the momentum-filtering mechanism which is the core contribution of the proposed MoFO algorithm."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Simple and intuitive approach: The idea of updating only the parameters with the largest momentum magnitudes to stay close to the pre-trained model is well-motivated and easy to understand.",
+        "Data-free and loss-preserving: Unlike reply-based or regularization-based methods, MoFO does not require access to pre-training data or modification of the fine-tuning loss, making it highly practical for open-source LLM fine-tuning.",
+        "Strong empirical performance: MoFO achieves impressive results in preserving general capabilities during instruction fine-tuning and continual fine-tuning, outperforming baselines like Full FT, L1/L2 regularization, and Half Fine-Tuning (HFT).",
+        "Insightful toy example: The 2D toy landscape successfully illustrates the mechanism of MoFO in avoiding unwanted attractors and converging to a closer minimum."
+      ],
+      "weaknesses": [
+        "Lack of wall-clock time and computational overhead analysis: Sorting or performing top-k selection for all parameter blocks at every iteration can be computationally expensive for multi-billion parameter models. The paper lacks any reporting of training time overhead compared to standard Adam.",
+        "Missing baseline comparison with PEFT (e.g., LoRA): LoRA is the de facto standard for parameter-efficient fine-tuning and is widely used to mitigate forgetting. Comparing MoFO against LoRA on the same benchmarks is critical to show its relative advantages in both training efficiency and capability preservation.",
+        "Gap between theory and practice: Theorem 1 provides convergence guarantees for a simplified GD version of MoFO (Algorithm 2) rather than the actual Adam-based momentum-filtered version (Algorithm 1) used in experiments. The proof itself is standard for coordinate/sparsified descent.",
+        "Typographical error: In Appendix A (Page 19), the inequality derivation for $L(\\Theta_{t+1})$ contains a duplicated line: `= L(\\Theta_t) + (L/2 * \\eta_t^2 - \\eta_t) ||g_t \\odot FILTER_t||_2^2` is written twice."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Simple and intuitive idea of using momentum-based block coordinate descent to keep fine-tuned model parameters close to the pre-trained initialization.",
+        "The 2D toy example and loss landscape visualizations (Figures 2 and 4) provide clear intuition on why subset updates help the optimizer converge to a closer minimum.",
+        "Solid empirical results on Llama-2-7B and TinyLlama-1.1B (TRACE benchmark) showing that MoFO is effective at retaining general capabilities (MMLU, Commonsense) compared to full-parameter fine-tuning and traditional L1/L2 regularization."
+      ],
+      "weaknesses": [
+        "Disconnect between theory and practice: Theorem 1 proves the convergence of a simplified gradient descent version of MoFO (Algorithm 2) which uses gradient magnitudes for coordinate selection. However, the proposed MoFO (Algorithm 1) uses momentum magnitudes. Table 5 shows that gradient-filtered BCD is empirically inferior to MoFO, meaning the convergence proof only applies to a suboptimal baseline and not to the proposed method itself.",
+        "Lack of comparison with LoRA/QLoRA: LoRA is the de facto standard for LLM fine-tuning and is known to mitigate catastrophic forgetting. While the paper discusses LoRA in the related work, it does not include it as a baseline in any of the primary experimental tables (Tables 2, 3, or 4). This makes it difficult to evaluate the practical utility of MoFO compared to existing popular PEFT approaches.",
+        "No savings in memory and potential computational overhead: Unlike PEFT methods, MoFO requires computing gradients for all parameters during the backward pass, and it must maintain optimizer states (first and second moments) for all parameters. Therefore, it does not reduce GPU memory. Furthermore, finding the top-alpha% momentum magnitudes in each partition at every step introduces non-trivial top-k computational overhead. The paper lacks any reporting of wall-clock training time, throughput, or memory consumption comparison.",
+        "Limited novelty in the optimization theory: The convergence of a greedy block coordinate descent (Algorithm 2) under standard Lipschitz smoothness is a well-known result in the optimization literature, making the theoretical contribution of Section 2.4 quite incremental."
+      ]
+    }
+  },
+  "v3": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Novel and intuitive optimizer design: MoFO modifies Adam to update only the parameters with the largest momentum magnitudes. This effectively acts as a greedy block coordinate descent method, restricting parameter deviation from the pre-trained initialization.",
+        "Solid theoretical foundation: The authors prove the convergence of MoFO on non-convex objectives, showing that it achieves the same $O(\\log T / \\sqrt{T})$ convergence rate as full-batch Adam. An illustrative two-dimensional example (and Theorem 2) further clarifies why updating coordinates with the largest momentum prevents the model from deviating too far.",
+        "Extensive experiments and strong baselines: MoFO is evaluated across multiple base models (Llama-2, Gemma, TinyLlama) and benchmarks (MetaMathQA, PMC-LLaMA-Instructions, TRACE). It is thoroughly compared against many competitive baselines (Default FT, HFT, LoRA, L1/L2 regularization, CoFiTune, HMA, etc.), showing superior Pareto-optimal trade-offs between learning new tasks and retaining pre-training knowledge.",
+        "Clear and detailed presentation: The paper is well-written, with thorough explanations in both the main text and appendix, including helpful visualizations of the loss landscapes."
+      ],
+      "weaknesses": [
+        "Optimizer state memory overhead: Although MoFO avoids the additional memory costs of storing pre-trained weights (unlike regularization methods like L2 or EWC), it still maintains the full first and second momentum states ($m$ and $v$) for all parameters. Thus, it does not reduce optimizer memory compared to Default FT (unlike PEFT methods like LoRA).",
+        "No savings in backward pass: MoFO requires computing gradients for all parameters via full-parameter backpropagation. Therefore, it does not speed up training and instead introduces a minor computational overhead (4-5%) due to sorting/filtering.",
+        "Full-batch assumption in theory: Theorem 1 assumes full-batch gradient descent (as is common in many Adam convergence analyses), which does not fully capture the stochasticity of the mini-batch training used in practice."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Clear and intuitive motivation: The authors empirically validate the correlation between distance from the pre-trained weight initialization and the severity of forgetting, which directly justifies the use of a coordinate descent-based approach (greedy BCD) to stay closer to the starting state.",
+        "Simple and memory-efficient: MoFO only modifies the optimizer's update step without requiring access to pre-training data or storing reference pre-trained weights (unlike L2-regularization or replay-based approaches), introducing virtually no additional memory overhead.",
+        "Solid theoretical guarantees: The authors provide a rigorous convergence proof for the full-batch version of MoFO on non-convex objectives, showing that it preserves the same convergence rate as standard Adam ($O(\\log T / \\sqrt{T})$), which is non-trivial since updates are filtered by momentum rather than gradients.",
+        "Comprehensive empirical evaluation: The paper features extensive experiments on various open-source LLMs (Llama-2, Gemma, TinyLlama, Pythia) across different domains (instruction fine-tuning, medical QA, and continual learning). MoFO consistently achieves a superior Pareto frontier (target task performance vs. general capability preservation) compared to solid baselines like HFT, LoRA, and regularization."
+      ],
+      "weaknesses": [
+        "Hyperparameter sensitivity of $\\alpha$: MoFO introduces an extra hyperparameter $\\alpha$ (the updating fraction). While the authors provide a robust proxy-dataset grid search guideline and demonstrate that $5\\%-15\\%$ is generally effective, this still adds a hyperparameter to tune compared to standard full-parameter fine-tuning.",
+        "Simplified theoretical model for forgetting: The analysis in Section 3.2 is based on a toy quadratic-like attractor system on hyperplanes. While illustrative, it is highly simplified and does not capture the full complexity and non-convexity of deep neural network landscapes during SFT.",
+        "Additional computational overhead: Sorting/filtering the top $\\alpha\\%$ momentum elements in each parameter block at every step introduces a slight training time overhead (empirically shown to be around $4\\%-5\\%$ in Appendix G.2). While manageable, it is still a minor drawback."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "The paper addresses a highly practical and significant problem in LLM fine-tuning: mitigating catastrophic forgetting of general capabilities without requiring access to pre-training data or introducing heavy memory overhead.",
+        "The proposed Momentum-Filtered Optimizer (MoFO) is conceptually simple, elegant, and motivated by an intuitive connection between greedy block coordinate descent (BCD) and minimizing parameter drift from the pre-trained state.",
+        "The authors provide a rigorous convergence proof for the proposed momentum-filtered coordinate update under the Adam framework, which is non-trivial due to the decoupling of gradients and momentum.",
+        "Extensive experiments on various model architectures (Llama-2, Gemma, TinyLlama) and multiple benchmarks (including math, medical QA, and the TRACE continual learning benchmark) demonstrate that MoFO consistently outperforms state-of-the-art baselines in balancing fine-tuning performance and forgetting."
+      ],
+      "weaknesses": [
+        "There is a gap between the theoretical convergence analysis and practical settings: Theorem 1 assumes a full-batch optimizer and a diminishing learning rate schedule ($\\eta_t = \\eta / \\sqrt{t}$), whereas the practical implementation uses mini-batch training with a cosine decay learning rate.",
+        "The hyperparameter $\\alpha\\%$ (the update fraction) requires tuning for different datasets and models. Although the authors provide a practical proxy-subset grid search guideline, this introduces additional preprocessing overhead.",
+        "The computational overhead of computing the top-$\\alpha\\%$ momentum filter at every step, while relatively low (4-5%), relies on GPU sorting or selection kernels (like `torch.topk`) which can scale poorly on extremely large models if not carefully optimized."
+      ]
+    }
+  }
+}

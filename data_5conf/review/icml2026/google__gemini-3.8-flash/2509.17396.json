@@ -1,0 +1,97 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Addresses a critical and practical limitation of existing KV cache compression methods: post-prefill methods suffer from linear peak GPU memory growth during prefill, whereas block-prefill eviction severely degrades multi-turn conversational QA accuracy due to the lack of query alignment.",
+        "The proposed episodic caching framework is intuitive and well-motivated: using conversational clustering to identify medoid segments as patched prompts allows pre-computing topic-specialized caches under bounded memory.",
+        "The sensitivity-aware layer-wise budget allocation is technically sound, computationally lightweight (requiring only a single calibration sample), and demonstrates superior alignment with full KV representations compared to existing heuristics like PyramidKV.",
+        "Extensive empirical evaluation across four modern LLMs (LLaMA-3.2-3B, LLaMA-3.1-8B, Qwen2.5-3B, Qwen2.5-7B) on three diverse conversational benchmarks (Realtalk, LoCoMo, LongMemEval), consistently outperforming prior block-prefill KV compression baselines by large margins (up to 20+ points under strict budgets).",
+        "Detailed efficiency and hardware-aware analysis, including breakdown of decoding latency, CPU-to-GPU transfer times, episode switching frequencies, and ablations over key hyperparameters."
+      ],
+      "weaknesses": [
+        "Increased prefill computation and host memory footprint: Because block prefill must be repeated for each of the $E$ episodes (Phase A3 in Algorithm 1), the total prefill compute scales linearly by a factor of $E$. In addition, storing $E$ separate KV caches offloaded to CPU memory scales aggregate storage requirements ($E \\times M$), which warrants a more explicit discussion in the main paper.",
+        "Static context assumption: The clustering and cache construction process operates under the assumption of a static, finalized conversation history $H$. In realistic long-term conversational assistants where new dialogue turns are constantly appended, it remains unclear how the episodic caches should be dynamically updated or re-clustered without incurring frequent, costly re-prefills.",
+        "Limitations on cross-episode multi-hop reasoning: Routing an incoming query to a single best-matching episode ($e^\\dagger$) poses inherent risks when a query requires synthesizing evidence distributed across multiple distinct topical episodes. Investigating multi-episode cache union or top-$k$ retrieval could strengthen the approach."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Clear problem formulation and motivation: Addresses the practical dilemma in long conversational QA where post-prefill eviction incurs unbounded peak GPU memory, whereas existing block-prefill eviction suffers severe degradation due to misalignment with future queries.",
+        "Principled and well-motivated method: Combining dialogue segmentation/clustering to create episode-specialized KV caches via medoid-patched prompts, paired with an input-independent layer-sensitivity profiling for non-uniform budget allocation, is intuitive and effective.",
+        "Extensive empirical evaluation: Thoroughly validated across three representative LongConvQA benchmarks (Realtalk, LoCoMo, LongMemEval) and four LLMs (LLaMA-3.2-3B, LLaMA-3.1-8B, Qwen2.5-3B, Qwen2.5-7B) against five adapted baselines, demonstrating substantial performance improvements (often >10-20 F1 points under tight memory budgets).",
+        "Detailed efficiency and systems analysis: Provides a breakdown of decoding latency, CPU-to-GPU cache transfer overhead, peak GPU memory footprint, and episode-switching dynamics across conversational turns."
+      ],
+      "weaknesses": [
+        "Increased offline storage and prefill compute overhead: Building $E$ episodic caches requires performing block-wise prefill $E$ times, scaling offline prefill computation linearly with $E$. Furthermore, total offline host memory storage scales to $E \\times M$, whereas standard baselines maintain only a single cache of size $M$. A comparison against baselines under equal total storage (e.g., baseline with $E \\times M$ or EpiCache with budget $M/E$) would provide a clearer view of the capacity-storage trade-off.",
+        "Potential vulnerability on cross-episode / multi-hop queries: Long conversational QA frequently requires reasoning over events spread across different sessions or disparate topics. Since EpiCache routes an incoming query to only a single top-1 episodic cache ($C_{KV}^{(e^\\dagger)}$), queries requiring synthesis across multiple topical clusters could suffer from missing context.",
+        "Handling dynamic/streaming dialogues: The current formulation assumes a fixed, pre-existing dialogue history $H$ that is clustered and compressed offline. In realistic conversational assistants where user interactions arrive incrementally, re-clustering and re-prefilling multiple episodic caches could introduce significant latency unless incremental updating strategies are established."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Clear and well-motivated problem formulation: Addresses the critical tension in LongConvQA between the bounded GPU memory offered by block-wise prefill and the accuracy degradation caused by query-agnostic eviction.",
+        "Comprehensive empirical evaluation: Experiments span four modern open-source LLMs (LLaMA-3.2-3B, LLaMA-3.1-8B, Qwen2.5-3B, Qwen2.5-7B) across three established conversational memory benchmarks (Realtalk, LoCoMo, and LongMemEval up to 100K context tokens).",
+        "Strong performance gains: EpiCache consistently and significantly outperforms recent block-prefill baselines (e.g., KVzip, InfiniPot, KeyDiff) across various memory budgets, closing much of the accuracy gap toward full KV caching.",
+        "Thorough efficiency and systems analysis: The authors provide detailed latency breakdowns (including query embedding, centroid matching, and CPU-to-GPU KV retrieval overhead) and turn-to-turn episode switching dynamics, demonstrating practical decoding speedups and GPU memory reductions.",
+        "Solid ablations: Informative analysis comparing the episodic KV cache strategy against a text-level RAG baseline, along with hyperparameter sweeps over block size, clustering encoders, and episode counts."
+      ],
+      "weaknesses": [
+        "Multiplied prefill computation overhead: Building E episodic KV caches requires running block-wise prefill E times over the entire dialogue history (Algorithm 1, lines 13-17). While peak GPU memory remains bounded, the total FLOPs and prefill time scale linearly with E (e.g., 4× compute for E=4). This significant compute/energy overhead during the prefill phase is not prominently reported alongside the decoding latency in the main text.",
+        "Static dialogue history assumption: The workflow assumes a completed, static conversation history that can be clustered and prefilled offline before questions arrive. In realistic, continuously unfolding multi-turn conversational agents where user and assistant exchange turns dynamically, re-clustering and re-running prefill passes on every few new turns would be computationally prohibitive.",
+        "Bottleneck on cross-episodic / multi-hop queries: Online retrieval routes each query to a single episodic cache C_KV^(e†). Queries requiring synthesis across distinct episodes (e.g., multi-session or complex two-hop questions bridging different topics) are structurally disadvantaged by being restricted to one episode's compressed cache.",
+        "Host memory footprint: While GPU memory is tightly bounded, storing E compressed caches on host CPU RAM scales linearly with the number of episodes (E × M). For multi-user serving or very long conversations, this creates non-trivial host RAM pressure and PCIe transfer requirements."
+      ]
+    }
+  },
+  "v4": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Practical and timely problem: Addressing the peak memory bottleneck during the prefill phase (block-wise prefill) for long-term multi-turn conversational agents is a crucial challenge for deploying LLMs in resource-constrained and on-device settings.",
+        "Well-motivated method: Combining dialogue segmentation and clustering into topical episodes with patched-prompt-guided block eviction offers an elegant way to maintain topic-specific KV caches without needing oracle future queries.",
+        "Sensitivity-aware layer allocation: The layer-wise budget allocation grounded in Key-state cosine deviation under masked simulation is empirically well-justified, yielding noticeable improvements over uniform or heuristic (e.g., PyramidKV) allocations.",
+        "Comprehensive empirical validation: Evaluated across multiple diverse LongConvQA benchmarks (LongMemEval, Realtalk, LoCoMo), LongBench document QA tasks, and multiple model families (LLaMA-3.1/3.2, Qwen2.5/Qwen3) across varying model sizes and context budgets, consistently outperforming strong baselines.",
+        "Thorough analysis: The paper includes rigorous ablations on segmentation units, embedding backbones, episode counts, layer allocation sharpness, multi-episode reasoning, and calibration sample domain invariance."
+      ],
+      "weaknesses": [
+        "Total host/storage memory overhead: While peak active GPU memory is constrained to $M + M_{\\text{block}}$, constructing and storing $E$ episodic KV caches requires $E \\times M$ storage offline (e.g., in host CPU RAM or disk). In resource-constrained edge devices with shared unified memory (such as mobile SoCs), storing multiple compressed caches could still be non-trivial.",
+        "Prefill computation scaling with $E$: Constructing $E$ separate episodic caches requires performing block-wise prefill over the full history $E$ times (once per episode prompt), multiplying the offline prefill computation and energy consumption by $E$.",
+        "Cache rebuilding overhead upon context expansion: In Stage 3b, refreshing an episodic cache when it exceeds $M + M_{\\text{block}}$ requires re-running clustering and rebuilding episodic caches. Clarifying how frequently full rebuilds are triggered during long interactions and their runtime overhead would strengthen the operational feasibility."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Addresses a critical and realistic bottleneck in deploying LLMs on resource-constrained devices: while post-prefill eviction methods reduce decoding cache size, they require unbounded peak memory during prefill, making block-wise prefill essential yet difficult due to accuracy degradation.",
+        "The episodic cache concept is well-motivated for multi-turn conversations; using centroid-closest segments as patched prompts effectively guides block-wise eviction without requiring oracle access to future queries or re-prefilling the entire history at each turn.",
+        "The sensitivity-aware layer-wise budget allocation based on key state deviation under simulated block prefill is conceptually clean, domain-agnostic, and demonstrated to reduce prediction KL divergence compared to existing allocation schemes.",
+        "Extensive and rigorous empirical evaluation across three long-conversation benchmarks (LongMemEval, Realtalk, LoCoMo), multiple model families (LLaMA-3.1/3.2, Qwen2.5, Qwen3), and long-form document QA, consistently demonstrating superior performance over strong baselines (e.g., KVzip, InfiniPot, KeyDiff, RAG).",
+        "Thorough ablations and efficiency profiling that quantify trade-offs in segmentation unit, encoder choice, episode count, allocation sharpness, peak memory, and end-to-end decoding latency."
+      ],
+      "weaknesses": [
+        "Episodic cache construction overhead: Building the episodic KV caches requires running block-wise prefill over the entire history E times (once for each episode prompt). Although peak memory remains flat, the total prefill compute scales linearly with E, which can become noticeable for frequent offline updates.",
+        "Aggregate storage footprint: While active GPU memory during decoding is bounded to budget M, maintaining E separate episodic caches increases the total storage/host memory footprint to E x M tokens. The trade-offs and latency of offloading and swapping these caches between host memory and GPU memory under strict memory limits could be explored more explicitly.",
+        "Hard routing for complex multi-episode reasoning: At inference, queries are routed to a single episodic cache via argmax cosine similarity. While the paper shows that contextualized block prefill retains some cross-episode dependencies, queries that strictly require detailed factual evidence from multiple distinct episodes may still suffer from information loss compared to multi-cache retrieval or merging strategies.",
+        "Selection of the episode count E and new episode creation threshold tau: In the main experiments, E is fixed to 4. For conversations with highly variable lengths and topic diversities, an adaptive mechanism for choosing E and tuning the threshold tau would make the framework more robust."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Clear Motivation and Problem Formulation: The paper addresses a critical challenge in on-device conversational AI: reconciling the strict constant-memory requirement of block-wise prefill with the retention of multi-turn dialogue context, avoiding the unbounded peak memory of post-prefill eviction methods (Figure 1).",
+        "Novel and Principled Design: The two core components—using unsupervised conversational episode clustering medoids as patched prompts for block-prefill eviction (Section 3.1) and sensitivity-aware layer-wise budget allocation via Key-state deviation under custom causal masking (Section 3.2)—are well-reasoned, training-free, and directly target the root causes of quality degradation in block-wise eviction.",
+        "Comprehensive and Rigorous Empirical Evaluation: Evaluated across six model variants (LLaMA-3.1-8B, LLaMA-3.2-3B, Qwen2.5-3B/7B, Qwen3-4B/8B) and three prominent LongConvQA benchmarks (LongMemEval, Realtalk, LoCoMo), plus LongBench document QA. EpiCache consistently outperforms competitive block-prefill baselines (KVzip, InfiniPot, KeyDiff, SnapKV) by significant margins (up to 30% absolute improvement at low budgets) and maintains robustness up to 100K context length (Figure A3, Tables A4–A6).",
+        "In-Depth Ablations and Diagnostic Analyses: The paper provides extensive analyses, including multi-episode/cross-turn reasoning behavior (Figure 8, Table 1), layer-wise sensitivity stability across domains and sample counts (Figure 9), segmentation units, and embedding backbones (Table 2)."
+      ],
+      "weaknesses": [
+        "Prefill Computation and Energy Overhead: Constructing E episodic KV caches requires running block-wise prefill over the context history E times (once per episode prompt; Table 3 shows Stage 2 prefill executed 4 times). While peak GPU memory remains bounded, the total floating-point operations and offline prefill latency scale linearly with E.",
+        "Hierarchical Storage and Cache Swapping Overhead: Maintaining E distinct episodic caches of size M requires an aggregate storage footprint of E * M on CPU/host memory or secondary storage. Although only one cache of size M resides in GPU memory at a time, frequent topic switching across turns incurs repeated host-to-device cache transfer and write-back latencies (Stage 3 in Table 3), which may become non-negligible in bandwidth-limited edge architectures.",
+        "Limitations in Incremental Updates: When an episodic cache exceeds M + M_block, EpiCache currently rebuilds the cache by re-running block prefill over the accumulated history rather than performing an online incremental update. For very long lifelong dialogues, repeated reconstruction could introduce noticeable latency spikes.",
+        "Single-Cache Routing for Complex Cross-Episodic Queries: In Stage 3, generation conditions solely on a single retrieved cache C_KV^(e*). While the authors show that block-wise prefill over the full conversation preserves some cross-episode contextualization, queries that require granular, simultaneous facts from distinctly separated episodes still exhibit a notable performance gap compared to full KV (Table 1 and Figure 8)."
+      ]
+    }
+  }
+}

@@ -1,0 +1,97 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 6,
+      "strengths": [
+        "Addresses an important and timely challenge: while token filtering methods (such as Rho-1) have demonstrated substantial sample efficiency gains, they fail to achieve practical computational speedups due to dense gradient propagation through attention and the inefficiency of sparse GEMM operations at moderate sparsity levels.",
+        "The system design is well-engineered: transforming sparse GEMMs into dimension-reduced dense GEMMs by dynamically rewriting the PyTorch autograd computational graph is a pragmatic and effective solution.",
+        "The use of prime-number dimension marking to unambiguously identify and shrink batch/sequence dimensions within dynamic computational graphs is a clever technique that facilitates automated operator generation.",
+        "Convincing efficiency evaluation across three different LLM architectures (TinyLlama-1.1B, Qwen2.5-1.5B, and Phi-1.5), achieving up to 35.1% backward speedup and 22.0% end-to-end training time reduction with negligible operator overhead."
+      ],
+      "weaknesses": [
+        "Noticeable degradation in model utility compared to Rho-1: on math reasoning benchmarks, Collider achieves an average score of 20.7% compared to Rho-1's 24.8% (retaining less than half of Rho-1's utility improvement over full training at 17.8%). While the authors hypothesize that this gap could be closed by hyperparameter tuning (e.g., learning rates, batch size), no empirical evidence or ablation is provided to support this claim.",
+        "Lack of rigorous mathematical formulation for the activation-filtered backward pass: truncating or masking intermediate attention activations (softmax/Q/K) modifies the true gradient of the unmasked tokens due to causal masking dependencies. The paper does not thoroughly analyze the resulting biased gradient estimation or explain theoretically what objective function is implicitly being optimized.",
+        "Limited utility evaluation scope: downstream utility is evaluated only on TinyLlama-1.1B on a single domain (mathematical reasoning via OpenWebMath), leaving open whether the utility gap generalizes to other domains or model architectures.",
+        "Evaluations are restricted to single-node 8x RTX 3090 setups with small models (~1B-1.5B parameters). While Section 4.2 provides insightful discussion on compatibility with Tensor, Sequence, and Pipeline Parallelism, no empirical benchmarks are provided for distributed multi-node settings."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Addresses an important and timely problem: while prior token filtering methods (e.g., Rho-1) demonstrated utility benefits, they achieved virtually no training speedup (~1.2%) due to dense gradient propagation through attention and poor hardware support for moderate sparsity (30-40%).",
+        "Novel and practical system design: mutating PyTorch's dynamic autograd computation graph to convert sparse GEMMs into dimension-reduced dense GEMMs avoids the severe performance penalties of sparse tensor libraries.",
+        "Clever offline analysis workflow: using prime number dimensional markers during a synthetic dry run to reliably resolve ambiguous tensor dimensions across arbitrary PyTorch autograd graph nodes.",
+        "Solid efficiency gains: achieves 25.7% to 35.1% reduction in backward pass latency and 15.0% to 22.0% end-to-end speedup across three contemporary small LLMs (TinyLlama, Qwen2.5-1.5B, Phi-1.5).",
+        "Low integration barrier: packaged as a PyTorch C++ extension that requires only minimal modification (a few lines of code) to existing training loops."
+      ],
+      "weaknesses": [
+        "Noticeable degradation in model utility compared to Rho-1: on math reasoning tasks (Table 2), Collider's average utility score drops from 24.8 to 20.7 compared to Rho-1 (e.g., GSM8K drops from 11.7% to 6.7%, MAWPS from 63.2% to 46.7%). While Section 4.1 hypothesizes that this is due to hyperparameter mismatch caused by gradient truncation, the authors do not provide empirical evidence or tuning to validate this claim.",
+        "Lack of theoretical grounding for activation truncation: modifying the backward attention pass (cutting off gradients from subsequent kept tokens to preceding dropped tokens) fundamentally changes the gradient estimator rather than being an exact speedup. A formal discussion or ablation of the bias introduced by this gradient approximation is missing.",
+        "Limited evaluation scale and unvalidated distributed claims: experiments are confined to small models (1.1B–1.5B) on a single 8-GPU node. While Section 4.2 details how Collider could benefit distributed parallelisms (Tensor Parallel, Sequence Parallel, Pipeline Parallel), none of these distributed configurations are implemented or benchmarked.",
+        "Reference model overhead remains unaddressed in practice: Section 4.3 discusses using n-gram models to reduce reference model inference cost, but the actual implementation assumes offline precomputed reference losses and leaves the integration to future work."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Addresses an important and practical systems bottleneck: while backward token filtering (e.g., Rho-1) has proven effective for data efficiency and model quality, existing training frameworks achieve virtually zero wall-clock speedup due to dense attention activations and the inefficiency of sparse GEMM at moderate (30–40%) sparsity.",
+        "Clever systems engineering design: the automatic offline graph tracing workflow using prime number dimensional markers to identify sequence axes and transform dynamic autograd backward graphs into dimension-reduced dense GEMMs is creative and avoids runtime overhead.",
+        "Solid efficiency gains demonstrated across multiple modern open-weight architectures (TinyLlama-1.1B, Qwen2.5-1.5B, and Phi-1.5), achieving 15–22% overall iteration speedups and up to 35% backward pass speedups on an 8-GPU testbed.",
+        "Good engineering ergonomics: packaged as a PyTorch C++ extension requiring only minimal lines of code change in standard training loops while retaining compatibility with FlashAttention."
+      ],
+      "weaknesses": [
+        "Substantial degradation in downstream utility compared to the exact backward token filtering baseline (Rho-1): Table 2 shows average utility drops from 24.8% (Rho) down to 20.7% (Collider), erasing nearly half of the utility improvement over standard training (17.8%). On key benchmarks such as GSM8K (11.7% -> 6.7%) and MAWPS (63.2% -> 46.7%), the performance penalty is severe.",
+        "Unsubstantiated claim regarding hyperparameter tuning: The authors hypothesize in Section 4.1 and Section 6.2 that the utility degradation is due to differing gradient dynamics and could be mitigated with larger batch sizes or layer-wise learning rates, but provide no empirical validation or tuning experiments to substantiate this claim.",
+        "Limited utility evaluation scope: Downstream task evaluations are only conducted on a single small model (TinyLlama-1.1B). While efficiency microbenchmarks include Qwen2.5 and Phi-1.5, their task performance and convergence under Collider are not evaluated.",
+        "End-to-end overhead of the reference model is omitted: The evaluation assumes reference model losses are precomputed offline. In dynamic data filtering or online training pipelines, reference model forward passes introduce significant computational overhead that would diminish the reported end-to-end wall-clock speedups.",
+        "Fragility and maintenance of internal autograd graph manipulation: Hijacking and mutating PyTorch's internal C++ autograd nodes (`MmBackward0`, `ScaledDotProductFlashAttentionBackward0`, etc.) relies on internal implementation details that are notoriously unstable across PyTorch minor releases and may not generalize cleanly to custom kernels, sequence parallelism, or distributed communication hooks."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 8,
+      "strengths": [
+        "Compelling problem formulation: The paper clearly identifies a major bottleneck in existing backward token filtering methods—namely that despite dropping 30–50% of tokens, practical speedups are negligible (~1.2%) due to activation recomputation and dense gradient propagation in attention blocks.",
+        "Well-motivated algorithm-system co-design: The algorithmic decomposition of FlashAttention backward (handling dQ vs. dK/dV separately to preserve mathematical validity while maintaining sparsity) is clever and sound. The system-level conversion of sparse GEMM to dimension-reduced dense GEMM via PyTorch computation graph rewriting directly tackles the inefficiency of sparse GEMM libraries in the medium-sparsity regime.",
+        "Comprehensive and convincing evaluation: The authors evaluate on a wide range of model architectures and scales (from 1.1B up to 40B parameters), across diverse training settings (ZeRO-1 Data Parallelism, Tensor Parallelism up to TP=8, and LoRA fine-tuning). The observed speedups (up to 49.9% backward and 34.7% end-to-end) are substantial and validate the design.",
+        "High usability and ease of integration: By wrapping the graph mutation and custom attention backward kernel into a single operator, the framework can be adopted with minimal code modifications."
+      ],
+      "weaknesses": [
+        "Downstream utility evaluation is restricted to smaller models: Downstream task performance (Table 1) is only reported for TinyLlama-1.1B. While convergence curves in Figure 4 demonstrate training loss behavior, reporting benchmark evaluation scores for a larger model (e.g., 7B or 8B) would provide stronger empirical validation that utility improvements scale consistently.",
+        "Discussion of reference model overhead: Backward token filtering assumes per-token reference losses are available (Equation 1–2). In Code 2, `ref_loss` appears to be pre-loaded with the batch. Clarifying whether reference model evaluation is precomputed offline or runs online—and how that impacts total wall-clock cost in pre-training or fine-tuning pipelines—would improve clarity.",
+        "Anonymization artifact: Section C.3 contains an incomplete sentence ('The system is open-sourced and hosted on GitHub. The link is'). An anonymous repository link should be provided."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Addresses an important and practical bottleneck: while backward token filtering is well known to improve token efficiency and final model quality, prior implementations achieved negligible wall-clock speedups (<2%) due to gradient propagation through dense activations in memory-efficient attention and lack of low-sparsity GEMM acceleration.",
+        "Technically sound algorithm-system co-design: the paper cleanly dissects the attention backward pass, identifying the asymmetric dependency between dQ and dK/dV activations, and addresses this without destabilizing gradient computation. The transformation of sparse sequence GEMMs into dimension-reduced dense GEMMs via backward autograd graph mutation is novel and elegant.",
+        "The prime-number dimension tagging trick used in offline profiling is an ingenious and pragmatic solution to dynamically discover and manipulate sequence dimensions across arbitrary autograd node graphs without manual per-layer bookkeeping.",
+        "Extensive efficiency benchmarking across multiple model families and scales (1.1B to 40B parameters) and across diverse distributed execution modes (ZeRO-1 DP, Tensor Parallelism up to TP=8, and LoRA), delivering up to ~50% backward speedup and ~35% end-to-end wall-clock savings.",
+        "Clean and developer-friendly integration, requiring minimal intrusive code changes for standard PyTorch training pipelines."
+      ],
+      "weaknesses": [
+        "Accounting for reference model overhead: backward token filtering relies on token loss differences between the target model and a reference model. The paper should clearly quantify the computational and memory overhead of running or caching the reference model during the end-to-end training loop.",
+        "Scope of downstream evaluation: the utility experiments focus primarily on mathematical reasoning fine-tuning with OpenWebMath and TinyLlama. Evaluating on broader pre-training benchmarks or multilingual/code settings across larger models would provide a more complete assessment of utility preservation.",
+        "Autograd graph hacking fragility: directly mutating PyTorch autograd C++ internals (e.g., node attributes, unpacked SavedVariables, and symbol sizes) is notoriously brittle across PyTorch version updates and incompatible with newer compilation stacks such as torch.compile / Inductor. A discussion on integration with graph-capture/AOTAutograd compiler frameworks is missing.",
+        "Appendix C.3 contains an incomplete placeholder URL for the open-source repository ('The link is ')."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 6,
+      "strengths": [
+        "Addresses an important and practical bottleneck: while backward token filtering has been shown to improve data efficiency and model utility, prior implementations yielded negligible wall-clock speedups (<2%) due to gradient densification in attention backprop and the poor performance of sparse GEMM at moderate sparsity levels (30-50%).",
+        "Sound algorithm-system co-design: The authors identify why naive activation filtering causes gradient corruption in FlashAttention (harming query gradients), derive a decoupled backward formulation for attention (separating dQ from dK/dV), and transform sparse GEMM into dense dimension-reduced GEMM.",
+        "Clever graph manipulation workflow: By exploiting runtime stability during training and using prime-number dimension markers to identify tensor dimensions in PyTorch's dynamic autograd graph, the system provides a clean, drop-in integration with minimal user-facing code changes.",
+        "Comprehensive efficiency evaluation: Evaluates models spanning 1.1B to 40B parameters across diverse settings (data parallelism, tensor parallelism, and LoRA), demonstrating solid end-to-end training speedups of up to 34.7% and backward speedups of up to 49.9% at 50% filtering ratio."
+      ],
+      "weaknesses": [
+        "Fragility and engineering complexity of autograd graph modification: Directly intercepting and mutating internal PyTorch autograd graph nodes (e.g., C++ node attributes and unpacked variables) is inherently brittle across framework versions and may conflict with modern graph capture/compilation pipelines like `torch.compile` / Inductor.",
+        "Omission of reference model overhead: The paper evaluates time spent in target forward, filter operator, and backward, but backward token filtering requires loss values from a reference model. The computational cost, memory footprint, and communication overhead of computing reference losses should be explicitly accounted for or clarified regarding when they can be amortized offline.",
+        "Limited evaluation scope for model utility: While efficiency is benchmarked up to 40B models, the utility evaluation (Table 1 and Figure 4) is restricted primarily to mathematical reasoning fine-tuning on TinyLlama-1.1B. Demonstrating utility retention across larger models and broader pretraining domains (e.g., general language modeling) would significantly strengthen the empirical claims."
+      ]
+    }
+  }
+}

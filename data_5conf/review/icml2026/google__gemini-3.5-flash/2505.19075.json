@@ -1,0 +1,94 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "The core idea of decoupling reasoning capability into a lightweight, plug-and-play module (π_r) that interacts with a frozen backbone at the logit level is highly practical, elegant, and computationally efficient.",
+        "Excellent support for modular composition and transferability. The paper demonstrates that a small reasoning module (e.g., 0.5B or 1B) can be successfully transferred to larger backbones (e.g., 8B, 14B) without further training, and multiple modules (math + translation) can be composed via weighted logit addition.",
+        "Solid theoretical grounding, establishing a formal connection between the learned reasoning module and the optimal soft Q-function, which provides strong justification for treating token-level log-probabilities as guidance signals.",
+        "Comprehensive empirical evaluation spanning multiple reasoning benchmarks (GSM8K, MATH-500, AIME24, Minerva, OlympiadBench), machine translation, and even extensions to vision-language backbones in the appendix.",
+        "Significant reduction in activation memory and VRAM usage during reinforcement learning training, since the large backbone model remains completely frozen and gradients are only computed for the smaller module."
+      ],
+      "weaknesses": [
+        "At inference time, running UniR requires executing forward passes on both the large backbone model and the smaller reasoning module. This introduces a non-trivial computational and latency overhead compared to using a single fine-tuned model, which is not thoroughly quantified or benchmarked in terms of generation speed/TPS.",
+        "The logit addition formulation (π_θ ∝ log π_b + log π_r) implicitly assumes that the backbone and the reasoning module share the exact same vocabulary. This heavily restricts the 'universality' of the approach, as it cannot be easily applied across different model families (e.g., using a Qwen-trained reasoning module to guide a LLaMA backbone). This vocabulary constraint should be discussed more explicitly.",
+        "The performance of UniR on the Qwen2.5-3B backbone (Table 1) slightly underperforms standard full GRPO and GRPO LoRA. While the benefits of modularity and training efficiency remain, the trade-off in peak downstream performance on some architectures deserves a more transparent discussion.",
+        "The paper would benefit from a direct comparison or discussion with existing logit-based model combination and guidance methods, such as Proxy-Tuning (Liu et al., 2024), which similarly uses logit arithmetic to guide frozen backbones using tuned smaller models."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Elegant and theoretically grounded formulation: Decomposing the trajectory-level reward into a sum of log-probabilities of a compact reasoning module allows for simple logit addition at inference time, bypassing the need for training complex token-level value functions.",
+        "Multi-faceted modularity (Composability & Transferability): The method excels at modular composition (e.g., combining math and translation modules for multi-faceted tasks without retraining) and transferability across model scales (applying a small module trained on a 3B model to guide a 14B model, or guiding a frozen VLM with a text-only module).",
+        "High training efficiency: Keeping the large backbone model frozen and backpropagating only through the lightweight reasoning module dramatically reduces activation and gradient memory overhead, enabling significantly larger training batch sizes compared to full-model tuning or LoRA.",
+        "Comprehensive and rigorous evaluation: The paper evaluates the approach on multiple out-of-distribution math benchmarks, machine translation, and multimodal settings, demonstrating robust empirical gains."
+      ],
+      "weaknesses": [
+        "Vocabulary compatibility constraint: Logit-level additive guidance dictates that the backbone LLM and the reasoning module must share the exact same tokenizer and vocabulary. This restricts the transferability of the trained module across different model families (e.g., guiding a LLaMA model with a Qwen-trained module).",
+        "Inference-time computational overhead: Running both the frozen backbone and the reasoning module concurrently during inference increases generation latency and GPU memory footprint compared to a single fine-tuned model. The paper lacks a quantitative analysis/measurement of this inference-time slowdown.",
+        "Performance gap for highly compact modules: For the Qwen2.5-3B model, the 0.5B reasoning module achieves 42.2 average accuracy, which still falls short of GRPO Full (44.8). This indicates a slight capacity bottleneck when the reasoning module is extremely small."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "Resource-efficient training: Training only the lightweight reasoning module while keeping the larger backbone model frozen significantly reduces training-time memory (VRAM) overhead, making reinforcement learning training much more accessible.",
+        "Modularity and composability: The paper successfully demonstrates that multiple specialized reasoning modules (e.g., a math solver and a translation module) can be combined at inference time using weighted logit addition to tackle multi-faceted tasks.",
+        "Cross-model transfer: The empirical evaluation shows that a reasoning module trained with a smaller backbone model can be transferred to guide a larger backbone of the same family (e.g., a 0.5B module guiding a 14B backbone) and achieve performance improvements."
+      ],
+      "weaknesses": [
+        "Mathematical inconsistency in reward modeling: Equation (4) assumes that the reward can be represented exactly as the sum of log-probabilities of the reasoning module without any sequence-level partition function. Since arbitrary rewards (like binary exact match or BLEU) do not naturally normalize to 1 over the sequence space, this formulation is technically flawed unless a prompt-dependent partition function $Z(x)$ is introduced. Ignoring this term affects the theoretical claims and interpretation of Theorem 1.",
+        "Inference latency and computational overhead: Autoregressive generation is highly memory-bandwidth bound. Running two separate models (the backbone and the reasoning module) sequentially or in parallel at every decoding step to sum their logits introduces substantial latency and memory access overhead. The paper lacks a quantitative evaluation of inference throughput (tokens per second) and latency compared to standard single-model inference.",
+        "Inconsistent empirical performance: While UniR shows strong results on Llama-3.2, it underperforms both GRPO Full and GRPO LoRA when evaluated on the Qwen2.5-3B backbone. The reasons behind this discrepancy across model families are not adequately investigated or explained.",
+        "Tokenizer and vocabulary constraints: Because the plug-and-play guidance occurs directly at the logit level, the backbone and the reasoning module must share the exact same tokenizer and vocabulary. This architectural dependency heavily restricts the 'universality' of the reasoner, as a module trained on one model family (e.g., Qwen) cannot be used with another (e.g., Llama). This limitation is not explicitly discussed.",
+        "Limited novelty in the inference mechanism: Combining the logits of a small specialized model and a large base model (Product of Experts) is a well-established concept in literature (e.g., DExperts, Contrastive Decoding). While training the expert directly with GRPO is an interesting application, the underlying decoding mechanism itself has limited novelty."
+      ]
+    }
+  },
+  "v3": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Strong theoretical foundation: The paper provides a solid mathematical formulation connecting logit-level additions to soft Q-learning (Theorem 4.1) and multi-objective optimization, justifying why modular addition of logits works.",
+        "Comprehensive empirical evaluation: The proposed UniR method is thoroughly tested across multiple diverse domains, including mathematical problem-solving, machine translation, multi-modal vision-language tasks, and medical prediction benchmarks.",
+        "Excellent modularity and transferability: The paper demonstrates impressive weak-to-strong generalization (where small reasoners successfully guide much larger frozen backbones) and compositionality (combining math and translation modules to solve German math problems in English).",
+        "Detailed computational and training analyses: The authors provide detailed investigations into VRAM footprint during training, gradient stability, robustness to temperature variations, and inference efficiency using Speculative Decoding."
+      ],
+      "weaknesses": [
+        "Cross-tokenizer dependency limitation: Although the method is described as a 'Universal Reasoner', its performance drops significantly when transferring across different model families with mismatched vocabularies (e.g., Llama to Qwen as shown in Table 10), making it less 'universal' across heterogeneous architectures without advanced token alignment techniques.",
+        "Inference memory and compute overhead: Running multiple models (the frozen backbone plus one or more reasoning modules) at inference time inherently increases the overall VRAM footprint to store the weights and KV caches of all active models. The paper could benefit from a more detailed discussion of this inference VRAM overhead.",
+        "Unclear training overhead details: While only the parameters of the lightweight reasoning module are updated, the frozen backbone must still be loaded and executed in inference mode during the GRPO sampling phase. The paper should more prominently discuss the actual computational cost and resource requirements of the backbone during the training of the reasoner."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "The proposed method, Universal Reasoner (UniR), is highly modular, composable, and training-efficient. Decoupling the reasoning capabilities into a lightweight module while keeping the backbone frozen is an elegant way to reduce VRAM requirements during RL training.",
+        "Strong theoretical backing. The paper provides a rigorous mathematical connection (Theorem 4.1) showing that optimizing the reasoning module via GRPO to maximize reward implicitly aligns its token-level log-probabilities with the optimal soft Q-function.",
+        "Extensive and diverse empirical validation across multiple domains including mathematical reasoning, machine translation, multimodal visual math, and clinical medical decision-making (MIMIC-IV).",
+        "Excellent analysis on why UniR outperforms standard GRPO tuning under stochastic sampling (T=0.6). The observation and evidence showing that standard GRPO suffers from mode collapse while UniR preserves the backbone's prior diversity is highly insightful.",
+        "The demonstration of composability (e.g., combining German-to-English translation and mathematical reasoning modules to solve bilingual math tasks) is exceptionally clear and showcases a major practical advantage over monolithic LLMs."
+      ],
+      "weaknesses": [
+        "While the training phase is highly parameter-efficient because only the small reasoning module's gradients are computed, the generation of rollouts during GRPO still requires forwarding both the backbone LLM and the reasoning module. This introduces inference latency during training, though the authors partially mitigate this at inference time using speculative decoding (CoS).",
+        "Logit-level guidance methods are naturally constrained by tokenizer compatibility. As shown in the cross-tokenizer experiments (Section D.2), relying on mapping methods like EVA to bridge different vocabularies (e.g., Llama and Qwen) results in a notable performance penalty."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Modular and Composable Design: Decoupling reasoning capabilities from the backbone LLM via logit-level summation is a flexible approach. The ability to compose multiple specialized modules (e.g., translation + math) via a simple weighted logit addition is well-motivated and empirically demonstrated.",
+        "Strong Performance on Math and Translation: Empirical results in Tables 1 and 2 showcase notable gains over standard GRPO and GRPO-LoRA under stochastic decoding (T=0.6), demonstrating that keeping the backbone frozen helps preserve diversity and avoid mode collapse.",
+        "Detailed Resource and Efficiency Benchmarks: The inclusion of training memory (VRAM) scaling analyses, gradient norm comparisons, and throughput measurements adds practical value and shows a clear optimization benefit during the training phase.",
+        "Weak-to-Strong Generalization: The paper successfully demonstrates that smaller reasoning modules (1B/1.5B) trained alongside smaller backbones can scale up to guide larger frozen models (8B/14B) without additional training."
+      ],
+      "weaknesses": [
+        "Incremental Novelty and Overlap with GenARM: The theoretical foundation (including Lemma A.1, the reward decomposition, and logit addition for multi-objective optimization) heavily relies on GenARM (Xu et al., 2024b). The primary adaptation lies in using verifiable/rule-based rewards with GRPO instead of preference rewards, which limits the conceptual originality.",
+        "Performance Degradation in Cross-Tokenizer Generalization: Despite the title promising a 'Universal' reasoner, Table 10 shows that applying a Llama-1B module to a Qwen-3B backbone using EVA alignment degrades the backbone's standalone performance from 35.6 to 18.3. This major bottleneck suggests the approach is largely restricted to models sharing the exact same vocabulary/tokenizer, making the 'Universal' claim somewhat oversold.",
+        "Significant Inference Overhead: Summing logits at inference time requires concurrent forward passes through both the backbone and the reasoning module. This increases latency by approximately 58% (from 0.0262 to 0.0414 sec/token in Table 6). While speculative decoding (CoS) mitigates this, it introduces extra system complexity and still does not fully eliminate the overhead.",
+        "Lack of KL Regularization during Training: Setting the KL regularization coefficient to zero (\\beta_{KL}=0) during UniR training can cause severe policy drift and lead the module to produce degenerate or adversarial logits (as seen in Figure 19 where the standalone module generates repetitive and broken text). The paper lacks a rigorous discussion on the safety, alignment, and out-of-distribution risks of combining these unregularized logit outputs with different backbones."
+      ]
+    }
+  }
+}

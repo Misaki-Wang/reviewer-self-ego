@@ -1,0 +1,99 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 2,
+      "strengths": [
+        "The paper addresses an important and timely topic: data curation and sample utility evaluation for deep learning and multimodal foundation models.",
+        "The proposed framework is evaluated across two distinct settings: synthetic label noise on image classification benchmarks and large-scale multimodal pre-training on DataComp.",
+        "The empirical analysis provides interesting visualizations, including token length distribution comparisons, score distributions across clean/noisy subsets, and overlap analysis with pretraining datasets."
+      ],
+      "weaknesses": [
+        "Severe conceptual and theoretical issue regarding weight space alignment: The method projects per-sample gradients onto $v_t = \\theta_{\\text{ref}} - \\theta_t$. However, deep neural networks suffer from permutation symmetries and non-convexity. In Section 5.2, CLIP models are trained *from scratch* while using weights from an existing public model (DataComp.XL) as $\\theta_{\\text{ref}}$ in an intermediate MLP layer. Because networks trained from scratch have arbitrary neuron permutations in hidden layers, Euclidean vectors between their weights lack geometric meaning unless explicit re-basin / permutation alignment is performed. The paper never discusses nor addresses weight permutation invariance.",
+        "Mathematical inconsistency in key formulas: In Equation (2) and Algorithm 1, the softmax normalization is written with a negative sign in the exponent: $\\bar{m}_{i,t} = \\frac{\\exp(-m_{i,t}/\\tau)}{\\sum_j \\exp(-m_{j,t}/\\tau)}$. Since higher $m_{i,t}$ indicates positive alignment with the reference direction, exponentiating $-m_{i,t}$ assigns the highest weights to samples with the *lowest* (or most misaligned) mimic scores, contradicting the stated intuition and text.",
+        "Unclear practical utility and realistic setup in synthetic experiments: In Section 5.1, the reference model $\\theta_{\\text{ref}}$ is trained on the noise-free version of each dataset. In realistic noisy-label or data curation settings, having access to an oracle clean dataset to train a clean reference model invalidates the need to train on the noisy dataset.",
+        "Marginal performance gains over strong baselines in multimodal curation: On DataComp Medium (Table 4), pure Mimic Score Top 30% achieves an average score of 0.268, substantially underperforming the standard CLIP Score baseline (0.321) and barely exceeding Basic Filtering (0.267). When used to filter the CLIP Score set, the improvement is merely 0.002 (0.321 to 0.323), which is within typical training noise and variance.",
+        "Missing computational cost, wall-clock time, and memory analysis: Calculating per-sample gradients $g_{i,t}$ across batch sizes as large as 4,096 in DataComp incurs non-trivial computation and memory overhead. Moreover, Stage 2 tracks mimic scores across multiple steps and applies Snorkel aggregation over millions of samples. The paper provides no empirical throughput, runtime, or memory overhead comparisons.",
+        "Presentation flaws: Typographical and grammatical errors are present throughout the draft, such as 'more optima part' (Section 3.1), 'Peason correlation' (Figure 4), and a dead footnote link ('See here for details', Footnote 1)."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3,
+      "strengths": [
+        "The core idea of treating the parameter vector pointing toward a reference model in weight space as a directional guide for per-sample gradient utility is intuitive and conceptually neat.",
+        "The authors evaluate the approach across two distinct regimes: synthetic label noise across six standard vision benchmarks (DTD, Flowers102, STL10, Oxford Pets, CIFAR-10, CIFAR-100) and large-scale multimodal pre-training on DataComp (10M and 100M scales).",
+        "The analysis sections provide interesting diagnostic observations, such as the correlation between mimic scores and caption lengths/heuristics, and the exploration of dataset membership prediction (Table 5)."
+      ],
+      "weaknesses": [
+        "Formulation inconsistency in Eq. (2) and Algorithm 1: The normalized mimic score is defined as $\\overline{m}_{i,t} = \\frac{\\exp(-m_{i,t}/\\tau)}{\\sum_j \\exp(-m_{j,t}/\\tau)}$. Since $m_{i,t}$ is defined as the alignment with the direction toward the reference model (where larger positive values indicate better alignment), introducing a negative sign in the exponent means samples with higher alignment receive exponentially smaller weights. This directly contradicts the stated goal of amplifying helpful samples, suggesting either a serious typo or an inverted implementation.",
+        "Theoretical connection to first-order loss approximation is unaddressed: Geometrically, $\\langle -\\nabla_\\theta \\ell_i(\\theta_t), \\theta_{ref} - \\theta_t \\rangle$ is the first-order Taylor approximation of $\\ell_i(\\theta_t) - \\ell_i(\\theta_{ref})$. This indicates that Mimic Score is essentially approximating how much lower the reference model's loss is on sample $i$ relative to the current model. The paper does not discuss this relationship, nor does it compare against direct loss-based evaluation under $\\theta_{ref}$ (e.g., cross-entropy under the reference model or relative loss drop), which would avoid per-sample gradient computation entirely.",
+        "Underwhelming empirical performance on web-scale data (DataComp): In Table 4, data filtering using Mimic Score alone (Top 30%) achieves 0.135 on Small and 0.268 on Medium, which significantly underperforms the standard CLIP Score baseline (0.165 on Small, 0.321 on Medium). Furthermore, when using Mimic Score to prune the CLIP Score dataset, the performance on Small degrades (0.165 to 0.163/0.164), and the gain on Medium is marginal (0.321 to 0.323, a +0.002 increase without reported variance or error bars across random seeds).",
+        "Unrealistic or circularly strong reference model assumptions: In the controlled synthetic experiments (Sec. 5.1), the reference model is trained on the clean, noise-free version of the target dataset, which is unrealistic for practical data curation where ground truth clean data is unavailable. In the web-scale experiments (Sec. 5.2), the reference model is pretrained on 1.4 billion samples (DataComp-1B). Relying on an existing model trained on 1.4B samples to filter a 10M/100M dataset requires a stronger justification against simpler inference-time distillation or scoring methods.",
+        "Computational overhead and complexity: Stage 1 requires computing per-sample gradients (even when restricted to a single layer, this incurs non-trivial backward pass overhead at batch size 4096). The full pipeline requires pretraining a model to collect scores across steps, fitting a weak-supervision aggregation model (Snorkel), and then retraining the target model from scratch on the filtered subset. The computational cost of this multi-stage workflow is not adequately quantified or compared to single-pass filtering methods."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Original and intuitive core concept: Leveraging weight-space vectors toward a superior reference model (vt = theta_ref - theta_t) to evaluate per-sample gradient utility provides an interesting alternative to feature-space or loss-based data selection.",
+        "Broad empirical evaluation: The authors evaluate the proposed framework across both controlled label-noise scenarios (6 vision benchmark datasets) and large-scale multimodal pretraining (DataComp small and medium scales).",
+        "Versatile applications: The paper explores multiple facets of the proposed score, including online gradient reweighting (Stage 1), offline dataset curation via filtering (Stage 2), dataset quality estimation, and pretraining data attribution."
+      ],
+      "weaknesses": [
+        "Mathematical inconsistency in core formulation: In Equation (1), mimic score mi,t is defined as the projection of -gi,t onto vt (where higher indicates better alignment toward the reference). However, in Equation (2) and Algorithm 1, the softmax normalization is given as exp(-mi,t / tau) / sum(exp(-mj,t / tau)). With a negative sign in the exponent, samples with higher mimic scores receive exponentially smaller weights, directly contradicting the stated principle of amplifying aligned samples.",
+        "Unaddressed weight-space geometry and permutation symmetries: In Section 5.2, the model is trained from scratch while comparing weights against a pretrained reference model. Because deep neural networks are invariant under hidden neuron permutations, the Euclidean difference vector between an independently initialized network and a reference checkpoint is generally not geometrically meaningful without explicit weight permutation alignment (e.g., Git Re-Basin). The authors do not explain how or why coordinate-wise alignment works in this setting.",
+        "Marginal empirical performance on realistic benchmarks: In DataComp experiments (Table 4), the standalone Mimic Score filter severely lags behind the standard CLIP score baseline (0.143 vs. 0.165 on Small; 0.268 vs. 0.321 on Medium) and barely edges past simple handcrafted heuristic filtering (0.141 and 0.267). Furthermore, removing bottom mimic score samples from the CLIP score subset yields negligible improvements (+0.002 on Medium) or even hurts performance (0.165 -> 0.163 on Small).",
+        "Missing computational overhead and efficiency analysis: Computing per-sample gradients and project dot products at every iteration introduces non-trivial runtime and memory overhead. The paper does not report wall-clock training times, FLOPs, or memory profiles compared to standard training.",
+        "Practical dependency on a high-quality reference model: Requiring an already well-performing reference model (e.g., trained on 1.4B DataComp samples) with matching architectural layers restricts the practical utility of the method for scenarios where no high-performing model exists in the target domain or architecture."
+      ]
+    }
+  },
+  "v3": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Simple and intuitive formulation: Using the directional alignment between per-sample gradients and a reference weight vector (vt = theta_ref - theta_t) avoids the expensive Hessian inversions of influence functions and extra forward passes required by excess-loss methods (e.g., Rho-Loss).",
+        "Comprehensive empirical evaluation: Experiments span controlled synthetic label noise across 6 vision datasets as well as web-scale multimodal pre-training (DataComp-Small and DataComp-Medium with up to 100M+ examples).",
+        "Extensive efficiency and ablation analysis: The authors provide detailed benchmarks on per-batch runtime, peak GPU memory, choice of temperature, layer selection, and degradation of reference model quality (via weight noise and data subsampling).",
+        "Novel integration with weak supervision: Using Snorkel to aggregate step-level binary filtering decisions across training steps effectively smooths optimization noise and captures training dynamics."
+      ],
+      "weaknesses": [
+        "Weight space permutation symmetry and architecture constraints: Computing vt = theta_ref - theta_t requires identical weight shapes and assumes aligned parameter coordinates. When training models from scratch (as in the DataComp experiments), neural network weight spaces suffer from permutation symmetries. The paper does not adequately justify why a direct Euclidean weight-difference vector in the final MLP layer is meaningful before representations align.",
+        "Modest performance improvements in large-scale CLIP experiments: In Table 3 (DataComp Medium), the overall 38-task average improvement is marginal (0.254 to 0.258), with ImageNet zero-shot top-1 accuracy slightly decreasing (0.171 to 0.169). In Table 4, combining Mimic Score with CLIP Score yields only a +0.002 gain (0.321 to 0.323), without confidence intervals or error bars across random seeds.",
+        "Per-sample gradient computation overhead: While more efficient than full Rho-Loss or influence functions, computing per-sample gradients for online reweighting still incurs roughly a 20x slowdown per batch compared to standard mini-batch SGD (0.671s vs. 0.031s as reported in Figure 7), which is a non-trivial cost for large-scale pretraining.",
+        "Theoretical assumptions and applicability: In Theorem A.4, the upper bound on the learning rate requires 2*tau*||vt||*||sigma - sigma(0)||^2 > 4*epsilon*kappa. When the reference model is imperfect (epsilon = ||theta_ref - theta*|| is non-negligible), the required condition can easily become vacuous unless the reference model is already essentially optimal."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "The paper introduces an intuitive and computationally efficient metric (Mimic Score) that uses the Euclidean parameter displacement vector toward a pretrained reference model to score sample gradients, bypassing the need for clean validation sets or costly bi-level gradient matching.",
+        "The two-stage framework (online batch re-weighting and offline sample filtering via weak supervision / Snorkel aggregation) is well-motivated and provides a coherent pipeline for both active training speedup and dataset curation.",
+        "Extensive empirical evaluation across multiple domains and scales, including synthetic noise experiments on six vision benchmarks (DTD, Flowers102, STL10, Pet, CIFAR10, CIFAR100) and large-scale CLIP pretraining on DataComp-10M and DataComp-100M.",
+        "Strong efficiency benefits over prior model-based methods (such as Rho-Loss and approximated influence functions), demonstrating lower per-batch runtime and GPU memory consumption by evaluating gradients only with respect to a single target layer (e.g., the final MLP layer).",
+        "Thorough ablation studies in the appendix addressing the choice of temperature, layer selection, reference model degradation (via noise injection and data pruning), and convergence speedups."
+      ],
+      "weaknesses": [
+        "The core formulation computes Euclidean distances and directions ($\\theta_{\\text{ref}} - \\theta_t$) directly in weight space. While this is well-justified when fine-tuning from a shared initialization, its geometric validity when training from scratch (as in the DataComp CLIP experiments) is conceptually tenuous due to permutation symmetries and separate basins of attraction in non-convex loss landscapes; the paper would benefit from deeper discussion on why linear weight-space vectors remain effective across disparate basins.",
+        "Performance improvements over strong baselines in the large-scale DataComp medium setting are relatively modest (e.g., from 0.254 to 0.258 in Table 3, and from 0.321 to 0.323 over CLIP Score top 30% in Table 4), although the data pruning efficiency (removing 4.7M samples) is noteworthy.",
+        "Practical utility relies heavily on the availability of an architecturally compatible, well-performing reference model $\\theta_{\\text{ref}}$. In bleeding-edge pretraining scenarios where a superior reference model does not yet exist or where model architectures differ significantly, applying parameter-level alignment becomes challenging.",
+        "Computing per-sample gradients across large batch sizes (such as $b=4096$ in CLIP pretraining) typically incurs computational and memory overhead; while restricting computation to the last MLP layer alleviates this, the paper should provide more implementation details and exact per-step wall-clock comparisons specifically for the distributed 4096-batch CLIP setting."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Intuitive formulation: Measuring sample utility via the alignment of per-sample negative gradients with the displacement vector toward a reference model in parameter space is a straightforward and computationally simpler proxy than second-order influence functions or full-model forward-pass excess loss.",
+        "Comprehensive experimental scope: The evaluation spans controlled synthetic label noise across six standard image classification benchmarks (DTD, Flowers102, STL10, Pets, CIFAR-10/100) as well as large-scale multimodal pretraining on DataComp (10M and 100M subsets).",
+        "Two-stage pipeline: Combining dynamic online mini-batch reweighting with an offline consensus filter based on weak supervision (Snorkel) provides a complete lifecycle for both accelerating current training and curating future subsets.",
+        "Extensive ablations and theoretical exploration: The paper includes a convergence analysis in the appendix along with empirical ablations on temperature sensitivity, layer selection, reference model degradation, and per-sample runtime/memory profiles."
+      ],
+      "weaknesses": [
+        "Fundamental parameter-space symmetry and alignment issues: Deep neural networks have non-convex loss surfaces with pervasive permutation symmetries and coordinate ambiguity in intermediate representations. While comparing weights is well-defined for a shared classification head (linear probing), computing Euclidean differences vt = theta_ref - theta_t on intermediate layers (such as the final MLP layer of an image/text encoder) between independently initialized models is problematic. Without explicit weight matching, Git Re-Basin, or canonical alignment, vector differences in raw parameter space are generally ill-defined across different training trajectories.",
+        "Heavy reliance on superior reference models: In the multimodal setting, the reference model was pretrained on DataComp-1B (1.4 billion samples) to curate data for 10M and 100M subsets. This creates a circular dependency: curating a dataset requires an existing reference model trained on an order of magnitude more clean/curated data. In greenfield domains or non-standard architectures where high-capacity pretrained checkpoints do not exist, the applicability of this method is severely constrained.",
+        "Computational overhead of per-sample gradients: Although restricting the calculation to the final layer avoids backpropagating per-sample gradients through the entire backbone, per-sample gradient computation still incurs non-negligible cost. As reported in Figure 7, per-batch runtime increases from 0.031s for standard mini-batch SGD to 0.671s for Grad-Mimic (an approximate 20x slowdown per step), which significantly offsets the reported 20.7% reduction in training step count.",
+        "Marginal empirical gains on large-scale benchmarks: On DataComp Medium (Table 3), the improvement of Grad-Mimic over vanilla training is modest (+0.004 on average across 38 tasks, with ImageNet accuracy dropping slightly from 0.171 to 0.169). Similarly, in Stage 2 filtering (Table 4), the performance difference between standard CLIP Score (0.321) and CLIP Score pruned with Mimic Score (0.322–0.323) is within typical training variance.",
+        "Restrictive theoretical assumptions: Theorem A.4 requires a step size condition where the numerator includes -4*epsilon*kappa, where epsilon = ||theta_ref - theta_*||. In realistic deep learning regimes, the reference model is far from the true empirical optimum theta_* of the specific training run, rendering the theoretical bound potentially vacuous (the right-hand side easily becomes negative, precluding any positive learning rate eta)."
+      ]
+    }
+  }
+}

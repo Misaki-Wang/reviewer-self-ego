@@ -1,0 +1,95 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "The idea of shifting action chunking to the critic side and using a causal Transformer to process action sequences for multi-step return prediction is interesting and novel.",
+        "The proposed gradient-level averaging of separate $n$-step losses is a simple and effective design to prevent reward dilution in sparse environments compared to direct return averaging.",
+        "The paper provides an extensive empirical evaluation, including results on 50 tasks from the Metaworld suite and a box-pushing benchmark, accompanied by detailed ablation studies."
+      ],
+      "weaknesses": [
+        "The benchmark terminology is incorrect. The authors refer to the evaluation suite as 'Metaworld-ML1' (which is a meta-RL benchmark with 1 task type), but they actually evaluate on 50 distinct tasks (Assembly, FaucetOpen, Hammer, etc.), which corresponds to the MT50 multi-task benchmark.",
+        "To stabilize the $N$-step returns without importance sampling, the authors use an extremely small replay buffer of 5000 steps (only 10 episodes of length 500). This effectively converts the off-policy SAC into a near-on-policy algorithm. While this avoids the off-policy mismatch, it leads to massive sample inefficiency: the model requires up to 20 million environment interactions to converge on simple tasks like 'Reach' or 'ButtonPress', which standard off-policy SAC can solve in under 200,000 steps. This limitation is not explicitly discussed and severely limits the practical utility of the method.",
+        "There is a mathematical inconsistency/typo in Equation (6). The target term is written as $G^{(n)}(s_t^k, a_t^k, \\dots, a_{t+i}^k)$ inside a summation over $i=0 \\dots n-1$. Since the action sequence length is $i+1$, the target should be the $(i+1)$-step return $G^{(i+1)}$, not the $n$-step return $G^{(n)}$.",
+        "The paper is unclear about how the policy is updated. Since the policy is step-based (Equation 8), it only outputs a single action $a_t$ and is updated using $Q_\\phi(s_t, a_t)$. This implies the Transformer's sequence-processing capability is only utilized as an auxiliary representation-learning task during critic training. If so, a standard MLP critic with auxiliary multi-step heads could potentially achieve the same benefit during representation learning without the heavy computational overhead of a Transformer during policy updates. The authors do not provide wall-clock time comparisons to address this computational overhead."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3,
+      "strengths": [
+        "The paper is well-written, clearly structured, and easy to follow.",
+        "The idea of utilizing Transformer architectures for sequential credit assignment in the critic of actor-critic algorithms is an interesting and active research direction.",
+        "The authors provide a thorough experimental evaluation, including complete task-by-task success rate curves in the appendix for MetaWorld tasks, which supports reproducibility."
+      ],
+      "weaknesses": [
+        "Core claim unsupported by ablation studies: As shown in the ablation study in Figure 2(c), the performance of 'SAC Variant + Covariance Aug.' (which uses a standard MLP-based critic but shares the same training schedule and covariance augmentation as T-SAC) is almost identical to 'T-SAC' (with the Transformer critic). This indicates that the performance improvement over vanilla SAC is primarily driven by hyperparameter tuning, the specific training schedule, and covariance network modifications, rather than the Transformer critic or N-step gradient averaging. This significantly undermines the paper's central contribution.",
+        "Conceptual mismatch in Q-function definition: In standard reinforcement learning, the action-value function $Q^\\pi(s_t, a_t)$ represents the expected return starting from state $s_t$, taking action $a_t$, and subsequently following policy $\\pi$. By feeding future actions $a_{t+1}, \\dots, a_{t+n-1}$ from the replay buffer into the critic, the network is trained on the behavior policy's trajectory rather than the current policy's trajectory. This off-policy mismatch is not addressed. Furthermore, during policy improvement (Equation 8), only the 1-step $Q(s_t, a_t)$ is utilized, making the high-dimensional sequence evaluation at training time conceptually unjustified.",
+        "Misleading terminology: The paper frames its method as 'action chunking' at the critic level. However, action chunking in the literature (e.g., in imitation learning and movement primitives) refers to executing a sequence of actions open-loop. In this paper, the policy is standard, reactive, and step-based (executing actions closed-loop at every timestep). Merely feeding subsequences of past transitions from the replay buffer into the critic does not constitute action chunking, and framing it as such is misleading.",
+        "Computational overhead: Transformers are significantly more computationally expensive than standard MLPs. According to Table 2, T-SAC trains the critic for 100 epochs per update step (compared to 1 for standard SAC/CrossQ). There is no evaluation of wall-clock time or computational cost, which is crucial given that the performance benefit over the MLP-based 'SAC Variant + Covariance Aug.' is negligible.",
+        "Clarity of equations: Equation 5 introduces a target state-value function $V_{\\phi_{tar}}$, but SAC is an action-value based algorithm that typically uses $Q$-target networks. The exact relationship and mathematical formulation of $V_{\\phi_{tar}}$ with respect to the twin target Q-networks should be explicitly defined."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper addresses a highly relevant problem in reinforcement learning: integrating multi-step returns into off-policy actor-critic frameworks using Transformer-based architectures.",
+        "The proposed architecture (T-SAC) is clearly illustrated in Figure 1, making the network design easy to understand.",
+        "The evaluation covers a wide range of tasks, specifically 50 environments from the Meta-World suite and the Box-Pushing task."
+      ],
+      "weaknesses": [
+        "Conceptual issues with 'Gradient-Level Averaging': The authors claim that averaging gradients of individual loss terms (Eq. 7) is a novel strategy that avoids 'signal dilution' while preserving the variance-reduction benefits of averaged N-step targets. However, mathematically, the average of the gradients of individual MSE losses is identical to the gradient of the average loss. Since the different heads of the Transformer output different Q-values to predict different targets, they naturally require separate loss terms. Framing this standard multi-head training as a novel 'gradient-level averaging' that inherits the theoretical variance reduction of averaged returns is mathematically loose and misleading.",
+        "Unfair Baselines and True Source of Gain: The ablation studies (Figure 2c) reveal that the 'SAC Variant + Covariance Aug' (which uses the authors' proposed policy network modifications and hyperparameters but retains a standard MLP critic) performs almost identically to T-SAC (~80% vs ~85% success rate). In contrast, standard SAC performs much worse (~70%). This strongly indicates that the main performance gains of the paper do not stem from the primary contribution (the Transformer Critic with N-step returns), but rather from simple policy network modifications (LayerNorm and Covariance Augmentation) and hyperparameter tuning (e.g., AdamW, larger batch size). This crucial detail is downplayed in the main text.",
+        "Confusing and Inconsistent Benchmarking: The paper repeatedly refers to the 50 tasks of Meta-World as 'Metaworld-ML1' (e.g., 'our method achieves state-of-the-art performance on benchmarks such as Metaworld-ML1'). However, ML1 is a meta-RL benchmark consisting of a single task with multiple meta-environments, whereas MT50 consists of 50 distinct tasks. The evaluation presented is clearly single-task RL on 50 tasks (as shown by individual curves in the Appendix), making the 'ML1' terminology incorrect and confusing. Furthermore, the baselines appear severely undertuned; standard SAC typically solves most MT50 tasks in 1-2 million steps, whereas here it fails to reach high success rates even after 20 million steps.",
+        "Contradictory Performance Claims: The authors claim state-of-the-art performance on 'Box-Pushing Sparse'. However, looking at Table 1, gSDE achieves a 60% success rate on Box Pushing Sparse, while the proposed T-SAC only achieves 58%. Thus, the claim of outperforming existing methods on this sparse task is contradicted by the paper's own experimental results.",
+        "Unaddressed Off-Policy Bias: Training a critic on multi-step returns (N-step) from a replay buffer without importance sampling correction introduces off-policy bias, because the future actions are generated by older policies. While the transformer critic conditions on these actions, the paper does not address how this bias affects the policy updates or provide any theoretical justification for why importance sampling can be omitted."
+      ]
+    }
+  },
+  "v3": {
+    "exp1_quality": {
+      "oa": 8,
+      "strengths": [
+        "Novel and elegant approach: Integrating a Transformer-based sequence critic into a step-based Soft Actor-Critic (SAC) framework without the need for high-variance importance sampling (IS) is a highly creative, clean, and practical contribution.",
+        "Theoretical validation: The manuscript provides robust theoretical support (detailed in Appendices C and D) demonstrating how gradient-level averaging of N-step returns reduces update-side variance under an equicorrelation model.",
+        "Outstanding empirical evaluation: The paper features a comprehensive evaluation across 57 distinct continuous control tasks (50 Meta-World tasks, FancyGym Box Pushing, and Gym MuJoCo) comparing against a diverse suite of strong baselines (such as CrossQ, TOP-ERL, TCP, GTrXL, etc.) using up to 8 seeds and rigorous statistical metrics (IQM).",
+        "Detailed ablation studies: The authors provide highly informative ablations isolating the importance of the Transformer components (causal masking, self-attention), sequence length, policy-side vs. critic-side chunking, and alternative sequential backbones (GRUs and LSTMs).",
+        "Excellent clarity and reproducibility: The paper is beautifully written, well-structured, and includes detailed algorithmic flowcharts, hyperparameter tables, and a reproducibility statement promising public code release."
+      ],
+      "weaknesses": [
+        "Locomotion performance: While T-SAC excels on long-horizon manipulation and sparse reward tasks, its performance on certain Gym MuJoCo locomotion environments (like Hopper and Walker2d) is slightly weaker than standard MLP-based SAC or CrossQ. The explanation involving high trajectory variability could be further unpacked.",
+        "Instability of target-free training in sparse rewards: The proposed lightweight critic parameter-freezing schedule (designed to eliminate target networks) is occasionally unstable in sparse-reward regimes like Box-Pushing-Sparse, requiring a fallback to standard target networks.",
+        "Computational overhead: While more parallelizable and faster than RNN-based critics, the 2-layer Transformer critic still introduces some computational overhead relative to simple MLP critics, slightly reducing step throughput."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 8,
+      "strengths": [
+        "Novel and Elegant Approach: T-SAC introduces a sequence-conditioned Transformer critic for standard step-based continuous control. By evaluating realized action prefixes from the replay buffer, it bypasses the need for off-policy importance sampling for N-step returns, which is a clever and highly practical solution.",
+        "Strong Empirical Performance: T-SAC achieves outstanding results on long-horizon, multi-phase tasks like Meta-World ML1 (50 tasks) and FANCYGYM Box Pushing, significantly outperforming both step-based baselines (SAC, CrossQ) and episodic baselines (TOP-ERL, BBRL) in sample efficiency.",
+        "Rigor of Evaluation and Analysis: The paper is exceptionally thorough. It includes extensive ablations (probing the role of causal masking, self-attention, and sequence lengths) and provides a rigorous mathematical analysis of the variance reduction of gradient-level averaging in the appendix.",
+        "High-Quality Writing and Presentation: The manuscript is exceptionally well-structured and written with high clarity. The figures, algorithmic flowcharts, and detailed hyperparameter tables make the work highly reproducible."
+      ],
+      "weaknesses": [
+        "Limited Gain/Slight Degradation on Standard Locomotion: T-SAC shows mediocre or weaker performance compared to simpler baselines (like CrossQ and SAC) on some MuJoCo locomotion tasks like Hopper and Walker2d, which the authors attribute to high trajectory variability. This indicates the sequence-conditioned critic is primarily advantageous for long-horizon or complex manipulation tasks, rather than a universal enhancement.",
+        "Computational Cost: Although the Transformer is lightweight, training T-SAC still introduces a clear wall-clock time overhead. As shown in Figure 2, T-SAC takes roughly twice as long as standard SAC (3.09 hours vs 1.47 hours per 1M steps).",
+        "Increased Hyperparameter Complexity: The introduction of sequence segment lengths, window sizes (min_length, step_length), and gradient averaging adds more moving parts and hyperparameters to tune compared to vanilla SAC."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "A well-motivated and pragmatic design: T-SAC combines step-based off-policy reinforcement learning with a sequence-conditioned Transformer critic, successfully bridging step-based and episodic RL.",
+        "Avoids off-policy importance sampling: By training the sequence-conditioned critic on realized prefixes from replay, the method side-steps the need for high-variance importance sampling, yielding stable multi-step critic updates.",
+        "Comprehensive and rigorous evaluation: T-SAC is evaluated on 57 tasks (including Meta-World ML1, Box-Pushing, and Gymnasium MuJoCo) with 8 seeds, demonstrating strong performance and sample efficiency, particularly in long-horizon, multi-phase, and sparse-reward scenarios.",
+        "Extensive ablations and analysis: The paper includes thorough ablations of the Transformer components, comparison with RNNs/MLPs, hyperparameter sweeps, and solid theoretical analysis in the appendix regarding the variance reduction benefits.",
+        "Alternative to target networks: The critic freezing schedule offers a lightweight, target-free training alternative for local-motion tasks."
+      ],
+      "weaknesses": [
+        "No intermediate state conditioning: The Transformer critic Q(s_t, a_t, ..., a_{t+i-1}) only receives the initial state s_t and the action sequence as inputs, omitting intermediate states. In highly stochastic environments or those with high trajectory variability (e.g., Hopper, Walker2d), the action sequence does not uniquely determine the state path, forcing the critic to implicitly average over transitions. This likely explains the weaker performance on some MuJoCo tasks compared to standard step-based SAC.",
+        "Slightly misleading terminology on 'gradient-level averaging': The paper describes gradient-level averaging (Eq. 4) as a distinct step during backpropagation. However, mathematically, this is identical to taking the gradient of the mean squared error averaged over all sequence positions (Eq. 7), which is standard sequence-to-sequence loss training. This distinction is really between multi-horizon sequence prediction vs. target-value averaging (Eq. 2), and the text should be clarified to avoid suggesting that a custom gradient manipulation is being performed.",
+        "Computational overhead: While sample efficient, the Transformer critic is more computationally demanding than standard MLP critics. As shown in Figure 2, training time roughly doubles compared to standard SAC (3.09h vs 1.47h per 1M steps).",
+        "Target-free instability: The proposed critic-freezing schedule can be unstable in sparse-reward settings (e.g., Box-Pushing-Sparse), requiring the authors to revert to conventional target networks in those cases."
+      ]
+    }
+  }
+}

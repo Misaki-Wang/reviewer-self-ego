@@ -1,0 +1,93 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 6,
+      "strengths": [
+        "Addresses a critical, unaddressed bottleneck in token-filtering training: while previous methods like Rho-1 demonstrated utility improvements, they achieved negligible training speedups due to dense backpropagation gradients and inefficient sparse GEMMs.",
+        "Proposes a creative system design that transforms sparse GEMM operations into dimension-reduced dense GEMMs by dynamically rewriting the autograd graph during backpropagation.",
+        "Introduces an elegant offline graph-tracing approach using prime-number dimensions as markers to reliably identify and map sequence and batch dimensions within a dynamic computational graph.",
+        "Demonstrates solid training speedups, reducing backpropagation time by up to 35.1% and end-to-end training time by up to 22.0% on 8x RTX 3090 GPUs.",
+        "The manuscript is well-structured, clearly written, and provides a thorough explanation of the underlying system bottlenecks."
+      ],
+      "weaknesses": [
+        "There is a non-trivial utility degradation compared to the original Rho-1 baseline. In Table 2, while Rho-1 improves average task utility from 17.8% (regular) to 24.8% (a +7.0% absolute improvement), Collider's average utility is only 20.7% (a +2.9% absolute improvement). This means Collider loses more than half of the utility gains of token filtering to achieve its speedup. Although the authors explain why this happens (due to cutting off attention dependencies via causal gradients) and hypothesize that hyperparameter tuning can recover it, they do not provide empirical evidence showing this recovery.",
+        "The evaluation scale is somewhat limited. The experiments are conducted on small models (1.1B to 1.5B parameters) using consumer-grade GPUs (RTX 3090) in a single-node setup. Although Section 4.2 theoretically discusses how Collider reduces communication in distributed settings (TP, SP, PP), there are no actual multi-node or distributed experiments validating these claims.",
+        "The system relies heavily on modifying the internal PyTorch C++ autograd graph. Such graph-rewriting techniques can be highly fragile across different PyTorch versions (e.g., PyTorch 2.1 vs 2.5) and when integrated with customized execution kernels (like specialized Triton kernels or custom FusedLinear layers). A discussion on the robustness and maintenance overhead of Collider's Torchgen skeleton generator would strengthen the paper."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Clear and highly practical motivation: The paper bridges the gap between the algorithmic benefits of backward token filtering (e.g., Rho-1) and actual system-level acceleration, which has previously been limited to less than 2% due to activation overhead and inefficient sparse GEMM.",
+        "Novel and robust system design: The transformation of sparse GEMM into dimension-reduced dense GEMMs is a pragmatic and effective solution that fully leverages modern hardware capabilities (highly optimized dense tensor cores) rather than relying on immature sparse kernels.",
+        "Clever autograd graph-rewriting workflow: To handle PyTorch's dynamic autograd graph, the authors design an offline code generation step using unique prime-number markers for batch size and sequence length to reliably trace and update dimensions in complex, model-specific computation graphs.",
+        "Strong and consistent performance speedups: Evaluation across multiple popular open-source LLMs (TinyLlama, Qwen2.5, and Phi-1.5) demonstrates significant end-to-end speedups (up to 22.0% overall and 35.1% in backward propagation) with negligible system overhead."
+      ],
+      "weaknesses": [
+        "Utility degradation compared to full backward filtering: Because filtering activations cuts off the gradient pathways between remaining tokens and filtered tokens (due to causal attention), Collider changes the mathematical gradients. This leads to a noticeable drop in model utility compared to Rho-1 (e.g., average task score drops from 24.8% to 20.7% on TinyLlama). While still better than baseline training (17.8%), this trade-off is substantial, and the assertion that hyperparameter tuning will close the gap is not empirically proven in the paper.",
+        "Limited scaling evaluation: The empirical evaluations are conducted on relatively small models (1.1B to 1.5B parameters) and single-node hardware (8x RTX 3090 GPUs). While Section 4.2 provides a solid theoretical analysis of how Collider interacts with distributed strategies (Tensor Parallel, Sequence Parallel, etc.), actual multi-node distributed benchmarks are missing."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "The paper addresses a very practical and important system bottleneck: although token filtering methods (such as Rho-1) have demonstrated excellent potential in improving model utility and data efficiency, they fail to achieve actual wall-clock speedups because the gradients propagated during the backward pass remain dense due to intermediate activation states.",
+        "The proposed approach of modifying PyTorch's backward graph to shrink the sequence dimension globally (transforming sparse matrix operations into dimension-reduced dense GEMMs) is a clever system-level solution.",
+        "The offline profiling mechanism that uses unique prime-number dimension markers to auto-detect sequence length and batch size dimensions across complex autograd graphs is elegant and technically sound.",
+        "The system shows significant speedups in backward propagation (up to 35.1%) and overall end-to-end training time (up to 22%) across multiple popular architectures (TinyLlama, Qwen2.5, Phi1.5)."
+      ],
+      "weaknesses": [
+        "There is a significant utility drop compared to the token filtering baseline (Rho-1). In Table 2, Rho achieves an average task utility of 24.8%, while Collider only achieves 20.7% (compared to 17.8% for full training). This means Collider loses nearly 58% of the utility gains of Rho. While the authors hypothesize this is due to untuned hyperparameters (since gradient dynamics change when cutting off activation pathways), they do not provide empirical evidence (e.g., a hyperparameter search) showing that the original Rho utility can actually be recovered under Collider.",
+        "The paper is somewhat vague on how it integrates with FlashAttention. Under FlashAttention, intermediate softmax results are not stored and must be recomputed block-by-block in the backward pass using Q, K, and V. If Collider filters Q and K to reduce the sequence dimension, how does this affect the block-by-block recomputation and causal masking? Dropping arbitrary sequence dimensions breaks the contiguous structure of the keys/queries, which might violate the expectations of FlashAttention's CUDA kernels. More details on the exact FlashAttention implementation and integration are needed.",
+        "The evaluation only considers relatively small models (1.1B to 1.5B parameters) on a single node (8 GPUs). It would be much more convincing to show how the system scales to larger models (e.g., 7B or 13B parameters) and multi-node setups where communication overheads (such as Tensor Parallel or Sequence Parallel all-reduces) play a larger role.",
+        "The overhead of the reference model is discussed but not integrated or evaluated in the end-to-end speedup comparison. Running a reference model to compute target losses introduces non-trivial online compute or offline storage/precomputation overheads. The paper should clearly state whether the reported speedups factor in the reference model's costs."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 8,
+      "strengths": [
+        "Strong motivation and highly practical: Token filtering has been recognized as an effective way to improve data quality and utility, but previous systems failed to translate token sparsity into real-world training speedups. This paper identifies and elegantly solves this critical bottleneck.",
+        "Algorithm-system co-design: The authors present an exact mathematical decomposition of the attention backward pass (Equations 3 & 4) which allows filtering K and V activations while keeping Q's gradients intact. This mathematically lossless reformulation is highly compatible with FlashAttention-like kernels.",
+        "Creative engineering: Amending the PyTorch C++ autograd graph is notoriously difficult due to its dynamic nature. The authors propose a clever automatic workflow that uses unique prime number markers to dynamically identify sequence and batch dimensions, generating customized C++ graph-updating code.",
+        "Extensive and convincing evaluation: The system is evaluated across multiple modern LLMs (from 1.1B to 40B parameters) and diverse configurations (such as Tensor Parallelism and LoRA). The end-to-end speedups (up to 34.7%) are highly substantial and the convergence is mathematically identical to standard token filtering."
+      ],
+      "weaknesses": [
+        "Clarification on reference model overhead: Token filtering relies on comparing the target model's loss to a reference model's loss (Equation 2). Since they use the same architecture for both target and reference models, running the reference model online would introduce massive overhead (equivalent to an extra forward pass). If they instead precomputed and stored the reference losses offline, this should be explicitly clarified along with the associated storage overhead and feasibility.",
+        "Framework and compilation portability: The system relies heavily on PyTorch-specific autograd graph manipulation. While PyTorch is the industry standard, discussing the portability and challenges of applying such dynamic graph-surgery techniques to compiler-centric frameworks like JAX/XLA (where dynamic shapes can trigger expensive recompilations) would strengthen the paper's discussion.",
+        "Minor text omission: Section C.3 (Hosting) ends abruptly with an incomplete sentence: 'The system is open-sourced and hosted on GitHub. The link is ' (likely due to anonymization, but it should be cleanly formatted or placeholder-noted)."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Strong Motivation and Clear Problem Statement: Token filtering has emerged as a promising technique to improve LLM training utility, but existing backward filtering methods suffer from inadequate sparsity propagation, yielding almost no real-world training speedup (only ~1.2%). This paper directly addresses and solves this important practical bottleneck.",
+        "Novel Algorithm-System Co-design: The paper proposes a highly cohesive co-design. On the algorithm side, it splits the attention backward computation to preserve query gradients while enabling sparse calculation for key/value gradients. On the system side, it transforms inefficient sparse GEMMs (which standard libraries do not support well at 30-50% sparsity) into dimension-reduced dense GEMMs by dynamically rewriting the PyTorch execution graph.",
+        "Clever and Practical Engineering: The use of prime-number markers (e.g., setting batch size and sequence length to unique primes during a trace pass) to reliably identify and rewrite sequence-dependent dimensions in PyTorch's dynamic graph is an elegant and highly practical solution.",
+        "Convincing and Comprehensive Evaluation: The evaluation is thorough, spanning models of various architectures (Llama, Qwen, TinyLlama) and scales (from 1.1B up to 40B parameters). It consistently demonstrates substantial backward speedups (up to 49.9%) and end-to-end training speedups (up to 34.7%) while fully preserving model convergence and downstream utility."
+      ],
+      "weaknesses": [
+        "Assumption of Runtime Stability / Static Dimensions: The system's automatic graph-rewriting workflow relies on 'runtime stability' (i.e., that tensor dimensions remain constant during training). However, many modern LLM training pipelines employ dynamic padding or sample packing (variable sequence lengths within a batch). The paper should clarify how CENTRIFUGE handles training runs where sequence length or batch size varies dynamically across iterations.",
+        "Reference Model Overhead Clarification: Backward token filtering relies on computing a reference loss $L_{ref}$ from a reference model. The paper should explicitly state whether $L_{ref}$ is pre-computed offline or computed online during training. If online, its overhead should be analyzed and factored into the reported end-to-end execution times.",
+        "Minor Typo: In Figure 7 on page 17, there is a small typo in the diagram text: 'Globally Reudce Dimensions' should be 'Globally Reduce Dimensions'."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Addresses a highly critical and practical bottleneck in ML systems: translating theoretical token-level sparsity (30-50%) into real-world wall-clock speedups in standard deep learning libraries.",
+        "A well-thought-out algorithm-system co-design. Reformulating the attention backward equations to preserve the integrity of dQ while shrinking dK and dV is mathematically sound and highly practical.",
+        "The use of prime-number dimension marking during the offline tracing phase is a clever and elegant solution to resolve dimension ambiguity in PyTorch's complex C++ autograd graph.",
+        "The evaluation spans multiple powerful LLMs (from 1.1B to 40B parameters) and covers diverse distributed training paradigms, including Data Parallelism (ZeRO-1), Tensor Parallelism (TP), and parameter-efficient fine-tuning (LoRA)."
+      ],
+      "weaknesses": [
+        "Compatibility with torch.compile: Modern LLM training heavily relies on PyTorch's compiler (AOTAutograd and Inductor) for kernel fusion and optimization. Since Centrifuge directly mutates the C++ autograd graph at runtime, it is highly likely to cause graph breaks, prevent optimizations, or trigger continuous recompilation. The paper does not state whether the baselines and Centrifuge were evaluated with torch.compile. If Centrifuge is incompatible with compiled mode, its eager-mode speedups might be overshadowed by standard compiled training.",
+        "Handling of Dynamic Sequence Lengths: In many real-world LLM fine-tuning scenarios (e.g., SFT), sequence lengths vary dynamically across batches. Since the proposed automatic graph updating workflow relies on caching the greedy dimension-reduction mapping from an offline run, it remains unclear how Centrifuge handles dynamically changing sequence lengths. Re-running the offline profiling phase for every new sequence length would introduce unacceptable overhead.",
+        "dQ Computation Bottleneck in Attention Backward: According to Equation 4, calculating the query gradient dQ still requires activations from all tokens (including the filtered ones) to maintain data integrity. Because dQ represents a substantial portion of the attention backward pass, this limits the theoretical speedup of the modified attention kernel. The authors should provide a detailed profiling breakdown (e.g., a CUDA kernel timeline) of the modified attention backward versus other standard layers.",
+        "Incomplete Text and Missing Repository: In Section C.3, the text states 'The system is open-sourced and hosted on GitHub. The link is ' but leaves the actual link entirely blank. This makes it impossible for reviewers to evaluate the source code or verify the implementation during the review phase.",
+        "Clarity of Utility Claims: The paper frequently highlights model performance improvements of up to 26.6% over standard training. While Section 2.1 correctly attributes this to the selective token filtering mechanism from Lin et al. (2024), the abstract and introduction sometimes conflate this data-selection utility gain with Centrifuge's system-level contributions. The paper should clearly isolate the system acceleration achievements from the algorithmic data-quality benefits of the baseline token filtering strategy."
+      ]
+    }
+  }
+}

@@ -1,0 +1,95 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Insightful analysis of cross-layer representations: The paper effectively shows that while token-wise cosine similarity across layers is modest (limiting methods like MiniCache), Centered Kernel Alignment (CKA) reveals strong alignment among dominant singular vectors across adjacent layers, providing a sound mathematical motivation for cross-layer SVD.",
+        "Simplicity and post-training flexibility: The proposed xKV method requires no pre-training or fine-tuning, functioning as a plug-and-play approach that can group arbitrary stride sizes of layers.",
+        "Comprehensive quality evaluation: Experiments across several recent LLMs (Llama-3.1-8B, Qwen2.5-7B/14B) on the RULER benchmark demonstrate significant retention of long-context capabilities at high compression ratios (up to 8x) compared to MiniCache and single-layer SVD baselines.",
+        "Compatibility with Multi-Head Latent Attention (MLA): Demonstrating that xKV can be layered on top of DeepSeek-Coder-V2's already compressed latent KV representation (achieving 3–3.5x further compression on RepoBench-P and LCC) is a valuable and novel result."
+      ],
+      "weaknesses": [
+        "Lack of wall-clock runtime, throughput, and peak memory benchmarks: While theoretical compression ratios (based on rank) are reported, there are no end-to-end inference latency, decoding throughput, or actual VRAM footprint measurements on real hardware. In particular, the reconstruction procedure during decoding or prefill SVD computation could introduce non-trivial overheads.",
+        "Ambiguity in the decoding implementation and computational complexity: The text mentions that KV states are reconstructed during decoding by multiplying $A$ with $B_{\\ell_i}$, but does not clarify whether full KV matrices are dynamically materialized in memory per step/layer, or if attention is computed associatively in the low-rank subspace (i.e., $(Q B^T) A^T$). Clear algorithmic details and memory access implications are missing.",
+        "Missing operational details of the on-the-fly SVD: Running online SVD on matrices of size $L \\times (G \\cdot d)$ (where $L=64\\text{k}$ or $128\\text{k}$) during prefill can be computationally heavy. The paper claims this adds <10% overhead at 128k context, but omits the exact algorithm used (e.g., randomized SVD, standard SVD, cuSOLVER) and detailed timing breakdowns.",
+        "Limited baseline comparisons: The evaluation primarily compares against MiniCache and Single-layer SVD. Inclusion of other recent post-training low-rank KV compression baselines (such as Palu, LoRC, or ShadowKV) or standard low-bit KV quantization methods would provide a more complete picture of the Pareto frontier."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Insightful analysis and motivation: The paper provides a compelling explanation for why prior inter-layer merging methods (such as MiniCache) struggle by showing that token-wise cosine similarity is low, while CKA reveals strong alignment in the dominant singular vectors across adjacent layers.",
+        "Simple, elegant, and post-training: xKV requires no retraining or architecture modifications. Horizontally concatenating KV-caches across grouped layers and decomposing into a shared basis matrix and layer-specific projection matrices is mathematically clean and straightforward to implement.",
+        "Strong empirical performance: Across multiple widely used LLMs (Llama-3.1-8B, Qwen2.5-7B/14B) on the RULER benchmark (64K context), xKV significantly outperforms both per-layer SVD and MiniCache at aggressive compression ratios (up to 8x).",
+        "Compatibility with MLA: The paper successfully demonstrates applicability to Multi-Head Latent Attention (DeepSeek-Coder-V2-Lite), achieving up to 3.5x further compression on coding benchmarks without accuracy degradation."
+      ],
+      "weaknesses": [
+        "Lack of end-to-end serving and throughput measurements: The evaluation focuses solely on task accuracy across compression ratios. As acknowledged in the limitations, the paper lacks wall-clock latency, decoding throughput, and peak VRAM profiling when integrating the reconstruction step into an actual serving system (e.g., vLLM or TensorRT-LLM).",
+        "Runtime overhead of online SVD during prefill: Computing truncated SVD on matrices of size L x (|G|*d) (where L=64k/128k) on the fly introduces non-trivial computational overhead during the prefill phase. The claim that it consumes '< 10% of prefilling times' needs more rigorous hardware profiling and breakdown across different context lengths.",
+        "Narrow baseline selection: While MiniCache and Single SVD are directly relevant low-rank/inter-layer baselines, the paper does not compare against other widely adopted KV-cache compression paradigms at equivalent memory budgets, such as 2-bit/4-bit quantization (e.g., KIVI) or budget-matched token eviction (e.g., SnapKV, PyramidKV), nor recent post-training low-rank methods like Palu or LoRC."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Insightful Motivation and Subspace Analysis: The paper identifies a clear limitation in prior inter-layer KV cache compression (e.g., MiniCache's assumption of high token-wise cosine similarity). By using Centered Kernel Alignment (CKA) and singular vector analysis, the authors demonstrate that while token embeddings vary, the underlying principal subspaces across adjacent layers are strongly aligned.",
+        "Effective Formulation: The cross-layer SVD formulation is mathematically straightforward and elegant. It factorizes the horizontally concatenated KV-caches into a single shared basis matrix across multiple layers and compact layer-specific projection matrices, avoiding redundant basis storage.",
+        "Strong Empirical Results: On the comprehensive RULER benchmark with modern open-weight LLMs (Llama-3.1-8B, Qwen2.5-7B, Qwen2.5-14B), xKV consistently outperforms MiniCache and per-layer Single SVD, achieving up to 8x compression with minimal accuracy degradation.",
+        "Compatibility with MLA: The paper demonstrates that xKV can be applied on top of architectures with Multi-Head Latent Attention (DeepSeek-Coder-V2-Lite), achieving further compression on already low-rank representations where existing approaches degrade."
+      ],
+      "weaknesses": [
+        "Lack of End-to-End System Evaluation: The paper only evaluates accuracy and theoretical KV-cache size reduction. There are no wall-clock latency, decoding throughput, or memory fragmentation benchmarks measuring real hardware deployment (e.g., using vLLM or custom Triton/CUDA kernels), leaving the practical speedup unverified.",
+        "Prefill Computation Overhead: Performing an online SVD on an $L \\times (|G| \\cdot d)$ matrix on the fly during prompt prefilling can introduce significant latency for long contexts (e.g., $L = 64\\text{k}$ or $128\\text{k}$). While the authors mention it takes under 10% of prefilling time, no concrete execution time profiles, hardware setups, or algorithm complexity breakdowns for the SVD computation are presented.",
+        "Limited Scope of Baselines: The comparison is mainly restricted to MiniCache and Single SVD. A comparison or combination study with mainstream KV quantization techniques (e.g., KIVI, QuaRot) or hybrid KV-eviction/sparse attention methods (e.g., SnapKV, ShadowKV) would significantly strengthen the empirical validation.",
+        "Missing Details and Incomplete Artifacts: The abstract leaves the code repository URL blank ('Our code is publicly available at: .'), and the layer-grouping strategy is limited to uniform contiguous strides without exploring adaptive grouping based on the observed CKA block structure."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Insightful and well-motivated analysis: The use of Centered Kernel Alignment (CKA) to demonstrate that cross-layer KV representations share aligned dominant singular vectors—despite poor token-wise cosine similarity—provides a principled and compelling explanation for why previous inter-layer merging methods fail and justifies the cross-layer factorization design.",
+        "Strong empirical performance: Across extensive benchmarks (RULER at 64K, LongBench, and multi-turn NIAH) and diverse LLMs (Llama-3.1, Qwen2.5, and DeepSeek-Coder-V2 with MLA), xKV consistently maintains near-lossless accuracy (within ~2-3% of uncompressed attention) under aggressive compression (up to 8x).",
+        "Practical throughput and latency improvements: Pairing cross-layer factorization with Selective Reconstruction (SR) mitigates the O(L) reconstruction FLOP bottleneck during decoding, resulting in real-world wall-clock speedups (up to 4.23x throughput and 3.5x attention latency speedup on an A100 GPU) without requiring CPU offloading.",
+        "Comprehensive evaluation and ablations: The manuscript includes thorough ablations covering window size, key vs. value sensitivity, combinations with low-bit quantization, and computational/memory complexity breakdowns."
+      ],
+      "weaknesses": [
+        "Heavy reliance on prior mechanisms for decoding: While cross-layer low-rank factorization is the core contribution, the selective decoding strategy (SR) directly adopts the landmark-guided chunk selection mechanism from ShadowKV. The paper would benefit from explicitly clarifying any architectural or algorithmic differences in how landmark selection is applied to the shared basis versus ShadowKV.",
+        "Peak memory and buffering overhead during prefill: Computing joint SVD across a window of W layers requires buffering the full KV states across all W layers in memory before factorization can take place. A clearer discussion of the transient peak memory footprint during prefill would strengthen the practical deployment narrative.",
+        "Applicability restricted to prefill context: As acknowledged in the limitations, the approach currently keeps newly generated tokens uncompressed during autoregressive decoding. For long-generation tasks (e.g., extensive reasoning/CoT or agentic loops), the decoding KV cache may eventually dominate memory unless periodic re-factorization or sliding-window eviction is introduced.",
+        "Minor text and table inconsistencies: In Section 4, the model evaluated is introduced as Qwen2.5-7B-Instruct-1M, whereas Table 1 and Table 4 report results for Qwen2.5-14B-Instruct-1M. Ensuring consistency between the text and tables will improve presentation clarity."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Insightful geometric analysis: The paper provides a compelling explanation for why prior inter-layer merging approaches (e.g., MiniCache via token-wise cosine similarity) suffer significant degradation, demonstrating via Centered Kernel Alignment (CKA) and spectral rank analysis that cross-layer KV redundancy exists in shared left-singular subspaces rather than pointwise token similarity.",
+        "Effective training-free post-hoc approach: Unlike cross-layer attention architectures (e.g., CLA, YOCO) that require expensive pretraining from scratch, xKV is purely post-training and plug-and-play across off-the-shelf LLMs.",
+        "Comprehensive experimental validation: The authors thoroughly benchmark xKV across multiple strong models (Llama-3.1, Qwen2.5, and MLA-based DeepSeek-Coder-V2) and rigorous benchmarks (RULER, LongBench, Multi-turn NIAH), demonstrating superior information retention up to 8x compression compared to intra-layer SVD, token eviction, and inter-layer merging baselines.",
+        "Practical end-to-end acceleration: By coupling cross-layer factorization with Selective Reconstruction (SR) and a custom accelerated randomized SVD kernel, xKV eliminates the host-device PCIe transfer bottleneck of prior offloading methods (e.g., ShadowKV) and delivers substantial real-world throughput gains (up to 4.23x)."
+      ],
+      "weaknesses": [
+        "Incremental nature of the selective reconstruction mechanism: The decoding acceleration mechanism (landmark-guided chunk selection) is directly adopted from ShadowKV. While integrating it with cross-layer factorized representations is practically effective, the selective decoding formulation itself is not conceptually novel.",
+        "Focus restricted to prefill KV cache: The method operates under the long-prefill / short-generation regime and leaves newly generated tokens during autoregressive decoding uncompressed. For long-generation workloads (e.g., multi-step reasoning / chain-of-thought generation), the growing generation cache remains unaddressed.",
+        "Minor inconsistencies and presentation issues: In Section 4 ('Models'), the text references Qwen2.5-7B-Instruct-1M, whereas Table 1 and Table 4 report results for Qwen2.5-14B-Instruct-1M. Clarifying model checkpoints and uniform reporting across the main text and tables would improve presentation rigor."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Insightful analysis and motivation: The paper provides a clear and principled insight by using Centered Kernel Alignment (CKA) to show that while individual token-wise cosine similarities across layers are modest, the dominant singular vectors spanning the KV subspaces across adjacent layers are highly aligned, explaining why prior token-merging methods (e.g., MiniCache) struggle.",
+        "Effective training-free methodology: The proposed Cross-Layer Factorization (CLF) requires no pretraining or fine-tuning, successfully compressing grouped-layer KV caches into a shared low-rank subspace and achieving up to 8x compression with minimal accuracy loss (<=3%) on RULER and LongBench.",
+        "Comprehensive baseline comparisons: The paper compares against an extensive set of baselines across multiple categories, including token eviction (SnapKV, PyramidKV, StreamingLLM), quantization (KIVI), single-layer low-rank decomposition (Single SVD), and dynamic loading/offloading (Quest, ShadowKV).",
+        "Robustness in multi-turn settings: Unlike token eviction methods whose performance drops dramatically after the first turn due to permanent context discarding, xKV retains context and demonstrates strong accuracy preservation across multi-turn conversation benchmarks.",
+        "Practical systems implementation and wall-clock speedups: The authors do not rely solely on theoretical FLOPs or compression ratios; they implement a custom hardware-aware randomized SVD kernel for prefill and combine CLF with Selective Reconstruction (SR) during decoding, demonstrating tangible end-to-end throughput improvements (up to 4.23x speedup on an A100 GPU) and compatibility with advanced architectures such as DeepSeek Multi-Head Latent Attention (MLA)."
+      ],
+      "weaknesses": [
+        "Heavy reliance on Selective Reconstruction for decoding speedup: Dense reconstruction under xKV is compute-bound and slower than full attention (dropping to ~0.4x normalized kernel speedup at 122k sequence length). Therefore, actual throughput improvements depend critically on combining xKV with landmark-based chunk selection inherited from ShadowKV.",
+        "Limited to long-prefill / short-generation regimes: As noted in the limitations section, only the initial prefill cache is factorized, while tokens generated during decoding are kept uncompressed. The paper does not provide an online mechanism to continuously update or re-factorize the shared basis during extended generation settings.",
+        "Peak memory footprint during prefill: While inference memory footprint is significantly reduced, computing the cross-layer SVD online during prefill requires buffering uncompressed activations across the layer window, which may introduce non-negligible transient memory overhead in highly constrained GPU memory environments.",
+        "Fixed rank and window allocation heuristics: The choice of window size (W=4) and fixed rank ratios between key and value caches (1:1.5) are empirically determined heuristics. As Figure 6 shows, optimal rank trade-offs vary substantially across different downstream task types (e.g., QA vs. variable tracking)."
+      ]
+    }
+  }
+}

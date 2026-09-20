@@ -1,0 +1,95 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Novel conceptual bridge between dynamic structural pruning and dense-to-MoE conversion: transforming dense MLPs into MoE layers while keeping original base weights frozen and only learning lightweight routing/hypernetwork components.",
+        "Strong empirical performance: across several model families (LLaMA-2/3, Qwen-2.5, Phi-2) and various sparsity ratios (40%–70% active parameters), ToMoE consistently achieves better perplexity and zero-shot downstream task accuracy compared to competitive structural pruning baselines (e.g., LLM Surgeon, ModeGPT, DISP-LLM).",
+        "Thoughtful architectural handling: carefully addressing positional embedding constraints (RoPE symmetry preservation during static Q/K pruning), memory-efficient in-place self-distillation, and scalable formulation of the union-of-experts loss."
+      ],
+      "weaknesses": [
+        "Unfair/incomplete comparison regarding total parameter footprint and memory: structural pruning permanently removes weights, substantially reducing the GPU memory required to host the model. In contrast, ToMoE optimizes for the union of experts to approach full capacity (Eq. 6, Fig. 5a), meaning that memory footprint during inference remains essentially equal to the dense base model. The paper should clearly discuss this trade-off between active compute (FLOPs) and parameter/memory storage.",
+        "Lack of actual wall-clock inference latency and throughput measurements: dynamic routing (top-1 for MLPs and per-token dynamic head masks for MHA) often introduces kernel dispatch overhead, irregular memory access, and communication bottlenecks. Hardware throughput (tokens/sec) under realistic serving scenarios (e.g., batched inference, prefill vs. decode) is missing.",
+        "Unclear implications for autoregressive decoding and KV caching: Eq. (4) introduces token-dependent dynamic selection matrices $S_t$ for Value and Output projections in attention. The authors should clarify how this interacts with KV cache indexing and memory layout across steps during autoregressive generation.",
+        "Visual presentation defects: Figure 5 contains extremely small text and poorly labeled axes on subfigures (a) and (b), making it difficult to read and interpret the quantitative cost comparisons without zooming in significantly."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Novel and intuitive perspective: Transforming dense LLMs into MoE models through dynamic structural pruning without retraining or continually pre-training the dense backbone weights is a creative, practical idea.",
+        "Remarkably low conversion cost: By freezing the base model and optimizing lightweight routers, projections, and hypernetwork modules via self-distillation, ToMoE requires orders of magnitude less training compute compared to prior dense-to-MoE methods like LLaMA-MoE (which required 200B tokens of continual pre-training).",
+        "Consistent and significant empirical performance: Evaluated across several modern model families (LLaMA-2 7B/13B, LLaMA-3 8B, Qwen-2.5 7B/14B, and Phi-2), ToMoE substantially outperforms conventional structural and semi-structured pruning baselines in perplexity and zero-shot downstream tasks at equivalent active parameter budgets.",
+        "Principled regularization scheme: The combination of active parameter control ($R_P$), union of experts regularization ($R_U$), and Switch-Transformer load balancing ($R_L$) directly addresses the core challenges of expert utilization and balanced routing."
+      ],
+      "weaknesses": [
+        "Unfair/unclear comparison regarding inference memory footprint: Structural pruning baselines (e.g., LLM-Pruner, SliceGPT, LLM Surgeon) permanently delete weights, reducing both memory footprint (VRAM) and compute. In contrast, ToMoE explicitly optimizes the union of experts to retain ~100% of the original model weights ($R_U$). Consequently, ToMoE cannot provide the memory footprint reduction of structural pruning, making direct comparisons purely based on 'active parameters' somewhat misleading without explicit qualification.",
+        "Absence of real-world latency, throughput, and memory benchmarks: The paper reports active parameter counts and FLOP-equivalent metrics, but lacks any wall-clock latency or throughput (tokens/second) measurements. In practice, MoE routing and sliced dynamic GEMMs introduce non-trivial kernel launch overheads and memory fragmentation; empirical runtime validation (especially with batched serving or standard attention kernels like FlashAttention) is crucial.",
+        "Formulation ambiguity in MHA pruning: Equation (4) appears notationally problematic for autoregressive sequence attention, as it writes $f_{\\text{MHA}}(X_t)$ as though $X_t$ attends only to itself, omitting the sequence aggregation over key/value tokens $X_{1:t}$. Furthermore, having dynamic, token-dependent selection masks $S_t$ on $V$ and $W_O$ breaks standard parallel attention kernels, and the paper does not explain how this is efficiently realized during inference.",
+        "Presentation and legibility issues: Key figures in the analysis section (notably Figures 5a and 5b) have tiny, low-resolution axis labels and legends that are essentially illegible."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "The core idea of converting dense LLMs into MoE-like architectures via learned dynamic routing and sub-network slicing with frozen backbone weights is an intriguing perspective bridging dynamic structural pruning and MoE adaptation.",
+        "The training pipeline uses self-knowledge distillation with frozen weights and straight-through estimators, making the MoE conversion relatively lightweight and computationally inexpensive compared to full pre-training/upcycling pipelines.",
+        "The empirical evaluation spans several model families (LLaMA-2 7B/13B, LLaMA-3 8B, Qwen-2.5 7B/14B, and Phi-2) across both language modeling perplexity (WikiText-2) and standard zero-shot reasoning benchmarks."
+      ],
+      "weaknesses": [
+        "Fundamentally unfair baseline comparison: The paper compares ToMoE directly against static structural pruning baselines (e.g., LLM-Pruner, SliceGPT, LLM Surgeon) strictly on the metric of 'active parameters'. However, static pruning permanently removes weights, reducing both FLOPs and physical VRAM footprint by 30-50%. In contrast, ToMoE actively regularizes the union of experts ($R_U$) to cover nearly the entire dense model (~100% parameter footprint in memory). For memory-constrained deployment, storing the entire model while dynamically activating a subset is not equivalent to structural pruning, making the performance comparisons misleading.",
+        "Technical inconsistency in dynamic MHA pruning: In Eq. (4) and Section 3.3, token-dependent selection matrices $S_t$ are applied to $W_V$ and $W_O$. In autoregressive self-attention, token $t$ attends to all preceding tokens $\tau \\le t$, aggregating $\\sum_\\tau A_{t,\\tau} V_\\tau$. If each token $\\tau$ selects a different dynamic subset of head dimensions, the KV cache would have misaligned dimensions/indices across positions, making standard batched attention aggregation impossible. The paper does not explain how KV caching and sequence-wide aggregation function when $S_t$ varies per token.",
+        "Absence of wall-clock inference and memory benchmarks: The paper frequently motivates the method by citing deployment on resource-constrained devices and efficient model serving. However, it provides zero real-world latency (ms/token), throughput (tokens/s), or peak VRAM measurements. Token-level dynamic slicing and MoE routing incur significant kernel launch overhead, non-contiguous memory accesses, and routing latency on GPUs, which cannot be assumed away without empirical profiling.",
+        "Lack of relevant dense-to-MoE baselines: Because ToMoE converts a dense model into an MoE with frozen weights, it ought to be evaluated against dense-to-MoE conversion methods (e.g., Sparse Upcycling, LLaMA-MoE), rather than solely comparing against methods that permanently discard parameters.",
+        "Presentation flaws and unreadable figures: Figure 5 is largely illegible due to microscopic axes and text. There are several noticeable typographical and grammatical errors throughout the text (e.g., 'seme-structural pruning', 'We than push', 'activate parameters', 'Aplaca Dataset' in Figure 6)."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Novel conceptual bridge connecting dynamic structural pruning with dense-to-MoE conversion, unifying expert construction and router learning into a single differentiable optimization framework without updating backbone model weights.",
+        "Extensive experimental evaluation across diverse model families (LLaMA-2 7B/13B, LLaMA-3 8B, Qwen-2.5 7B/14B, and Phi-2) demonstrating consistent gains over strong structural pruning methods (e.g., SliceGPT, LLM-Surgeon, DISP-LLM) and existing MoE conversion techniques (e.g., LLaMA-MoE, G-MoEfication, CMoE).",
+        "Carefully justified architectural choices, notably the insightful analysis in Section 3.3 and Appendix F explaining why dynamic pruning along the head dimension fails on Q and K due to cross-token inner products, and how head-dimension pruning is made compatible with Rotary Position Embeddings (RoPE).",
+        "High training efficiency and low resource footprint: freezing backbone weights enables self-knowledge distillation without loading a separate teacher model, and expert derivation requires minimal additional trainable parameters (<0.3%).",
+        "Thorough ablation studies and analytical visualizations, including training dynamics, expert token allocation, layer-wise preserved widths, and expert similarity matrices."
+      ],
+      "weaknesses": [
+        "Clarity regarding model storage and deployment representations: Section 3.2 and Section A.1 mention both shared-weight sliced experts and a 'pseudo-MoE' form. It remains somewhat ambiguous whether the deployed model stores $N$ separate sparse weight matrices (increasing memory consumption) or slices from a single shared matrix via gathered indices, and how this impacts standard MoE serving engines.",
+        "Evaluation of real-world inference speedups is limited: While Table 15 reports throughput for large batch sizes (512–1536), the paper lacks latency profiles for memory-bound single-batch (batch size = 1) autoregressive generation, where dynamic routing and irregular head/channel dimensions can introduce non-negligible kernel dispatch overhead.",
+        "Restriction to top-1 routing for MLP: The design relies strictly on top-1 routing for MLP layers, whereas state-of-the-art open MoE architectures (e.g., Mixtral, DeepSeek) primarily utilize top-2 or fine-grained routing. The paper does not explore whether ToMoE scales gracefully to top-k ($k > 1$) expert routing for MLPs.",
+        "Notational inconsistency in Section 3.2: Equation (3) defines token-dependent selection masks $s$ via $GE$, whereas Equation (11) in Appendix A.1 derives expert masks directly as $s_e = \\text{ST-GSig}(\\text{Proj}_D^{MLP}(E))$. Clarifying earlier in the main text that each expert's slice is input-invariant once trained, while only the assignment $G$ is token-dependent, would improve readability."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Conceptual insight and elegant formulation: Unifying dense-to-MoE conversion with dynamic structural pruning provides a principled, lightweight framework that learns expert configurations and routing jointly without modifying base model weights.",
+        "Well-reasoned architectural handling: The separation between static pruning for query/key projections (avoiding inner-product dimension mismatches and respecting RoPE subspace structure) and dynamic routing for value/output projections and MLPs is technically sound and well-justified.",
+        "Comprehensive empirical evaluation: The method is tested across a broad range of contemporary model families (LLaMA-2 7B/13B, LLaMA-3 8B, Qwen-2.5 7B/14B, and Phi-2) on perplexity and standard downstream benchmark suites, consistently outperforming competitive structural pruning baselines (e.g., LLM Surgeon, DISP-LLM, ModeGPT) and training-free/low-token MoE baselines.",
+        "Thorough analysis: The manuscript provides informative ablations (regularization terms, hypernetwork embeddings, temperature sensitivity), inference throughput benchmarks, and qualitative analyses of expert activation patterns."
+      ],
+      "weaknesses": [
+        "Practical inference latency at low batch sizes: While Table 15 reports throughput under large batch sizes (512 to 1536), practical LLM serving frequently operates at small batch sizes where MoE routing and dynamic slicing can suffer from kernel launch overheads and memory bandwidth constraints. Providing latency/throughput measurements for small batch sizes (e.g., 1 to 32) would give a clearer picture of real-world deployment viability.",
+        "Downstream performance ceiling relative to weight fine-tuning: In Table 6 (LLaMA-3 8B), fully trained MoE baselines that update weights (e.g., LLaMA-MoE-v2 trained on 7B tokens) still achieve higher average accuracy (59.61 vs 57.40), with notable gaps on BoolQ and MMLU. While ToMoE is dramatically more token-efficient (0.02B tokens), discussing the trade-offs and limits of keeping weights frozen versus subsequent lightweight fine-tuning would provide useful nuance.",
+        "Minor presentation issues: There are minor typos in table headers (e.g., Table 4 title reads 'Compassion against MoE construction methods' instead of 'Comparison')."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Novel and elegant connection between dynamic structural pruning and dense-to-MoE conversion: by framing expert formation as learning dynamic structural masks alongside routing, the dense model is converted into an MoE without modifying or fine-tuning the underlying pre-trained backbone weights.",
+        "Resource-efficient training: by freezing the backbone weights and relying on in-place self-distillation and Gumbel-based discrete routing optimization, the method requires orders of magnitude fewer tokens (e.g., 0.02B tokens vs. 1.2B–7B tokens for baselines like LLaMA-MoE and CMoE) and low GPU memory overhead.",
+        "Comprehensive empirical validation: the paper evaluates across diverse model families (LLaMA-2 7B/13B, LLaMA-3 8B, Qwen-2.5 7B/14B, Phi-2) on both language modeling perplexity and multiple downstream reasoning/QA benchmarks (ARC, PIQA, WinoGrande, HellaSwag, MMLU).",
+        "Principled architectural constraints: the paper explicitly addresses the geometric and structural incompatibilities between dynamic pruning and Multi-Head Attention (specifically RoPE compatibility and inner-product dimensionality in Q/K projections), retaining static pruning for Q/K while dynamically routing V/O projections."
+      ],
+      "weaknesses": [
+        "Conflation of active computational budget with parameter storage / memory footprint: structural pruning permanently discards weights to lower both parameter memory and compute, whereas ToMoE preserves nearly the full model parameters in memory (via the union of experts) while dynamically activating a subset. The paper needs to more explicitly delineate the difference between serving-time VRAM footprint and per-token FLOPs reduction.",
+        "Limited evaluation at high sparsity levels: experiments primarily investigate active parameter ratios of 40%–70% (e.g., 1 out of 8 experts with ~50% width). Standard MoE architectures often achieve substantially lower active parameter ratios (e.g., top-1 or top-2 over 8 to 16 experts, yielding ~15%–25% active compute), leaving the method's behavior at higher sparsity regimes uncharacterized.",
+        "Real-world inference serving and latency analysis: although Table 15 reports token throughput for large batch sizes (512–1536), batch sizes in real-time LLM serving are often much smaller (e.g., BS=1 to 16), where memory bandwidth dominates. Given that layers have non-uniform pruned widths across experts (Figures 5 and 7), the actual kernel implementation and practical speedup under latency-critical batch sizes are not sufficiently explored.",
+        "Notational ambiguity in expert definition: Section 3.2 uses $s = \\text{ST-GSig}(\\text{Proj}_D^{MLP}(GE))$ in Eq. (3) which suggests token-dependent continuous/discrete masking, whereas Appendix A.1 and Eq. (11) clarify that static binary expert masks $s_e$ are extracted from $E$ and then dynamically routed via $G$. Clarifying this decoupling directly in Section 3 would improve readability."
+      ]
+    }
+  }
+}

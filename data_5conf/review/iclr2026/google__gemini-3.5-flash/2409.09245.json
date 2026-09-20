@@ -1,0 +1,93 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "A novel and theoretically interesting perspective that treats quantization and sparsification as injecting bounded perturbations during training, addressing the problem via denoising.",
+        "The formulation of reconstruction as a ridge regression problem with a closed-form solution provides a continuous control knob (lambda) to stabilize training, preventing divergence in ultra-low bitwidths.",
+        "The proposed method shows promising stability and competitive accuracy when training very low-precision models (such as 1-bit weights) without requiring complex learning rate tuning or specialized optimizers.",
+        "The framework is versatile and can be applied to both quantization and sparsification, including structured M:N sparsity."
+      ],
+      "weaknesses": [
+        "Severe Hardware and Inference Inefficiency: The proposed denoising reconstruction g(q) requires computing the mean, variance, and covariance of the activations dynamically at inference time. This means full-precision activations must be processed and kept in memory to solve the ridge regression, which defeats the primary purpose of activation quantization (saving memory and using cheap integer operations).",
+        "Complex Dequantization Formula: As shown in Eq. (12), the dequantized matrix multiplication requires computing three additional outer products and multiple element-wise operations per block. While the theoretical FLOP overhead might be small, these memory-bound operations are highly unfriendly to modern GPU/TPU architectures and cannot be easily fused, likely resulting in a significant slowdown compared to standard quantization or even FP16 baselines.",
+        "Confounding Effect of Block-wise Normalization: The ridge regression reconstruction formula essentially acts as a block-wise normalization (similar to LayerNorm/InstanceNorm) on both weights and activations. Since block-wise normalization is known to regularize and improve model performance, the observed accuracy gains (sometimes exceeding the FP32 baseline) might be a byproduct of this architectural change rather than the quantization itself. To prove the robustness of the quantization scheme, the authors should compare against an FP32 baseline that also incorporates this block-wise ridge-regression normalization (with delta = 0).",
+        "Missing Comparisons in the Ultra-Low Precision Regime: While the paper claims state-of-the-art results for ultra-low precision models, the comparison in Table 2 is limited to A4W4. For ultra-low precision configurations like A4W1, the paper does not compare against established Binary Neural Network (BNN) or 1-bit/2-bit weight quantization literature (e.g., PokeBNN, ReActNet), where competitive or superior results are often reported."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Elegant and novel formulation of quantization/sparsification as a perturbation problem solved via ridge regression, providing a closed-form solution for the scaling and bias parameters.",
+        "The regularization parameter $\\lambda$ acts as an effective control knob that stabilizes training and prevents divergence in ultra-low bit regimes (e.g., 1-bit weights).",
+        "Strong experimental results in terms of validation accuracy and BLEU scores on ResNet-50 (ImageNet) and Transformer (WMT) without requiring extensive hyperparameter tuning or recipe modifications."
+      ],
+      "weaknesses": [
+        "Significant training overhead: Calculating the mean, variance, and covariance on-the-fly for every small block (e.g., block size of 128) during every forward pass, and backpropagating through these operations, introduces substantial computational and memory overhead. No wall-clock training time or memory benchmarks are provided.",
+        "Impractical for actual hardware acceleration: Equation 12 in the appendix outlines the actual integer matrix multiplication under the proposed scheme. It is extremely complex, involving four distinct terms, Hadamard products, and outer products. It is highly unlikely that this formulation can achieve real-world inference speedups on standard GPU/TPU hardware without custom, highly optimized kernels.",
+        "Vague details on sparsification: Section 4.4 introduces sparsification but lacks concrete details on how the hard thresholding operation $H(x)$ is defined, how the threshold is dynamically selected, and how it interacts with the ridge regression framework in practice.",
+        "Lack of modern low-bit LLM baselines: While the Transformer on WMT is a standard benchmark, the paper lacks comparison with more recent and representative low-bit quantization-aware training (QAT) methods designed for large language models (LLMs)."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "The paper introduces a novel and elegant formulation of quantization/sparsification as a perturbation-resilient ridge regression problem. Optimizing the reconstruction (dequantization) parameters with a regularization term $\\lambda$ provides a clean, closed-form solution to mitigate quantization noise.",
+        "The mathematical derivation is intuitive, and the connection to the 'fail-safe' piecewise constant backbone model when $\\lambda \\to \\infty$ is well-explained.",
+        "The method achieves impressive empirical results in extremely low-precision regimes (e.g., A4W1, A2W2, and even A1W1) on standard benchmarks (ResNet-50 on ImageNet and Transformers on WMT) without requiring complex training strategies or learning rate tuning.",
+        "The implementation is simple, requiring only a few lines of JAX/PyTorch code, as illustrated in the provided figures."
+      ],
+      "weaknesses": [
+        "A major clarity and technical concern is how activation quantization is handled during actual inference. The optimal scaling factor $a = \\frac{Cov(x, q)}{Var(q) + \\lambda}$ and bias $b = \\bar{x} - a\\bar{q}$ depend directly on the unquantized activation $x$. During inference, $x$ is unavailable. The authors do not explain how $a$ and $b$ are computed or approximated during deployment without access to the full-precision activations.",
+        "The sub-channel/block-wise quantization (e.g., block size of 128) introduces additional memory and computational overhead. Storing $a$ and $b$ as 16-bit floats for a block size of 128 adds an overhead of 0.25 bits per element. For 1-bit weights, this represents a significant relative overhead (25%), which should be factored into the comparisons with other methods that use per-channel or per-tensor quantization.",
+        "There is a lack of actual wall-clock speedup or execution time measurements. While the authors state that the method can be implemented using integer matrix multiplications, the extra overhead of computing dynamic stats (mean, variance, covariance) during training is not quantified."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 8,
+      "strengths": [
+        "Compelling and elegant core motivation: The paper pinpoints the \"quantization-oblivious\" backward pass of the Straight-Through Estimator (STE) as a fundamental cause of training instability in low-bit regimes, and addresses this by introducing a data-dependent, denoising dequantization transform derived from ridge regression.",
+        "Highly practical mathematical contribution (Theorem 1): Affine quantization is theoretically superior but historically avoided in hardware due to the computational overhead of offset terms. The proposed shortcut formula decomposes affine quantized matrix multiplication into a standard linear integer multiplication plus cheap, rank-1 corrections, making it highly efficient.",
+        "Exceptional and extensive empirical evaluation: The proposed method is validated across various scales and tasks, including small-scale models (nanoGPT, GPT-2 small) and large-scale pre-training of state-of-the-art LLMs (Gemma 1B and Gemma 4B trained on up to 26B tokens). It also achieves state-of-the-art results on ResNet-50 on ImageNet and Transformers on WMT translation datasets.",
+        "Outstanding clarity and reproducibility: The paper is beautifully written and structured. The inclusion of clear JAX code snippets in the appendix makes the method highly reproducible and easy to adopt as a drop-in replacement."
+      ],
+      "weaknesses": [
+        "Lack of training throughput/overhead analysis: The denoising dequantization transform relies on dynamically computing the mean, variance, and covariance of tensors. While the authors state that the forward pass cost is on par with LayerNorm, backpropagating through these statistical operations in PyTorch/JAX autograd can introduce overhead. Highlighting the actual training speed (e.g., in steps/second or tokens/second) compared to standard STE would strengthen the practical claims.",
+        "Lack of explicit analytical gradient formulation: While Section 3.3.2 conceptually explains how the backward pass becomes error-aware, the paper would benefit from presenting the explicit analytical derivative of $g(q)$ with respect to $q$ (including the gradient flowing through the variance and covariance terms) to clearly illustrate how the quantization error $\\delta$ mathematically guides the gradient update."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Identifies a fundamental flaw in the Straight-Through Estimator (STE)—the 'quantization-oblivious' backward pass—and provides an elegant, principled solution using ridge regression.",
+        "By formulating dequantization as a ridge-regularized reconstruction problem, the method creates a mathematically sound, error-aware gradient path that automatically accounts for both quantization and sparsification errors.",
+        "Proposes a novel and highly efficient 'affine quantized matrix multiplication shortcut' (Theorem 1) that dramatically reduces the computational overhead of two-sided affine quantization from four matrix multiplications to a single integer matrix multiplication plus two rank-1 corrections. This is a highly practical contribution for hardware-friendly deployment.",
+        "Outperforms standard STE and competitive baselines (such as BitNet, ParetoQ) across a wide range of architectures and scales, including nanoGPT, GPT-2, ResNet-50, and modern large language models like Gemma 1B and 4B.",
+        "Successfully trains fully binarized (A1W1) and sparse sub-1-bit networks with standard, off-the-shelf training recipes, demonstrating exceptional stability where other methods fail.",
+        "Exceptionally well-written, clearly motivated, and provides reproducible, self-contained JAX code snippets in the appendix."
+      ],
+      "weaknesses": [
+        "While the hardware-agnostic energy cost metric is useful for theoretical comparison, the paper would benefit from a discussion or measurement of the actual training wall-clock time or GPU memory overhead associated with computing the dynamic statistics (variance, covariance) online.",
+        "The comparison to other dynamic quantization methods that learn or compute scale/bias on-the-fly (e.g., Learned Step Size Quantization, LSQ) could be elaborated further in the related work to fully contextualize how the closed-form ridge-regression formulation compares to optimization-based step-size learning."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Clear Motivation and Formulation: The paper provides a clear critique of the Straight-Through Estimator (STE) and models the quantization error as an additive perturbation, which is a mathematically sound way to view the problem.",
+        "Elegant Mathematical Shortcut: Theorem 1 introduces a mathematically elegant shortcut for two-sided affine quantized matrix multiplication, showing how to decompose it into an integer matrix multiplication plus cheap, low-rank corrections.",
+        "Comprehensive Evaluation Scope: The authors evaluate their method on a wide range of architectures and scales, including nanoGPT, Gemma 1B, Gemma 4B, ResNet-50, and WMT Transformers.",
+        "Integration of Sparsity and Quantization: The paper offers a unified perspective that treats sparsification as a special case of quantization, demonstrating joint compression capabilities."
+      ],
+      "weaknesses": [
+        "Inference Dependency on High-Precision Activations: The most critical weakness of the proposed method is that the dequantization scale $s_g$ (specifically $s_X$ for activations) is data-dependent and computed on the fly using the covariance between the high-precision activation $X$ and the quantized activation $Q$ (Eq. 3). During inference, this requires the high-precision activations to be fully preserved and processed to compute $E_{QX}$, $Var_Q$, and $E_X$. This completely defeats the primary purposes of activation quantization, which are to reduce the memory footprint of activations and to avoid expensive floating-point operations in the activation pipeline.",
+        "Computational Overhead and Contradiction with Hardware Claims: The paper claims that the proposed method enables 'hyper-efficient neural networks' and that 'expensive floating-point units can be replaced with highly efficient bitwise operation circuits.' However, to compute the dynamic dequantization parameters ($s_X$) on the fly, the hardware must perform floating-point operations (including element-wise multiplications of high-precision tensors and divisions) at every layer. This overhead likely outweighs the savings of low-precision matrix multiplication, particularly for smaller layers or smaller batch sizes, and prevents the model from being deployed on pure integer/bitwise hardware.",
+        "Flawed Energy Proxy Metric: The 'Approximate Total Energy Cost' metric is highly simplified and, as the authors acknowledge, omits the costs of data movement and quantization overhead. Given the substantial computational overhead introduced by the dynamic dequantization step (which requires multiple reduction operations and element-wise products on high-precision tensors), this proxy metric is misleading and does not represent the actual energy consumption of the proposed method.",
+        "Overstated Novelty Claims: The assertion that this method enables 'for the first time, stable A1W1 and sparse sub-1-bit training' is inaccurate. Many existing works (e.g., Bi-Real Net, BitNet, etc.) have successfully trained stable A1W1 networks.",
+        "Lack of Real Hardware Benchmarks: Despite emphasizing 'hyper-efficient computing' and 'hardware implications,' the paper does not provide any actual latency, throughput, or energy measurements on real hardware (e.g., CPUs, GPUs, or edge accelerators) to demonstrate that the proposed method is indeed more efficient than standard baselines when accounting for the dequantization overhead."
+      ]
+    }
+  }
+}

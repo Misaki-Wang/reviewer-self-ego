@@ -1,0 +1,97 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Compelling and practical formulation: Decoupling task-specific reasoning guidance into a lightweight standalone policy via logit-level combination allows training with a frozen backbone LLM, saving significant activation memory and computation during RL training.",
+        "Modularity and composability: By operating directly at the logit level, multiple specialized modules (e.g., translation and mathematical reasoning) can be composed via simple linear logit interpolation at test time without additional joint training, as demonstrated convincingly on the multilingual reasoning task.",
+        "Weak-to-strong transferability: Modules trained alongside smaller models (e.g., Qwen-0.5B alongside 3B) transfer effectively to guide larger models (8B, 14B) and even a frozen Vision-Language Model (Qwen2.5-VL), showing genuine cross-scale utility.",
+        "Comprehensive empirical evaluation: The paper tests across diverse domains (mathematical reasoning and machine translation), includes out-of-distribution math benchmarks, memory scaling analyses, and qualitative ablations."
+      ],
+      "weaknesses": [
+        "Overstated architectural generality / tokenizer dependency: The paper repeatedly claims that UniR works with 'any frozen LLM' and is 'architecture-agnostic'. However, logit-level summation strictly requires identical token vocabularies and tokenizers. Experiments are solely conducted within the same model family (Llama-to-Llama or Qwen-to-Qwen). The authors should clearly scope this limitation or address how cross-tokenizer guidance could be handled.",
+        "Inference latency and memory bandwidth overhead: Unlike LoRA adapters—which can be merged directly into backbone weights for zero inference overhead—UniR requires executing forward passes through both the backbone and all attached reasoning modules at every autoregressive decoding step. A discussion or measurement of inference latency, throughput, and memory footprint during decoding is missing.",
+        "Theoretical claims in Section 4.3 are informal and somewhat circular: Theorem 1 assumes that $\\frac{1}{\\beta} r(x,y) = \\sum_t \\log \\pi_r(y_t \\mid x, y_{<t})$ holds exactly and that $\\pi_\\theta$ has converged to the exact optimal policy. In practice, $\\pi_r$ is a normalized probability distribution constrained to $\\sum_a \\pi_r(a) = 1$ (meaning per-token log-probs are non-positive), whereas arbitrary rewards and soft Q-values have no such normalization constraint. The theoretical connection to $Q^*$ is more heuristic than rigorous.",
+        "Inconsistent gains across backbones: While UniR outperforms full GRPO and LoRA on Llama-3.2-3B, it lags behind full GRPO and LoRA on Qwen2.5-3B (Table 1: 42.2% vs 44.8% and 42.8%). The paper would benefit from a deeper diagnostic analysis of why Llama-3.2 baseline GRPO struggled while Qwen GRPO was more competitive."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Clear, intuitive formulation: Framing the reward decomposition into an additive log-probability term optimized via GRPO while freezing the backbone model is neat and practically useful.",
+        "Training efficiency: Freezing the large backbone during RL training substantially reduces activation memory and peak VRAM overhead (as demonstrated up to batch size 128 in Figure 5).",
+        "Interesting emergent properties: The paper empirically demonstrates weak-to-strong transferability (e.g., a 0.5B/1.5B module trained with a 3B backbone improves 8B and 14B models) and modular composability across distinct tasks (math + German-to-English translation).",
+        "Thorough empirical evaluation across diverse domains: Experiments cover mathematical reasoning (GSM8K, MATH-500, AIME24, Minerva, OlympiadBench), machine translation, and an extension to multimodal models (VLMs)."
+      ],
+      "weaknesses": [
+        "Overstated architectural generality: The paper claims the reasoning module can be integrated into an 'architecture-agnostic backbone' and used with 'any frozen LLM'. In practice, logit-level summation strictly requires identical tokenizers and matching vocabulary spaces (e.g., Qwen-to-Qwen or LLaMA-to-LLaMA). It cannot be applied out-of-the-box across different model families without vocabulary mapping.",
+        "Missing discussion and comparison with Proxy-Tuning: Logit arithmetic between a frozen base model and an untied/smaller tuned model is closely related to Proxy-Tuning (Liu et al., 'Tuning Language Models by Proxy', 2024). A discussion clarifying the differences (especially updating $\\pi_r$ via GRPO with joint rollout versus separate tuning) and empirical comparisons are missing.",
+        "Lack of inference runtime and latency analysis: Guiding generation requires synchronized forward passes across both the backbone and the reasoning module(s) at every decoding step. The paper does not provide empirical wall-clock time, decoding latency, or throughput overhead benchmarks.",
+        "Theoretical contribution is trivial: Theorem 1 ('Informal') is essentially an immediate algebraic rearrangement under the strong assumption that the guided policy has already reached the exact optimal regularized policy $\\pi_\\theta^*$, offering limited new theoretical insight."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Compelling Motivation for Resource-Efficient Training: Decoupling reasoning adaptation into a lightweight module that guides a frozen backbone avoids backpropagating through large models, demonstrating tangible activation memory savings during RL training.",
+        "Interesting Transferability and Compositionality Concept: The framework demonstrates that a small module (e.g., 0.5B) trained via RL can guide larger models (e.g., 14B) and multimodal models (Qwen2.5-VL) within the same model family at inference time without retraining the backbone.",
+        "Comprehensive Qualitative Exploration: The manuscript provides thorough qualitative analyses and step-by-step reasoning comparisons demonstrating how the combined logits produce more structured reasoning traces than the standalone models."
+      ],
+      "weaknesses": [
+        "Flawed Theoretical Formulation in Eq. (4) and Theorem 1: Eq. (4) posits that the scaled trajectory reward (1/beta) * r(x, y) equals the sum of log-probabilities of policy pi_r. Since pi_r is a valid probability distribution, its log-probabilities are strictly non-positive (<= 0), which directly contradicts standard positive or non-negative reward formulations (e.g., binary 0/1 accuracy or BLEU scores). Furthermore, Theorem 1 equates log pi_r directly to (1/beta) * Q*, ignoring the fact that soft Q-values are unnormalized across actions while pi_r must satisfy sum_{y_t} pi_r(y_t | s_t) = 1; the state-dependent partition function Z'(s_t) is simply discarded in the proof.",
+        "Misleading 'Architecture-Agnostic' Claims and Strict Tokenizer Dependency: The paper repeatedly claims that UniR can be applied to 'any frozen LLM' and is 'architecture-agnostic'. However, logit-level addition strictly requires identical tokenizers and matching vocabulary spaces. The empirical validation is restricted entirely to intra-family pairs (Qwen-to-Qwen and LLaMA-to-LLaMA). The inability to apply the module across models with disparate tokenizers is a fundamental limitation that should be explicitly scoped.",
+        "Absence of Test-Time Guidance and Logit-Steering Baselines: The paper positions UniR primarily against full-model RL and LoRA-RL. However, guided generation via logit manipulation is well-studied in literature (e.g., DExperts, GenARM, PPLM, FUDGE). Omitting empirical comparisons against established logit-guidance and reward-guided decoding methods weakens the evaluation of the method's distinct contribution.",
+        "Inconsistent Empirical Superiority: In Table 1, on the Qwen2.5-3B backbone, UniR achieves an average score of 42.2%, which underperforms both GRPO LoRA (42.8%) and full GRPO (44.8%), lagging behind particularly on out-of-distribution math benchmarks (AIME24, Minerva, OlympiadBench). The gains over full GRPO are observed solely on Llama3.2-3B, where GRPO Full exhibits surprisingly low performance compared to LoRA, suggesting potential under-tuning of the baseline.",
+        "Lack of Inference Latency and Hardware Overhead Analysis: Combining modules requires running two or more models synchronously during autoregressive token generation (e.g., backbone + module 1 + module 2 in Section 5.3). The paper provides memory scaling figures for training but lacks runtime latency, FLOPs, and throughput benchmarks during inference."
+      ]
+    }
+  },
+  "v3": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Clear, elegant, and theoretically grounded formulation: Decoupling the reasoning policy from the frozen backbone allows the backbone probabilities to cancel out in the GRPO importance sampling ratio, enabling efficient optimization of only the lightweight reasoning module while maintaining theoretical connections to the optimal soft Q-function.",
+        "Strong and diverse empirical evaluation: The paper validates the approach across multiple distinct benchmarks and modalities, including mathematical reasoning (GSM8K, MATH-500, AIME24, Minerva, OlympiadBench), machine translation (IWSLT 2017), multimodal reasoning with frozen VLMs (MathVerse, Geometry3k), and clinical risk prediction (MIMIC-IV).",
+        "Effective composability and cross-scale transfer: The paper convincingly demonstrates that a small reasoning module (e.g., 1.5B or 0.5B) trained on a smaller backbone (3B) can guide much larger frozen models (8B, 14B) without further training, and that multiple specialized modules (e.g., translation + math, readmission + LOS) can be composed via logit summation to solve multi-faceted tasks.",
+        "Thorough analysis of training and inference dynamics: The manuscript includes helpful analyses regarding training stability (gradient norm and reward variance reduction compared to full GRPO), robustness across decoding temperatures ($T=0$ vs. $T=0.6$), and latency mitigation via speculative decoding (CoS)."
+      ],
+      "weaknesses": [
+        "Inference and deployment overhead: At test time, UniR requires maintaining and querying two separate models (or more when composing modules), which increases memory footprint for KV caches and runtime system complexity relative to standard merged LoRA adapters or fully fine-tuned models.",
+        "Strict dependence on shared tokenizers: The plug-and-play capability relies heavily on an identical vocabulary space. As shown in the cross-tokenizer experiment in Appendix D.2 (using EVA), cross-family transfer across different vocabularies incurs substantial performance degradation (dropping from 35.6% backbone accuracy to 18.3%), which bounds the universality of the approach in practice.",
+        "Relative gains under greedy decoding ($T=0$): While UniR clearly outperforms baselines under stochastic sampling ($T=0.6$), full fine-tuning with GRPO achieves slightly higher or comparable average performance under deterministic greedy decoding on Qwen (Table 16: 44.8% for GRPO Full vs. 43.9% for UniR). Evaluating Pass@$k$ or Best-of-$N$ would provide a more complete perspective on performance under varied sampling budgets.",
+        "Discrepancy in KL regularization during training: The authors set $\\beta_{KL} = 0$ for UniR while using $\\beta = 0.04$ for baseline GRPO (Appendix B.1). While motivated by the need for the small model to explore, it introduces a confounding factor when comparing training stability and mode collapse directly against GRPO baselines."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Compelling modular paradigm: UniR decouples reasoning adaptation from the backbone LLM by training a lightweight policy module using verifiable rewards (RLVR / GRPO) that steers a frozen backbone via logit modulation, preserving the core capabilities of the base model.",
+        "Resource-efficient training: By freezing the backbone and updating only the smaller reasoning policy (e.g., 0.5B-1.5B parameters), the framework significantly curtails backpropagation activation memory and VRAM requirements, supporting considerably larger training batch sizes than full fine-tuning or LoRA.",
+        "Modular composability: The additive logit formulation naturally supports combining multiple specialized modules (e.g., math reasoning and machine translation) at inference time with adjustable weighting coefficients, successfully addressing multi-faceted tasks without joint retraining.",
+        "Extensive empirical evaluation: The authors conduct comprehensive evaluations across mathematical problem solving, machine translation, vision-language reasoning (VLMs), and clinical risk prediction (MIMIC-IV), demonstrating consistent utility across domains.",
+        "Thorough analysis of deployment trade-offs: The submission investigates inference speed and effectively mitigates the dual-forward latency bottleneck using Collaborative Speculation (CoS), while also benchmarking against relevant inference-time guidance alternatives (RAST and Reasoning Vectors)."
+      ],
+      "weaknesses": [
+        "Theoretical inconsistency in Q* interpretation: In Section 4.3 and Appendix A.2, the optimal token-level policy derivation includes a per-step partition function log Z'(x, y_{<t}) (Eq. 24). However, in asserting log π_r = (1/β) Q* (Eq. 25 and Eq. 27), the authors drop the state-dependent normalization constant. Because π_r is a normalized probability distribution over tokens, it cannot strictly equal an unnormalized action-value function Q* without accounting for the log-partition term.",
+        "Inference-time computational overhead: Deploying UniR requires executing forward passes across both the backbone and the reasoning module(s) at each generation step. As shown in Table 6, naive deployment increases token generation time by ~58% compared to the backbone alone, which represents a tangible trade-off compared to parameter-merged methods like LoRA.",
+        "Sensitivity to decoding strategy in comparative claims: The performance advantage over GRPO Full is pronounced under stochastic decoding (T = 0.6 in Table 1), but under standard greedy decoding (T = 0 in Table 16), GRPO Full actually outperforms UniR on Qwen2.5-3B (44.8% vs. 43.9%). The paper should present greedy results more prominently in the main text to give a balanced picture.",
+        "Constrained cross-tokenizer applicability: While the method is architecture-agnostic in principle, practical cross-model transfer remains constrained by tokenizer compatibility. As shown in Table 10, cross-tokenizer alignment via linear embedding projection leads to severe performance degradation relative to the backbone (35.6% dropping to 18.3%), limiting out-of-family transfer without shared vocabularies."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper explores an interesting and timely direction: modular, plug-and-play reasoning guidance for frozen LLMs using verifiable rewards (RLVR) rather than full fine-tuning or parameter editing.",
+        "Extensive experimental scope covering diverse domains and modalities, including mathematical reasoning, machine translation, cross-lingual transfer (MGSM in Japanese/Spanish), multimodal reasoning (VLMs on MathVerse and Geometry3k), and medical outcome prediction on MIMIC-IV.",
+        "Comprehensive empirical analysis in the appendix, including training dynamics (gradient norms, reward variance), standalone vs. combined module evaluations, memory footprint analysis, and integration with collaborative speculative decoding (CoS) to alleviate inference latency."
+      ],
+      "weaknesses": [
+        "Theoretical flaw in Theorem 4.1 / Theorem A.3: The paper claims that the log-probability of the reasoning module recovers the scaled optimal soft Q-function, i.e., $\\log \\pi_r(y_t | x, y_{<t}) = \\frac{1}{\\beta} Q^*(y_t | x, y_{<t})$. However, because $\\pi_r$ is a properly normalized probability distribution over the vocabulary ($\\sum_{y_t \\in \\mathcal{V}} \\pi_r(y_t | x, y_{<t}) = 1$), this equality implies that the soft state-value / per-step partition function $V^*(s_t) = \\beta \\log \\sum_{y_t} \\exp(\\frac{1}{\\beta} Q^*(y_t | s_t))$ is identically zero for all states and rewards, which does not hold in general.",
+        "Incorrect derivation in Section 4.2 regarding the policy ratio: The text claims that $\\frac{\\pi_\\theta(y^i|x)}{\\pi_\\theta(y^i|x; \\phi_{old})}$ simplifies strictly to $\\frac{\\pi_r(y^i|x, \\phi)}{\\pi_r(y^i|x; \\phi_{old})}$ because terms from $\\pi_b$ cancel out. This overlooks the token-level normalization factor $Z'(x, y_{<t}; \\phi) = \\sum_{w} \\pi_b(w) \\pi_r(w; \\phi)$, which explicitly depends on the trainable parameters $\\phi$. Disregarding the partition function's parameter dependence produces an unaddressed gradient discrepancy between the true objective and the practical update.",
+        "Questionable baseline tuning and sensitivity under sampling: The main claims of superiority over GRPO Full fine-tuning heavily rely on the baseline's drastic drop at $T=0.6$ (e.g., dropping over 12 points on GSM8K and 6 points on MATH-500 from $T=0$ to $T=0.6$). Such extreme sensitivity indicates potential optimization issues or suboptimal hyperparameter choices (e.g., KL coefficient, learning rate schedule) for the baseline, rather than an inherent limitation of standard RL fine-tuning.",
+        "Negative interference in module composition and modest transfer gains: The empirical evaluation reveals evident negative transfer during composition; for example, in Table 3, combining the Readmission and Length of Stay (LOS) modules leads to an 8% accuracy drop on readmission and a 6% drop on LOS compared to using individual modules. Furthermore, the weak-to-strong transfer to 8B and 14B backbones (Figure 2) yields only modest gains of +1.8% to +2.5% on average.",
+        "Inference latency and memory overhead: Maintaining and running two models simultaneously at each autoregressive decoding step incurs substantial latency (+58% per-token time naively, as shown in Table 6) and duplicate KV cache memory, which partially counters the efficiency benefits gained during training."
+      ]
+    }
+  }
+}

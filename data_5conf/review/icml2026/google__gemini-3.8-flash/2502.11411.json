@@ -1,0 +1,96 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Relevant and timely problem: Addressing data contamination and unsafe fine-tuning data in LLMs is critical for trustworthy AI.",
+        "Insightful analysis of token-level attribution noise: The authors provide an interesting empirical analysis (Section 4 and Appendix B.1) showing that naive full-response data attribution suffers because benign/filler tokens dilute the gradient signal compared to explicit unsafe tokens.",
+        "Dual-perspective evaluation: The paper evaluates both detection performance (AUPRC, Precision, Recall, F1) on identifying injected unsafe data and downstream utility by retraining models on filtered data and evaluating safety metrics (ASR and TPR Gender Gap)."
+      ],
+      "weaknesses": [
+        "Conceptual inconsistency and human-in-the-loop dependency: The paper introduces DABUF to address the shortcomings of moderation classifiers (e.g., lack of adaptability, predefined taxonomies). However, for the primary jailbreak injection setting, DABUF explicitly depends on Llama-Guard-3-8B to screen candidates, followed by human verification to construct the attribution target dataset $D_{target}$. This creates an unfair comparison against fully automated baselines (Wildguard, OpenAI API, GradSafe) and contradicts the claim that DABUF operates independently of moderation models.",
+        "Artificial setup for gender bias mitigation: The gender bias evaluation relies on injecting 150 flipped labels (female physician $\\to$ nurse) into Bias in Bios. Tracing mislabeled data via gradient influence is a well-established property of influence functions (e.g., Koh & Liang 2017; Pruthi et al. 2020). Testing this as 'generalization to gender bias' oversells the finding, as it is fundamentally mislabeled data detection rather than handling subtle, naturalistic representation bias.",
+        "Weak baselines in the bias mitigation experiment: In Section 5, the only baseline compared is text embedding similarity using OpenAI Ada-003. Ada-003 is a general-purpose unsupervised embedding model and an inadequate control. Stronger and more standard baselines—such as training loss/perplexity ranking, gradient norm ranking, or linear probing on embeddings—are missing.",
+        "Limited downstream protection in realistic jailbreak scenarios: On the ToxicChat dataset, retraining with the top 100 filtered samples leaves the models with an extremely high attack success rate (ASR of 86.7% for Llama-3-8B and 66.7% for Gemma-2-9B, down from 93.3% and 90.0% respectively), indicating that the practical safety gains from this filtering threshold are modest.",
+        "Lack of runtime and computational cost discussion: Calculating projected LoRA gradients across tens of thousands of training instances requires substantial backward-pass compute compared to forward-only moderation classifiers. The paper does not provide runtime, memory, or FLOPs comparisons."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3,
+      "strengths": [
+        "Important problem formulation: Identifying and filtering small amounts of unsafe or poisoned training data (e.g., subtle jailbreaks, safety demonstration corruptions, and demographic bias) is a critical challenge for LLM safety.",
+        "Insightful diagnosis of naive data attribution: The paper demonstrates both theoretically and empirically (Section 3.1, Appendix B.1, and Table 9) that naive attribution from long-form generated responses suffers from gradient dilution due to benign filler tokens.",
+        "Broad evaluation across two distinct safety domains: The method is evaluated on both jailbreak injection detection (ToxicChat, XSTest-Response) and algorithmic fairness / demographic bias mitigation (Bias in Bios)."
+      ],
+      "weaknesses": [
+        "Unfair baseline comparison and missing retrieval baselines: In the jailbreak detection setup (Section 3.1 and 4), DABUF relies on running an external classifier (Llama-Guard-3-8B) followed by human annotation to create a verified unsafe seed set $D_{\\text{identified}}$. None of the baseline classifiers receive this human-in-the-loop refinement. Furthermore, standard nearest-neighbor retrieval baselines (e.g., using text embeddings such as Ada3 or BM25 to retrieve training points similar to $D_{\\text{identified}}$) are missing in the jailbreak benchmarks (Tables 2–4), making it unclear whether gradient attribution provides any gain over simple semantic retrieval from the verified seed set.",
+        "Contradictory claims regarding computational efficiency: The abstract and introduction critique existing classifiers because they 'require significant computational overhead.' However, DABUF requires fine-tuning the model, running a classifier over the entire corpus, performing human annotation, computing parameter gradients for all training samples (40k+), and computing pairwise similarities. This pipeline is considerably more computationally and operationally expensive than single-pass classifier moderation.",
+        "Very small evaluation sets and statistical noise: The test sets for Attack Success Rate (ASR) are extremely small ($|D_{\\text{test}}| = 30$ for ToxicChat and $|D_{\\text{test}}| = 20$ for XSTest-Response). On a test set of size 30, the difference between 93.3% (28/30) and 86.7% (26/30) in Table 4 corresponds to a shift of only two prompts, which falls well within expected stochastic variation. Confidence intervals or multi-seed standard deviations are missing for the retrained model results in Tables 4 and 7.",
+        "Conceptual inconsistency between jailbreak and bias formulations: In jailbreaking scenarios, DABUF does not attribute harmful model outputs; instead, it performs sample-to-sample attribution from a classifier-and-human-filtered training subset $D_{\\text{identified}}$. In contrast, the gender bias scenario attributes directly from model responses. This conceptual pivot undermines the central narrative that model output attribution alone resolves unsafe data detection.",
+        "Ambiguity in human annotation protocol: The paper notes that $D_{\\text{cand}}$ is filtered via human annotation into $D_{\\text{identified}}$, but provides no specifics on annotator guidelines, number of annotators, inter-annotator agreement, or exact filtering yield across splits."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "The paper addresses a significant and timely problem in LLM safety: identifying and filtering harmful or poisoned data from instruction tuning datasets to prevent jailbreaks and societal biases.",
+        "The empirical analysis in Appendix B.1 provides a useful observation: attributing entire long-form model responses to training data yields noisy gradient signals because common benign tokens dilute the gradients of safety-critical tokens.",
+        "The authors evaluate the approach across two distinct safety settings: jailbreak injection (ToxicChat, XSTest) and occupational gender bias (Bias in Bios)."
+      ],
+      "weaknesses": [
+        "Conceptual mismatch with the paper's core premise: The paper is framed around attributing unsafe model outputs back to training data without requiring predefined classifiers. However, for long-form jailbreak scenarios, the proposed solution explicitly abandons model output attribution and instead requires running a moderation classifier (Llama-Guard-3-8B) across the training set, followed by manual human verification of candidate samples to create the target set $D_{\\text{target}}$. In this setting, the method reduces to human-in-the-loop gradient similarity search seeded by an existing safety classifier, rather than pure post-hoc output attribution.",
+        "Unfair baseline comparisons: Because DABUF relies on Llama-Guard plus manual human verification to seed the target set in jailbreak experiments, it receives substantial external supervision that the competing automated baselines (Wildguard, OpenAI Moderation API, GradSafe) do not receive. Comparing this pipeline against standalone zero-shot classifiers is inherently asymmetric.",
+        "Contradictory computational efficiency claims: The introduction criticizes moderation classifiers for requiring 'significant computational overhead.' However, DABUF requires initial model fine-tuning on the full dataset, backpropagating and computing projected gradients across tens of thousands of training instances, screening with a classifier, human inspection, similarity ranking, and complete model retraining. This workflow has significantly higher computational cost and latency than simply running a single forward pass with a classifier.",
+        "Mixed experimental results and weak statistical power: In Table 2, Wildguard outperforms DABUF by a wide margin on XSTest-Response (85.9% vs. 74.1% AUPRC for Llama-3-8B and 64.1% for Gemma-2-9B), and also achieves a higher F1 score in Table 3 (71.1% vs. 68.7%). Furthermore, the test sets used to measure Attack Success Rate (ASR) are very small ($|D_{\\text{test}}| = 30$ for ToxicChat and $|D_{\\text{test}}| = 20$ for XSTest-Response), where a single sample flip shifts ASR by 3.3% to 5.0%, and no standard deviations or significance tests are reported for Tables 1–4.",
+        "Weak baseline selection for bias mitigation: In the gender bias evaluation (Section 5), the only comparison is an off-the-shelf embedding similarity baseline using OpenAI text embeddings (Ada3). More standard data attribution baselines (e.g., TracIn, influence functions, datamodels) or active learning/classifier probes are omitted.",
+        "Presentation and writing polish: The text contains several grammatical oversights, such as missing words (e.g., Section 3.1: 'we first an LLM-based classifier... to screen the entire training dataset') and inconsistent baseline definitions."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Principled formulation grounded in signal detection theory: The paper provides a clear justification for representation denoising (centering and whitening) and dimension selection using the discriminability index d' as an analytical surrogate for detection performance.",
+        "Substantial empirical gains: The proposed Denoised Representation Attribution (DRA) significantly improves upon standard data attribution baselines (RepSim and GradSim), increasing detection AUPRC substantially across both Llama-3-8B and Gemma-2-9B architectures.",
+        "Effective downstream mitigation: The evaluation goes beyond offline detection metrics by retraining models on filtered data and demonstrating marked reductions in Attack Success Rate (ASR) for jailbreaks and TPR Gender Gap for implicit bias.",
+        "Strong performance on implicit unsafe behaviors: The method demonstrates clear value over standard moderation classifiers (such as Wildguard and OpenAI Moderation API) in domains like gender bias, where harmful content does not follow explicit lexical toxicity patterns."
+      ],
+      "weaknesses": [
+        "Lack of detailed algorithmic specification for dimension selection: Section 3.3 mentions selecting a subset of indices I from the top m' eigenvectors to maximize the leave-target-out discriminability index, but does not specify whether the optimization is done via individual ranking, greedy search, or exact combinatorial search. Providing explicit pseudocode and runtime complexity would improve reproducibility.",
+        "Absence of general utility evaluation after filtering: In the retraining experiments, the top K samples are removed (e.g., K=500 in the gender bias experiment where only 150 injected samples existed). The paper does not evaluate whether filtering these additional benign samples impacts general instruction-following ability or task benchmarks (such as MMLU or MT-Bench).",
+        "Missing details on gradient feature dimensionality and computational overhead: While the paper notes that LoRA is used to reduce gradient dimensions, it omits the exact gradient dimensionality m, the value of candidate dimensions m', and wall-clock runtime/memory requirements for covariance estimation and eigendecomposition."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Principled and theoretically grounded framework: The paper connects representation-based data attribution to classical signal detection theory, providing an intuitive and mathematically grounded rationale (via the discriminability index d' and whitening) for why standard representation averaging fails and how to optimally linearize detection.",
+        "Comprehensive empirical evaluation: The authors evaluate across two distinct unsafe data modalities (jailbreak injections and subtle gender bias in Bias in Bios) and test on multiple backbone architectures (Llama-3-8B and Gemma-2-9B). The gains in detection AUPRC over both vanilla attribution baselines (GradSim, RepSim) and specialized moderation models (Wildguard, Llama-Guard) are substantial.",
+        "Verification through downstream retraining: Crucially, the evaluation goes beyond offline detection metrics (AUPRC) to retraining models on filtered data and measuring downstream safety (ASR and TPR Gender Gap), proving that the denoised attribution effectively removes the most toxic/influential samples.",
+        "Addressing blind spots of classifier-based guardrails: The experiments on gender bias clearly demonstrate the value of data attribution over fixed-taxonomy classifiers (e.g., Wildguard fails completely on gender bias with ~0.059 AUPRC, while DRA achieves up to 0.748)."
+      ],
+      "weaknesses": [
+        "Algorithmic clarity on dimension selection: In Section 3.3, the procedure for selecting subset I* of size r from the top m' eigenvectors is somewhat underspecified. The paper does not clarify whether the optimization over I is performed via greedy forward selection, independent top-r ranking of individual dimensional d' values, or an exhaustive search.",
+        "Overfitting risk to small target sets: The leave-target-out criterion optimizes dimension selection directly against the target set Q. When |Q| is very small, there is a realistic risk that selected dimensions capture idiosyncratic stylistic features of Q rather than general unsafety; a more rigorous analysis of regularization or cross-validation on target sets would strengthen the paper.",
+        "Missing operational details for filtering baselines: In Table 3, the exact number of filtered training samples K is not explicitly specified in the text (unlike Table 6 which specifies top 500). Furthermore, comparisons to other competitive moderation baselines (such as Llama-Guard-3) during the retraining experiments are omitted.",
+        "Computational scalability: Calculating the covariance matrix Σ_X and performing eigen-decomposition over representations across entire training sets can introduce notable memory and runtime overhead, especially as training corpus size scales. An empirical discussion of the computational overhead (wall-clock time and memory) would provide valuable practical guidance."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Sound theoretical grounding: The paper effectively formulates representation-based data attribution under the lens of signal detection theory, using the classical discriminability index (d') to motivate both background centering/whitening and informative dimension selection.",
+        "Comprehensive empirical validation: Evaluates both jailbreak injection (ToxicChat, XSTest) and subtle implicit bias (Bias in Bios) across multiple model backbones (Llama-3-8B-Instruct, Gemma-2-9B-it).",
+        "Evaluation beyond detection metrics: The authors don't rely solely on AUPRC, but also demonstrate real downstream utility by retraining models on the filtered datasets and reporting substantial reductions in Attack Success Rate (ASR) and TPR Gender Gap.",
+        "Strong performance relative to baselines: The proposed DRA enhancement dramatically improves vanilla data attribution methods (GradSim, RepSim) and matches or outperforms heavy fine-tuned moderation models (e.g., Wildguard, Llama-Guard-3)."
+      ],
+      "weaknesses": [
+        "Under-specified optimization procedure: Section 3.3 mentions selecting a subset of indices I from the top m' eigenvectors by maximizing d'_LTO, but lacks precise details on the combinatorial optimization algorithm used (e.g., whether greedy selection, independent per-dimension ranking, or beam search is applied).",
+        "Computational overhead and scalability analysis: Computing representations, empirical covariance matrices, and eigendecompositions over large training sets can be resource-intensive, particularly for gradient-based attribution. A discussion of wall-clock time and memory complexity compared to baseline attribution methods is missing.",
+        "Asymmetry in baseline comparisons: DRA utilizes a target dataset of unsafe model responses (D_target) to guide attribution, whereas off-the-shelf moderation classifiers (OpenAI API, Wildguard) operate in a zero-shot, prompt/sample-only regime without access to downstream model outputs or target distributions.",
+        "Hyperparameter sensitivity: Key hyperparameter choices (such as the target dimension size r=30 and the candidate dimension cutoff m') are fixed across experiments without sensitivity analysis or exploration of how performance scales with r across different tasks."
+      ]
+    }
+  }
+}

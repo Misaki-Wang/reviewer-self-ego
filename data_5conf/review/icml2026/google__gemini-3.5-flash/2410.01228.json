@@ -1,0 +1,87 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Addresses a highly practical and important problem in LLM serving: optimizing GPU utilization by co-locating latency-sensitive online requests with throughput-oriented offline workloads.",
+        "Proposes a set of well-designed, complementary techniques: layer-wise preemption to guarantee low online latency, incremental checkpointing to amortize host-device memory transfers of KV caches, and SLO-aware scheduling.",
+        "Demonstrates impressive empirical results on real-world trace data, showing a 2.35x throughput increase compared to online-only serving, while drastically reducing tail latency compared to a naive priority-scheduling baseline."
+      ],
+      "weaknesses": [
+        "The evaluation is restricted to a single model (Llama-2-7B) on a single GPU (NVIDIA A100-40G). Since the paper claims to support tensor and pipeline parallelism, multi-GPU and larger-scale model evaluations should be included to demonstrate that the synchronization overhead of layer-wise preemption scales well.",
+        "The baseline comparisons could be stronger by including state-of-the-art chunked-prefill or disaggregated systems (such as Sarathi-Serve or Splitwise) adapted for co-serving, rather than comparing primarily against the authors' custom-modified vLLM priority scheduler (vLLM++)."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Addresses a highly practical and important problem: maximizing GPU utilization in LLM serving by co-serving latency-critical online requests and throughput-oriented offline batch tasks.",
+        "Well-designed and novel techniques: Layer-wise preemption provides a good trade-off between system responsiveness and runtime overhead compared to iteration-level or kernel-level preemptions.",
+        "Clever incremental checkpointing: Utilizing the autoregressive nature of LLMs to asynchronously checkpoint newly generated KV cache blocks (one token at a time) to CPU memory successfully amortizes PCIe bandwidth overhead and avoids the latency spikes of standard bulk swapping.",
+        "Solid evaluation using real-world bursty traces (BurstGPT) and benchmark datasets, demonstrating that the system significantly improves overall throughput while strictly honoring online tail-latency (99th percentile TTFT and TPOT) SLOs."
+      ],
+      "weaknesses": [
+        "The evaluation is mostly conducted on a single-GPU setup with the Llama-2-7B model. Testing on larger models (e.g., 70B+) or more complex multi-GPU tensor/pipeline parallel configurations would better demonstrate the scalability of the design under heavier communication and memory pressures.",
+        "The layer-wise preemption overhead, although minimized, still introduces a 4% execution time overhead due to the PyTorch distributed barrier. While acceptable, this could become more prominent for models with faster layer executions or smaller batch sizes.",
+        "The SLO-aware scheduling policy depends heavily on precise offline profiling. The paper would benefit from a sensitivity analysis showing how the system behaves when profiling estimates deviate from actual execution times in dynamic real-world environments."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a highly practical and important problem: maximizing GPU utilization by co-serving latency-critical online requests and latency-insensitive offline batch requests.",
+        "Proposes a cohesive set of system mechanisms, including layer-wise preemption safepoints, incremental and asynchronous KV cache checkpointing, background prefetching, and SLO-aware scheduling.",
+        "The evaluation uses a realistic, bursty load trace (BurstGPT) to demonstrate the system's effectiveness in protecting online tail latencies (TTFT and TPOT) while harvesting idle GPU capacity."
+      ],
+      "weaknesses": [
+        "The evaluation is highly limited in scale, conducted on a single GPU (NVIDIA A100-40G) and using only a relatively small model (Llama-2-7B). It lacks experiments on multi-GPU or multi-node settings with larger models (e.g., 70B+), where KV cache swapping overheads and inter-GPU synchronization during layer-wise preemption are bound to behave very differently.",
+        "The baseline comparison is weak. The main comparative baseline is 'vLLM++', which is a naive priority scheduler implemented by the authors themselves. The paper should compare against, or adapt, other multi-tenant or co-serving systems for deep learning workloads.",
+        "There is a potential starvation issue for offline requests. Since the scheduler treats offline requests as purely best-effort, a prolonged period of high online load could lead to complete starvation of offline jobs. The design lacks any SLO guarantees or scheduling fairness mechanisms for the offline queue.",
+        "The synchronization overhead of layer-wise preemption relies on PyTorch's distributed barrier and NCCL broadcasting. While the overhead is around 4% on a single GPU, this synchronous barrier is highly likely to scale poorly and introduce significant tail-latency jitter under multi-node pipeline or tensor parallel configurations."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Addresses a highly practical and significant problem of low GPU utilization in online LLM serving by co-serving with offline batch inference requests.",
+        "Proposes a comprehensive, fine-grained system architecture (ConServe) addressing scheduling (token-level), execution (layer-wise preemption), and state management (incremental KV cache checkpointing) in a unified way.",
+        "Strong evaluation on modern LLMs (Llama-3.1 8B/70B, Qwen-2.5 14B) on state-of-the-art hardware (NVIDIA H100) using realistic workload traces.",
+        "The implementation is substantial (built on top of vLLM with over 9000 lines of code) and the paper provides a thorough breakdown of overheads and design choices."
+      ],
+      "weaknesses": [
+        "The scheduler relies on an offline profiling step (~20 minutes) to fit the polynomial cost model. A discussion on how sensitive this model is to dynamic system environments (e.g., minor background noise, thermal throttling) would strengthen the paper.",
+        "Although the layer-wise preemption overhead is evaluated as low, frequent PCIe reads (device-to-host loads) to check the preemption flag could potentially scale poorly or cause minor interference on different hardware architectures with slower PCIe lanes."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Addresses a highly practical and timely problem: maximizing GPU utilization in LLM serving by co-scheduling latency-sensitive online requests with latency-tolerant offline batch requests.",
+        "Presents a comprehensive system design (ConServe) addressing the scheduling, execution, and state-management bottlenecks of co-serving.",
+        "Introduces novel and effective mechanisms such as sub-iteration layer-wise preemption and incremental, token-level KV cache checkpointing to eliminate the heavy cost of state swapping/recomputation.",
+        "Demonstrates impressive empirical results with a thorough evaluation on multiple modern LLMs (up to 70B parameters with tensor parallelism) and real-world datasets, outperforming competitive baselines significantly."
+      ],
+      "weaknesses": [
+        "The context-aware cost model relies on an offline profiling phase; it is not fully clear how well the polynomial approximation holds or adapts to highly dynamic architecture features like Mixture-of-Experts (MoE) or speculative decoding.",
+        "The layer-wise preemption design requires instrumenting safepoints into the model execution code, which could increase engineering complexity and complicate maintenance as underlying model architectures and inference backends (e.g., vLLM, TensorRT-LLM) evolve.",
+        "While PCIe and host memory overheads are analyzed, extreme scenarios with concurrent high-volume batch workloads under severe host memory pressure could still lead to bottlenecking."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Highly practical and well-motivated target problem: co-serving latency-critical online LLM requests alongside latency-tolerant offline batch requests is increasingly relevant given the emergence of cheap batch APIs.",
+        "Cohesive system design that addresses the core bottlenecks of co-serving (scheduling, execution, and memory management) through three synergetic fine-grained techniques: SLO-aware token-level scheduling, layer-wise preemption, and incremental KV cache checkpointing.",
+        "Solid and realistic system engineering implementations, successfully addressing practical complexities such as Tensor Parallelism deadlocks (via ncclBroadcast safepoint synchronizations) and CUDA Graph compatibility on top of vLLM.",
+        "Extensive and rigorous empirical evaluation using synthetic and real-world datasets across multiple model sizes (Llama-3.1 8B, Qwen-2.5 14B, Llama-3.1 70B), demonstrating substantial and convincing improvements in both throughput (2.2x) and tail latency (2.9x reduction)."
+      ],
+      "weaknesses": [
+        "Potential scalability limits of safe-point synchronization: While the 167.2µs overhead for a 4-GPU tensor-parallel setup is low, the use of collective communication (ncclBroadcast) at safepoints every few layers might suffer from greater latency jitter and overhead as tensor-parallelism scales to larger clusters (e.g., 8, 16, or more GPUs).",
+        "Dependency on offline profiling: The SLO-aware scheduler relies on a context-aware performance model. While the 20-minute profiling phase is reasonable, the resulting coefficients are static and tied to a specific hardware and model configuration, which reduces flexibility if there are dynamic runtime shifts in the system setup.",
+        "Hardware assumptions on PCIe bandwidth: The incremental KV cache management strategy relies on overlapping PCIe transfers with GPU compute. On systems with constrained PCIe bandwidth (e.g., PCIe Gen3 or virtualization-heavy clouds), this overlapping might not fully hide the state-transfer overhead, potentially degrading performance compared to the reported H100 benchmarks."
+      ]
+    }
+  }
+}
