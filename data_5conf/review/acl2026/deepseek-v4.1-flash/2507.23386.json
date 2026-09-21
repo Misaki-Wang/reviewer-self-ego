@@ -1,0 +1,47 @@
+{
+  "v2": {
+    "exp3_negative": {
+      "oa": 2.5,
+      "strengths": [
+        "Proposes a simple and clearly described embedding framework that combines a lightweight bidirectional encoder with a decoder-only LLM via a Contextual token, and evaluates it on the full MTEB benchmark across three LLM backbones.",
+        "Evaluation is extensive: full MTEB (56 datasets), MTEB-MINI ablations, multiple base models (S-LLaMA-1.3B, LLaMA-2-7B, Mistral-7B), and analyses of component contributions, token placement, number of Contextual tokens, and encoder choice.",
+        "Includes an efficiency analysis showing reduced sequence length and inference latency compared to ICL-based methods such as bge-en-icl few-shot.",
+        "Provides detailed experimental settings, hyperparameters, training data, and evaluation prompts, which supports reproducibility."
+      ],
+      "weaknesses": [
+        "The technical novelty is limited: the method is essentially a combination of an external embedding encoder used as a prefix, concatenation-based pooling, and existing contrastive training; the paper does not offer a fundamentally new insight into decoder-only LLM embeddings.",
+        "The central representation claim is confounded by embedding dimensionality: Causal2Vec concatenates two d-dimensional hidden states into a 2d embedding, while most baselines use d-dimensional embeddings. No dimension-matched baseline or projection-to-d ablation is provided, so the reported gains may be due to larger embedding size rather than the proposed Contextual/EOS concatenation.",
+        "Reported improvements are modest and lack significance testing: on MTEB-MINI, the Contextual token alone improves S-LLaMA-1.3B by only 0.24 points, and the concatenation adds a small additional gain. The paper does not report variance or statistical tests, making it unclear whether the gains are reliable.",
+        "The efficiency comparison is not entirely fair: the paper emphasizes reduction in sequence length and inference time compared to bge-en-icl few-shot, which requires long in-context examples, but does not analyze the efficiency of its own ICL variant against bge-en-icl under matched conditions.",
+        "The training data overlap with MTEB retrieval datasets is not adequately addressed; the public retrieval mixture includes datasets such as MS MARCO, NQ, HotpotQA, FEVER, and Quora, which also appear in MTEB retrieval evaluation, potentially inflating retrieval scores and weakening the general-purpose zero-shot claim.",
+        "Several strong baselines are missing: for example, simply concatenating a frozen E5-base-v2 embedding with an LLM last-token embedding, a dimension-matched concatenation baseline, or a trainable extra token without a separate bidirectional encoder. Without these, it is difficult to establish the necessity of the proposed Contextual token mechanism.",
+        "The motivational argument about a pretrain/fine-tune attention mismatch is asserted rather than empirically measured or analyzed; the paper does not provide direct evidence for why the Contextual token works beyond the separate encoder's existing representation quality.",
+        "No code or model release is mentioned, and the study is restricted to LLMs under 7B parameters, limiting claims about scalability and broader impact.",
+        "The 'state-of-the-art' claim is heavily qualified and depends on restricting comparisons to a particular training-data regime; within that regime the margin over the strongest baselines is small and would not clearly support main-conference acceptance."
+      ]
+    }
+  },
+  "v3": {
+    "exp3_negative": {
+      "oa": 2.5,
+      "strengths": [
+        "The problem is well-motivated and clearly framed: the paper identifies a real tension between (a) modifying causal attention to bidirectional, which introduces a pre-train/fine-tune attention mismatch, and (b) adding extra input text (ECHO/ICL), which inflates sequence length and compute. This framing is convincing and useful.",
+        "The empirical evaluation is broad and generally well-controlled: MTEB (56 datasets, 7 task categories) across four decoder-only backbones of different scales, plus a curated MTEB-MINI for ablations. Results are reported consistently against strong prior methods (LLM2Vec, ECHO, GRITLM, NV-Embed, MGH, Anchor, bge-en-icl).",
+        "The ablation suite is thorough and touches the right questions: contribution of each component (Table 2), number of Contextual tokens (Table 5), choice of bidirectional encoder (Table 6), position of the Contextual token (Table 14), alternative representation schemes (Table 12), robustness to injected noise (Table 3), and attention mechanism (Table 15).",
+        "The efficiency analysis (Figures 4 and 6) is a valuable addition: the method avoids the sequence-length blow-up of ECHO and bge-en-icl and stays close to the base LM's inference cost, while the embedding-concatenation overhead is shown to be negligible in practice (Table 13).",
+        "Reproducibility is comparatively strong for this kind of work: all base models and encoders are public Hugging Face checkpoints, training data are the public Springer et al. (2025) collection, and hyperparameters (LoRA rank/alpha, max steps, batch size, quantization) are given in Appendix A.",
+        "The negative result in Figure 3/Table 15 — that simply switching to bidirectional attention degrades MTEB-MINI for most backbones under this training recipe — is a useful empirical data point that other practitioners can build on."
+      ],
+      "weaknesses": [
+        "Limited conceptual novelty. The core mechanism — prepend a single distilled 'contextual' vector produced by a lightweight bidirectional encoder and pool/concatenate it with the EOS state — is an incremental combination of ideas already present in ECHO (repeat-context), TP (token prepending), embedding-fusion baselines, and generic BERT-to-LLM projection layers. The paper positions itself as distinct, but the delta over prior causal-attention methods is largely engineering rather than a new insight.",
+        "The central 'state-of-the-art among models trained on publicly available retrieval data' claim is fragile. On Mistral-7B the margin over bge-en-icl is 66.10 vs 66.08 (0.02 points) and over ECHO it is ~1.4; the only clearly meaningful win is with ICL (66.85 vs 66.08, 0.77). No confidence intervals, multiple seeds, or significance tests are provided anywhere, so several headline comparisons are plausibly within run-to-run noise. This directly undercuts the validity of the main claim.",
+        "The concatenation design doubles the output embedding dimension (8192 vs 4096 for competitors). The paper acknowledges this as a limitation and reports Table 12/13, but the comparison against methods with half the dimensionality is not capacity-matched, so part of the reported gain may reflect a larger representation rather than a better mechanism. A dimension-controlled comparison is missing.",
+        "The 'pre-train/fine-tune attention mismatch' explanation is asserted rather than tested. The paper does not directly probe whether LLM-acquired semantic information is better preserved under Causal2Vec (e.g., via probing or controlled knowledge-retention tests); Figure 3 only shows that bidirectional attention scores lower on MTEB-MINI under one recipe. The interpretive claim is stronger than the supporting evidence.",
+        "Internal improvements are small and unstable. Table 2 shows gains of only 0.38 (S-LLaMA-1.3B) and 0.60 (Mistral-7B) from the Contextual token, and Table 5 shows that adding more Contextual tokens, or using stronger encoders (Table 6), does not help — which weakens the 'contextual distillation' narrative and suggests the mechanism may be sensitive to specific design choices rather than robustly capturing contextual content.",
+        "Comparison fairness is not fully established. Although the authors claim identical training data/pipelines, the paper does not report compute budgets, token counts, or sequence-length budgets for each baseline under the same protocol, and some numbers ('†') are borrowed. Claims of superiority over ECHO/GRITLM/MGH would be more convincing with a strictly matched training budget.",
+        "Interpretation of several ablations is speculative and presented as explanation ('We speculate that this helps the LLM better capture...'; 'We hypothesize...'). For a mechanism paper, at least one of these hypotheses should be validated with an experiment rather than left as conjecture.",
+        "The choice to concatenate Contextual + EOS hidden states (rather than, e.g., a learned combination) is heuristic and its advantage over averaging (Table 12: 62.83/65.85 vs 62.67/65.55) is small; the rationale ('explicit supervision of the Contextual token') is plausible but untested."
+      ]
+    }
+  }
+}

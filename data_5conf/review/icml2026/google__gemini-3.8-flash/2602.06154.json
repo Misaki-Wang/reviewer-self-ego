@@ -1,0 +1,92 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Clear and intuitive conceptual motivation: combining slimmable/nested subnetworks with sparsely gated Mixture-of-Experts (MoE) provides a fine-grained, continuous knob for trading off accuracy and compute beyond discrete expert routing.",
+        "The training recipe is simple and computationally modest, requiring only two forward passes (full width and a sampled random width) per iteration without altering the core MoE routing pipeline.",
+        "The test-time calibration strategy—optimizing a single or layer-wise sharpness parameter $\\gamma$ on a tiny calibration stream under a target FLOP budget—is lightweight, elegant, and empirically effective.",
+        "Comprehensive empirical analysis across multiple model sizes (55M to 1B parameters), data scales, and routing top-$k$ configurations, clearly illustrating improved Pareto frontiers in terms of perplexity versus FLOPs."
+      ],
+      "weaknesses": [
+        "Evaluation relies entirely on theoretical FLOPs (MFLOPs/token) rather than actual wall-clock latency or throughput on hardware. In practice, running non-uniform or dynamically sliced matrix multiplications across different tokens and experts on modern GPUs often incurs substantial memory realignment and kernel launching overheads, potentially eroding theoretical speedups.",
+        "The experimental evaluation lacks direct empirical comparison against existing dynamic compute MoE baselines (e.g., dynamic/threshold-based routing, Elastic MoE, or variable-$k$ routing), evaluating primarily against uniform-width MoSE and vanilla static top-$k$ MoE.",
+        "Experiments are limited to small-scale models (GPT2-Small up to GPT2-Medium 1B) trained on modest token counts (3B to 15B tokens), leaving the question open as to whether slimmable expert dynamics remain stable and Pareto-optimal at modern LLM scales (tens of billions of parameters and trillions of tokens)."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "The core idea of combining slimmable networks with mixture-of-experts (MoSE) to enable conditional computation along both expert selection and expert capacity is natural, well-motivated, and conceptually neat.",
+        "The training recipe is simple and practical: optimizing the average of the full-width loss and a single randomly sampled width maintains stability without requiring complex multi-stage schedules or extensive architectural modifications.",
+        "The proposed test-time training (TTT) mechanism for learning the sharpness parameter $\\gamma$ (either globally or layer-wise) offers an effective and lightweight approach to calibrating width allocation under explicit FLOP budgets.",
+        "The experimental evaluation is thorough across multiple model scales (55M, 322M, and 1B parameters), data budgets (3B to 15B tokens), and routing topologies (E8A2, E8A4, E16A4), consistently demonstrating improved FLOP-perplexity Pareto frontiers."
+      ],
+      "weaknesses": [
+        "The evaluation relies entirely on theoretical compute (MFLOPs per token) without wall-clock latency, throughput, or memory bandwidth measurements on GPUs. Slicing intermediate dimensions dynamically per token/expert introduces non-uniform matrix shapes, which can severely impair batched GEMM / grouped GEMM efficiency and kernel execution on modern accelerators.",
+        "The paper lacks comparison against other elastic or dynamic-compute MoE baselines (such as dynamic-$k$ selection, routing thresholding, or expert skipping/pruning), comparing primarily against vanilla MoE and uniform-width MoSE.",
+        "Achieving optimal Pareto efficiency depends on test-time training / calibration of the temperature parameter $\\gamma$ over a calibration stream for each specific target compute budget $\\Gamma$, which adds operational deployment overhead compared to a closed-form allocation rule.",
+        "Experiments are limited to small-scale models (up to GPT2-Medium / 1B parameters trained on up to 15B tokens); modern MoE architectures (such as Mixtral or DeepSeek-style fine-grained routing with shared experts) may introduce additional routing and width interactions that remain unexplored."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Clear and intuitive motivation: Decoupling discrete expert selection from continuous expert capacity directly addresses the rigidity of conventional top-k MoE execution, where selected experts are executed at full width regardless of input difficulty or router confidence.",
+        "Simple and effective pre-training recipe: The dual-width sampling strategy (full width plus one uniformly sampled width per iteration) avoids complex loss schedules while successfully preventing degradation at full width (matching or slightly outperforming standard MoE baselines).",
+        "Thorough Pareto-frontier analysis: The empirical evaluation across model sizes (55M to 1B parameters), data regimes (3B to 15B tokens), and routing architectures (E8A2, E8A4, E16A4) consistently shows that MoSE shifts the compute-quality trade-off downward relative to uniform execution.",
+        "Lightweight compute-budget adaptation: The proposed test-time calibration of the sharpness parameter $\\gamma$ requires optimizing only a single scalar (or one scalar per layer) over a tiny calibration stream, offering a practical mechanism to dial in inference budgets without updating backbone weights."
+      ],
+      "weaknesses": [
+        "Lack of wall-clock latency and hardware profiling: All efficiency improvements are reported exclusively in theoretical MFLOPs per token. In practical GPU/TPU deployments, executing variable matrix slice widths across tokens or experts within a batch leads to ragged tensor shapes, divergence in batched GEMMs, and potential memory alignment penalties. Wall-clock latency and throughput measurements under standard serving runtimes (e.g., vLLM or custom Triton kernels) are necessary to substantiate real-world deployment efficiency.",
+        "Omission of compute-matched pre-training baselines: The training objective in Equation (6) evaluates both $w_{\\max}$ and a sampled width $w$ per iteration, requiring two forward passes and increased gradient computations per mini-batch. While the paper demonstrates optimization stability across iterations, it does not compare against a standard MoE baseline matched on total pre-training FLOPs/wall-clock time.",
+        "Evaluation limited to small-scale architectures: Experiments are performed on GPT-2 scale architectures (up to 1B parameters trained on 7.5B-15B tokens) on OpenWebText. While sufficient as a proof-of-concept, modern MoE models typically operate at much larger scales (e.g., 8x7B, 8x22B) and train on trillions of tokens where expert specialization and routing dynamics differ markedly."
+      ]
+    }
+  },
+  "v2": {
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Conceptual Elegance and Novelty: Integrating slimmable network concepts into Mixture-of-Experts (MoE) is a natural yet under-explored direction. Decoupling expert selection (which experts activate) from expert capacity (execution width per expert) provides a fine-grained, continuous control over the compute-accuracy trade-off.",
+        "Efficient and Stable Training Recipe: The dual-width sampling objective (full width plus one uniformly sampled width) introduces minimal training overhead while maintaining pre-training optimization stability and avoiding routing collapse, as supported by thorough routing diagnostics (load CV, routing entropy, JS divergence across widths).",
+        "Thorough Empirical Validation: The method is evaluated across multiple model scales (from 55M up to 2.5B parameters), diverse routing regimes (e.g., E8A2 up to E128A8), zero-shot reasoning benchmarks (LAMBADA, WSC, HellaSwag, PIQA, SIQA), and continual pre-training adaptation on DeepSeek-V2-Lite (16B), demonstrating consistent FLOP reductions (20% to 40%) at matched perplexity/accuracy.",
+        "Hardware-Agnostic and Wall-Clock Diagnostics: The inclusion of Appendix B.4 demonstrating strong empirical correlation between theoretical MFLOPs and actual latency/throughput across configurations supports the practical utility of the proposed trade-offs."
+      ],
+      "weaknesses": [
+        "Batched Execution and Kernel Practicality: In modern high-throughput serving systems, MoE layers rely on specialized grouped GEMM or fused scatter/gather kernels where intermediate dimensions are uniform across tokens assigned to an expert. Varying execution widths dynamically on a per-token basis could introduce padding overheads or kernel launch overheads during batched inference, which warrants deeper discussion regarding low-level kernel implementation.",
+        "Terminology of 'Test-Time Training' (TTT): Optimizing the scalar sharpness parameter $\\gamma$ on a held-out calibration stream (50 batches of OpenWebText) prior to evaluation functions essentially as offline calibration or profile-guided search rather than true online test-time training (as commonly defined in TTT literature). Clarifying this distinction would prevent confusion.",
+        "Direct Comparison with Dynamic Routing Baselines: While the paper compares against vanilla MoE and uniform-width MoSE, direct empirical comparison against dynamic top-$k$ routing baselines (e.g., confidence-threshold-based routing or elastic routing methods like EMoE) under identical FLOP budgets would further isolate the unique benefit of width-slimming versus expert-count elasticity."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Intuitive and well-motivated architecture: Extending Mixture-of-Experts with slimmable intermediate hidden dimensions allows elastic compute allocation per activated expert, effectively decoupling expert selection from expert capacity.",
+        "Comprehensive empirical evaluation: The paper validates the approach across multiple model scales (from GPT2-Small 55M up to GPT2-Large 2.5B), fine-grained routing regimes (up to 128 experts), zero-shot downstream reasoning tasks, and continual pre-training on DeepSeek-V2-Lite (16B).",
+        "Thorough diagnostics and ablations: The authors provide extensive analyses examining routing stability, expert load coefficient of variation, routing entropy, JS divergence across widths, and hardware latency/throughput tracking relative to FLOPs.",
+        "Effective continual pre-training adaptation: Showing that slimmability can be imparted onto existing pretrained MoE checkpoints (e.g., DeepSeek-V2-Lite) with minimal continued pretraining enhances practical applicability."
+      ],
+      "weaknesses": [
+        "Hardware implementation and batching overhead: The paper adapts widths per token based on router confidence, resulting in varying hidden dimensions across tokens. In batched GPU serving, ragged matrix operations across tokens often require padding or specialized grouped-GEMM kernels to avoid hardware under-utilization. The paper lacks detailed discussion on how per-token width variation is batched in practice and whether tensor core alignment constraints (multiples of 8/16/32) are maintained with step size 0.05.",
+        "Pre-training compute parity: The training recipe computes both a full-width pass and a sampled-width pass per iteration, which incurs approximately 1.5x-1.6x the FLOP cost per training step compared to standard MoE. In Table 1, models are compared at the same token count rather than matched total pre-training FLOPs.",
+        "Terminology regarding Test-Time Training (TTT): Optimizing the scalar parameter gamma using 50 batches of calibration data is essentially offline post-hoc calibration rather than genuine online test-time training (TTT) as commonly understood in modern literature.",
+        "Scale of pre-training from scratch: Scratch pre-training is conducted primarily on OpenWebText up to 15B–50B tokens, which is relatively small compared to modern open-source LLM pre-training standards (trillions of tokens), although the DeepSeek-V2-Lite experiment partially mitigates this concern."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Conceptual novelty and clean motivation: Combining slimmable networks with Mixture-of-Experts (MoE) is a natural and well-motivated idea. Decoupling expert selection from expert capacity allows for continuous, fine-grained accuracy-compute trade-offs that standard sparse MoE models cannot achieve.",
+        "Comprehensive empirical validation: The authors evaluate MoSE across multiple model scales (from GPT-2 Small to GPT-2 Large 2.5B), routing granularities (e.g., E8A2 up to E128A8), zero-shot downstream benchmarks (LAMBADA, WSC, HellaSwag, PIQA, SIQA), and continual pre-training adaptation on a modern 16B checkpoint (DeepSeek-V2-Lite).",
+        "Thorough diagnostics and analysis: The paper includes extensive supporting analysis, such as router stability metrics (CV of expert loads, routing entropy, JS divergence of expert assignments across widths), FLOPs decompositions, width-wise convergence dynamics, and latency/throughput tracking.",
+        "Well-designed inference modes: The formulation of router-conditioned width allocation and the lightweight calibration via test-time training (TTT) for the sharpness parameter $\\gamma$ effectively optimizes the Pareto frontier."
+      ],
+      "weaknesses": [
+        "Practical batching and hardware execution details: While Figure 16 shows that latency and throughput track FLOPs, executing different experts at varying sliced widths per token typically introduces ragged/dynamic tensor shapes and memory alignment challenges on GPUs during batched inference. The paper lacks discussion of how dynamic slicing is batched across tokens on modern hardware (e.g., custom Triton/CUDA kernels, padding, or bucketed dispatch) and what batch sizes were measured in Figure 16.",
+        "Pre-training compute parity: The MoSE pre-training recipe samples both full-width ($w_{\\max}$) and a random width ($w$) per iteration, computing two forward-backward passes. This increases per-step pre-training FLOPs significantly (~1.5×-1.7×) compared to vanilla MoE. The paper does not explicitly compare against an MoE baseline trained with equivalent total training FLOPs (compute-matched pre-training).",
+        "Minor presentation omissions: The code repository URL in the abstract is an empty placeholder ('The code can be found at: .')."
+      ]
+    }
+  }
+}

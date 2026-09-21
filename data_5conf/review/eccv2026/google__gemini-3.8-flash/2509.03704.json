@@ -1,0 +1,98 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Practical and well-motivated system perspective: The paper directly tackles the critical gap between algorithmic cooperative perception and edge deployability by addressing both model compute latency and communication bandwidth simultaneously.",
+        "Comprehensive full-stack design: Rather than isolating PTQ or feature compression, the work integrates a codebook-based communication compression strategy with full-pipeline PTQ (covering encoder, fusion, and head) calibrated specifically for multi-agent settings.",
+        "Domain-specific PTQ calibration: The proposed alignment module introduces multi-agent sampling, a heterogeneity alignment loss (KL divergence on fused BEV features), and a spatial alignment loss on box outputs to handle multi-sensor and cross-agent misalignment under quantization noise.",
+        "Extensive hardware and deployment evaluation: The authors conduct thorough latency breakdown measurements on physical hardware (TensorRT with custom CUDA kernels and ROS), reporting power/energy consumption (QPS/W) and evaluating realistic communication delays on multiple datasets (DAIR-V2X, V2X-Real, and OPV2V)."
+      ],
+      "weaknesses": [
+        "Algorithmic novelty is somewhat incremental: The communication compression relies heavily on codebook representations similar to CodeFilling (Hu et al., CVPR 2024), and the base PTQ pipeline heavily builds upon established techniques like AdaRound and BRECQ/LiDAR-PTQ. The primary algorithmic novelty is confined to the auxiliary alignment losses during calibration.",
+        "Mathematical typo in communication bandwidth formulas: In Section 2.3.1, the bandwidth formulas are written with an outer logarithm: $\\log_2 (H \\times W \\times C \\times 32 / 8)$ and $\\log_2 (H \\times W \\times \\log_2(n_L) \\times n_R / 8)$. The data volume in bytes should simply be $H \\times W \\times C \\times 4$ (or bits $32 H W C$); wrapping the entire size in $\\log_2$ is mathematically incorrect.",
+        "Severe degradation on Transformer architectures: As shown in Table 1, attention-based fusion (V2X-ViT) drops precipitously under INT4/8 quantization (from 57.4/49.5 AP30/50 down to 29.9/8.8), showing that the proposed calibration strategy still struggles significantly with attention mechanisms and LayerNorm operations.",
+        "Mixed results in component ablation: In Table 2 (DAIR-V2X LP + LS), adding the spatial alignment loss $\\mathcal{L}_{spatial}$ slightly decreases performance compared to adding only $\\mathcal{L}_{hetero}$ (80.8/75.3 down to 80.2/75.5), yet no discussion is provided regarding the interplay or balancing weights between these losses."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Addresses an important and practical bottleneck in V2X cooperative perception, where existing methods often ignore the intertwined hardware computation, edge memory constraints, and network communication latency.",
+        "The full-stack perspective—combining model quantization (PTQ across encoder, fusion, and head) with communication message quantization via codebooks—provides a holistic and well-motivated system design.",
+        "Comprehensive experimental evaluation across multiple datasets (DAIR-V2X, V2X-Real, OPV2V) and multiple intermediate fusion paradigms (CNN, attention, pooling-based), demonstrating strong accuracy preservation down to INT4 weight / INT8 activation for CNN architectures.",
+        "System-level latency profiling on TensorRT with custom CUDA kernels and realistic transmission delay modeling provides credible evidence of real-world deployability and speedups (3.2x end-to-end latency reduction)."
+      ],
+      "weaknesses": [
+        "The core algorithmic contributions are somewhat incremental: codebook-based feature compression heavily draws upon existing techniques (e.g., CodeFilling), and the calibration pipeline largely adapts existing PTQ techniques (e.g., AdaRound, Min-max calibration) with auxiliary distillation losses ($L_{hetero}$ and $L_{spatial}$).",
+        "Notational and mathematical imprecisions in Section 2: in Section 2.3.1, the transmission bandwidth formulas mistakenly wrap the byte count in $\\log_2(\\cdot)$ (e.g., $\\log_2(H \\times W \\times C \\times 32 / 8)$ instead of the raw data volume). Furthermore, in Algorithm 1, the interplay between the discrete scale factor search (Eq. 8) and parameter optimization via gradient minimization of $L_{hetero}$ and $L_{spatial}$ (lines 11 and 16) is somewhat vague and should be detailed more rigorously.",
+        "Limited effectiveness on vision transformer backbones: as shown in Table 1, the approach experiences severe degradation on attention-heavy architectures like V2X-ViT (dropping from 57.4% to 29.9% AP30 under INT4/INT8), highlighting that the proposed calibration and alignment scheme struggles with transformer-based multi-agent fusion.",
+        "Evaluation hardware mismatch with edge motivation: while the paper is motivated by resource-constrained in-vehicle edge platforms, hardware measurements and power benchmarks are conducted on a desktop NVIDIA RTX 3090 GPU (consuming ~300W), rather than typical automotive embedded hardware (e.g., NVIDIA Jetson AGX Orin/Drive Orin)."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Addresses an important and practical problem: While most cooperative perception research focuses on accuracy under idealized full-precision assumptions, this paper tackles the real-world deployment bottlenecks of inference compute, communication bandwidth, and system latency simultaneously.",
+        "Comprehensive full-stack perspective: Unifies model-level quantization (weights and activations) with communication-level quantization (codebook-indexed BEV feature sharing), providing a holistic system-level treatment of end-to-end V2X perception delay.",
+        "Well-motivated alignment objectives: The introduction of heterogeneity alignment loss (KL divergence) and spatial alignment loss (bounding-box regression consistency) appropriately addresses key domain-specific challenges in V2X, such as multi-modal sensor discrepancies and spatial/pose noise.",
+        "Extensive experimental evaluation: Validated across multiple datasets (DAIR-V2X, V2X-Real, OPV2V) and multiple fusion backbones (Pyramid Fusion, AttFuse, Where2comm, etc.), complemented by deployment latency breakdowns (TensorRT profiling) and energy efficiency measurements."
+      ],
+      "weaknesses": [
+        "Ambiguity between Post-Training Quantization (PTQ) and full retraining: While Section 2.4 frames the model compression as lightweight PTQ requiring minimal data, Section 2.3.2 describes a codebook learning stage where all model parameters (encoder, fusion module, detection head) are unfrozen and jointly fine-tuned on task and reconstruction losses. This means the overall pipeline is not strictly post-training/training-free, and the computational cost of the codebook adaptation stage should be clarified.",
+        "Evaluation on non-embedded hardware: System latency, throughput, and power consumption are measured on a desktop GPU (NVIDIA RTX 3090). While informative, real V2X deployments operate on automotive edge compute platforms (e.g., NVIDIA Jetson Orin/Xavier or automotive-grade ECUs), where memory bandwidth constraints and INT8/INT4 Tensor Core behaviors differ notably.",
+        "Moderate algorithmic novelty: Several individual components rely heavily on established techniques (e.g., vector quantization/codebooks from CodeFilling, AdaRound, and standard PTQ calibration). The primary contribution lies in system synthesis and the specific calibration loss formulation rather than a fundamentally new quantization algorithm.",
+        "Sensitivity on Transformer-based architectures: Table 1 reveals that attention-heavy architectures like V2X-ViT suffer severe performance degradation under INT4/INT8 (AP30 dropping from 57.4 to 29.9), indicating that the current calibration and alignment strategies are less effective for transformer-based cross-agent attention."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Compelling and practically motivated focus: The paper tackles a critical and often overlooked bottleneck in V2X cooperative perception—the high computational, memory, and communication overhead of full-precision intermediate fusion models on resource-constrained vehicular platforms.",
+        "Holistic full-stack system design: QuantV2X effectively integrates communication-side compression (codebook index transmission) and model-side compression (end-to-end post-training quantization across encoders, fusion modules, and detection decoders).",
+        "Realistic, deployment-centric evaluation: Instead of relying solely on static offline accuracy, the work evaluates system-level latency (local inference, transmission, and fusion inference) on TensorRT/ROS and demonstrates how latency reduction translates into substantial downstream performance gains in dynamic online settings (e.g., +9.5 mAP30 on V2X-Real and real-world evaluation in V2X-ReaLO).",
+        "Domain-specific quantization design: Proposes tailored alignment mechanisms—such as the multi-agent calibration sampling strategy, heterogeneity alignment loss, and spatial alignment loss—that directly address cross-agent modality shifts and pose/spatial noise under low-bit quantization.",
+        "Extensive experimental validation: The empirical evaluation spans multiple datasets (DAIR-V2X, V2X-Real, OPV2V), multiple fusion architectures (CNN-based, computation-based, attention-based), and detailed ablation studies covering calibration sensitivity, noise robustness, power consumption, and GPU memory scaling."
+      ],
+      "weaknesses": [
+        "Modest novelty in individual algorithmic components: The underlying techniques (AdaRound, min-max calibration, KL/L2 feature distillation, and vector-quantized codebooks inspired by CodeFilling) are well-known primitives. The primary novelty lies in systems integration and domain-specific formulation rather than foundational quantization theory.",
+        "Hardware profiling mismatch: The latency and power profiling are primarily measured on a high-end desktop GPU (NVIDIA RTX 3090), which does not fully capture the memory hierarchy, compute characteristics, and integer arithmetic constraints of automotive-grade embedded edge SoCs (e.g., NVIDIA Drive Orin, Xavier, or low-power NPUs).",
+        "Ambiguity between PTQ and retraining: Section 2.3 states that codebook learning involves an unfreezing and joint training stage (optimizing detection loss and reconstruction loss over multiple epochs). This blurs the definition of an entirely training-free 'post-training quantization' pipeline, and the paper should clearer delineate the training compute/data cost incurred by the codebook learning stage versus the calibration stage.",
+        "Severe degradation on transformer-based architectures: As shown in Table 1, V2X-ViT suffers a massive drop under low precision (e.g., from 57.4/49.5 down to 29.9/8.8 at INT4/8), highlighting that the method does not yet adequately handle complex vision transformer architectures common in recent V2X perception works."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Practical and timely system-level focus: The paper addresses a critical deployment barrier in V2X cooperative perception by jointly optimizing model inference latency, GPU memory footprint, and transmission bandwidth.",
+        "Comprehensive full-stack design: Rather than treating quantization or communication compression in isolation, the authors integrate a multi-stage pipeline combining codebook-based message transmission with end-to-end post-training quantization (PTQ).",
+        "Domain-specific quantization adaptations: The proposed alignment losses (heterogeneity alignment via KL divergence and spatial alignment on predicted bounding boxes) effectively alleviate cross-agent feature distribution discrepancies and localization sensitivity under low bit-widths.",
+        "Rigorous evaluation on realistic and streaming benchmarks: The framework is evaluated across multiple datasets (DAIR-V2X, V2X-Real, OPV2V) and tested in online streaming environments (ROS-based V2X-ReaLO platform) with real hardware latency and power measurements via TensorRT on an RTX 3090."
+      ],
+      "weaknesses": [
+        "Algorithmic novelty of core components is somewhat incremental: The codebook messaging largely draws upon existing vector/product quantization paradigms (e.g., CodeFilling [13]), and the PTQ optimization heavily builds on established techniques like AdaRound [28] and block-wise reconstruction [18], with domain adaptation via feature and output matching.",
+        "Inconsistency in precision settings between experimental sections: Section 3.1 primarily investigates aggressive INT4 weight / INT8 activation (INT4/8) quantization, whereas the system-level deployment experiments in Section 3.2 revert to INT8 weight / INT8 activation (INT8/8). A clearer justification for why INT4/8 was omitted from real-world TensorRT latency benchmarks should be provided in the main text.",
+        "Severe degradation on Transformer-based architectures: As shown in Table 1, V2X-ViT experiences severe degradation under quantization (AP50 drops from 49.5 to 11.0 in INT8/8 and 8.8 in INT4/8), highlighting a notable limitation of the proposed PTQ method when applied to attention mechanisms with layer normalization.",
+        "Mathematical typo in communication bandwidth expression: In Section 2.3, the communication volume is written as 'log2(H x W x C x 32 / 8)' and 'log2(H x W x log2(nL) x nR / 8)'. Prepending 'log2' to the total byte count is mathematically inaccurate when describing total transmitted volume/bandwidth."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Holistic and practical system perspective: Unlike most cooperative perception papers that assume ideal communication bandwidth and zero inference latency, this work tackles real-world deployment bottlenecks by unifying model quantization (PTQ) and communication compression (quantized codebook representations).",
+        "Domain-specific PTQ calibration designs: The paper introduces multi-agent sampling and fusion-stage alignment losses (heterogeneity alignment via KL divergence and spatial alignment on predicted bounding boxes) that specifically counteract cross-agent distribution shifts and spatial misalignment under low-bit precision.",
+        "Comprehensive experimental validation: The authors validate their method across multiple datasets (DAIR-V2X, V2X-Real, OPV2V), multiple fusion paradigms (CNN, computation-based, attention-based), and under both static offline metrics and dynamic real-world ROS/TensorRT streaming benchmarks (V2X-ReaLO).",
+        "Thorough analysis of system-level latency and scaling behavior: The decomposition of end-to-end latency into local compute, communication transmission, and fusion inference provides insightful evidence that latency reduction directly translates to improved perception accuracy in dynamic driving scenarios."
+      ],
+      "weaknesses": [
+        "Limited algorithmic novelty of individual building blocks: The core components largely assemble established techniques—codebook compression builds closely upon CodeFilling [13], the PTQ framework relies on AdaRound [28] and standard MSE scale search, and the alignment objectives are conventional feature and prediction distillation losses.",
+        "Blurry boundary between PTQ and fine-tuning: While the quantization of network weights/activations is post-training, the codebook learning phase requires a two-stage training procedure that unfreezes and fine-tunes all model parameters using detection and reconstruction losses (Eq. 4). Presenting the framework strictly as lightweight PTQ partially obscures this required retraining overhead.",
+        "Severe degradation on transformer-based architectures: As shown in Table 1, attention-based models such as V2X-ViT experience catastrophic failure under INT4/INT8 (AP30 drops from 57.4 to 29.9, and AP50 drops to 8.8), indicating that the proposed alignment pipeline does not readily generalize to vision transformers without specialized quantization strategies.",
+        "Evaluation platform disparity: Latency and throughput benchmarks are reported on high-end desktop/workstation GPUs (NVIDIA RTX 3090 / A6000) rather than true automotive-grade edge SoCs (e.g., NVIDIA Jetson AGX Orin or Drive Xavier), which would more accurately reflect practical in-vehicle deployment constraints.",
+        "Ambiguity in transmission protocol details: In Section 2.3, when multiple codes per location are used (nR > 1), it is unclear whether the combination weights alpha_r must also be quantized and transmitted alongside indices, or how much communication overhead they contribute."
+      ]
+    }
+  }
+}

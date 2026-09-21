@@ -1,0 +1,120 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Addresses a practically important and well-motivated problem: reducing GPU underutilization from static partitioning of online/offline LLM serving, backed by real ChatGPT trace data showing bursty load (Figure 1).",
+        "The system design is comprehensive and technically well-reasoned, combining three complementary mechanisms (layer-granularity preemption, incremental/asynchronous KV-cache checkpointing with background prefetching, and an SLO-aware profiler-driven scheduler) that are individually motivated with clear trade-off analyses (Figure 4's comparison of recompute vs. swap vs. incremental checkpointing is particularly clear).",
+        "Strong empirical results: 2.35x throughput improvement over Online-Only vLLM and 84x tail-latency reduction over a naive co-serving baseline, plus a thorough ablation (Figure 8) attributing gains to each component, and robustness experiments across varying burstiness (CV) and request rates (Figure 7).",
+        "Reasonably detailed implementation description (built atop vLLM 0.4.2, ~4165 LOC, custom multiprocessing backend, safepoint instrumentation, CUDA stream overlap) that aids reproducibility.",
+        "Related work section is thorough, correctly situating the contribution relative to throughput-oriented, latency-oriented, disaggregated, and offline-focused LLM serving systems as well as general ML serving and workload co-location literature."
+      ],
+      "weaknesses": [
+        "All experiments are conducted on a single NVIDIA A100-40G GPU with a single 7B model (Llama-2-7B); despite the paper claiming support for tensor/pipeline parallelism and multi-GPU deployments, no multi-GPU or larger-model (e.g., 13B/70B, MoE) results are shown, leaving scalability and preemption/synchronization overhead at scale (e.g., cross-node barrier costs) unvalidated.",
+        "Baselines are limited to vLLM (Online-Only) and a self-implemented priority scheduler (vLLM++); no comparison to other plausible co-serving or preemption-capable systems (e.g., adapting REEF's kernel-level preemption, Llumnix's migration, or Sarathi-Serve/DistServe hybrids) that could better contextualize the reported speedups.",
+        "Presentation inconsistency: Figures 5–8 label the proposed system as 'Concerto' rather than 'ConServe,' suggesting insufficient proofreading/consistency in figures, which raises minor concerns about care taken in finalizing results.",
+        "The SLO-aware scheduler and preemption logic rely on an offline profiler tailored to specific hardware/model/parallelism configurations; the cost, generalizability, and maintenance overhead of this profiling step (e.g., under configuration or hardware changes) are not quantified.",
+        "Experimental results appear to be based on single runs without reported variance, confidence intervals, or repeated trials, making it hard to assess the statistical robustness of the reported percentile latencies and throughput numbers.",
+        "The paper is primarily a systems/engineering contribution with an incremental combination of known techniques (chunked prefill, continuous batching, checkpointing, priority scheduling) adapted to a new problem setting; the novelty lies more in integration and engineering effort than in fundamentally new algorithmic or ML insight, which may be a modest fit for a research-focused ML venue."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a practical and well-motivated problem: safely harvesting idle GPU capacity from bursty online LLM serving for offline batch workloads, backed by real trace data (BurstGPT) showing significant load variability.",
+        "The system design decomposes the problem sensibly into three coupled mechanisms: layer-granularity preemption, incremental/asynchronous KV-cache checkpointing with background prefetching, and an SLO-aware scheduler—each targeting a specific bottleneck identified through careful analysis (e.g., Figure 2's naive-colocation experiment).",
+        "The ablation study (§6.4.1, Figure 8) clearly attributes throughput/latency gains to individual components, and the preemption overhead microbenchmark (§6.4.2) is a nice level of engineering detail.",
+        "Reasonably broad set of experiments (real workload replay, ON/OFF phased load, synthetic Gamma-process sweeps over CV and request rate) probing robustness to different burstiness regimes.",
+        "Clear articulation of design rationale versus prior work (vLLM, Sarathi-Serve, DistServe, Splitwise), with a plausible argument for why layer-granularity preemption strikes a good balance between responsiveness and overhead."
+      ],
+      "weaknesses": [
+        "All experiments are run on a single NVIDIA A100-40G GPU with a single model (Llama-2-7B). Despite claiming support for tensor/pipeline parallelism, no multi-GPU or multi-node results are shown, which is a serious gap given that most production LLM serving occurs on multi-GPU setups where preemption synchronization (NCCL broadcast, distributed barriers) and swap bandwidth contention could behave very differently and be more costly. The generalizability of the reported 2.35x and 84x numbers to realistic multi-GPU deployments is unsupported.",
+        "The primary co-serving baseline (vLLM++) is a scheduler the authors themselves implemented on top of vLLM rather than a published, peer-reviewed co-serving system; no comparison is made against other plausible SOTA baselines (e.g., disaggregated serving systems like DistServe/Splitwise adapted for co-serving, or fairness/priority schedulers from cluster literature) that might narrow the reported gap.",
+        "Only one model size/architecture (7B dense Transformer) is evaluated; no results for larger models, MoE architectures, or different context lengths, despite the paper explicitly discussing these as relevant future extensions in §7. This limits confidence that the SLO-aware scheduling and profiler-based approach scales with model size or heterogeneity.",
+        "The load traces used are heavily down-sampled/rescaled from a campus-wide ChatGPT trace to fit a single-GPU setting (§6.1), which may distort burstiness statistics in ways not fully justified or validated against the original trace's properties.",
+        "Several design parameters (e.g., 50% memory threshold to start checkpointing, preemption every 8 layers, gamma CV=1 for synthetic loads) appear to be manually tuned without a systematic sensitivity analysis, raising reproducibility and generalizability concerns across different hardware/models.",
+        "No discussion of long-run fairness/starvation: under sustained high online load with no OFF periods, offline requests could be perpetually starved; the paper does not analyze or bound this behavior nor discuss SLA/fairness guarantees for offline batch jobs.",
+        "The preemption safepoint overhead (988µs, dominated by PyTorch's distributed barrier) is acknowledged as unoptimized, suggesting the reported numbers do not reflect a fully mature implementation, and it's unclear how this cost scales with GPU count in multi-GPU deployments.",
+        "Reproducibility details are incomplete: no clear statement about code/artifact release, and some evaluation settings (e.g., SLO thresholds tied to Online-Only's own P99 values) are somewhat circular, making independent replication of the exact latency SLOs difficult.",
+        "The contribution is primarily a systems/engineering one; while practically useful, the connection to core ML methodology or new scientific understanding for the ICML audience is limited, and the significance claims rest on a narrow experimental scope (single GPU, single model, self-built baseline) rather than broad demonstrated generality."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Clear and well-motivated problem statement, backed by real ChatGPT traffic trace analysis (BurstGPT) showing high load burstiness at both hourly and minute-level timescales, which convincingly justifies the need for GPU harvesting rather than static partitioning.",
+        "The paper diagnoses precisely why naive co-location fails (head-of-line blocking, uncontrolled batch growth) with a targeted strawman experiment (Figure 2), motivating the specific design choices that follow.",
+        "Technically sound and creative system design: layer-granularity preemption (a well-justified middle ground between iteration-level and kernel-level preemption), incremental/asynchronous KV-cache checkpointing exploiting the append-only, stateless nature of LLM decoding, and an SLO-aware profiler-driven scheduler. Each design choice is motivated with a clear rationale and alternative comparison (Figure 4).",
+        "Comprehensive evaluation covering overall performance on real workloads, reactive ON/OFF load bursts, robustness across varying burstiness (CV) and request rates, and a careful ablation (Figure 8) isolating the contribution of each optimization (SLO-aware scheduling, incremental checkpointing, background prefetching).",
+        "Strong empirical results: 2.35x throughput improvement over Online-Only vLLM and 84x tail latency reduction versus a naive priority-based co-serving baseline (vLLM++), with detailed micro-benchmarks quantifying preemption/safepoint overhead (988μs vs 98.5ms model execution).",
+        "Good coverage of related work and honest discussion of compatibility/limitations with disaggregated serving, long-context scenarios, and multi-model serving, showing awareness of the broader design space."
+      ],
+      "weaknesses": [
+        "All experiments are conducted on a single NVIDIA A100-40G GPU with a single model (Llama-2-7B); despite claiming support for tensor/pipeline parallelism and multi-GPU deployments, no multi-GPU or larger-model results are shown, leaving scalability of preemption/checkpointing at larger model/cluster scale unverified.",
+        "The comparison baselines are limited to vLLM (Online-Only) and a self-implemented vLLM++ priority scheduler; no comparison against other GPU-sharing/preemption systems mentioned in related work (e.g., REEF, SHEPHERD) or disaggregated serving systems (DistServe, Splitwise), which would better contextualize the magnitude of the reported gains.",
+        "The offline profiler's estimates underlie the SLO-aware scheduling decisions and preemption triggers, but the paper does not analyze profiler accuracy, sensitivity to profiling error, or behavior under workload/hardware distribution shift not captured by profiling.",
+        "There are minor but noticeable inconsistencies in the figures (e.g., 'Concerto' appears instead of 'ConServe' in Figures 5-7 legends), suggesting insufficient proofreading and slightly undermining reproducibility confidence.",
+        "The paper claims compatibility with multi-model/PEFT serving and disaggregated architectures in the Discussion, but these are unverified by experiments, making them speculative future-work claims rather than substantiated contributions.",
+        "Real-world workload evaluation relies on a relatively short trace window (15 minutes) and a single dataset per online/offline category (BurstGPT, LongBench); broader workload diversity (e.g., different offline task types, different online SLO tightness regimes) would strengthen generality claims."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Identifies a well-motivated and practically significant problem: co-serving latency-sensitive online requests with latency-tolerant offline batch inference on the same GPU/engine to harvest idle cycles, backed by real production load traces showing high burstiness.",
+        "Clear, systematic diagnosis of why existing coarse-grained (request/iteration-level) scheduling and preemption fail in this setting, decomposed into three concrete root causes (chunk-level scheduling contention, iteration-level preemption delay, request-level KV cache overhead), each with quantitative profiling evidence.",
+        "The three proposed techniques (SLO-aware token-level scheduling with an interpretable, physically-motivated latency model; layer-wise sub-iteration preemption via safepoints; incremental token-level KV cache checkpointing/prefetching) are individually well-justified and together form a coherent, tightly coupled system design addressing scheduling, execution, and memory management at consistent fine granularity.",
+        "Strong empirical evaluation: multiple model scales (8B/14B/70B, including tensor-parallel setting), four real-world workload traces plus synthetic sweeps over rate/SLO/burstiness/length, and comparison against four credible baselines (Online-Only, Non-Preemptive, Sarathi-Preemptive, DistServe-Preemptive), consistently showing large improvements in both online latency (2-3x) and offline throughput (2-3x) with near-optimal attainment.",
+        "Thorough ablation and micro-benchmarks isolating the contribution and overhead of each component (scheduler, layer-wise preemption, incremental KV management), including overhead accounting (safepoint cost, PCIe bandwidth, checkpoint latency) that supports the claim of near-zero preemption cost.",
+        "Practical implementation detail (built atop vLLM, ~9k LOC, CUDA graph compatibility, TP synchronization handling) suggesting reasonable engineering feasibility and reproducibility, along with a built-in load generator described."
+      ],
+      "weaknesses": [
+        "The performance model (5-term polynomial in P and C) is fit per model/hardware and its generalization across different GPU types, quantization schemes, MoE architectures, or heterogeneous parallelism configurations (e.g., pipeline parallelism, mixed TP+PP) is not evaluated; robustness of the profiler under distribution shift (e.g., very long context or unusual batch compositions not seen during profiling) is not tested.",
+        "Layer-wise preemption granularity (every 4 layers) and its interaction with pipeline-parallel or expert-parallel MoE deployments is not discussed; it's unclear how well the safepoint mechanism generalizes beyond dense transformer TP settings used in experiments.",
+        "All experiments use single-node, single-model-replica deployments (up to 4 GPUs with TP); no evaluation of ConServe in larger multi-node/multi-replica production-scale clusters or interaction with load balancing/autoscaling across replicas.",
+        "The paper does not report code/artifact release, and the offline profiler and load generator, while described, are not confirmed to be open-sourced, which may limit reproducibility given the complexity of the system (9169 LOC, custom CUDA kernels, modified vLLM internals).",
+        "Sensitivity to profiler quality/imperfections is not deeply explored (e.g., how does an out-of-distribution workload beyond profiled P/C ranges affect scheduling safety and lead to actual SLO violations?), and no worst-case or adversarial workload analysis is given despite claiming 'strong' SLO guarantees.",
+        "Comparisons are restricted to co-serving offline batch jobs of the same model family/size as online; no discussion of scenarios with different model sizes or multi-tenant heterogeneous models sharing GPU resources, which somewhat limits the generality of the 'GPU harvesting' framing suggested in the title.",
+        "Cost-benefit or complexity trade-off of the additional profiling, monitoring threads, and incremental checkpointing infrastructure versus simpler alternatives (e.g., dynamic batch size limiting without full token-level modeling) is not directly quantified, making it harder to assess minimal viable complexity needed for the gains reported."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The problem motivation is well quantified: Figures 1-3 provide concrete evidence (real ChatGPT trace burstiness, GPU utilization vs. TTFT curves, and a controlled co-serving experiment) that grounds the paper's central claim that coarse-grained scheduling/preemption/KV management causes severe latency and throughput degradation when co-serving online and offline LLM requests.",
+        "The three proposed techniques (token-level SLO-aware scheduling with an explicit latency polynomial model, layer-wise preemption via safepoints, and incremental per-token KV checkpointing/prefetching) are coherently designed to attack the problem at complementary levels of granularity (scheduling, execution, memory), and the engineering is described in sufficient implementation detail (vLLM-based, 9K LOC, CUDA-stream overlap, TP-safe broadcast at safepoints) to be plausible and largely reproducible.",
+        "The evaluation is fairly extensive: three model scales (8B/14B/70B, including TP), four real-world workload traces, synthetic sensitivity sweeps over burstiness/SLO-scale/sequence length, an ablation isolating the contribution of each component, and micro-benchmarks quantifying safepoint and KV-transfer overheads (µs-level), which together support the internal consistency of the claimed 2.2x/2.9x improvements."
+      ],
+      "weaknesses": [
+        "Fit and contribution type for ICML: this is a pure systems/engineering paper (scheduler heuristics, CUDA-level preemption points, KV cache page management) with no new learning method, model, theory, or ML insight; the polynomial cost model is fit via simple regression rather than any novel ML technique, making the core intellectual contribution more appropriate for a systems venue (OSDI/NSDI/MLSys) than ICML's research track.",
+        "The main baselines (Sarathi-Preemptive, DistServe-Preemptive) are the authors' own extensions of prior schedulers rather than the original tuned systems or other purpose-built harvesting systems (e.g., SpotServe, AntMan, FlexLLM, which are only cited but never empirically compared); this raises concern about whether baselines were tuned as rigorously as ConServe, potentially inflating the reported gains.",
+        "Evaluation is confined to a single 8-GPU DGX node; no results are shown for multi-node, larger-scale clusters, or MoE architectures, which are increasingly the dominant serving setting and may stress the KV-checkpointing/host-memory assumptions differently (e.g., PCIe/NVLink bandwidth assumptions may not hold in disaggregated or network-bound multi-node deployments).",
+        "The paper reports only offline throughput as the offline-task metric; there is no analysis of individual offline request latency, completion-time distribution, or possible starvation under sustained heavy online load, which matters for whether offline SLAs (e.g., 24-hour batch turnaround) are actually respected in the worst case.",
+        "Design choices such as the safepoint granularity (every 4 layers) and the specific polynomial cost model form are not ablated or justified beyond a single configuration—no sensitivity study is shown for coarser/finer safepoint spacing or for how the model's accuracy/latency-prediction error propagates into SLO violation rates.",
+        "Real-world online workload evaluation relies on a single trace (BurstGPT); broader generalization across different online traffic patterns (e.g., different providers' traces, multi-tenant mixes, adversarial burst patterns) is not demonstrated, limiting confidence that the gains hold outside the tested regime.",
+        "The one-time offline profiling step (per model/hardware combination) is presented as lightweight (~20 minutes), but the paper does not discuss the operational burden of re-profiling for every new model, quantization scheme, or hardware SKU in a production fleet, nor how profile staleness/drift would be detected or handled."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Clear and well-motivated problem: the paper starts from concrete profiling evidence (Figures 1-3) showing GPU underutilization from bursty online traffic and the failure of naive preemptive co-serving (3-4x latency/throughput degradation), which convincingly justifies the need for finer-grained resource management.",
+        "The three proposed techniques (SLO-aware token-level scheduling with an analytic performance model, layer-wise preemption via safepoints, and incremental token-level KV cache checkpointing) are coherently designed to attack the scheduling, execution, and state-management bottlenecks identified in the motivation section, respectively, giving the paper a clean problem-to-solution mapping.",
+        "The performance/cost model is simple yet physically grounded (separating linear compute, quadratic attention, communication, and memory-access terms) and is empirically shown to be fast to calibrate (20 minutes) and accurate (<4% error), which is a practical and reproducible contribution.",
+        "Extensive evaluation across three model scales (8B, 14B, 70B with TP), four real-world datasets, and systematic sensitivity sweeps over burstiness, SLO scale, and sequence lengths, compared against four carefully constructed baselines (including a disaggregated DistServe-style baseline), providing good coverage of realistic operating conditions.",
+        "Detailed ablation and micro-benchmarking (safepoint overhead ~10-167us, KV transfer bandwidth, per-component latency/throughput gains) substantiates the specific engineering claims and helps isolate where the gains come from.",
+        "Implementation is grounded in a real, widely used engine (vLLM 0.8.4) with reported line counts, increasing confidence in practical relevance and reproducibility."
+      ],
+      "weaknesses": [
+        "Evaluation is confined to a single 8-GPU node (max TP=4); the paper does not address or evaluate how the approach interacts with cross-node/pipeline-parallel deployments or larger production-scale clusters (e.g., thousands of GPUs, as cited for DeepSeek), leaving scalability claims partly unverified.",
+        "The performance model and its 5 coefficients are calibrated per model/hardware combination; the paper does not discuss how well the model generalizes to more heterogeneous batches (mixed very-short/very-long contexts, MoE architectures, quantized models) beyond the tested dense architectures, nor the cost of re-profiling when models or hardware change frequently in production.",
+        "All baselines other than Online-Only are reimplemented/extended by the authors (Sarathi-P, DistServe-P), which raises some risk of implementation bias favoring ConServe; the paper would benefit from more detail on baseline tuning effort or an appeal to author-independent baseline validation.",
+        "There is no explicit discussion of long-run fairness or starvation for offline requests under sustained heavy online load — since the scheduler always prioritizes online requests, it's unclear whether offline jobs have any progress guarantee over long time horizons, which matters for SLA-bound batch APIs mentioned in the intro.",
+        "Real-world online workload evaluation relies on a single trace source (BurstGPT, one campus's ChatGPT traffic, 10-minute window), which, while useful, is a relatively narrow empirical basis for claims of robustness to arbitrary real-world bursty conditions.",
+        "Limited discussion of engineering generality: layer-wise safepoint instrumentation and CUDA graph interaction are demonstrated for the tested Llama/Qwen models, but the effort needed to port this instrumentation to substantially different architectures (e.g., MoE, non-standard attention variants) is not discussed, which affects reproducibility/generalizability claims."
+      ]
+    }
+  }
+}

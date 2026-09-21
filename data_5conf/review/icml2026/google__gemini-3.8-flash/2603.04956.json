@@ -1,0 +1,95 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Compelling theoretical foundation: The paper bridges post-training quantization (PTQ) and information theory (rate-distortion theory), proving that standard GPTQ can have an unbounded gap to the IT limit, whereas WaterSIC is provably within 0.255 bits of the information-theoretic limit under Gaussian weight assumptions.",
+        "Principled and novel rate allocation: Deriving column-wise grid spacings $\\alpha_i = c / |\\ell_{ii}|$ via the Cholesky factor diagonal elements is a natural yet previously unexploited realization of IT waterfilling in layerwise quantization.",
+        "Thorough practical enhancements: The paper does not stop at theory; it systematically addresses real-world failure modes through LMMSE shrinkage, activation drift compensation, residual stream correction, alternating diagonal rescaler optimization, and dead-feature erasure.",
+        "Strong and consistent empirical gains: WaterSIC demonstrates noticeable improvements in WikiText-2 perplexity and zero-shot downstream tasks across several model families (Llama-3.2-1B, Qwen3-8B, Llama-3-8B, and Llama-2-7B), outperforming both Huffman-GPTQ and conventional PTQ baselines especially in low-bit regimes (1.5–3.0 bits)."
+      ],
+      "weaknesses": [
+        "Variable-rate vs. fixed-rate comparison caveats: WaterSIC reports bitrates based on empirical entropy, and while comparison against Huffman-GPTQ/HPTQ is fully fair, comparing directly on the same curve against fixed-rate codebook/lattice methods (e.g., QTIP, NestQuant, QuIP#) can be slightly misleading from a hardware deployment perspective.",
+        "Absence of runtime inference and decompression benchmarks: Real-time autoregressive LLM inference requires efficient hardware dequantization kernels. While the authors show that lossless compressors (Zstandard/LZMA) achieve the theoretical bitrates, they do not evaluate hardware execution latency or memory bandwidth savings on modern GPUs (e.g., custom CUDA/Triton kernels).",
+        "Pipeline complexity and tuning overhead: The full practical algorithm involves multiple interdependent components and layer-wise hyperparameter optimizations (such as golden-section searches for mixing parameters $\\epsilon_{\\text{qr}}$ and $\\epsilon_{\\text{aw}}$, binary search for $c$, alternating rescalers, and outlier handling), adding significant post-training calibration complexity."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Principled Information-Theoretic Foundation: The paper establishes an elegant connection between classical rate-distortion theory (specifically reverse waterfilling for Gaussian sources) and layerwise LLM quantization. The theoretical proof demonstrating that standard GPTQ can be arbitrarily far from the IT limit, whereas WaterSIC's column-adaptive spacing achieves within 0.255 bits of the Shannon lower bound, is clean, insightful, and mathematically rigorous.",
+        "Comprehensive Practical Adaptation: Rather than leaving the theory in the idealized i.i.d. Gaussian setting, the authors introduce a suite of thoughtful enhancements required for deep transformers, including LMMSE bias correction, activation drift compensation, residual stream correction, alternating row/column rescaler optimization, and adaptive attention-weighted calibration.",
+        "Strong Empirical Performance: Across multiple model families and sizes (Llama-3.2-1B, Qwen3-8B, Llama-3-8B, Llama-2-7B), WaterSIC consistently outperforms strong baselines (Huffman-GPTQ, QTIP, NestQuant, AWQ) on WikiText-2 perplexity, KL divergence, and downstream zero-shot accuracy, with particularly dramatic gains in the extreme low-rate regime (1.5 to 2.5 bits).",
+        "Thorough Diagnostic and Ablation Analysis: The appendix includes comprehensive layer-by-layer ablations demonstrating the specific contributions of each engineering component, empirical validations of compression via standard codecs (Zstandard, LZMA), and analyses of coordinate-mixing dynamics."
+      ],
+      "weaknesses": [
+        "Lack of Hardware Runtime and Latency Benchmarks: Like prior entropy-coded PTQ methods, WaterSIC reports bitrates computed via Shannon entropy and compressed archive sizes via lossless codecs. However, the paper does not evaluate real-world inference throughput, decoding latency, or memory bandwidth gains on modern GPU hardware, leaving open questions regarding practical inference deployment.",
+        "Theory-to-Practice Gap: While Theorem 3.3 provides a compelling 0.255-bit bound under asymptotic high-rate Gaussian assumptions, the practical implementation relies heavily on heuristics (e.g., golden-section coordinate search for covariance mixing, empirical thresholding for dead features, iterative alternating rescalers). The relative contribution of the pure waterfilling step size versus the combined heuristics could be more clearly disentangled in the main text.",
+        "Ad-hoc Outlier Handling on Certain Models: In the case of Qwen3-8B (Appendix D/E), the method manually zeroes specific outlier rows and columns in layers 6 and 16. While shown to preserve unquantized perplexity, this manual intervention creates friction for automated, push-button quantization across new architectures.",
+        "Evaluation Limited to Small/Mid-scale Models: The empirical validation is restricted to models up to 8B parameters. Validating the scalability of the alternating rescalers and calibration optimization on 70B+ parameter models would further strengthen the claims."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Elegantly bridges classical information theory (rate-distortion theory, waterfilling) and modern LLM post-training quantization (PTQ), framing GPTQ as successive interference cancellation (ZSIC) on a lattice.",
+        "Provides a rigorous theoretical result (Theorem 3.3) demonstrating that while standard GPTQ can have an arbitrarily large gap to the rate-distortion limit due to arithmetic-mean geometric-mean disparity, per-channel grid scaling (mimicking waterfilling) provably closes the gap to within 0.255 bits of the information-theoretic limit for Gaussian sources in the high-rate regime.",
+        "Proposes practical engineering refinements to make the scheme work effectively on LLMs, including LMMSE shrinkage, residual stream compensation, activation drift correction with adaptive mixing, and dead feature erasure.",
+        "Comprehensive empirical evaluation across multiple model families (Llama-3.2-1B, Llama-3-8B, Llama-2-7B, Qwen3-8B) on both perplexity and zero-shot downstream tasks, demonstrating clear gains in the low-bitwidth regime (1.0–2.5 bits)."
+      ],
+      "weaknesses": [
+        "The primary rate metric used is Shannon entropy / variable-length entropy coding rather than fixed log-cardinality bitwidth. Comparing entropy-coded methods directly against fixed-rate hardware-friendly baselines (e.g., AWQ, QuIP#, NestQuant) on the same rate-distortion axes is somewhat misleading, as fixed-bit representations map directly onto standard tensor hardware.",
+        "Lack of inference runtime, latency, or throughput benchmarks. Variable-rate per-column quantization and entropy coding introduce significant hardware deserialization overhead and kernel irregularities; without custom GPU kernels demonstrating wall-clock inference speedups, the practical utility of the storage gains remains unverified.",
+        "Significant discrepancy between theoretical assumptions and practical execution: while the theory assumes i.i.d. Gaussian weights and high-rate asymptotics ($D \\to 0$), real-world LLMs have heavy-tailed weights and operate in ultra-low bitrates. Bridging this gap requires a complex, multi-stage calibration pipeline with extensive layer-by-layer hyperparameter tuning (golden-section search, heuristic thresholding, and even manual zeroing of specific outlier rows on Qwen3-8B).",
+        "High calibration overhead: the quantization process involves alternating rescaler optimization, iterative binary searches over scale parameters, and golden-section search over drift-mixing and attention-weighting parameters, which substantially increases the post-training quantization time compared to standard GPTQ."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Compelling theoretical foundation: The paper bridges post-training quantization (PTQ) and information-theoretic rate-distortion theory, demonstrating that standard GPTQ is inherently suboptimal due to uniform column bit allocation, and proving that adjusting column quantization step sizes inversely to Cholesky diagonal elements achieves within 0.255 bits of the Shannon rate-distortion bound.",
+        "Bypassing the need for basis transmission: By exploiting the connection between Cholesky-based successive interference cancellation (ZSIC) and prediction error quantization (Zamir et al., 2006), the method achieves the waterfilling rate allocation limit without requiring expensive transmission of the SVD/PCA orthogonal rotation matrix to the decoder.",
+        "Principled and effective algorithmic extensions: The transition from PlainWaterSIC to the full system includes well-motivated refinements, such as LMMSE shrinkage correction, residual stream compensation for down-projection layers, alternating diagonal rescaler optimization, and adaptive calibration mixing.",
+        "Strong empirical performance across bitrates: Extensive evaluations on Llama-3.2-1B, Qwen3-8B, Llama-2-7B, Llama-3-8B, and Llama-3-70B demonstrate consistent state-of-the-art perplexity and zero-shot accuracy across low-to-mid bitrates (1.0 to 4.0 bits per parameter), significantly outperforming Huffman-GPTQ and existing fixed-rate baselines.",
+        "Thorough diagnostics and ablations: The appendix provides extensive validation, including layer-wise MSE progressions, empirical verification of weight Gaussianity, lossless codec compression (Zstd/LZMA) feasibility, and cross-dataset generalization analyses (WikiText-2 vs. C4 vs. RedPajama)."
+      ],
+      "weaknesses": [
+        "Lack of inference runtime and kernel evaluation: Because the method relies on variable-length entropy coding and non-uniform column precision, weights cannot be executed directly via standard dense GEMM kernels. While the authors note Blackwell hardware support and verify compressibility with Zstd/LZMA, practical decoding/inference latency benchmarks on hardware are missing.",
+        "Algorithmic complexity: The complete quantization pipeline contains many specialized components and hyperparameters (e.g., golden-section coordinate search for drift/attention mixing, dead feature pruning, alternating diagonal rescalers), which makes replication and end-to-end tuning considerably more complex than standard GPTQ.",
+        "Reporting rate via entropy vs. fixed-bit baselines: While the authors clearly distinguish entropy-based bitrates from log-cardinality baselines in the text and plots, comparing entropy-coded models against fixed-rate integer formats (e.g., AWQ, QuIP#) can mask runtime efficiency differences."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Principled Information-Theoretic Foundation: The paper provides an elegant information-theoretic perspective on linear layer post-training quantization (PTQ). Connecting GPTQ to lattice decoding via Successive Interference Cancellation (ZSIC) and proving that the standard equal-step allocation in GPTQ can be arbitrarily far from the waterfilling limit, whereas WaterSIC is within 0.255 bits uniformly over input covariance matrices in the high-rate regime, is a notable conceptual contribution.",
+        "Novel Channel-Wise Rate Allocation: The key insight that column grid spacing should be inversely proportional to the innovation magnitude (via the Cholesky factor diagonal $\\ell_{ii}$, rather than the total activation variance) is theoretically grounded and distinct from prior heuristic channel-weighting approaches.",
+        "Extensive Empirical Evaluation: The method is validated thoroughly across multiple architectures and model sizes (Llama-3.2-1B, Qwen-8B, Llama-3-8B, Llama-2-7B, and Llama-3-70B) from 1 to 4 bits, evaluating perplexity on WikiText-2 and C4, KL divergence, and standard zero-shot benchmarks.",
+        "Thorough Diagnostic and Ablation Analysis: The appendices provide insightful diagnostics, such as empirical testing of weight Gaussianity (Kolmogorov-Smirnov distance), verifying entropy coding against real compressors (Zstd, LZMA), and component-wise MSE ablations for the practical enhancements."
+      ],
+      "weaknesses": [
+        "Confounding Enhancements vs. Core Innovation: The jump from PlainWaterSIC (which directly embodies the theoretical waterfilling insight $\\alpha_i = c / |\\ell_{ii}|$) to the full WaterSIC pipeline involves numerous orthogonal engineering enhancements: LMMSE shrinkage factors $\\gamma_i$, activation drift correction, residual stream compensation, alternating row/column rescaler optimization ($T, \\Gamma$), attention-weighted covariance calibration, per-layer golden-section parameter search, and dead feature erasure. It is difficult to disentangle how much of the empirical gain over prior baselines (such as Huffman-GPTQ/HPTQ) stems specifically from the waterfilling rate allocation versus this combined stack of heuristics.",
+        "Mismatch Between High-Rate Theory and Low-Rate Application: Theorem 3.3 is derived in the high-rate limit ($D \\to 0, R \\to \\infty$) under i.i.d. Gaussian weight assumptions. However, the practical focus of the paper is the extreme low-bit regime (1 to 2.5 bits), where high-rate approximations break down, cell boundary effects become prominent, and heuristic shrinkage (LMMSE) is required.",
+        "Practical Deployment and Hardware Latency: The reported bitrates are based on empirical entropy and lossless data compression (Zstd/LZMA). While entropy-coded weights yield compact storage, they typically cannot be directly executed on modern GPU tensor cores without fast custom dequantization or GEMM kernels. The paper lacks end-to-end inference latency or memory throughput benchmarks during actual token generation.",
+        "Quantization Pipeline Complexity: Finding the target rate and hyperparameter tuning requires multiple calibration steps: secant root-finding iterations to hit target entropy, golden-section searches per layer for drift and attention mixing coefficients $(\\epsilon_{qr}, \\epsilon_{aw})$, and iterative alternating minimization for rescalers $(T, \\Gamma)$, making the quantization procedure significantly more compute-intensive than standard one-pass PTQ."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Principled information-theoretic formulation: The paper provides a rigorous rate-distortion analysis connecting GPTQ (equivalent to Babai's nearest plane / successive interference cancellation) to classical waterfilling rate allocation, proving that standard GPTQ suffers from an arbitrary AM-GM gap while WaterSIC achieves an asymptotic rate gap of at most 0.255 bits to the information-theoretic limit on Gaussian weights.",
+        "Well-motivated algorithmic design: Setting column quantization step sizes inversely proportional to the Cholesky diagonals ($\\alpha_i = c / |\\ell_{ii}|$) directly remedies the suboptimality of uniform-step GPTQ. The subsequent practical extensions—LMMSE bias correction, residual stream compensation, alternating diagonal rescaler optimization, and dead feature erasure—are technically coherent and well justified.",
+        "Comprehensive empirical evaluation: The method is validated across diverse model families and scales (Llama-3.2-1B, Llama-2-7B, Llama-3-8B, Qwen3-8B, and Llama-3-70B) over a wide bitrate range (1 to 4 bits), demonstrating consistent state-of-the-art perplexity and zero-shot benchmark performance against competitive baselines (Huffman-GPTQ, QTIP, QuIP#, NestQuant, PV-Tuning).",
+        "Thorough diagnostics and ablations: The appendix provides detailed validations, including empirical testing of weight Gaussianity via Kolmogorov-Smirnov statistics, verification that practical lossless compressors (Zstandard/LZMA) closely match the theoretical entropy, and step-by-step layerwise MSE ablations of individual pipeline components."
+      ],
+      "weaknesses": [
+        "Practical inference latency and hardware deployment: WaterSIC produces variable-rate integer matrices requiring entropy coding. While Table 6 demonstrates that byte compressors achieve rates near the theoretical entropy, the paper does not evaluate end-to-end decoding throughput or kernel latency on real GPUs. In practical LLM serving, variable-length decoding often faces memory bandwidth and thread divergence bottlenecks compared to uniform fixed-bit GEMM kernels.",
+        "High pipeline complexity and calibration overhead: The full practical pipeline incorporates numerous heuristics and multi-stage optimizations (golden-section coordinate search for drift/attention mixing parameters $\\epsilon_{qr}, \\epsilon_{aw}$, secant search for per-layer target rates, alternating $T$ and $\\Gamma$ optimization, and dead feature pruning). While effective, this significantly increases calibration time and complexity compared to standard PTQ methods.",
+        "Discrepancy in model nomenclature: The manuscript frequently evaluates and refers to 'Qwen3-8B' (e.g., Figures 1, 3, 5 and Tables 2, 3, 4, 18). As Qwen3-8B is not a standard publicly recognized release (potentially referring to Qwen2.5-7B/8B or an unreleased internal checkpoint), this creates ambiguity and hinders exact experimental reproducibility unless clarified.",
+        "High-rate asymptotic assumptions: The theoretical guarantee of a 0.255-bit gap strictly holds in the asymptotic regime ($D \\to 0, a \\to \\infty$). At ultra-low bitrates (1–2 bits/parameter), where the method is practically most interesting, the high-rate approximation loosens, and non-Gaussian tails observed in attention projections ($w_q, w_k$) deviate from the theoretical model."
+      ]
+    }
+  }
+}

@@ -1,0 +1,94 @@
+{
+  "v1": {
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Timely and impactful problem: The paper identifies a critical and practically relevant denial-of-service (DoS) vulnerability in Mixture-of-Experts (MoE) serving systems deployed with Expert Parallelism (EP). As sparse MoE models are rapidly adopted in commercial production, studying their algorithmic resource-exhaustion surfaces is of high significance.",
+        "Extreme simplicity and zero-cost attack: In contrast to gradient-based or search-heavy adversarial prompt generation methods, RepetitionCurse exploits router distribution collapse using simple repetitive token sequences in a completely black-box manner.",
+        "Extensive and rigorous empirical evaluation: The authors conduct a comprehensive study across 14 diverse MoE models, survey 139 open MoE checkpoints on HuggingFace, and validate the effect on both local instrumented vLLM deployments and commercial production APIs (including ChatGPT, DeepSeek, and Kimi).",
+        "Insightful mechanistic analysis: The paper provides valuable insights into router behavior, particularly the entropy analysis across sequence lengths and the discovery of layer-wise 'attractor' experts in intermediate layers acting as fallback sinks for out-of-distribution repetitive inputs.",
+        "Dual perspective with side-channel and mitigation: Beyond DoS, the authors show the latency differential can serve as a side-channel to infer backend model architecture (dense vs. MoE), and propose a concrete, vulnerability-aware expert placement defense (Algorithm 1)."
+      ],
+      "weaknesses": [
+        "Triviality of practical input filtering: The attack relies on extreme, overt token repetitions (e.g., up to 20,000 repeated tokens). While the paper argues that perplexity (PPL) filtering requires an auxiliary model, practical inference gateways can trivially detect such inputs using negligible-overhead heuristics (e.g., zlib/gzip compression ratios, sliding-window unique n-gram counts, or simple regex) without needing full language model scoring.",
+        "Lack of evaluation under realistic serving conditions: Modern production LLM serving engines employ chunked prefill (e.g., Sarathi, vLLM chunked prefill) and dynamic continuous batching with concurrent heterogeneous requests. Evaluating an isolated single 20,000-token prompt does not fully capture how the straggler effect amortizes or interferes in multi-tenant, continuous batch settings.",
+        "Potential confounding factors in black-box API measurements: In Table 4, attributing API TTFT differences solely to EP straggler latency overlooks closed-source architectural variables, such as prompt caching mechanisms, cluster queue lengths, dynamic instance autoscaling, and differing attention optimizations across providers."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "The paper identifies a novel and intuitive vulnerability in expert-parallel (EP) MoE serving systems: repetitive token sequences collapse the dynamic routing distribution into a small set of bottleneck experts, causing straggler GPUs and degrading prefill latency.",
+        "Comprehensive empirical evaluation covering an extensive survey of 139 open MoE models, detailed profiling across 14 distinct MoE models with varying sparsity and architectures, and experiments under multiple EP degrees.",
+        "Insightful mechanistic analysis of router behavior under out-of-distribution repetitive inputs, showing that intermediate layers act as 'fallback' attractors for anomalous tokens.",
+        "Clear presentation, strong motivational figures (Figures 1-4), and practical discussion of mitigation strategies, including both input filtering and vulnerability-aware expert placement."
+      ],
+      "weaknesses": [
+        "Attack stealthiness and practical exploitability are limited: RepetitionCurse relies entirely on repeating identical tokens over thousands of positions. Such extreme repetition can be trivially detected and rejected by standard front-end safeguards (e.g., string compression ratio, simple n-gram/repetition filters) without requiring expensive perplexity models.",
+        "Lack of evaluation in realistic multi-tenant serving conditions: The latency amplification is measured for isolated requests. Modern production serving systems (e.g., vLLM, SGLang) utilize continuous batching and chunked prefill, where normal requests are co-scheduled. The paper does not quantify the actual end-to-end throughput degradation or queuing impact on concurrent benign users in an active multi-tenant serving cluster.",
+        "Unexplored trade-offs for the proposed defense: The vulnerability-aware load balancing algorithm distributes experts across GPUs based on worst-case repetitive token counts. However, the manuscript does not evaluate how this static reassignment affects normal runtime load balancing, communication overhead, or serving throughput on standard, non-adversarial benchmarks.",
+        "Overly speculative side-channel attribution: Using API round-trip TTFT ratios to infer that closed-source proprietary APIs (e.g., ChatGPT-3.5/4/4o-mini) are MoE models is prone to confounding factors, such as backend batching dynamics, auto-scaling, dynamic rate-limiting, and network jitter."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper addresses an important and timely systems problem: the performance vulnerabilities of Mixture-of-Experts (MoE) architectures deployed under Expert Parallelism (EP) when subjected to adversarially skewed routing.",
+        "The physical intuition is well-motivated: in EP deployments, severe router imbalance turns parallelized computation into a single-GPU straggler bottleneck, directly increasing Time to First Token (TTFT).",
+        "The empirical investigation is broad, covering an architectural survey of 139 MoE configurations and profiling 14 open-weight MoE models across different sizes, expert cardinalities, and sparsity levels.",
+        "The mechanistic analysis in Section 5.2 and Figure 7 offers an interesting insight, showing that intermediate MoE layers deterministically concentrate repetitive out-of-distribution tokens onto a very small subset of 'attractor' or fallback experts.",
+        "The paper explores both detection and architectural mitigation, proposing Vulnerability-Aware Load Balancing to distribute commonly collided experts across distinct GPUs."
+      ],
+      "weaknesses": [
+        "Practical exploitability and stealthiness of the attack are weak: The adversarial prompt consists of a single token repeated up to 20,000 times. While the authors suggest that perplexity (PPL) filtering requires an auxiliary model, such degenerate inputs can be trivially detected and rejected at the API ingress gateway using lightweight heuristics (e.g., token entropy, run-length checks, or compression ratio via gzip) with negligible overhead, without requiring MoE-specific defenses.",
+        "Lack of evaluation in realistic multi-tenant serving environments: In modern LLM serving engines (such as vLLM or SGLang), requests are served via continuous batching, chunked prefill, and dynamic scheduling. The paper evaluates requests in isolation, leaving unvalidated whether a single malicious request actually starves concurrent user queries or degrades overall system throughput under realistic multi-tenant workloads.",
+        "Overreach in side-channel architecture inference: In Section 4.3 and Table 4, concluding that proprietary closed-source models (ChatGPT-3.5-Turbo, ChatGPT-4, ChatGPT-4o-Mini) are backed by MoE systems based solely on TTFT ratio ($R_{api} > 1$) is poorly controlled. Public API latencies are subject to multiple confounders, including server load fluctuations, tokenization speed on repetitive strings, guardrail processing, and caching layers. Notably, dense baselines also exhibit substantial variance (e.g., Qwen-14B has $R_{api} = 0.635$, and Llama-3-8B has $1.160$).",
+        "The proposed defense has limited efficacy and unclear trade-offs: Vulnerability-aware load balancing only reduces the bottleneck coverage by 10%–36% (Figure 8), leaving substantial latency amplification intact. Furthermore, the paper does not evaluate whether rearranging expert placements based on out-of-distribution repetitive tokens harms the load balance or communication overhead of normal, in-distribution traffic."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Novel systems-security perspective targeting the prefill phase of Mixture-of-Experts (MoE) architectures under expert parallelism (EP), shifting the focus from autoregressive token exhaustion to hardware-level straggler bottlenecks and idle-wait synchronization overheads.",
+        "Comprehensive empirical measurement across 13 diverse MoE models (covering low- and high-sparsity architectures, various attention types, and parameter scales) and realistic hardware configurations (up to 32 GPUs).",
+        "Thorough analytical characterization, including the formulation of embedding dispersion collapse, derivation of the Theoretical Maximum Imbalance (TMI), and layer-wise profiling of expert attractor distributions.",
+        "Solid evaluation of real-world impact, providing formal SLA degradation modeling under Log-Normal arrival assumptions and black-box verification on commercial APIs."
+      ],
+      "weaknesses": [
+        "The attack mechanism relies on naive repetition of identical tokens, which is readily detectable via trivial, low-cost gateway sanitization filters (e.g., run-length encoding, token-frequency thresholds, or compression ratios). The manuscript argues against perplexity (PPL) filtering due to GPU overhead, but overlooks simple rule-based and algorithmic string checks.",
+        "The paper does not investigate whether router concentration can be sustained using semantically natural, varied, or paraphrased text, limiting the stealthiness of the proposed attack vector in production environments with basic input validation.",
+        "Missing evaluation of standard MoE inference-time mechanisms designed to handle load skew, such as expert capacity limits with token dropping or secondary-expert rerouting (e.g., Switch Transformer-style capacity factors), which naturally cap straggler latency at the expense of slight output degradation.",
+        "In the commercial API experiments (Section 6.2), differences in TTFT across remote endpoints could be confounded by multi-tenant load fluctuations, proprietary prefix caching, or unknown parallelism strategies (e.g., hybrid TP-EP or dynamic micro-batching), making definitive attribution to EP imbalance difficult without internal telemetry."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Novel and insightful perspective: The paper establishes an important link between algorithmic MoE routing behaviors and distributed system-level serving vulnerabilities, specifically showing how expert parallelism (EP) exposes inference engines to denial-of-service (DoS) via computational stragglers.",
+        "Zero-cost, black-box threat model: RepetitionCurse does not require white-box access, optimization, or model gradients; the realization that simple token repetition reliably collapses router entropy across layers makes the attack practically accessible.",
+        "Comprehensive empirical measurement: The evaluation covers 13 MoE models across diverse configurations (dense vs. sparse MoE, standard vs. linear attention), real multi-GPU EP testbeds (up to 32 GPUs across 4 nodes on vLLM), and real-world commercial APIs (Table 3), backed by SLA degradation modeling."
+      ],
+      "weaknesses": [
+        "Overlooked lightweight defenses (e.g., token repetition / run-length checks): While Appendix D discusses and dismisses perplexity (PPL) filtering due to false positives on code and inference overhead, it fails to consider trivial O(N) token-level heuristics. In production, serving systems and API gateways commonly employ simple run-length encoding (RLE) or regex-based repetitive token filters (e.g., dropping or truncating inputs with >50 consecutive identical tokens), which would neutralize identical-token prompts with negligible overhead.",
+        "Limited investigation into stealthier or structured repetitive patterns: The attack relies predominantly on repeating identical tokens. It remains unclear whether routing concentration persists under periodic patterns (e.g., n-gram repetitions, alternating tokens) or semantically repetitive natural text that could bypass simple syntax/repetition filters.",
+        "Scope limited mainly to pure EP: Modern MoE serving at scale often utilizes hybrid parallelism schemes (e.g., TP + EP, or sequence parallelism combined with EP). The paper focuses largely on pure EP configurations, and the extent to which tensor parallelism or expert replication dampens the straggler effect is not thoroughly quantified."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Insightful bridge between model-level representation collapse and system-level hardware bottlenecks: The paper clearly connects how repetitive input tokens collapse hidden state variance, driving deterministic top-k expert selection and creating straggler GPUs during all-reduce synchronization in expert-parallel (EP) deployments.",
+        "Comprehensive and rigorous empirical evaluation: The study covers 13 MoE models across diverse architectures (dense vs. linear attention, small vs. large expert counts) on physical multi-GPU and multi-node clusters (up to EP=32 on 4 nodes), accompanied by an investigation of 139 HuggingFace MoE configurations.",
+        "Solid theoretical and systems analysis: The derivation of the Theoretical Maximum Imbalance (TMI), the vocabulary-wide vulnerability scans (N_eff), and the log-normal SLA degradation modeling provide clear, quantitative insights into how EP scaling turns parallelism against itself.",
+        "Exploration of system mitigations: The authors systematically analyze potential defenses, including vulnerability-aware expert-to-GPU remapping and state-of-the-art dynamic rebalancing (DeepSeek EPLB), demonstrating why static and dynamic mapping adjustments offer only partial mitigation for highly sparse models."
+      ],
+      "weaknesses": [
+        "Triviality of gateway-level detection: While the paper evaluates perplexity-based filtering in Appendix D and argues that PPL models are computationally heavy, it overlooks simpler, rule-based defenses. High-frequency token repetition (e.g., identical repeated tokens) can be detected with near-zero latency using basic regex, sliding-window n-gram checks, or compression-ratio thresholds (e.g., Run-Length Encoding / zlib) at the API gateway before requests ever enter the batching queue.",
+        "Lack of stealthy / semantically coherent attack prompt variants: The proposed attack relies strictly on repeating identical tokens. The paper does not investigate whether routing collapse can be sustained under stealthier adversarial inputs (e.g., semantic paraphrasing, repeating short natural phrases, or embedding repetitive triggers within benign context), leaving the robustness of the attack surface in realistic deployment settings partially unaddressed.",
+        "Confounding factors in black-box commercial API experiments: While the elevated TTFT in Table 3 is suggestive, commercial LLM APIs employ complex production stacks with proprietary parallelism strategies (e.g., hybrid TP/EP/PP), variable dynamic batching, and distinct hardware topologies. Attributing TTFT spikes purely to MoE EP straggler effects in black-box commercial settings is difficult to isolate definitively from cluster-level queuing or network noise."
+      ]
+    }
+  }
+}

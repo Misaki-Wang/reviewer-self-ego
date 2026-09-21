@@ -1,0 +1,146 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Principled mathematical formulation: Connecting attention approximation to cumulant generating functions and multipole expansions (monopole centroids plus dipole covariance corrections) provides an elegant, physically inspired framework.",
+        "Decoupled query and key clustering: Partitioning query and key spaces independently respects the asymmetry and duality between queries and keys in softmax attention, and the two-stage refinement scheme is well-motivated.",
+        "Promising isolated kernel performance: The authors demonstrate practical wall-clock speedups on an A100 GPU over cuDNN Flash Attention at sequence lengths of 4k and above (e.g., ~3x at 8k, scaling up to 20-30x at 64k for acausal attention).",
+        "Informative ablations: Component-level ablations cleanly isolate the importance of the two-stage clustering and the dipole correction terms on relative approximation error across different training phases."
+      ],
+      "weaknesses": [
+        "Highly restricted and artificial end-to-end pretraining setup: The end-to-end validation is limited to a toy 29M parameter model trained on only 2B tokens. Furthermore, only a single central layer uses global attention (while the other 6 layers use a sliding window of 256), and in that layer, only a single off-diagonal block uses MuSe. This severely limits the empirical validation of training stability and wall-clock benefits in realistic full-model architectures.",
+        "Lack of downstream and long-context task evaluation: The only evaluation metric provided is training loss (negative log-likelihood) on PG-19. There are no evaluations on long-context benchmarks (such as Needle-in-a-Haystack, passkey retrieval, or standard language modeling perplexity across diverse validation sets) to verify whether semantic clustering preserves precise token-level retrieval capabilities.",
+        "Under-specified backward pass and gradient mechanics: K-means assignment is a non-differentiable operation. While the paper mentions backpropagating through the attention computation, it lacks explicit technical detail on how backward gradients are handled with respect to cluster centroids and assignments (e.g., whether assignments are detached and treated as fixed indices).",
+        "Modest end-to-end speedup: In the end-to-end pretraining experiment, MuSe achieves only a 12.2% wall-clock step time reduction over the custom Pallas Flash Attention baseline, and the paper does not benchmark against a fully optimized cuDNN/FlashAttention-2 baseline for the full-context causal model."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Principled mathematical foundation: The paper presents an elegant derivation linking cumulant generating functions, exponential tilting, and multipole expansions to approximate softmax attention, providing a clear theoretical motivation for introducing dipole (covariance) corrections beyond simple centroids.",
+        "Asymmetric representation handling: Separately clustering queries and keys respects the mathematical duality and transformation properties between query and key spaces, avoiding the flawed assumption that queries and keys reside in an identical metric space.",
+        "Realistic runtime accounting: The empirical microbenchmarks include all end-to-end overheads (clustering iterations, ragged tensor handling, and block merging), rather than reporting idealized FLOPs, and demonstrate genuine wall-clock speedups over FlashAttention at sequence lengths of 8k and above.",
+        "Informative ablation studies: Table 3 clearly validates the specific contributions of the two-stage query clustering and the dipole correction terms at both early and late stages of training."
+      ],
+      "weaknesses": [
+        "Limited pretraining scale and architecture setup: End-to-end pretraining is conducted only on a very small model (29.4M parameters, 2B tokens) where only 1 of the 7 layers utilizes long-range global attention (with the other 6 restricted to a 256-token sliding window). Consequently, the overall system speedup in pretraining is modest (12.2% over a Pallas FlashAttention baseline).",
+        "Lack of downstream and long-context retrieval evaluations: The evaluation focuses exclusively on pretraining loss (NLL) on PG-19. Without evaluations on standard long-context benchmarks (such as Needle-in-a-Haystack, synthetic retrieval tasks, or downstream QA/summarization), it remains unverified whether the ~15–20% relative squared error in attention weights impairs precise associative recall over long contexts.",
+        "Simplified causal validation in pretraining: While Section 6 derives an $O(N C D \\log N)$ hierarchical decomposition for causal attention, the actual pretraining experiment in Section 7.3 only tests the simplest two-block configuration (one 8k FlashAttention diagonal block and one 8k MuSe below-diagonal block), leaving the stability and overhead of deeper multi-level causal hierarchies unverified in full training.",
+        "Clarification on backward pass dynamics: K-means assignment is non-differentiable. The manuscript should explicitly detail how gradients propagate through the clustering step (presumably gradients through cluster assignments are zeroed / treated as constant) and whether this creates any training instabilities across different learning dynamics."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Principled mathematical foundation: Deriving the multipole expansion of softmax attention via cumulant generating functions (CGF) provides a theoretically sound and elegant way to incorporate intra-cluster variance (dipole corrections) into attention approximations.",
+        "Well-motivated asymmetric clustering: The distinction between query and key latent spaces—recognizing that queries and keys lie in dual vector spaces and clustering them independently—is conceptually well-justified compared to prior work relying on unified clustering.",
+        "Thorough microbenchmark analysis and ablation: The ablations in Section 7.2 clearly isolate the impact of each algorithmic component, confirming that dipole corrections and the two-stage clustering mechanism substantially reduce approximation error across training stages.",
+        "Hardware-aware implementation: Benchmarking includes fused GPU kernel implementations (using Pallas) with combined forward and backward passes, accounting for clustering overheads rather than reporting purely theoretical FLOP reductions."
+      ],
+      "weaknesses": [
+        "Extremely restricted end-to-end architectural evaluation: The end-to-end pretraining validation is conducted only on a tiny 29.4M parameter model trained on 2B tokens, where global attention is applied to only a single layer (layer 4 of 7), while all other 6 layers use a local sliding window of 256. This leaves the behavior, stability, and speedup of MuSe when deployed across all transformer layers completely untested.",
+        "Modest and selectively baselined end-to-end speedups: In Table 4, the 12.2% wall-clock speedup is measured against a custom Pallas implementation of FlashAttention rather than optimized vendor libraries (e.g., cuDNN or FlashAttention-2/3). Furthermore, the actual end-to-end runtime reduction is modest because only one layer uses long context.",
+        "Lack of downstream or long-context task evaluation: The only evaluation metric reported during pretraining is training perplexity/loss on PG-19. There are no evaluations on standard downstream long-context benchmarks (such as BABILong, L-Eval, or needle-in-a-haystack tasks) to verify whether the 15–20% relative squared error harms retrieval or multi-hop reasoning capabilities.",
+        "Potential error accumulation across deep networks: Because the approximation introduces a 15–25% relative squared error in the attention output, stacking multiple MuSe layers throughout a deep architecture could lead to compounding approximation error or gradient variance during training, which cannot be assessed from the single-layer experiment provided."
+      ]
+    }
+  },
+  "v4": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Compelling theoretical foundation: The paper provides a clear mathematical derivation connecting multipole expansions to attention via cumulant generating functions and exponential tilting, offering a principled justification for independent query-key clustering and Euclidean K-means.",
+        "Rigorous, end-to-end empirical validation: Rather than relying solely on isolated kernel benchmarks or synthetic tasks, the authors train 1B-scale models up to 24B tokens at 64k context on 8x A100 GPUs, demonstrating an actual 36% wall-clock throughput speedup and matching baseline perplexity.",
+        "Careful analysis of interchangeability and adaptation: The authors openly address the test-time adaptation gap when switching back to exact cuDNN FlashAttention, diagnosing the gradient pathway responsible and demonstrating effective remedies (a brief 0.1% exact-attention fine-tuning phase or non-differentiable aggregation weights).",
+        "Drop-in compatibility on pretrained models: Validation on pretrained Llama 3.2-1B and 3.1-8B models on Project Gutenberg without retraining provides compelling evidence that query-centroid exponential tilting is crucial for capturing natural attention biases.",
+        "Thorough ablations: Comprehensive analysis detailing the trade-offs of query vs. key clustering, spatial vs. semantic retrieval breadth, block size, and monopole vs. retrieval contributions across multiple model scales."
+      ],
+      "weaknesses": [
+        "Pretraining scale is limited to 1B parameters: While pretraining at 64k context for 24B tokens is substantial for academic compute constraints, modern LLM architectures routinely operate at 7B+ scale, where attention characteristics, sparsity dynamics, and head dimensions may exhibit different behaviors.",
+        "Primary pretraining evaluations focus on head dimension 64: While Table 8 and Figure 5 evaluate head dimension 128 at smaller scales or in inference-only settings, most state-of-the-art open models (e.g., Llama 3, Mistral) standardize on head dimension 128.",
+        "Incomplete code availability section: In Appendix I (page 21), the text cuts off with an apparent missing link/phrase ('available as the supplementary material accompanying ... It is provided to document...').",
+        "Standardized benchmark evaluation limitations: On general benchmarks like RULER, small base models struggled due to limited instruction-following capabilities. Although the custom code-based NIAH and LongBench code completion evaluations are sound alternatives, broader multi-task evaluations across diverse instruction-tuned regimes remain an area for future work."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Compelling practical motivation and system results: achieving a 36% end-to-end wall-clock pretraining throughput improvement at 64k context length on 1B-parameter models while maintaining or slightly improving baseline loss is a significant empirical result.",
+        "Rigorous theoretical formulation: the mathematical grounding connecting exponential tilting, cumulant generating functions, and Taylor expansions provides a clear justification for clustering queries and keys separately (retaining three of four cross-terms and discarding only the residual product term).",
+        "Thorough ablation study and analysis: the paper comprehensively isolates the roles of query clustering, key clustering, exponential tilting, monopole summaries, and retrieval (e.g., Tables 2, 3, 13–19, 21), clearly demonstrating why each component is necessary.",
+        "Drop-in capability on existing models: validating the approximation on pretrained Llama 3.1-8B and 3.2-1B without retraining confirms that the exponential tilting mechanism effectively handles non-trivial mean query distributions in real models.",
+        "Extensive scaling and downstream validation: the work evaluates scaling across five model sizes (96M to 1B) following compute-optimal schedules, demonstrates context utilization across 64k tokens during training, and tests downstream performance on LongBench and custom retrieval tasks."
+      ],
+      "weaknesses": [
+        "Pretraining scale is limited to 1B parameters: while training 1B models at 64k context for ~24B tokens is substantial for academic compute, modern LLM pretraining operates at much larger parameter counts and distributed topologies where sequence/context parallel communication patterns could alter the speedup profile.",
+        "Pretraining evaluation primarily focuses on head dimension 64: although head dimension 128 is tested via inference on Llama and pretraining at the 185M scale, the headline 1B pretraining runs exclusively use head dimension 64.",
+        "Presence of an adaptation gap requiring fine-tuning: at 1B scale on the code domain, the MuSe-trained model experiences a small degradation when evaluated directly with exact attention (0.7108 vs. 0.7026 baseline), requiring either post-hoc fine-tuning on ~26M tokens or the non-differentiable aggregation heuristic to fully recover exact performance.",
+        "Standard long-context benchmark results are partially inconclusive: standard RULER tasks showed poor performance across both baseline and MuSe models due to model scale and domain mismatch, necessitating the design of a custom in-domain code NIAH evaluation.",
+        "Minor presentation flaw in Section I (Code Availability), where sentence truncation occurs ('...accompanying It is provided...')."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Principled Mathematical Formulation: The paper provides a clear and elegant theoretical grounding for Multipole Semantic Attention (MuSe). Viewing softmax attention through cumulant generating functions and exponential tilting rigorously justifies clustering queries and keys independently in representation space, effectively bounding the residual approximation error.",
+        "Real-World End-to-End Pretraining at Scale: Unlike many sparse attention papers that evaluate only on synthetic microbenchmarks or post-hoc perplexity, the authors pretrain models up to 1B parameters on 24B tokens at 64k context length across multiple domains (code and scientific documents), demonstrating scaling law preservation from 96M to 1B parameters.",
+        "Genuine Hardware Speedup: MuSe is implemented with custom kernels (JAX/Pallas and CUDA) and delivers measurable wall-clock throughput improvements—achieving a 2× attention speedup over cuDNN FlashAttention and a 36% overall pretraining throughput improvement on an 8× A100 node.",
+        "Drop-in Compatibility and Transferability: The method demonstrates excellent zero-shot compatibility on existing pretrained models (Llama 3.1-8B and 3.2-1B) at 64k context without retraining, convincingly illustrating the critical importance of query-centroid exponential tilting to avoid distribution shifts.",
+        "Comprehensive Ablations: The empirical analysis isolates key components thoroughly, including monopole vs. retrieval contributions, the quantitative advantage of separate query clustering (~9× effective cluster multiplier), block sizes, and semantic vs. spatial retrieval allocations."
+      ],
+      "weaknesses": [
+        "Inference Adaptation Gap at 1B Scale: On the 1B code model, evaluating with exact cuDNN attention directly out of pretraining incurs a noticeable degradation (0.7108 vs 0.7026 baseline), requiring an additional 26M tokens (~0.1%) of exact attention fine-tuning to recover performance. While the authors propose a non-differentiable aggregation fix in Appendix C, this remains preliminary.",
+        "Evaluation on Standard Long-Context Benchmarks is Limited: Due to base models lacking instruction-tuning, standard long-context benchmarks like RULER yield poor scores for both baseline and MuSe models. While the custom code-based NIAH evaluation and LongBench code tasks are reasonable alternatives, more extensive downstream validation on broader standard tasks would strengthen the empirical claims.",
+        "Architectural and Engineering Complexity: MuSe introduces multi-stage complexity—streaming K-means clustering, exponential tilting, causal accumulation across spatial blocks, and segmented retrieval attention. This complexity is substantially higher than simpler fixed-block sparse attention baselines like MoBA.",
+        "Primary Focus on Head Dimension 64: The headline pretraining experiments are conducted with head dimension 64, whereas many modern LLMs (e.g., Llama 3) predominantly use head dimension 128. While Appendix E/Table 8 shows positive preliminary results at 185M scale with head dimension 128, extending full 1B pretraining to head dimension 128 remains unverified."
+      ]
+    }
+  },
+  "v3": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Principled and well-motivated formulation: MuSe provides a clear mathematical justification for clustering queries and keys independently in their representation spaces, demonstrating that retaining three of four dot-product expansion terms reduces monopole approximation error by 4–5x compared to key-only clustering.",
+        "Strong and rigorous pretraining validation: Unlike many approximate attention works that only evaluate on synthetic tasks or short-context perplexity, this work conducts full pretraining up to 1B parameters on 64k context lengths across two distinct domains (code and scientific documents), demonstrating 36% end-to-end wall-clock speedup on 8x A100 GPUs while matching or slightly exceeding baseline cross-entropy loss.",
+        "Comprehensive empirical analysis and ablations: The manuscript systematically investigates scaling laws (96M to 1B parameters), the distinct roles of exponential tilting and query clustering, the tradeoff between monopole approximation and exact retrieval, and head dimension compatibility (dim 64 and 128).",
+        "Drop-in compatibility on pretrained models: Validation on off-the-shelf Llama 3.2-1B and 3.1-8B demonstrates that exponential tilting allows the approximation to be applied to existing checkpoints without retraining, while showing catastrophic failure when tilting is removed."
+      ],
+      "weaknesses": [
+        "Limited evaluation on long-context downstream benchmarks: While pretraining perplexity and context utilization (Figure 6) are thoroughly analyzed, downstream evaluation is restricted to two standard short-context benchmarks (ARC-Easy and SciQ). Incorporating targeted long-context benchmarks (e.g., Needle-In-A-Haystack, RULER, or long-context code understanding) would provide stronger verification of downstream retrieval fidelity.",
+        "Implementation complexity: The multi-stage pipeline—consisting of streaming K-means clustering, exponential tilting, causal accumulation, two-level retrieval, and output merging—introduces non-trivial engineering complexity compared to simpler block-sparse patterns like MoBA.",
+        "Distributed sequence-parallel scaling remains largely conceptual: Pretraining is conducted using tensor/head parallelism on a single 8-GPU node. The compatibility with multi-node context parallelism schemes (such as RingAttention or Ulysses) is discussed theoretically in Appendix G.4 but not empirically benchmarked at larger sequence lengths (e.g., 128k–256k)."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Principled and novel formulation: Combining multipole approximations with independent query and key semantic clustering is theoretically well-motivated. The use of exponential tilting from query centroids effectively bridges the dual key-query spaces and preserves accuracy by discarding only the second-order residual cross-term.",
+        "Real end-to-end pretraining verification: Unlike many sparse attention papers that only benchmark isolated kernels or inference decoding, this work demonstrates end-to-end pretraining up to 1B parameters on 64k context (24B tokens) across two distinct domains (code and scientific PDFs), yielding a genuine 36% wall-clock pretraining throughput improvement on standard hardware (8x A100 GPUs).",
+        "Drop-in compatibility and minimal adaptation: The method demonstrates strong zero-shot drop-in evaluation on standard pretrained models (Llama 3.1-8B and 3.2-1B) on 64k passages without retraining. Furthermore, it shows that any minor pretraining adaptation gap can be rapidly eliminated with brief (0.1%) exact fine-tuning.",
+        "Thorough ablations and microbenchmarks: The paper provides extensive ablations dissecting the contributions of query clustering vs. key-only clustering, the monopole vs. retrieval mechanisms, block size tradeoffs, and comparisons against MoBA at matched sparsity."
+      ],
+      "weaknesses": [
+        "Limited downstream and long-context evaluation: Downstream evaluation is limited to a brief sanity check on ARC-Easy and SciQ. Standard long-context evaluations (such as Needle-In-A-Haystack, RULER, or LongBench) are absent, which would have provided clearer evidence of long-range reasoning fidelity beyond perplexity and position-loss curves.",
+        "Scaling of clustering and overheads: Clustering queries and keys on the fly across 64k sequences introduces per-step latency and non-trivial kernel complexity (Pallas/CUDA). As noted in Table 18, per-token monopole cost exhibits slight super-linear scaling as context grows, which may constrain scaling to much longer contexts (e.g., 256k+).",
+        "Head dimension and architectural specifics: The main pretraining runs rely on head dimension 64 with a specific paired local/global layer architecture. While an initial 185M validation for head dimension 128 is included, full 1B pretraining with standard Llama-like head dimension 128 and Grouped-Query Attention (GQA) remains unexplored."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Sound mathematical foundation: MuSe addresses the asymmetry and dual-space nature of queries and keys in softmax attention by introducing separate clustering and query-centroid exponential tilting, mathematically retaining three of four dot-product expansion terms and leaving only the small residual-residual cross-term.",
+        "Comprehensive and rigorous pretraining evaluation: Unlike many efficient attention proposals that only present synthetic microbenchmarks or fine-tuning, this work pretrains models from scratch up to 1B parameters across 5 scales (96M to 1B) on 64k sequence length (up to ~24B tokens per domain on both code and scientific documents), demonstrating compute-optimal scaling behavior matching exact FlashAttention.",
+        "Demonstrated wall-clock speedups: Achieves a realistic 36% end-to-end pretraining throughput improvement (88.9 vs 65.3 KTok/s on an 8x A100 node) and a 2x layer speedup over CUDNN FlashAttention at 64k context, while maintaining significantly lower approximation error than block-sparse baselines such as MoBA at matched sparsity.",
+        "Drop-in compatibility with pretrained models: Successfully demonstrates that the approximation can be applied without retraining to existing models (Llama 3.2-1B and Llama 3.1-8B) on long contexts, where the query-tilted summaries prevent the catastrophic failure modes typical of un-tilted clustering approximations.",
+        "Extensive ablations and theoretical exploration: The paper provides in-depth ablations dissecting the contributions of query clustering, key clustering, retrieval count, spatial block sizes, and an analytical polynomial cumulant expansion (dipole approximation)."
+      ],
+      "weaknesses": [
+        "Limited long-context downstream benchmark evaluation: While cumulative loss on Project Gutenberg and token-position reducible loss curves confirm context utilization, standard long-context benchmarks (such as Needle-In-A-Haystack, RULER, or long-document QA/summarization) are absent. Evaluating on these would rigorously verify that fine-grained information retrieval is preserved throughout the 64k window.",
+        "Pipeline complexity and implementation overhead: The system relies on a multi-stage process involving streaming K-means clustering, exponential summary tilting, causal accumulation scans, two-level top-k routing, and segmented index-based FlashAttention. This increases implementation and maintenance complexity compared to simpler sliding-window or static block-sparse patterns.",
+        "Scope of baseline comparisons in pretraining: While thoroughly compared against CUDNN FlashAttention and MoBA, comparisons against other recent content-based or hardware-efficient dynamic sparse attention approaches (such as Native Sparse Attention / NSA or routing transformer variants) are not included in the pretraining experiments.",
+        "Scalability to wider head dimensions: Most pretraining and microbenchmark experiments focus on head dimension 64; although a 185M validation is shown for head dimension 128, modern architectures (e.g., Llama 3 with 128, Gemma with 256) would benefit from more extensive pretraining validation at head dimension 128+."
+      ]
+    }
+  }
+}

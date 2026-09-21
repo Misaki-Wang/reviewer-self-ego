@@ -1,0 +1,97 @@
+{
+  "v1": {
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Addresses a fundamental challenge in VLA reasoning: resolving the inference latency bottleneck and linguistic representational limits of explicit CoT by constructing a compact latent spatio-temporal reasoning space.",
+        "Well-engineered dual-system Mixture-of-Transformers (MoT) architecture that decouples deliberative, low-frequency latent forecasting from reactive, high-frequency action generation via shared attention and KV cache reuse.",
+        "Clever asymmetric supervision setup where 3D geometric representations (Uni3D) and future visual features act purely as latent supervisory targets during training, avoiding the need for 3D depth/point cloud sensors at test-time inference.",
+        "Extensive experimental validation across 10 RLBench simulation tasks and 6 real-world robot manipulation tasks (including bimanual and dynamic closed-loop settings), demonstrating clear performance gains and superior inference throughput (15.4 Hz vs 1.1 Hz for CoT-VLA).",
+        "Thorough ablation studies analyzing modality ablation, token compression, temporal horizon scaling, and asynchronous frequency ratios."
+      ],
+      "weaknesses": [
+        "The 3-stage training pipeline (large-scale robotic pretraining, reasoning expert SFT, and action expert flow matching SFT) is relatively complex and computationally demanding.",
+        "Generating synthetic point clouds via VGGT for the entire 400K-trajectory pretraining corpus is computationally heavy; the paper lacks analysis on how reconstruction artifacts/noise in pseudo-point clouds impact latent reasoning stability.",
+        "Although parameter sizes are mentioned in passing (Janus-Pro / DeepSeek-LLM 1B backbone with duplicated MoT non-embedding layers), a clear table comparing active parameters, total parameters, and FLOPs against the baselines (such as HybridVLA-7B and π0.5-3B) would make the comparative evaluation more comprehensive.",
+        "The choice of cosine similarity alone for continuous multi-modal latent alignment lacks comparison with alternative regression losses (e.g., L2/Huber loss or contrastive objectives), particularly regarding scale and translation awareness in spatial latents."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Compelling and well-motivated concept: Shifting reasoning from explicit textual or image tokens to continuous latent representations resolves both the severe inference latency bottleneck of explicit CoT and the expressivity limitations of natural language for physical dynamics.",
+        "Well-engineered dual-system architecture: Decoupling low-frequency latent spatio-temporal reasoning from high-frequency action generation via a Mixture-of-Transformers (MoT) framework and KV cache sharing is an elegant, practical approach for real-time robotic control.",
+        "Rigorous empirical evaluation: The paper conducts extensive testing across 10 simulation tasks (RLBench) and 6 real-world manipulation tasks (spanning single-arm, dual-arm, and dynamic multi-step settings), consistently demonstrating superior performance over strong baselines such as pi0.5, SpatialVLA, and CoT-VLA.",
+        "Thorough ablation studies: The ablations systematically validate design choices, including the necessity of multimodal latent features (2D, 3D geometric, proprioceptive), temporal coverage horizons, token compression budgets, and asynchronous operating ratios."
+      ],
+      "weaknesses": [
+        "Aggressive token compression: Compressing multi-modal features (including 3D point clouds from Uni3D and 2D visual feature maps) via global average pooling down to a single token per modality per step seems overly aggressive. The paper claims this preserves fine-grained physical and geometric structure, but further discussion or analysis on how much spatial resolution is sacrificed would strengthen the paper.",
+        "Tactile sensor contradiction / omission: Appendix B mentions that dual Tashan TS-E-A tactile sensors are integrated into the gripper fingertips 'to ground the Latent CoT in physical contact dynamics.' However, the methodology in Section III explicitly details only visual, 3D point cloud, and proprioceptive inputs. It is unclear whether tactile data was actually incorporated into the latent state or action expert, or if this was just part of the hardware platform.",
+        "Baseline action chunking clarification: The text notes that LaST0 operates at 15.4 Hz with an action chunk size of one. Models like pi0/pi0.5 typically utilize multi-step action chunking during execution to achieve high control rates. More explicit details on whether baselines were evaluated with chunk size 1 or their native chunk sizes would ensure completely unambiguous comparison."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Compelling Fast–Slow System Architecture: Decoupling deliberative latent dynamics prediction (slow expert) from high-frequency action generation (fast acting expert) via a Mixture-of-Transformers (MoT) framework is an intuitive and practical way to reconcile reasoning latency with real-time robot control.",
+        "Strong Empirical Results in Simulation: On the 10 RLBench manipulation tasks, LaST0 achieves an 82% mean success rate, noticeably outperforming strong baseline policies like HybridVLA (74%) and pi0.5 (65%) while maintaining a high reported control rate (15.4 Hz).",
+        "Comprehensive Hardware and Real-World Validation: The paper demonstrates physical deployments across both single-arm and bimanual dual-arm Franka setups over six manipulation tasks, including an evaluation of long-horizon execution consistency.",
+        "Insightful Ablation Studies: The ablations systematically investigate the role of multimodal inputs (2D, 3D, and proprioception), latent token budget, temporal rollout horizon, and expert collaboration frequencies, providing valuable design insights."
+      ],
+      "weaknesses": [
+        "Conceptual Framing vs. Actual Mechanism ('Chain-of-Thought' vs. Latent Dynamics Forecasting): The paper frames its approach as 'Latent Spatio-Temporal Chain-of-Thought', but the slow expert is strictly trained via cosine regression to predict average-pooled future observation embeddings (RGB, point cloud, and proprioception) across future time steps. This is fundamentally multi-step forward dynamics / world-state forecasting rather than inferential or deductive reasoning. Repurposing 'Chain-of-Thought' terminology here is conceptually loose and obscures the relationship with existing latent world model literature.",
+        "Representational Bottleneck via Global Average Pooling: The method compresses future visual and 3D point cloud feature maps into a single average-pooled token per modality per time step. For contact-rich, fine-grained 3D manipulation (e.g., spatula insertion, small-object grasping), global spatial average pooling discards local geometric coordinates and precise spatial affordances. The claim that a single average-pooled token faithfully captures fine-grained 3D spatial occupancy dynamics requires deeper theoretical or empirical justification.",
+        "Unclear MoT KV Cache Interaction and Separate Attention Projections: Section III-B states that the MoT architecture introduces task-specific parameter sets for all non-embedding components, including attention projections ($W_Q, W_K, W_V, W_O$). However, Section III-D states that during fast control steps, the acting expert directly attends to the cached Key-Value states generated by the reasoning expert. If both experts have distinct $W_K$ and $W_V$ projection weights, how are keys and values projected and aligned between the two expert spaces without projection mismatch?",
+        "Questionable Real-Time Inference Claims with Flow Matching: The paper claims an inference frequency of 15.4 Hz on an NVIDIA RTX 4090 with action chunk size 1. Because the action expert employs a Flow Matching diffusion-style policy, numerical integration typically requires multiple ODE steps (e.g., 5–10 steps). Running multiple denoising forward passes of a ~1B parameter transformer at 15.4 Hz per step is computationally demanding; the manuscript does not disclose the number of integration steps, solver choice, or optimization frameworks (e.g., TensorRT, compilation) used to achieve this throughput.",
+        "Discrepancy Regarding Hardware and Modalities: Appendix B notes that 'To ground the Latent CoT in physical contact dynamics, we integrate dual Tashan TS-E-A tactile sensors into the gripper fingertips.' Yet, the method description in Section III-C completely omits tactile representations, mentioning only 2D visual, 3D point cloud, and robot state latents. It remains ambiguous whether tactile signals were actually processed by the network or merely present on the physical end-effector.",
+        "Reproducibility and Data Feasibility Concerns: Appendix A states that synthetic 3D point clouds were generated for all 28 million frames across 400K pretraining trajectories using VGGT. Running VGGT inference across 28M video frames constitutes an immense computational burden, yet details on the compute infrastructure, filtering, and storage overhead are entirely omitted.",
+        "Limited Evaluation Rollouts in Real-World Setup: Real-world tasks are evaluated on only 15 trials per condition without confidence intervals or error bars. Given that each trial accounts for ~6.7% of the total score, small sample variance could significantly influence the reported performance differences."
+      ]
+    }
+  },
+  "v3": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Compelling and well-motivated framework: Proposing a latent spatio-temporal Chain-of-Thought (LaST CoT) neatly addresses the dual challenges of explicit CoT VLA models—namely, excessive autoregressive decoding latency and the expressivity bottleneck of verbalizing physical/geometric dynamics.",
+        "Well-engineered dual-system architecture: The Mixture-of-Transformers (MoT) design with shared self-attention allows the slow reasoning expert to generate future multimodal latent states at low frequency while the fast action expert generates flow-matching control at native frequencies (15.4 Hz with KV caching on an RTX 4090).",
+        "Comprehensive empirical validation across diverse robot embodiments: Evaluated on 10 RLBench tasks and 10 real-world tasks across 4 platforms (Franka single-arm, Franka dual-arm, AgileX mobile base, and TienKung humanoid dexterous hands), demonstrating consistent improvements over strong baselines including π0.5, SpatialVLA, and CoT-VLA.",
+        "Insightful ablations and analysis: The ablation experiments convincingly justify design choices including the contribution of each latent modality (2D visual, 3D point cloud, and proprioception), latent token budgets, temporal horizon coverage, and asynchronous update frequency ratios."
+      ],
+      "weaknesses": [
+        "Real-world sample size: The success rates in Table 2 appear to be derived from 15 rollout trials per task (as reflected by multiples of 1/15, e.g., 0.27, 0.33, 0.47, 0.53, 0.67, 0.87), which represents a relatively small sample size per condition, making small margin differences harder to assess with statistical significance.",
+        "Details on latent prediction quality and scale: The slow reasoning expert is trained with a cosine similarity loss on continuous latents. Since cosine loss only supervises directional alignment and ignores vector magnitude, it remains somewhat unclear how scale drift in predicted latents affects the downstream cross/shared attention inside the action expert.",
+        "Inference explanation for 3D geometric latents: While the paper notes that the point cloud encoder (Uni3D) is training-only and depth/point clouds are not provided during inference, the discussion could be clearer regarding whether the autoregressively predicted 3D latents retain fidelity to actual 3D geometry or simply collapse toward RGB-correlated features."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Addresses key limitations of explicit Chain-of-Thought (CoT) in robotics—specifically the computational latency of generating explicit text/image tokens and the representational bottleneck of verbalizing continuous physical/geometric dynamics.",
+        "Well-crafted architecture combining a dual-system Mixture-of-Transformers (MoT) framework with asynchronous frequency coordination: a slow reasoning expert predicting multimodal latent tokens (2D semantic, 3D geometric, proprioceptive) and a fast acting expert operating via flow matching with KV-cached shared attention.",
+        "Smart training-only utilization of Uni3D and synthetic point cloud generation (via VGGT) for 3D geometric latents, allowing the system to benefit from 3D spatial priors during inference without requiring online depth/point cloud processing.",
+        "Comprehensive experimental validation spanning 10 RLBench simulation tasks and extensive real-world manipulation across diverse robotic platforms (single-arm Franka, dual-arm Franka, AgileX mobile manipulator, and TienKung humanoid dexterous hands), showing consistent improvements over strong baselines like π0.5, CoT-VLA, and HybridVLA while maintaining high control frequency (15.4 Hz)."
+      ],
+      "weaknesses": [
+        "Loss of interpretability: Shifting from explicit natural language/visual subgoals to high-dimensional latent vectors diminishes the inherent transparency and diagnosability of CoT reasoning; while attention heatmaps are provided, inspecting failure modes in the reasoning trace itself remains difficult.",
+        "Potential exposure bias in latent rollouts: During training, latent reasoning relies on standard teacher forcing with ground-truth embeddings, whereas during inference it autoregressively fills placeholders. The paper does not thoroughly discuss error accumulation or rollout drift over longer horizons.",
+        "Training complexity and multi-stage overhead: The pipeline requires synthetic 3D data generation across large datasets (VGGT), multi-stage fine-tuning (freezing/unfreezing different experts), and modality-specific projection alignments, which increases the barrier to training and reproduction."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Well-motivated approach tackling the inference latency and linguistic representational bottlenecks of explicit Chain-of-Thought (CoT) / predictive VLAs by shifting multi-step reasoning into a compact continuous latent space.",
+        "Well-engineered dual-system architecture implemented via Mixture-of-Transformers (MoT), effectively decoupling low-frequency latent spatio-temporal reasoning from high-frequency action generation using shared attention and KV-caching.",
+        "Comprehensive empirical validation across both simulation (10 RLBench manipulation tasks) and real-world experiments spanning diverse embodiments (single-arm, dual-arm, mobile manipulation, and dexterous hands).",
+        "Thorough ablation studies verifying key design decisions, including the multimodal composition of latent states (2D visual, 3D geometric, proprioceptive), temporal coverage, token allocation, and fast-slow collaboration frequencies."
+      ],
+      "weaknesses": [
+        "Conceptual framing: Calling multi-step latent state prediction (future visual, 3D point cloud, and proprioception features) a 'Chain-of-Thought' is somewhat debatable; conceptually, this closely resembles latent world modeling or predictive multi-step state representation rather than deliberative cognitive reasoning.",
+        "Action chunking comparison clarity: The paper benchmarks inference speed without action chunking, but many modern continuous policies (e.g., flow-matching / diffusion policies like pi0) inherently leverage action chunking to achieve real-time execution frequencies on hardware. It is slightly unclear how the asynchronous dual-expert rate interacts with standard action chunking horizons.",
+        "Pretraining 3D supervision dependency: During large-scale pretraining on 2D datasets, the model relies on VGGT to synthesize pseudo-point clouds for Uni3D encoding. The impact of reconstruction noise in these pseudo-3D point clouds on the learned latent representations is not thoroughly analyzed.",
+        "Supervision loss dynamics: The latent reasoning expert is supervised solely via cosine similarity on continuous targets. A deeper discussion on why representation collapse or trivial scale issues do not arise (likely due to frozen target encoders) would strengthen the technical description."
+      ]
+    }
+  }
+}

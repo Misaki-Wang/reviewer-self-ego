@@ -1,0 +1,92 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Compelling and sound motivation: The paper identifies a clear conceptual mismatch in existing SJF-based LLM schedulers, which rely on deterministic point estimates of output length despite the inherently stochastic nature of autoregressive decoding.",
+        "Rigor in distribution modeling and theory: The authors justify the heavy-tailed nature of generation lengths both empirically (via KS tests across several candidate distributions) and theoretically under plausible assumptions about trajectory-level termination rates, properly incorporating censoring at max_tokens and deriving formulas for censored expectation and CVaR.",
+        "Thoughtful system-level design: The integration into vLLM includes crucial systems considerations, notably decoupling prediction from the main thread via asynchronous batched processing, adaptive risk weighting based on queue load, and starvation mitigation through waiting-time decay.",
+        "Thorough empirical evaluation: The proposed TIE scheduler is tested across multiple workloads (online serving and offline synthetic data generation), model architectures (dense models from 7B to 70B, MoEs, and reasoning-distilled models), and datasets. It demonstrates consistent, significant improvements over strong baselines (FCFS, SSJF, and LTR), supported by ablation studies and overhead analysis."
+      ],
+      "weaknesses": [
+        "Upfront data collection overhead: Generating ground-truth training distributions requires multiple stochastic generations per prompt (the authors identify 20 repetitions across 45k prompts as optimal), which requires notable compute upfront compared to single-sample point-estimate collection.",
+        "Impact of decoding parameters: The study assumes fixed sampling parameters (temperature, top-p, penalties). In production systems where requests specify varying decoding parameters that alter the termination probabilities and output variance, it is unclear how the predictor accommodates these inputs without re-training or conditioning on hyperparameters.",
+        "Stylized theoretical assumptions: Theorem 3.2 relies on Assumption 3.1 regarding the density behavior near zero termination rate ($f(p) \\sim c p^{\\alpha-1}$), which provides good qualitative intuition but is a strong assumption about complex generation trajectories."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Sound and well-motivated conceptual premise: the paper correctly identifies that autoregressive LLM decoding is inherently stochastic, rendering single-point length predictions suboptimal for Shortest-Job-First (SJF) scheduling.",
+        "Principled statistical formulation: the paper systematically evaluates candidate heavy-tailed distributions using Kolmogorov-Smirnov tests, establishes the effectiveness of the log-t distribution (pass rate of 90.6% with fixed degree of freedom), and derives closed-form/partial expectation expressions for censored expectation and Conditional Value at Risk (CVaR).",
+        "Practical and low-overhead systems design: decoupling scheduling and prediction via asynchronous processing and dynamic batching in vLLM ensures that request enqueuing is non-blocking, maintaining an average scheduling latency of only ~4.26 ms.",
+        "Comprehensive empirical evaluation: the method is tested across multiple datasets (LMSYS-Chat-1M, ShareGPT, Alpaca) and an extensive suite of architectures (Llama-3-8B/70B, Qwen3 dense and MoE variants, Mixtral-8x7B, DeepSeek-R1-Distill, Mistral-7B, OpenPanGu-7B), consistently outperforming FCFS, SSJF, and LTR baselines in both online serving and offline SDG tasks.",
+        "Detailed ablation studies that isolate the impact of distribution choice, risk sensitivity beta adaptation, degrees of freedom, and sample repetition budgets."
+      ],
+      "weaknesses": [
+        "High data collection cost for distribution supervision: training the parameter predictor requires collecting multiple generation trajectories (the authors use 20 repetitions per prompt across 45k prompts), which restricts applicability to offline training data and poses challenges for online adaptation to changing serving distributions.",
+        "Theoretical assumptions are somewhat tautological: Theorem 3.2 establishes power-law decay directly by assuming that the trajectory termination density satisfies f(p) ~ c * p^(alpha - 1) as p -> 0+ (Assumption 3.1), which essentially assumes the heavy-tailed property at the outset rather than deriving it from autoregressive decoding dynamics.",
+        "Omission of sampling hyperparameter sensitivity: generation length distributions vary substantially with decoding configurations (e.g., temperature, top-p, repetition penalty, system prompt length). The paper does not evaluate how robust the fixed-predictor setup is when inference parameters deviate from the training configuration.",
+        "Limited evaluation of extreme starvation metrics: although an exponential waiting-time decay mechanism is incorporated to prevent starvation of long requests, the paper primarily reports mean and P90 latencies; examining tail starvation metrics (such as P99 waiting time, maximum queue delay, or request-level fairness indices) under sustained high RPS loads is needed to fully assess fairness."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Compelling conceptual motivation: The paper convincingly argues that point estimates of LLM output length fail to capture the stochastic nature of autoregressive token generation, and that heavy-tailed risk is the primary culprit behind Head-of-Line (HOL) blocking in Shortest-Job-First (SJF) scheduling.",
+        "Solid theoretical and statistical foundation: The authors theoretically motivate power-law tail decay through a mixture of termination probabilities (Theorem 3.2), validate the fit empirically using Kolmogorov-Smirnov tests across distribution families, and derive analytical expressions for censored expectation and Conditional Value-at-Risk (CVaR) under a log-t formulation.",
+        "Practical and well-engineered system design: The implementation on vLLM decouples length prediction from request queuing via asynchronous background execution and dynamic batching, assigns safe initial scores to unpredicted requests, and incorporates an aging decay mechanism to prevent starvation.",
+        "Comprehensive experimental evaluation: Experiments span online chatbot and offline synthetic data generation (SDG) workloads, testing multiple model sizes (8B to 80B), architectures (dense and MoE), and diverse datasets. The proposed TIE scheduler demonstrates substantial improvements in per-token latency (up to 2.31× over SOTA baselines) and offline throughput."
+      ],
+      "weaknesses": [
+        "Training data collection requirements: Fitting the log-t parameters requires generating multiple stochastic rollouts per prompt (the paper tunes this to 20 samples per prompt). While total sample count is kept equal to baseline training data (900K samples), generating multiple completions per prompt poses distinct logistical and computational overheads in real serving environments where prompts are rarely observed repeatedly under the same context.",
+        "Sensitivity to decoding hyperparameters: The output length distribution depends heavily on sampling configurations (temperature, top-p, presence/frequency penalties) and system prompts. The paper does not clarify whether the DeBERTa predictor conditions on these decoding parameters or how robust the distribution predictions are when serving requests under diverse temperature settings.",
+        "Lack of detailed fairness and tail starvation evaluation: Although a waiting-time decay mechanism is implemented to mitigate job starvation under high load, the empirical evaluation primarily focuses on average and P90 latencies across all requests. Demonstrating latency percentiles specifically for the longest request tiers (e.g., top 5% or 1% longest jobs) would be necessary to verify that long jobs do not experience unacceptable waiting times."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Compelling and sound motivation: The paper convincingly argues that point estimation of LLM output length is fundamentally misaligned with the stochastic, heavy-tailed nature of autoregressive decoding, providing both theoretical justification (Theorem 3.2) and empirical validation via KS goodness-of-fit tests.",
+        "Well-grounded formulation: The use of the censored log-t distribution and Conditional Value-at-Risk (CVaR) to derive the Tail Inflated Expectation (TIE) score is mathematically rigorous and naturally penalizes high-variance, long-tail requests that cause head-of-line blocking.",
+        "Practical systems design: The asynchronous prediction pipeline with dynamic batching decouples distribution estimation from the critical path of continuous batching, avoiding bubbles and high scheduling overhead.",
+        "Thorough and extensive evaluation: The method is benchmarked against competitive non-preemptive baselines (SSJF, LTR) and preemptive methods (TRAIL) across online and offline workloads, demonstrating substantial improvements (e.g., >2x reduction in per-token latency). Appendix evaluations span a wide variety of model scales and architectures (including MoE and distilled reasoning models)."
+      ],
+      "weaknesses": [
+        "Data collection cost for predictor training: Unlike point-estimate predictors that can be trained directly on single-response production serving logs, TIE requires repeated samplings per prompt (the authors use 20 repetitions across 45k prompts) to estimate ground-truth distribution parameters, which poses a non-trivial data collection overhead.",
+        "Hardware resource consumption of the auxiliary model: The scheduler relies on fine-tuning and running DeBERTa-v3-base (86M parameters). While the per-request prediction latency is low (~4.26 ms), the memory footprint and CPU/GPU compute resource allocation for serving this auxiliary model concurrently with LLMs are not thoroughly quantified.",
+        "Simplifying theoretical assumptions: The theoretical proof relies on representing a decoding trajectory by a static initial effective termination rate \\tilde{p}, whereas real token termination dynamics are context-dependent and change dynamically across decoding phases."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Compelling conceptual motivation: Recognizing that autoregressive LLM decoding is intrinsically stochastic and exhibits heavy tails, the paper convincingly argues against single-point length predictions in favor of distributional modeling for request scheduling.",
+        "Rigorous theoretical and empirical justification for the distribution choice: The paper provides theoretical justification (Theorem 3.2) explaining power-law decay and demonstrates via thorough Kolmogorov-Smirnov testing on real datasets that a log-t distribution provides superior empirical goodness of fit compared to log-normal, Weibull, and Gamma distributions.",
+        "Practical and systems-aware design: Incorporating Conditional Value at Risk (CVaR) into the Tail Inflated Expectation (TIE) score elegantly hedges against head-of-line blocking. Furthermore, the asynchronous prediction mechanism with dynamic batching successfully decouples predictor latency from the continuous batching loop in vLLM.",
+        "Extensive and rigorous evaluation: The method is evaluated across multiple models (including dense and MoE architectures up to 80B parameters), multiple workloads (online serving and offline SDG), and benchmarked against strong baselines (SSJF, LTR, TRAIL). Ablations on distribution choice, score formulation, sample size, temperature sensitivity, and noise robustness are comprehensive."
+      ],
+      "weaknesses": [
+        "Data collection overhead for training: Unlike point-estimate predictors that can learn passively from single-sample production execution logs, fitting the distribution parameters requires generating multiple outputs per prompt (e.g., 20 samples per prompt), which entails higher initial data generation compute.",
+        "Score computation overhead: Computing censored expectation and CVaR via 10k Monte Carlo samples per request introduces non-trivial arithmetic overhead. Although the authors show the overall scheduling latency is ~4.26 ms, deploying this under ultra-high throughput environments (e.g., thousands of requests per second) might create a CPU bottleneck without further analytical approximations or lookup optimizations.",
+        "Sensitivity to decoding hyperparameter shifts: While Section D.6 evaluates sensitivity across sampling temperatures, in production environments users frequently customize top-p, min-p, presence/frequency penalties, and stop tokens, which can substantially alter the effective tail distribution without the predictor's awareness."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Sound and well-motivated premise: convincingly identifies that point-estimate predictors for LLM output lengths fundamentally fail to capture the stochastic, heavy-tailed nature of autoregressive decoding, leading to poor scheduling under head-of-line blocking.",
+        "Solid theoretical and statistical grounding: provides empirical validation and theoretical analysis (Theorem 3.2) demonstrating power-law tail decay in output lengths, accompanied by proper analytical formulations for censored expectation and Conditional Value at Risk (CVaR) under the log-t distribution.",
+        "Thoughtful systems design: the integration with vLLM explicitly handles practical systems bottlenecks through an asynchronous prediction worker and dynamic batching, avoiding the latency penalty of synchronous per-request proxy inference.",
+        "Extensive and rigorous evaluation: benchmarks span multiple datasets (LMSYS-Chat-1M, ShareGPT, Alpaca), model architectures (dense, MoE, reasoning models like DeepSeek-R1-Distill up to 70B/80B parameters), and realistic online/offline workloads, accompanied by comprehensive ablations (distribution family, adaptive risk coefficient beta, sampling temperature, and noise sensitivity)."
+      ],
+      "weaknesses": [
+        "High data collection cost for predictor training: fitting the log-t parameters per prompt requires multiple repeated generations (e.g., 20 samples per prompt across 45K prompts), which cannot be directly harvested from standard single-generation production logs without dedicated synthetic profiling runs.",
+        "Heuristic nature of Assumption 3.1: the theoretical proof of power-law output length decay relies on assuming that early-stage effective termination rates follow a power-law distribution near zero (f(p) ~ c * p^{alpha-1}), which partially assumes the heavy-tailed mechanism rather than deriving it purely from autoregressive token transition dynamics.",
+        "Computational overhead of score evaluation: computing censored expectation and CVaR via 10,000 Monte Carlo samples per request introduces non-trivial CPU work (reported at ~4.26 ms per request), which could become a throughput bottleneck in lightweight or ultra-high-QPS CPU scheduler threads if not further optimized."
+      ]
+    }
+  }
+}

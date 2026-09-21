@@ -1,0 +1,121 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 6,
+      "strengths": [
+        "Novel and well-motivated idea: shifting the sparse-attention paradigm from 'attention output is fixed' to retrospectively revising past attention outputs with newly loaded KV entries is a fresh angle on KV cache compression, and the motivation (Fig. 1b, Fig. 2a/b) is supported by concrete measurements of effective KV budget expansion (up to 1.6x) at no extra cache budget.",
+        "Comprehensive evaluation: results span LongGenBench (GSM8K, MMLU, CSQA at multiple n values), reasoning-intensive benchmarks (AIME 2024, GPQA-Diamond, LiveCodeBench), and PG-19 perplexity, with consistent gains over Quest (the primary SOTA non-eviction baseline) and clear failures documented for eviction-based baselines.",
+        "Strong systems contribution: the overhead analysis (arithmetic intensity, memory-traffic ratios, memory footprint in App. C) is careful, the method is implemented with custom CUDA kernels on FlashInfer, and kernel-level latency breakdowns plus end-to-end latency measurements empirically validate the claim of negligible overhead (<1ms/token for w=2) that remains constant with context length.",
+        "Useful ablations: retrospective window size (w=2,4,8,16), relative budget trade-offs, and saturation analysis of gains; the FlashAttention-style merging of partial softmax outputs via log-sum-exp normalizers is mathematically clean (Eqs. 9-10), and the asynchronous-Query mismatch issue is explicitly acknowledged and quantified (<5% l2 drift)."
+      ],
+      "weaknesses": [
+        "Limited model diversity: all main results use Llama-3.1-8B-Instruct (and DeepSeek-R1-Distill-Llama-8B for reasoning tasks); no larger models (e.g., 70B) or other model families are evaluated, leaving scalability of the gains and the w-scaling behavior unclear.",
+        "The retrospective merge is an approximation (Query/Key/Value representations evolve across the window); while the authors report small l2 drift, there is no analysis of when this approximation breaks down, no theoretical guarantee, and no experiment isolating error accumulation from the merging itself.",
+        "Gains are not uniform: GPQA-D shows zero improvement, CSQA at n=15 is slightly worse than Quest (-2.1), and in Table 2 the gap to full attention remains large (e.g., 39.2 vs 47.1 on AIME24), suggesting the method recovers only part of the quality loss; no headroom analysis of why some tasks benefit more.",
+        "Comparison with closely related concurrent work is absent from the experiments: Sun et al. (2025, Rectified Sparse Attention) addresses the same cumulative-error problem and Song et al. (2025) targets long generation; both are only discussed qualitatively, and no head-to-head numbers are provided, weakening the SOTA claim.",
+        "Evaluation relies heavily on LongGenBench-style concatenated-question prompts; general long-generation scenarios (open-ended writing, agentic/tool-use traces, multi-turn dialogue where KV reuse patterns may differ) are not tested, limiting generality of the claimed benefits.",
+        "The 'effective budget' analysis (Fig. 2b) is based on a single model and GSM8K in LongGenBench; the assumption that currently loaded entries are informative for past queries (semantic correlation) may not hold for all tasks, and this is not verified across the other benchmarks.",
+        "Writing/presentation issues: several claims (e.g., 'consistently outperforms', 'up to 21.9%') rely on cherry-picked best configurations (large w or specific n), and the interaction between the updated KV cache overwriting and long-range consistency across layers is described but not directly ablated (e.g., updating attention outputs without KV overwriting)."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "The core idea is novel and well-motivated: reusing currently loaded (but previously unseen) KV entries to retrospectively revise past attention outputs breaks the conventional fixed-attention-output paradigm and directly targets cumulative attention errors during long generation, a problem that prior KV compression work largely overlooks.",
+        "The motivational study (Fig. 2) provides quantitative evidence supporting the design, showing 70-80% overlap of current top-k entries with past important tokens and a 1.6x effective budget expansion at n=7.",
+        "The overhead analysis (Sec. 3.5, Appendix B) is thorough: arithmetic intensity analysis for both attention and linear layers, memory footprint analysis, and kernel-level latency breakdowns empirically validate the claim of near-negligible overhead (<1ms/token for w=2, ~2ms for w=8).",
+        "Evaluation covers multiple task types (LongGenBench GSM8K/MMLU/CSQA, reasoning benchmarks AIME/GPQA/LiveCodeBench, PG-19 perplexity) with latency and memory-traffic trade-off curves, and consistently shows gains over Quest, especially at longer generations.",
+        "Engineering contribution is substantive: custom CUDA kernels built on FlashInfer for masking, incremental updates, and KV cache overwriting, demonstrating the method is practically realizable."
+      ],
+      "weaknesses": [
+        "Limited model coverage: all results use only Llama-3.1-8B-Instruct and DeepSeek-R1-Distill-Llama-8B. There is no evidence the approach generalizes across model families, scales (e.g., 70B), GQA configurations, or non-Llama architectures.",
+        "Missing comparison with the most closely related work: Sun et al. (2025) 'Rectified Sparse Attention' is acknowledged as concurrent work addressing the same cumulative-error problem, but no head-to-head comparison is provided, making it hard to judge relative merit.",
+        "The core update mechanism is an approximation without solid theoretical grounding: merging asynchronously computed softmax outputs relies on the assumption that QKV representations 'evolve smoothly' across steps, justified only empirically (l2 distance <5-10%). No analysis of how this approximation error compounds across layers and long generations, especially at large w.",
+        "Baseline fairness is questionable in places: the 'effective budget' expands up to 1.6x, but the paper does not always compare against Quest with a proportionally increased budget. While Fig. 5(b-d) partially addresses this via budget sweeps, a direct iso-traffic comparison at matched effective exposure would be more convincing.",
+        "The retrospective KV cache overwrite (Sec. 3.4) modifies the model's hidden states and deeper-layer KV entries, deviating from the true computation graph; potential risks (instability, degraded attention consistency) are not analyzed, and gains saturate beyond w=8 with only PG-19 evidence.",
+        "Mixed results are not fully discussed: e.g., CSQA n=15 shows a -2.1 regression vs. Quest, and GPQA-D shows no gain, suggesting the benefit may be setting-dependent.",
+        "The motivational study (Fig. 2) is conducted on a single model and a single dataset (GSM8K), weakening the generality of the central empirical claims.",
+        "No mention of code or artifact release, which limits reproducibility given the heavy reliance on custom CUDA kernels and modified FlashInfer implementations."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "The paper identifies a genuine and underexplored problem: cumulative attention errors from sparse KV cache selection during long *generation* (as opposed to long input contexts), supported by a clear motivational analysis (Fig. 1b, Fig. 2) showing performance degradation grows with generation length.",
+        "The core idea—retrospectively revising past attention outputs using currently loaded KV entries via an output cache and FlashAttention-style softmax merging—is novel relative to prior non-eviction sparse attention methods, and the mechanism (supplementary attention, output cache push/update/pop, retrospective KV overwrite in deeper layers) is described in convincing technical detail.",
+        "The effective-budget analysis (1.17x at n=1 up to 1.6x at n=7 without increasing actual KV budget) is a compelling and well-quantified argument for why the approach works.",
+        "The overhead analysis is thorough: arithmetic-intensity derivations for both attention and linear layers, memory footprint analysis in the appendix, and kernel-level latency breakdowns empirically validate the claim of negligible overhead (<1ms/token for w=2), with custom CUDA kernels built on FlashInfer demonstrating real system feasibility.",
+        "Evaluation covers a diverse set of benchmarks (LongGenBench with GSM8K/MMLU/CSQA at multiple n, reasoning tasks AIME/GPQA/LiveCodeBench, and PG-19 perplexity), with consistent gains over Quest (up to +6.9%p) and clear scaling behavior with retrospective window size w.",
+        "The paper is transparent about its approximation: the appendix explicitly discusses the Query-representation mismatch introduced by asynchronous softmax merging and quantifies the L2 drift (~5-10%), and reports where gains saturate (w>8) and where gains are absent (GPQA-D)."
+      ],
+      "weaknesses": [
+        "The baseline set is thin. StreamingLLM and TOVA are essentially strawmen (near-zero accuracy in Table 1), so virtually all the meaningful comparison is against a single method, Quest. Given that RetroAttention is built on top of Quest's page selector, comparisons against other non-eviction methods (e.g., ArkVale, ClusterKV, RetrievalAttention, TokenSelect) would substantially strengthen the claims.",
+        "The most closely related concurrent work (Sun et al. 2025, Rectified Sparse Attention), which addresses the same cumulative-error problem via periodic dense-attention refreshes, is only discussed qualitatively and never compared against empirically, even at a small scale—this is a significant gap for substantiating the claim of reducing errors 'without additional KV cache budget.'",
+        "Only two 8B models (LLaMA-3.1-8B-Instruct and DeepSeek-R1-Distill-Llama-8B) are evaluated. No results on other model families or larger models raise questions about generality, especially since the retrospective query-evolution approximation may behave differently across architectures.",
+        "Results are not uniformly positive: GPQA-D shows zero gain over Quest, and CSQA at n=15 is negative (-2.1%p), suggesting the method's benefit is task- and regime-dependent; the paper does not analyze when/why retrospective updates fail to help.",
+        "The asynchronous softmax merging is an approximation whose validity rests on an empirical smoothness assumption about QKV drift rather than any theoretical justification; the interaction of this approximation across layers (updated KV entries feeding into later retrospective updates) could compound errors and is not analyzed.",
+        "Table 2's caption ('summarized with four retrospective window sizes. We set b and w to 0.15 and 2') is self-contradictory and confusing; similar minor presentation issues (e.g., Fig. 5a axis scaling) reduce clarity.",
+        "The reported 'accuracy improvement of up to 21.9%' is not directly traceable in the main tables, which show max deltas of ~6.9%p over Quest; the abstract claim likely references a different configuration and should be clarified."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 6,
+      "strengths": [
+        "Novel and clearly articulated idea: retroactively revising past attention outputs with newly loaded KV entries is a fresh departure from the static-output paradigm of existing sparse attention/KV compression methods, and it targets an underexplored failure mode (cumulative attention error during long generation).",
+        "Well-motivated empirical analysis (Section 2.2, Appendix B): the paper convincingly shows long-output tasks are far more sensitive to KV budget than long-input tasks, and quantifies top-k overlap across adjacent queries and the 'effective KV budget' expansion (up to 1.6x).",
+        "Technically sound mechanism: the FlashAttention-style online merging of partial softmax outputs is adapted and extended to asynchronous retrospective updates, with the query-representation mismatch honestly identified and empirically bounded (<5-10% relative L2 drift).",
+        "Strong systems contribution: custom CUDA kernels built on FlashInfer for page masking, incremental KV updates, and output-cache merging, backed by careful arithmetic-intensity and memory-traffic analysis (Sections 2.5, D, E) that explains why overhead stays near memory-IO parity.",
+        "Comprehensive evaluation: three benchmarks (LongGenBench, reasoning tasks, PG-19), three model scales (8B/14B/32B), ablations over window size and budget, kernel-level latency breakdowns, batch-size throughput tests, and generality checks on a second base method (ArkVale). Consistent accuracy gains with <1-2ms/token overhead and ~2-3% memory traffic increase.",
+        "Honest reporting: the paper acknowledges marginal gains on LongBench, performance saturation beyond w=8, and explains both with supporting analysis (Appendix C.3, G)."
+      ],
+      "weaknesses": [
+        "Baseline coverage is narrow. The primary quantitative comparisons are against Quest plus weak eviction baselines (StreamingLLM, TOVA). The most relevant concurrent work (Sun et al., 2025, Rectified Sparse Attention) that addresses the same cumulative-error problem is only discussed qualitatively, never compared empirically; other recent non-eviction methods (ClusterKV, RetrievalAttention, MagicPIG) are also absent.",
+        "Accuracy gains are uneven: improvements on MMLU are near-noise (+0.5%p on Llama-8B, +0.2-0.4%p on larger models), and the headline 21.9% claim comes from specific configurations; the average gain (~5.6%) is more representative but modest.",
+        "The core approximation — merging attention outputs computed with different (evolving) Query/Key/Value representations — is justified only by an L2-drift heuristic; there is no direct measurement of the error of O_up versus the exact full-context attention output over the union KV set, so the fidelity of the retrospective update is not rigorously established.",
+        "Propagation of updated KV entries across layers (Section 2.4) could amplify or destabilize errors; the paper claims progressive error reduction but provides no direct evidence (e.g., hidden-state divergence or layer-wise perplexity tracking) for this claim.",
+        "The method inherits Quest's assumption that the full KV cache fits in GPU DRAM, which limits practical applicability for very long contexts and restricts the memory-savings narrative; this constraint deserves more prominent discussion.",
+        "Some evaluation settings are small-scale (e.g., Table 5 attention-score analysis on 'few sampled data', PG-19 on 91 samples), and variance/confidence intervals are not reported for accuracy results."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "The core idea of retrospectively revising past attention outputs with newly loaded KV entries is intuitive, well-motivated, and clearly articulated, breaking the fixed-attention-output paradigm of existing sparse attention methods.",
+        "The motivational study (Section 2.2, Appendix B) is careful: it quantifies top-k overlap across adjacent queries, effective KV budget expansion, and explicitly tests the competing 'top-k reuse' baseline, showing it degrades accuracy substantially in long-generation settings.",
+        "Overhead analysis is more rigorous than typical systems papers: arithmetic intensity analysis for attention and linear layers, memory footprint analysis, kernel-level latency breakdowns, and batch-size throughput measurements with custom CUDA kernels built on FlashInfer.",
+        "Evaluation covers multiple model scales (8B, 14B, 32B), multiple benchmark families (LongGenBench, reasoning-intensive tasks, PG-19 perplexity, LongBench), and includes ablations over window size and budget, plus generality checks on ArkVale.",
+        "The paper is honest about limitations in places, e.g., marginal gains on LongBench and performance saturation beyond w=8, with a plausible attention-mass analysis explaining saturation."
+      ],
+      "weaknesses": [
+        "The contribution is largely an incremental extension of Quest: the underlying page selection, scoring, and paging machinery are entirely adopted from Quest, and the retrospective update is a refinement on top. The 'up to 21.9%' headline gain comes from cherry-picked configurations (AIME24), while mean gains are a more modest 3.5-5.6%.",
+        "The retrospective merging is an approximation without any error bound or theoretical guarantee: merging partial softmax outputs across asynchronously evolving Query representations (acknowledged in Appendix C) assumes QKV vectors evolve smoothly across steps. There is no analysis of when this assumption fails, no worst-case characterization, and no evidence of pathological behavior in adversarial or highly non-stationary generation regimes.",
+        "The accuracy gap to full attention remains large (e.g., 56.5 vs 61.8 on GSM8K; 55.3 vs 59.4 on MMLU at n=45), and there is even a regression on CSQA n=15 (-2.1%p), so the method does not come close to closing the compression-quality gap; the effective 1.6x budget expansion is a modest benefit.",
+        "Baseline coverage is thin. Only Quest is a serious non-eviction baseline; recent and concurrent methods addressing the same cumulative-error problem (Sun et al., 2025 Rectified Sparse Attention; Song et al., 2025) are discussed but not empirically compared, making it impossible to judge relative merit against the closest related work.",
+        "The method inherits the key restriction of non-eviction query-aware approaches: the full KV cache must reside in GPU DRAM, which limits applicability to very long contexts and constrains batch size; the paper acknowledges this only late in the appendix.",
+        "Efficiency claims are somewhat undercut by the measurements: throughput reductions up to 7.3% (worst case), constant per-token overhead of ~1-2ms, and the method does not reduce KV memory footprint at all (it is a compute/accuracy optimization, not a memory compression technique), which complicates the framing as 'KV cache compression.'",
+        "Evaluation tasks where retrospective updates matter (long-generation reasoning QA with concatenated questions) are relatively narrow and somewhat artificial (multiple questions concatenated in one prompt); there is no evaluation on more natural long-output settings such as extended code generation repositories, long-form writing, or agentic multi-step trajectories, which limits evidence of real-world significance.",
+        "Several important design details (retrospective mask policy, merge schedule, unseen-page detection) are deferred to the appendix, making the main paper method section harder to fully assess on its own."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "The core idea is genuinely novel: breaking the 'fixed attention output' paradigm by retrospectively revising past attention outputs with newly loaded KV entries via a lightweight output cache. This is a fresh angle on KV cache compression, distinct from existing selection-based (Quest, ArkVale) and eviction-based approaches, and directly targets the underexplored cumulative-error problem in long generation.",
+        "The paper is well-motivated with a clear empirical motivation section: it shows long-generation tasks are far more sensitive to KV budget than long-input tasks, quantifies the overlap of top-k pages across adjacent queries, and demonstrates that naive top-k reuse severely degrades accuracy (Table 4), which convincingly motivates retrospective supplementation.",
+        "The systems analysis is unusually thorough: Arithmetic Intensity analysis for attention and linear layers, kernel-level latency breakdowns, end-to-end latency up to 256k context, memory footprint analysis, and batch-size throughput measurements — all supporting the claim that overhead is minimal (e.g., <1ms/token for w=2).",
+        "Comprehensive evaluation: three benchmark families (LongGenBench, reasoning-intensive AIME/GPQA/LiveCodeBench, PG-19 perplexity), multiple model scales (8B, 14B, 32B), integration with a second base method (ArkVale), ablations over window size and budget, and honest reporting of where gains are limited (LongBench) with a plausible explanation.",
+        "The limitation analysis is mature: the Query-representation mismatch when merging partial softmax outputs is explicitly acknowledged and empirically bounded (<5-10% l2 drift), and performance saturation at w=8 is explained with attention-mass measurements (Table 5). Code availability aids reproducibility."
+      ],
+      "weaknesses": [
+        "Average gains over Quest are modest despite the headline numbers: Table 1 shows +3.9/+0.5/+3.5 mean accuracy over Quest, and the 'up to 21.9%' figure cherry-picks the best configuration. The gap to the full-cache baseline remains large (e.g., 56.5 vs 61.8 on GSM8K), so the method narrows but does not close the accuracy gap.",
+        "Results are not uniformly positive: RetroAttention regresses on CSQA n=15 (-2.1 vs Quest), and MMLU gains are consistently near zero (+0.2 to +0.6), suggesting the benefit is task-dependent and strongest only when generations are long and repetitive.",
+        "The effective KV exposure increase (up to 1.6x at n=7) and accuracy gains saturate quickly with window size, limiting the ceiling of the method; the paper itself shows later updates add diminishing attention mass (Table 5).",
+        "The method's correctness relies on an approximation: merging partial softmax outputs computed with asynchronously evolving Query representations is exact only under FlashAttention's same-Query assumption. The smooth-evolution assumption is validated empirically but not theoretically, and the interaction of repeated updates (re-updating Oup with stale LSE values) is only heuristically justified.",
+        "Scope of accuracy evaluation is somewhat narrow in absolute context lengths (inputs of 1.3k-5.7k on LongGenBench), while the impressive 256k latency results are not paired with accuracy at such lengths; the end-to-end impact of the ~3.5-7.3% throughput reduction at larger batch sizes is not discussed relative to the accuracy gains.",
+        "Positioning relative to the concurrent Sun et al. (2025) work on refreshing attention outputs with dense attention is qualitative only — no head-to-head comparison is provided, making it hard to assess the practical trade-off between the two approaches."
+      ]
+    }
+  }
+}

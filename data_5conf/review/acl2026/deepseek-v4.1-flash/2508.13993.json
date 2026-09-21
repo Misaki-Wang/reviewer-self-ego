@@ -1,0 +1,84 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "The paper proposes a well-motivated framework (LongMab-PO) that combines Multi-Armed Bandit with UCB exploration for context chunk selection in long-context DPO preference data construction. The combination of MAB-based adaptive chunk selection with probe-based initialization is technically sound and addresses a real problem in long-context modeling (the 'lost-in-the-middle' issue).",
+        "The experimental evaluation is reasonably comprehensive: two LLM backbones (Llama-3.1-8B-Instruct and Qwen-2.5-7B-Instruct), five long-context QA benchmarks spanning in-domain (MuSiQue) and out-of-domain (2WikiMultihopQA, MultiFieldQA-En, NarrativeQA, FakebookQA) settings, and three categories of baselines (vanilla, SFT, DPO).",
+        "Ablation studies are well designed (Table 3), isolating contributions of random selection, initial-distribution selection, final-distribution selection, and direct preference optimization. The additional analyses on diversity of sampled responses (Figure 4), impact of K (Table 4, Figure 5), and reward design (Figure 6, Table 5) provide useful insights into design choices.",
+        "On Llama-3.1-8B-Instruct, the improvements are meaningful: average SubEM 40.95 vs. 39.79 for the strongest DPO baseline (LongFaith-PO) and F1 47.43 vs. 43.15, with notably higher MuSiQue (50.00 vs. 44.00 SubEM) and 2WikiMQA (76.00 vs. 72.80 F1) performance.",
+        "The adaptive exploration/exploitation mechanism via UCB is a principled approach to the credit assignment problem for chunk utility, and the evidence-probe initialization strategy (using LLM-extracted reasoning traces + embedding similarity) is a sensible cold-start solution."
+      ],
+      "weaknesses": [
+        "The central claim of 'state-of-the-art performance' is not consistently supported. On Qwen-2.5-7B-Instruct, LongMab-PO underperforms LongFaith-PO on MuSiQue (44.00 vs. 48.50 SubEM; 43.25 vs. 43.38 F1) and 2WikiMultihopQA (67.50 vs. 66.00 SubEM; 62.97 vs. 53.93 F1—wait, actually higher). More importantly, on FakebookQA the Direct-PO ablation has higher F1 than the full LongMab-PO on Llama (37.31 vs. 36.55), suggesting the bandit mechanism does not uniformly help. The abstract's SOTA claim should be softened or qualified.",
+        "No statistical significance testing, confidence intervals, or error bars are reported despite the test sets being small (150–351 samples per dataset). Given the modest average gains (~1–4 points), the possibility that observed differences are within noise cannot be ruled out. This is the most significant threat to validity.",
+        "Fairness of comparisons is unclear. The DPO baselines (LongReward-PO, SeaLong-PO, LongFaith-PO) construct preference data with their own pipelines, and SFT baselines (LongAlpaca, LongAlign) use different training data. A controlled comparison with matched training data, compute budget, and prompts would strengthen the causal claim that the MAB chunk selection is responsible for the gains.",
+        "Computational cost is not discussed. The method requires T=30 rollouts per question, each involving multiple LLM generations plus an evidence-probe extraction step, while baselines may require fewer generations. The efficiency/quality trade-off relative to baselines is a relevant practical consideration that is not addressed.",
+        "The reward used to update the bandit during the rollout is the LLM's response quality against the gold answer (SubEM/F1 with y*). The reward is then equally attributed to every selected chunk in the subset, which is a coarse credit assignment that does not distinguish which specific chunk contributed to quality. The paper does not analyze whether this credit assignment is appropriate or whether chunk-level rewards could be estimated more precisely.",
+        "Novelty is moderate. Chunk-aware sampling for long-context preference optimization has been explored (e.g., Tang et al. 2024) and MAB/UCB selection is a standard technique. The contribution is largely the combination of these ideas plus a probe-based initialization, which is an incremental (if reasonable) conceptual advance.",
+        "The probe-based initialization depends on the LLM's ability to extract faithful reasoning traces containing the ground-truth evidence. No analysis is provided on how often this extraction succeeds or fails, or how sensitive the final performance is to initialization quality.",
+        "Reproducibility is only partially demonstrated. The paper promises to release code and data, but no code is provided in the submission, and key details (e.g., the number of context chunks, chunk overlap policy, exact probe-extraction prompt effects, and how the gold-answer reward is handled when the LLM fails to produce an answer string) are not fully specified."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 3.0,
+      "strengths": [
+        "The paper presents a clear and well-motivated framework, LongMab, that integrates multi-armed bandit (UCB) chunk selection with DPO preference-data construction for long-context LLM optimization. The method is intuitive and the pipeline is described in sufficient detail to understand the main components.",
+        "The empirical evaluation is reasonably broad: two base models (Llama-3.1-8B and Qwen-2.5-7B), five long-context QA benchmarks, several SFT- and DPO-based baselines, and additional generalization experiments on Qwen2.5-14B, Qwen3-8B, and contexts up to 128k tokens.",
+        "Ablation studies are informative. Variants such as LongMab w/o UCB, w/o initialization, Rejected w/o UCB, and Chosen w/o UCB help isolate the contributions of UCB-guided sampling and probe-based reward initialization, while the Direct-PO baseline shows that naive chunk splitting is insufficient.",
+        "The paper provides useful implementation details, including LoRA training, random seeds, hyperparameters, dataset licenses, prompt templates, and a case study illustrating how LongMab can mitigate lost-in-the-middle failures.",
+        "The reported main results are generally strong and consistent across models and datasets, with average F1/SubEM gains over the strongest baselines in most settings, supporting the central claim that bandit-guided chunk sampling improves DPO data for long-context reasoning."
+      ],
+      "weaknesses": [
+        "The MAB formulation is heuristic and not theoretically grounded. Treating each chunk as an independent arm while selecting top-K chunks and updating every selected chunk with the same response-level reward is not standard bandit feedback; credit assignment across chunks is coarse and may be unreliable when useful and noisy chunks are selected together. No regret analysis or formal justification is provided for this combinatorial/non-stationary setting.",
+        "Hyperparameter selection is a significant concern. The optimal rollout steps T=30, selected chunks K=4, and exploration factor alpha=1.0 are reported from sensitivity analyses on the same test benchmarks used for evaluation. No validation split or selection protocol is described, so the reported gains may be partly due to tuning on the test sets, and this undermines reproducibility and soundness.",
+        "Reproducibility is incomplete. Code and data are only promised, not released; the size and preprocessing of the MuSiQue training data are not specified; the order in which selected chunks are concatenated is not stated; and there are no variance estimates, confidence intervals, or significance tests across random seeds, despite several reported gains being small.",
+        "The evaluation metrics are limited to rule-based SubEM and F1. While the authors acknowledge their limitations, these metrics do not robustly measure reasoning quality and can be gamed by long or degenerate outputs. The diversity analysis based on variance of pairwise embedding similarities is also weakly justified and does not clearly establish that generated responses are usefully diverse.",
+        "The novelty is incremental relative to existing chunk-aware DPO and data-selection methods such as Logo-PO and LongFaith-PO. The core contribution is an empirical combination of UCB-style selection with DPO data construction, with limited methodological or theoretical advance beyond existing chunk-based preference optimization approaches.",
+        "Some claims are overstated relative to the evidence. The LV-Eval generalization results at 16k/128k are not consistently better than LongFaith-PO on F1, and the abstract/introduction claim of 'more than 4% improvement' is ambiguous about whether it refers to absolute points or relative gains, making the headline result harder to interpret."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2.5,
+      "strengths": [
+        "Addresses a relevant and challenging problem: long-context LLM preference optimization and the lost-in-the-middle issue.",
+        "The LongMab pipeline is clearly presented with UCB-guided chunk sampling, probe-based initialization, reward feedback, and DPO training; the method and motivation are easy to follow.",
+        "Empirical evaluation spans two model families (Llama-3.1-8B-Instruct, Qwen-2.5-7B-Instruct), five long-context QA datasets, and multiple SFT/DPO baselines, with ablations over key components and hyperparameters.",
+        "Ablations indicate that UCB-guided sampling and probe initialization contribute to performance, and the K sensitivity analysis offers practical guidance (K=4).",
+        "The paper provides useful reproducibility details, including prompts, LoRA/LLaMA Factory settings, random seeds, and licenses, and promises code/data release.",
+        "The case study and chunk-quality/response-diversity analyses attempt to explain why the method helps, going beyond a simple leaderboard comparison."
+      ],
+      "weaknesses": [
+        "The MAB formulation is conceptually flawed: chunks are treated as independent arms, but the reward is assigned to a jointly selected chunk set, so there is no per-arm credit assignment. Updating every selected chunk with the same response-level reward can reinforce irrelevant chunks and violates standard UCB assumptions.",
+        "The method relies on ground-truth answers both for probe-based initialization and for reward scoring, making it closer to supervised synthetic preference data construction than a general long-context preference optimization framework. Baselines may not receive equivalent gold-label supervision, which confounds comparisons.",
+        "There is no compute- or data-budget matching: LongMab uses 30 rollouts and generated preference pairs, while the number and quality of preference pairs used to train each DPO baseline is not controlled. Gains may come from more data or stronger supervision rather than from MAB-guided sampling.",
+        "No statistical significance testing or multiple random seeds are reported; many average gains are 1-3 points, and the abstract's more-than-4% improvement claim is not consistently supported across models and tasks.",
+        "Novelty is limited relative to prior chunk-based preference optimization methods such as LogPO and LongFaith-PO; the paper mainly replaces heuristic chunk selection with UCB and does not provide deeper theoretical or algorithmic insight.",
+        "Chunk-quality analysis depends solely on an LLM judge (GLM-4-Plus) without human validation or correlation to downstream gains; response diversity is measured by variance of pairwise embedding similarities, which is an indirect and weak proxy.",
+        "Several implementation details are unclear or potentially problematic: the number of chunks is small for 8k-16k contexts (1500-token chunks), so top-K selection may operate over very few arms; the UCB update equations lack clear definitions of t, n_i(t), and stopping criteria.",
+        "The paper does not control for potential overlap or leakage between training queries and evaluation tasks, especially for MuSiQue, and does not analyze failure modes of the UCB policy.",
+        "The limitations section acknowledges compute and model-scale constraints but does not address the central credit-assignment issue in the MAB formulation or the reliance on gold answers."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3.5,
+      "strengths": [
+        "Addresses an important and timely problem: long-context preference optimization for LLMs, where existing DPO-based methods struggle with noisy long contexts and the lost-in-the-middle issue.",
+        "Introduces a novel and reasonably effective combination of multi-armed bandit/UCB chunk selection with probe-based reward initialization for constructing preference pairs, moving beyond static chunk sampling.",
+        "Provides a substantial empirical study across five long-context QA datasets and two model families, with additional generalization experiments on larger models and longer contexts.",
+        "Ablations cleanly isolate the contributions of UCB-guided sampling and probe-based initialization, and the analyses of chunk quality, selection frequency, and response diversity give useful insight into why the method works.",
+        "The implementation details, prompts, and training configuration are mostly well documented, and the authors promise to release code and data, supporting reproducibility."
+      ],
+      "weaknesses": [
+        "The reward function for constructing preference pairs explicitly uses the ground-truth answer via SubEM/F1. Many DPO baselines compared against do not assume gold-answer supervision, so the comparison is confounded by an additional supervision signal; the method may also be impractical when labels are unavailable.",
+        "The MAB credit assignment is simplistic: all selected chunks receive the same reward, ignoring combinatorial interactions and positional effects among chunks. No theoretical regret/convergence analysis is provided, and the bandit formulation assumes stationarity that may not hold.",
+        "Experiments lack statistical rigor: single seed, no confidence intervals or significance tests, and relatively small test sets (200-351 examples per dataset). The gains are consistent but could be noisy on individual tasks.",
+        "The evaluation relies on SubEM/F1, the same metrics used in the reward construction, which may overstate practical long-context reasoning ability. Additional evaluation with LLM judges or human assessment would strengthen the claims.",
+        "The context augmentation with randomly sampled Wikipedia documents is not described in enough detail and may alter the benchmark distributions, making comparisons with prior results harder to interpret.",
+        "Some important hyperparameters and design choices (e.g., DPO beta, handling of reward ties/degenerate preference pairs) are omitted from the main paper, and it is not fully clear whether all baselines received equivalent tuning and data budgets."
+      ]
+    }
+  }
+}

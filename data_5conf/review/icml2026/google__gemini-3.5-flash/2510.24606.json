@@ -1,0 +1,94 @@
+{
+  "v1": {
+    "exp3_positive": {
+      "oa": 3,
+      "strengths": [
+        "The paper addresses a highly relevant and practical challenge: accelerating long-context LLM inference in resource-constrained environments using dynamic sparse attention.",
+        "The idea of transition-aware, dynamic chunking using a learned boundary predictor is conceptually sound and a clever departure from rigid, fixed-size block-sparse attention patterns.",
+        "The length-normalized aggregation strategy ($\\sqrt{|C|}$) is mathematically motivated to prevent representation dilution in variable-length chunks.",
+        "The evaluation on realistic on-device models (Gemma2-2b and Gemma3-1b) across key benchmarks like Needle-in-a-Haystack and LongBench shows promising results in latency and memory reduction."
+      ],
+      "weaknesses": [
+        "There is a critical logical gap regarding autoregressive decoding. The boundary predictor requires a future local window ($k_{i+1}, \\dots, k_{i+w}$ as shown in Eq. 1 and Fig. 3) to compute semantic transitions. However, during autoregressive decoding, future tokens are not yet generated and thus unavailable. The paper does not adequately explain how the boundary predictor functions during the decode stage, or if it reverts to a heuristic (such as grouping all newly generated tokens into a single chunk, which defeats the purpose of dynamic chunking during generation).",
+        "Important state-of-the-art dynamic sparse attention baselines like Minference (Jiang et al., 2024) are mentioned in the introduction but omitted from the main quantitative comparisons (Table 1 and Table 2). This makes it difficult to assess the true competitiveness of DHSA against existing dynamic sparsity frameworks.",
+        "The computational overhead of the auxiliary boundary predictor is not sufficiently analyzed. The predictor is a 20MB neural network that must be executed across all layers. The authors should provide a detailed latency breakdown showing the fraction of execution time consumed by the predictor versus the attention savings.",
+        "The system is highly sensitive to a large number of hyperparameters (e.g., window size $w$, budget $N_b$, chunk limit $N_c$, focal loss parameters $\\alpha, \\beta, \\gamma$, and NMS window size). The paper lacks a comprehensive ablation study showing how downstream task accuracy and system latency vary with changes in these hyperparameters."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "Proposes an interesting data-driven dynamic chunking strategy using a trained lightweight auxiliary model (boundary predictor).",
+        "Utilizes soft labels and focal BCE loss to effectively train the boundary predictor, addressing class imbalance and sample difficulty.",
+        "Provides an analysis of boundary alignment with discourse transitions (sentence/paragraph endings)."
+      ],
+      "weaknesses": [
+        "Crucial omission in figures: The proposed method (DHSA) is completely missing from the latency and peak memory curves in Figures 7, 8, and 9, making it impossible to visualize its performance trends across varying context lengths.",
+        "Memory overhead issue: While the abstract claims peak memory reductions of 35%, Tables 2 and 3 show that DHSA actually increases peak memory usage compared to the standard optimized `torch.sdpa` dense baseline (e.g., 9.69 GB vs. 8.38 GB at 16k context, and 16.99 GB vs. 15.18 GB at 32k context). This is a significant drawback for on-device applications where memory is highly constrained.",
+        "Lack of state-of-the-art baselines: Downstream evaluations on LongBench (Table 1) only compare against block-sparse attention. Crucial recent baselines for dynamic sparse attention (such as Minference or Quest) are not included in the main performance comparisons.",
+        "Complexity of auxiliary model: Running a separate neural network (including multi-head attention and MLP) per layer for boundary prediction introduces additional system complexity and computational overhead that is not fully analyzed or justified."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Dynamic Chunking via Boundary Detection: Proposing to segment sequences into variable-length chunks dynamically using a data-driven boundary predictor is a strong and intuitive idea, addressing the rigidness of static block-sparse attention.",
+        "Self-Supervised Labeling Strategy: The automatic labeling technique based on accumulated attention mass difference (comparing past and future windows) is elegant and avoids the need for manual annotation or expensive end-to-end reinforcement learning.",
+        "Robust Length Normalization: The mathematical formulation for normalizing aggregated queries and keys (√|C| * q_bar) elegantly scales similarity scores to prevent bias against varying chunk sizes.",
+        "Strong Performance on LongBench vs. Block Sparse: On benchmarks like LongBench, DHSA outperforms static block-sparse attention across most datasets while retaining low memory and latency."
+      ],
+      "weaknesses": [
+        "Incomplete Baseline Comparisons in Downstream Tasks: In Table 1, DHSA is only compared against Dense and Block Sparse. Other prominent dynamic sparse attention or KV cache compression techniques (such as Minference, H2O, PyramidKV, Quest) are missing from this downstream task comparison. It is crucial to show whether the proposed dynamic boundary detection offers better accuracy preservation on LongBench compared to these established dynamic baselines.",
+        "Omission of DHSA in Key Efficiency Figures: In the Appendix, Figures 7(b), 8(b), 9, and 10 plot the prefill/decode latency and memory of several baselines (StreamingLLM, H2O, PyramidKV, Sliding Window, Dense). Surprisingly, the proposed method (DHSA) is missing from these plots' legends and curves. This makes it impossible to directly compare the runtime and memory efficiency of DHSA against these baselines over varying context lengths during decoding.",
+        "Decoding Stage Boundary Heuristics: According to Section A and Algorithm 2, during autoregressive decoding, new boundaries are not dynamically predicted for the generated tokens. Instead, all previously generated tokens are simply lumped into a single chunk and the new query forms its own chunk. This heuristic treatment seems to contradict the \"dynamic boundary detection\" theme for the decoding stage and may degrade performance if the generated output sequence becomes very long.",
+        "Generalization and Training Overhead: The boundary predictor is a separate model (20MB) trained on key states. It is unclear if a new predictor needs to be trained from scratch for every new LLM architecture (e.g., Llama-3, Mistral) or size. Details regarding training time, convergence, and cross-model generalization are lacking."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Innovative content-aware dynamic chunking: Instead of relying on rigid, fixed-size blocks (e.g., standard block-sparse) or manual templates (e.g., MInference), DHSA introduces a learnable boundary predictor that groups tokens into semantically coherent, variable-length chunks.",
+        "Well-designed hierarchical routing: Recasting sparse attention prediction as a chunk-to-chunk similarity task followed by token-level selection avoids the quadratic complexity of token-pair scoring, keeping the selection overhead low (linear in sequence length).",
+        "Strong empirical performance: Across Needle-in-a-Haystack, LongBench, and RULER, DHSA consistently outperforms existing static and dynamic sparse attention baselines (such as Block-Sparse, MInference, SeerAttention, and Quest) under matched token densities.",
+        "Hardware and model portability: The paper demonstrates compatibility across three model families (LLaMA, Qwen, Gemma) and provides both CPU (PyTorch SDPA) and GPU (tiled online-softmax kernel) backends, delivering up to 10x prefill speedup.",
+        "Solid theoretical backing: The authors provide a rigorous theoretical analysis (Section B) proving why semantics-aligned chunking achieves near-oracle recall compared to fixed block-sparse structures under the same budget."
+      ],
+      "weaknesses": [
+        "Model-dependent training overhead: The lightweight boundary predictor must be trained separately for each backbone family because it relies on backbone-specific key representations. Although the training is a one-time cost (~9 hours on a single GPU), it is less convenient than fully training-free approaches.",
+        "Prefill-only optimization: DHSA focuses primarily on the prefill stage. While prefill is a significant bottleneck in many long-context scenarios (e.g., RAG, many-shot learning), the decoding stage is not optimized and is left for future work.",
+        "Sequential batch inference: To handle batching with dynamic sparse patterns, the authors resort to processing batch items sequentially with a loop. While they show this avoids OOM on memory-constrained hardware, it may restrict throughput on high-concurrency production servers."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Well-motivated approach addressing the rigidity of fixed-block partition in dynamic/block-sparse attention.",
+        "Novel hierarchical routing framework integrating an unsupervised boundary predictor trained using soft labels from dense attention maps.",
+        "Excellent empirical results across multiple model families (LLaMA-3.1, Qwen2.5, Gemma-2) and rigorous long-context benchmarks (Needle-in-a-Haystack, LongBench, RULER), significantly outperforming competitive baselines.",
+        "Hardware-friendly design with concrete GPU (tiled online-softmax) and CPU (PyTorch SDPA) backends that achieve real-world latency reductions and memory savings (e.g., enabling 100K context on a single 24GB RTX 3090).",
+        "Highly detailed and transparent manuscript, including theoretical recall analysis, detailed algorithm pseudo-codes, and extensive hyperparameter/ablation studies."
+      ],
+      "weaknesses": [
+        "The boundary predictor is model-family specific and requires a calibration training phase (~9 hours on an RTX 3090 for Gemma-2-2B), which limits its instant \"drop-in\" nature when switching to a completely new architecture.",
+        "The paper focuses heavily on the prefill stage, while decoding optimization is left to future work, meaning the benefits might not fully translate to generation-heavy workloads with very long outputs.",
+        "There is limited discussion or evaluation on extreme domain shifts (e.g., highly formatted tables, multi-lingual inputs, or mathematical proofs) where token-level boundaries might not align well with the trained predictor's assumptions."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "The proposed DHSA framework introduces dynamic boundary detection, allowing the model to adaptively partition sequences into variable-length semantic chunks rather than relying on fixed-size blocks. This better preserves the natural structure of text and improves attention recall.",
+        "Extensive evaluation on multiple models (LLaMA-3.1, Qwen2.5, Gemma-2) across standard long-context benchmarks (LongBench, RULER, Needle-in-a-Haystack) shows state-of-the-art performance compared to competitive sparse-attention baselines under matched sparsity.",
+        "The work provides actual hardware-level speedups with two specialized backends: a PyTorch SDPA-based backend for CPU/GPU portability and a tiled online-softmax GPU backend, showing up to 10x prefill speedups.",
+        "The inclusion of theoretical analysis showing why semantic segment alignment mathematically yields better recall than block-sparse attention under worst-case alignments is a strong addition."
+      ],
+      "weaknesses": [
+        "The method requires training a separate lightweight boundary predictor (20MB) for each model family. While this calibration is relatively cheap, it still prevents the method from being completely plug-and-play like purely heuristic or training-free approaches.",
+        "The batching strategy for inference relies on a simple sequential loop to avoid OOMs under memory-constrained settings. This is practical for single-user edge scenarios but is not optimized for high-throughput serving systems where batching concurrent requests is crucial.",
+        "The focus of this work is entirely on the prefill phase. While this is indeed a major bottleneck in long-context scenarios, the decoding phase is left unoptimized, which might still limit its end-to-end applicability in generation-heavy tasks unless paired with separate KV-cache eviction strategies."
+      ]
+    }
+  }
+}

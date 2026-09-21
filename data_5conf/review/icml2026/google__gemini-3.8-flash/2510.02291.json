@@ -1,0 +1,103 @@
+{
+  "v1": {
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Addresses an important and challenging problem: posterior sampling in discrete masked diffusion models with purely discrete token representations, where gradient-based guidance is traditionally precluded by non-differentiability.",
+        "Principled theoretical grounding: Theorems 3.1 and 3.2 provide variational upper bounds on the negative log-posterior, theoretically justifying test-time likelihood tilting and reuse of pretrained discrete foundation models without retraining.",
+        "Well-motivated algorithmic design: Combining quantized expectation (with straight-through estimation across codebook embeddings) and anchored remasking (which prioritizes tokens based on measurement-aware posterior confidence rather than prior confidence) effectively resolves the common pitfall of committing early to uninformative background tokens.",
+        "Comprehensive empirical evaluation: Demonstrates clear gains over existing discrete posterior sampling methods (G2D2, SGDD) and shows competitive performance against heavy continuous diffusion baselines across both linear and nonlinear inverse problems on FFHQ and ImageNet.",
+        "Versatility and efficiency: Shows effective application beyond standard inverse tasks to reference-based stylization and text-guided block inpainting, while requiring substantially fewer diffusion steps (T=15) than typical continuous baselines."
+      ],
+      "weaknesses": [
+        "Test-time inner optimization overhead: Although the method avoids backpropagating through the massive 8B denoiser backbone, it still requires M=100 Adam optimization steps per reverse step through the image decoder and perceptual network (totaling 1,500 forward/backward passes through the decoder), leading to noticeable test-time latency (e.g., ~121s for 512x512 and ~484s for 1024x1024).",
+        "Heuristic nature of the straight-through estimator (STE): Propagating gradients through the non-smooth LFQ thresholding function via STE introduces gradient approximation errors; while effective empirically, the theoretical guarantees of Theorem 3.2 do not strictly account for the bias introduced by STE optimization.",
+        "Evaluation sample size: The primary quantitative results in Tables 1 and 2 are evaluated on a 100-image subset of FFHQ and ImageNet; while following protocols from prior works like G2D2, reporting confidence intervals or error bars across larger benchmarks would further strengthen empirical claims.",
+        "Resolution scaling protocol: Operating at 512x512 or 1024x1024 by upsampling 256x256 inputs and downsampling outputs back to 256x256 can introduce subtle interpolation effects when compared to models operating natively at 256x256, although the ablation in Table 5 on VQ-Diffusion helps mitigate this concern."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Addresses an important and timely problem: posterior sampling in discrete masked diffusion models. While posterior sampling for continuous diffusion has been extensively studied, discrete diffusion—especially with lookup-free binary embeddings—has lacked effective, differentiable test-time guidance mechanisms.",
+        "The two core algorithmic mechanisms are intuitive and effective: Quantized Expectation enables gradient propagation through discrete token representations to update full categorical distributions via the straight-through estimator (STE), while Anchored Remasking prevents the premature unmasking of spurious background tokens by prioritizing tokens conditioned on measurement consistency.",
+        "Comprehensive empirical evaluation covering both linear (super-resolution, Gaussian deblurring, motion deblurring, random inpainting) and nonlinear (HDR recovery, nonlinear deblurring) inverse problems, as well as downstream applications like reference-based stylization and text-guided garment inpainting.",
+        "Demonstrates strong inference efficiency compared to continuous latent diffusion samplers (e.g., matching or exceeding PSLD while requiring only 15 reverse diffusion steps and achieving significant speedups on an A100 GPU).",
+        "Includes helpful ablation experiments (Figure 6, Section B.3) that clearly isolate the contributions of Quantized Expectation and Anchored Remasking."
+      ],
+      "weaknesses": [
+        "Theoretical soundness of the variational bounds (Theorems 3.1 and 3.2): In Eq. (6) and Appendix Eq. (9), the measurement-tilted reverse transition kernel is defined as $p_\\varphi(z_s^l | z_t, y) := q(z_s^l | z_t^l, x_\\varphi(z_t)) q(y | x_\\varphi(z_t))$. Because $q(y | x_\\varphi(z_t))$ does not sum to 1 over $z_s$, this reverse kernel is unnormalized unless a partition function is included. Consequently, the resulting joint $p_\\varphi(x, Z_{0:1} | y)$ is not a proper probability distribution that integrates to 1, which invalidates the claim that $\\mathcal{L}_{DDPS}$ and $\\mathcal{L}_{APS}$ are rigorous upper bounds on the true negative log-posterior $-\\log p_\\varphi(x|y)$. Furthermore, multiplying the measurement likelihood $q(y | x_\\varphi(Z_t))$ at every reverse step accumulates the likelihood $T$ times, which acts as a heuristic multi-step weighting rather than an exact Bayesian posterior formulation.",
+        "Disconnect between theoretical objectives and practical implementation: While Theorem 3.2 derives a bound containing an adaptation gap term between $x_\\theta$ and $x_\\varphi$, in practice (Section B.1.1 and Algorithm 1) the prior preservation coefficient $\\lambda_{pp}$ is set to 0 by default. Moreover, the optimization incorporates a VGG perceptual loss $\\mathcal{L}_{perceptual}$ which is absent from the theoretical derivation. The practical method is essentially a test-time STE optimization loop rather than direct variational inference.",
+        "Disparity in model capacity in the main benchmarks: In Tables 1 and 2, APS is evaluated using MMaDA (an 8B-parameter foundation model), whereas prior discrete baselines (G2D2, SGDD) utilize VQ-Diffusion (~300M parameters), and continuous baselines operate on smaller models. While the authors provide an identical-prior comparison on VQ-Diffusion in Table 5 (showing gains for super-resolution), this is relegated to the appendix and evaluated on only 100 samples. The significant parameter gap in the main tables should be discussed more transparently.",
+        "Evaluation set size: The primary quantitative results in Tables 1 and 2 are computed over only 100 images each from FFHQ and ImageNet. Although Table 7 includes a 1000-image evaluation on FFHQ super-resolution, evaluating on standard 1000-image subsets across all main tasks would make the statistical claims more robust."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "Addresses an important and challenging problem: enabling effective posterior sampling for masked discrete diffusion models operating with discrete token embeddings (such as lookup-free quantization).",
+        "The core practical proposal of 'quantized expectation'—using soft codebook expectations with a straight-through estimator through the quantizer and image decoder—provides an intuitive engineering mechanism to backpropagate measurement errors into discrete token distributions.",
+        "The motivation behind 'anchored remasking' (prioritizing tokens consistent with the measurement-guided posterior rather than unconditional prior confidence) intuitively tackles the common problem where masked discrete models unmask background regions prematurely.",
+        "Includes a wide range of qualitative demonstrations across linear inverse problems, nonlinear inverse problems, and stylization."
+      ],
+      "weaknesses": [
+        "Fundamental mathematical flaws in the theoretical derivations (Theorems 3.1 and 3.2): The proposed transition kernel in Equation (6) multiplies the reverse probability by the measurement likelihood $q(y|x_\\phi(z_t))$. Because this likelihood factor does not depend on the target state $z_s$ and is not normalized over $z_s$, $p_\\phi(z_s|z_t, y)$ is not a valid probability distribution (it does not sum to 1). Furthermore, multiplying by $q(y|x_\\phi(z_t(i)))$ across all $T$ time steps introduces a product $\\prod_{i=1}^T q(y|x_\\phi(z_t(i)))$, effectively raising the likelihood to the $T$-th power and overcounting measurement consistency by a factor of $T$. As a result, the variational bound derived via Jensen's inequality does not target the true Bayesian posterior $p(x|y) \\propto p(x)q(y|x)$.",
+        "Unfair evaluation via direct metric optimization: In Algorithm 1 (line 14) and Appendix B.1.1, the test-time objective incorporates a VGG perceptual loss ($\\lambda_p L_{perceptual}$) with $\\lambda_p = 10^{-3}$. Because LPIPS is directly computed using deep features from a VGG backbone, APS explicitly optimizes the primary evaluation metric at test time. Baselines like DPS, DDRM, DiffPIR, PSLD, and G2D2 only enforce measurement consistency ($\\|y - A(x)\\|^2$) without perceptual loss. Table 4 reveals that setting $\\lambda_p = 0$ severely degrades LPIPS (from 0.334 to 0.416 on ImageNet; 0.247 to 0.311 on FFHQ), demonstrating that the reported LPIPS superiority is largely an artifact of directly optimizing the test metric.",
+        "Flawed evaluation protocol for APS-L: Section B.1.3 explains that for APS-L, 256x256 benchmark images are first upsampled to 1024x1024 before the degradation operator is applied, and the reconstructed result is downsampled back to 256x256. For a 4x super-resolution task, applying 4x downsampling to a 1024x1024 image yields an input measurement of size 256x256, whereas standard 256x256 baselines receive a 64x64 measurement. Furthermore, post-hoc downsampling introduces artificial anti-aliasing and smoothing that skews PSNR and LPIPS favorably.",
+        "Misleading claims regarding 'training-free' capability: The paper repeatedly presents APS as a strictly training-free posterior sampler that eliminates model retraining. However, in Appendix B.8.2, the authors reveal that for the text-guided block inpainting experiments shown in Figure 5, the underlying MMaDA model was actually fine-tuned on 100,000 fashion images using $L_{DDPS}$. Comparing this fine-tuned model against off-the-shelf, general-purpose continuous models (Imagen 3, Flux, HD-Painter) without clear disclosure in the main text is misleading.",
+        "Contradiction between efficiency claims and actual compute cost: The abstract and introduction claim that discrete diffusion provides 'faster inference' and 'substantially lower inference cost'. In reality, Algorithm 1 runs an inner loop of $M=100$ Adam optimization steps at each of the $T=15$ diffusion steps, totaling 1,500 forward and backward passes through the VQ-VAE decoder and measurement operator. As shown in Table 6, APS requires 55s to 121s, and APS-L takes 484s (over 8 minutes per image), which is significantly slower than many competitive continuous solvers (e.g., DDRM takes 4s).",
+        "Confounding prior model comparisons in the main benchmarks: In Table 1, APS is evaluated using the 8B-parameter MMaDA backbone, whereas discrete baselines like G2D2 rely on the much older and smaller VQ-Diffusion backbone. When controlled under the exact same VQ-Diffusion backbone in Table 5, the performance margins shrink considerably."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Addresses an important and challenging problem: posterior sampling in discrete masked diffusion models, which has historically suffered from non-differentiability, high variance, or combinatorial computational complexity.",
+        "The proposed quantized expectation technique effectively circumvents the discrete bottleneck by computing expected codebook embeddings and employing a straight-through estimator (STE) through the decoder, avoiding expensive backpropagation through the massive diffusion backbone.",
+        "Anchored remasking provides a principled, test-time adaptive unmasking schedule based on the measurement-tilted posterior rather than unconditional prior confidence, which prevents early commitment to misleading background tokens.",
+        "Comprehensive experimental validation covering linear inverse problems (super-resolution, deblurring, inpainting), nonlinear inverse problems (HDR, nonlinear blur), reference-based stylization, and diffusion language model guidance.",
+        "Consistently outperforms prior discrete diffusion baselines (G2D2, SGDD) and demonstrates competitive or superior quality to popular continuous latent/pixel diffusion baselines while running significantly fewer diffusion steps (15 vs. 500–1000).",
+        "Thorough appendix containing variational derivations (ELBO upper bounds), detailed ablation studies, hyperparameter analyses, runtime comparisons, and honest discussions of limitations and failure cases."
+      ],
+      "weaknesses": [
+        "The transition from the theoretical bound in Equation (7) to the practical objective in Equation (8) relies on several heuristic approximations (e.g., first-order Taylor expansion and substituting the expectation of the measurement operator with the operator evaluated at the straight-through quantized expected embedding). While effective in practice, the formal connection between the variational bound and the optimization objective is weakened.",
+        "The diffusion language model evaluation in Section 4.4 is limited in scale (curated benchmark of only 20 prompts evaluated using an LLM judge), making the language modeling claims more of a preliminary proof-of-concept than a rigorous benchmark.",
+        "The method requires an inner optimization loop of 100 Adam steps at each reverse diffusion timestep, which involves 100 forward/backward passes through the image decoder and forward operator, partially offsetting the efficiency gained from using fewer diffusion steps."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Addresses a fundamental challenge in generative modeling: performing test-time posterior sampling and solving inverse problems within discrete masked diffusion models without retraining.",
+        "Proposes two well-motivated and complementary techniques: quantized expectation (leveraging straight-through estimation through the VQ decoder to obtain gradient guidance for discrete token logits without backpropagating through the transformer backbone) and anchored remasking (using posterior confidence to unmask informative tokens early).",
+        "Derives sound theoretical variational bounds for discrete diffusion posterior sampling (Theorems 3.1 and 3.3 / Appendix B) that ground the likelihood-tilted reverse transition relative to the standard masked diffusion NELBO.",
+        "Extensive experimental validation across diverse tasks, including linear and nonlinear image inverse problems (FFHQ and ImageNet), reference-based image stylization, and diffusion LLM guidance.",
+        "Careful apples-to-apples comparison in the appendix (Table 7) where APS is evaluated against G2D2 under the exact same generative prior (VQ-Diffusion) and compute budget, confirming that performance gains stem from the algorithmic innovations rather than backbone scaling.",
+        "Detailed runtime, ablation, and noise robustness analyses showing favorable trade-offs between sampling speed (15 steps) and reconstruction quality compared to continuous diffusion posterior samplers."
+      ],
+      "weaknesses": [
+        "Gap between theory and practical surrogate objective: The variational upper bounds (Theorems 3.1 and 3.3) motivate test-time guidance, but the transition to the practical objective in Equation (8) and Algorithm 1 relies on substantial approximations (plug-in estimate for $x$, first-order Taylor expansion, straight-through estimator, and replacing Gaussian likelihood with L1 + VGG perceptual loss). The paper would benefit from explicitly framing Equation (8) as an empirical surrogate rather than a direct variational minimization.",
+        "The evaluation on diffusion language models is conducted on a small, custom benchmark of only 20 prompts (Table 10), which is too limited to draw statistically definitive conclusions about general language task performance, serving mainly as a preliminary proof-of-concept.",
+        "Applicability constraint: The quantized expectation technique relies fundamentally on having a differentiable decoder mapping continuous expected embeddings to observation space (e.g., visual codebooks with decoders), which does not directly translate to standard discrete token spaces without continuous projection layers or differentiable surrogates."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Addresses an important and challenging problem: posterior sampling and inverse problem solving in discrete masked diffusion models, where standard continuous gradient-based guidance cannot be directly applied.",
+        "The proposed framework combines quantized expectation (using expected codebook embeddings and the straight-through estimator) with anchored remasking (decoding tokens prioritized by posterior confidence rather than unconditional prior confidence), resulting in an effective and practical test-time algorithm.",
+        "Comprehensive empirical evaluation covering both linear (super-resolution, Gaussian deblurring, motion deblurring, inpainting) and nonlinear (HDR, nonlinear deblurring) inverse problems, as well as creative tasks like reference-based stylization and diffusion language model guidance.",
+        "Significant runtime efficiency advantages over continuous diffusion posterior samplers (e.g., PSLD, DPS), achieving comparable or better perceptual results in 15 reverse steps versus 500-1000 steps for continuous models.",
+        "Fair and informative ablations and controlled experiments, including an evaluation under identical base priors and compute budgets against G2D2 (Table 7), isolating the specific gains from the algorithmic components."
+      ],
+      "weaknesses": [
+        "There is a substantial gap between the formal variational upper bounds (Theorems 3.1 and 3.3) and the operational test-time objective in Equation (8). The actual implementation relies on multiple aggressive approximations—substituting x with the denoiser prediction, truncating a first-order Taylor expansion while dropping remainder terms, and propagating gradients through a non-differentiable quantizer via the Straight-Through Estimator (STE)—meaning the theoretical bounds serve more as heuristic motivation than a rigorous justification for the sampler's convergence or posterior fidelity.",
+        "High computational cost in the inner optimization loop: each reverse step requires M = 100 optimization steps with Adam to align logits. Although backpropagation avoids the large foundation denoiser backbone, 100 forward/backward passes through the tokenizer decoder at every step remains computationally demanding and introduces hyperparameter sensitivity (e.g., large learning rates like 1.0).",
+        "The evaluation sample sizes on several benchmarks are limited. Image restoration benchmarks are evaluated on only 100 images per task from FFHQ and ImageNet, and the diffusion language model question-answering benchmark consists of merely 20 curated prompts evaluated with LLM judges, which is too small to draw statistically robust conclusions about general language steering capabilities.",
+        "The conceptual application of 'quantized expectation' to language models (Section C.1.4) is underspecified and diverges from the visual LFQ formulation; text models do not utilize binary sign-quantization codebooks, making this component appear as standard continuous logit optimization rather than the specific quantized expectation defined for vision tokenizers."
+      ]
+    }
+  }
+}

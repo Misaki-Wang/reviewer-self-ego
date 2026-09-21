@@ -1,0 +1,46 @@
+{
+  "v1": {
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "The concept of pondering in continuous space via a weighted sum of token embeddings is elegant, fully differentiable, and simple to implement.",
+        "The method achieves end-to-end self-supervised pretraining without requiring reinforcement learning or human-annotated chain-of-thought data.",
+        "Comprehensive empirical evaluation across multiple architectures (GPT-2, Pythia, LLaMA) showing solid improvements in validation perplexity and downstream tasks.",
+        "The paper includes a thorough scaling analysis showing that pondering-enhanced models can match the performance of vanilla models with significantly more parameters or training tokens under certain conditions."
+      ],
+      "weaknesses": [
+        "There is a lack of ablation comparing the proposed 'vocabulary projection' feedback ($T = PV$) against direct hidden state feedback ($E^1 = E^0 + H^0$). Passing the top-layer hidden state directly would bypass the costly vocab-sized matrix multiplication and avoid the loss of information from projecting into the token space. Explaining and empirically showing why the vocabulary projection is superior or necessary is a critical missing piece.",
+        "Inference and training compute overhead are significant. Since each pondering step requires a full forward pass through the entire network, a model with $k=3$ steps requires 4 times the compute. When comparing performance at equivalent inference FLOPs, a pondering model may be less efficient than a larger vanilla model. For example, Pondering-1B (with $k=3$) has the same inference FLOP cost as a ~4B model, but its downstream task performance (55.0% zero-shot average) is lower than Pythia-2.8B (57.3%). A more detailed discussion on inference-time compute-efficiency tradeoffs is needed.",
+        "While causality is preserved because of the causal mask in the LM, the paper would benefit from explicitly demonstrating and discussing why there is no future information leakage when feeding back the prediction of the next token into the current position."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 6,
+      "strengths": [
+        "Elegant and novel formulation of continuous-space pondering: Deriving the pondering embedding via a differentiable, softmax-weighted sum of token embeddings ($P \\times V$) successfully bypasses the discrete vocabulary bottleneck and enables fully end-to-end pretraining via gradient descent.",
+        "Extensive and rigorous experimental evaluation: The authors validate their method across three popular architectures (GPT-2, LLaMA, and Pythia) and pretrain models up to 1.4B parameters on up to 300B tokens (the entire Pile dataset). This scale of pretraining from scratch provides strong, credible empirical evidence.",
+        "Impressive parameter density gains: The pondering models show substantial downstream performance improvements over official vanilla baselines of the same parameter scale, sometimes matching or exceeding models with more parameters or trained on significantly more data.",
+        "Excellent clarity and presentation: The paper is well-written, with high-quality figures and an easy-to-understand PyTorch-style pseudocode in Figure 1 that makes reproducing the method straightforward."
+      ],
+      "weaknesses": [
+        "Inference FLOP Efficiency (Pareto Frontier): While the method increases 'parameter knowledge density' (performance per parameter), it does not appear to be FLOP-efficient at inference time. For instance, Ponder-410M with $k=3$ steps requires roughly $4 \\times 410\\text{M} = 1.64\\text{B}$ parameter-equivalent FLOPs per token during inference, but its average downstream accuracy (51.4%) is significantly lower than the vanilla Pythia-1.4B model (54.1%). The paper should be more transparent in discussing that the proposed method is primarily beneficial under strict parameter/memory constraints (e.g., edge devices) rather than general inference compute constraints.",
+        "Training Compute and Memory Overhead: Backpropagating through $k$ iterations of the entire language model increases training activation memory and FLOPs. The authors should discuss whether they utilized activation checkpointing to manage this memory footprint and explicitly quantify the training slowdown (wall-clock time) introduced by the iterative steps.",
+        "Absence of direct hidden-state recycling baseline: The continuous vocabulary projection acts as a semantic bottleneck. It would strengthen the paper to include a comparison with a simpler baseline that directly recycles final-layer hidden states back to the input (i.e., $E^1 = E^0 + H^0$) to isolate the benefit of projecting to the vocabulary space and back."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper introduces an interesting idea of performing iterative 'pondering' in continuous space by feeding back a weighted sum of token embeddings based on predicted probabilities, avoiding the non-differentiable bottleneck of discrete token generation.",
+        "The manuscript is well-structured and clearly written, with helpful figures and PyTorch-style pseudocode to clarify the implementation details.",
+        "The authors provide evaluations across multiple architectures (GPT-2, LLaMA, Pythia) and assess performance on a wide range of downstream benchmarks."
+      ],
+      "weaknesses": [
+        "The proposed method is highly compute-inefficient and is Pareto-dominated by standard parameter scaling. For $k=3$ pondering steps, the model requires 4 full forward passes per token during both training and inference. When compared on a FLOP-matched basis, larger vanilla models consistently outperform the pondering models. For example, in Table 3, Ponder-1B (which requires 4B FLOPs per token) achieves 56.2% 5-shot and 55.0% 0-shot accuracy. In contrast, the vanilla Pythia-2.8B (using only 2.8B FLOPs per token—nearly 30% less compute) outperforms it with 57.6% 5-shot and 57.3% 0-shot accuracy. Similarly, Ponder-1.4B (5.6B FLOPs) is worse than or equal to Pythia-2.8B (2.8B FLOPs). This suggests that simply scaling up parameters is more compute-efficient than using the proposed pondering mechanism.",
+        "The paper completely overlooks the massive KV cache memory and latency overhead during inference. Because the input embeddings at all prior positions are updated at each pondering step $t$ ($E^t_i = E^0_i + \\sum T^j_i$), a standard single KV cache cannot be reused across pondering steps. To avoid recomputing the prefix KV cache at every single pondering step (which would escalate the autoregressive generation complexity to a prohibitive $O(k L^2)$), the system must maintain $k+1$ separate KV caches. This increases the KV cache memory footprint by $k+1$ times (a $4\\times$ overhead for $k=3$). Given that KV cache capacity is already the primary bottleneck in LLM serving, this is a severe practical drawback.",
+        "The conceptual formulation of injecting the predicted next-token embedding into the current token's input is questionable. At position $i$, the model predicts $x_{i+1}$ and adds its expected embedding $T^1_i$ to $E^1_i$. In the next step, the model at position $i$ receives its own prior prediction of $x_{i+1}$ as input, allowing it to easily 'copy' or trivialise the prediction of $x_{i+1}$ rather than performing genuine multi-step reasoning. Furthermore, attending to position $i-1$ provides the predicted embedding of $x_i$, which is redundant because the ground truth $x_i$ is already present at position $i$. The physical meaning and cognitive justification of this recurrent shortcut are weak.",
+        "The FLOP-matched scaling comparison in Figure 3 (right) is flawed. Comparing PonderingPythia-70M (1 epoch) against Pythia-70M trained for 4 epochs is not a strong baseline because training a tiny model for multiple epochs on the same data violates Chinchilla scaling laws. A fair FLOP-matched baseline should compare the pondering model against a Chinchilla-optimal larger model trained on unique tokens, under which standard scaling would easily win."
+      ]
+    }
+  }
+}

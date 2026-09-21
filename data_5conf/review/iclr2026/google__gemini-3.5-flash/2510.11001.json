@@ -1,0 +1,94 @@
+{
+  "v1": {
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "The paper addresses an important and active research topic in LLMs: adaptive token-level computation (nested/recurrent depth) to boost performance on critical tokens.",
+        "The proposed routing and threshold control strategies (Score Dispersion Loss, Distribution Preservation Loss, Buffer Proportional Control, and EMA Synchronization) are well-designed and address the inherent instability of threshold-based routing in causal language modeling.",
+        "Comprehensive experimental evaluation on multiple benchmarks spanning general, math, reasoning, and coding tasks, showing positive gains on both dense and MoE models."
+      ],
+      "weaknesses": [
+        "Reproducibility Concerns: The experiments are conducted on 'Qwen3-1.7B' and 'Qwen3-30B-A3B' (citing a 2025 Qwen3 technical report). Since the 'Qwen3' series is currently not publicly available or released to the community, it is impossible for external researchers to reproduce, verify, or build upon the results. It is highly recommended to validate the method on standard open-source models (such as LLaMA-3-8B or Qwen-2.5-7B).",
+        "Missing Wall-Clock Latency: While the FLOPs overhead is analyzed in the Appendix (~6.27%), the actual wall-clock execution time is missing. Autoregressive decoding is highly memory-bound, and dynamic token-choice routing involving GPU index packing and unpacking (Eq. 3) often incurs significant kernel launch overheads and memory transfer costs. A detailed latency profile (e.g., generation speed in tokens per second) is necessary to demonstrate real-world efficiency.",
+        "Extremely High Training Cost for a 'Post-Training' Method: The paper frames DND as a 'post-training' method. However, the SFT phase uses a massive dataset of 1-2 million instances and takes 3 days of training across 256 H100 GPUs for the 30B MoE model. This is comparable to the scale of continuous pre-training or full instruction tuning, rather than a light-weight post-training adapter addition.",
+        "Baseline comparison: The paper would be stronger if compared against other test-time scaling or dynamic depth methods (e.g., ITT or standard recurrent/looping transformers) to show if the proposed threshold control is indeed superior to other adaptive routing techniques under similar compute budgets."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "The paper addresses a highly relevant and promising research direction: dynamically allocating variable computation to tokens based on their difficulty during post-training (SFT).",
+        "The proposed routing control strategies, including the dual-objective router loss (Score Dispersion and Distribution Preservation) and the threshold control scheme (Buffer Proportional Control combined with EMA synchronization), are well-designed to address the training instability of token-choice selection.",
+        "The paper provides comprehensive ablation studies demonstrating the impact of different loss components, thresholding strategies, and selection ratios."
+      ],
+      "weaknesses": [
+        "Critical Technical Omission: KV Cache Management during Autoregressive Decoding. The paper does not explain how the nested pass is executed during token-by-token autoregressive generation. If a newly generated token is selected at decoding step $t$, does it undergo the nested pass? If so, what does its attention mechanism attend to? Does the nested pass maintain its own separate KV cache containing only selected tokens, or does it attend to the vanilla KV cache? This is a fundamental aspect of LLM inference, and its omission makes the method's technical soundness and reproducibility highly questionable.",
+        "Context Loss in Nested Attention: According to the FLOPs calculation in Appendix A, the attention complexity of the nested pass scales as $r^2 \\cdot S^2$. This mathematical formulation indicates that selected tokens in the packed sequence only attend to other selected tokens. This design implies a complete loss of context from the unselected tokens during the recalculation phase. The authors should clarify this behavior and discuss its impact on the representation quality.",
+        "Lack of Real-world Speed and Latency Evaluation: The paper only reports theoretical FLOP counts. In practice, dynamically packing/unpacking sequences of variable lengths introduces substantial kernel launch overheads, synchronization bottlenecks, and memory fragmentation in modern serving frameworks (e.g., vLLM). Real-world wall-clock latency and throughput (tokens/sec) measurements are required to demonstrate actual efficiency.",
+        "Anachronistic and Unverifiable Models/References: The paper evaluates on unreleased models named 'Qwen3-1.7B' and 'Qwen3-30B-A3B', and references a 'Qwen3 technical report' from May 2025 (arXiv:2505.09388). Since these models and preprints are not public or verifiable by the scientific community, the paper's experiments cannot be reproduced, which undermines the credibility of the empirical evaluation."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The core motivation of extending token-level adaptive computation from token pruning to selective, nested reprocessing (latent test-time scaling) is intuitive and logical.",
+        "The authors address the inherent instability of token-choice routing by proposing a well-thought-out training control scheme, including score dispersion/preservation losses and an adaptive threshold control mechanism (buffer proportional control + EMA synchronization).",
+        "The evaluation covers a wide range of benchmarks (17 in total) across general alignment, mathematics, and coding, along with detailed ablation studies on different hyperparameters."
+      ],
+      "weaknesses": [
+        "Unclear Auto-regressive Inference and Attention Mechanism: The paper does not explain how auto-regressive decoding is performed during inference. In generation, tokens are processed one by one. If a token is selected for the nested pass, what does it attend to? If it only attends to itself (sequence length 1), then self-attention becomes a trivial linear projection, and no contextual information is updated. If it attends to previous tokens, does it use the vanilla KV cache or a separate 'nested' KV cache? If the former, how do the representations align? If the latter, how is it maintained? The lack of these details raises significant concerns about the technical soundness and correctness of the inference phase.",
+        "Issue with New Positional Embeddings: In Section 3.1.2 (Eq. 3), the authors state that the packed subsequence is given 'new positional embeddings $E'_{pos}$'. Assigning new sequential positions (e.g., 1, 2, 3...) to non-adjacent tokens (e.g., tokens at original positions 5 and 100) discards their original relative and absolute distances. This is highly likely to disrupt position-dependent semantics and causal relationships. The authors should justify why original positional embeddings are not preserved.",
+        "Practical Latency and GPU Batching Efficiency: While the authors perform a FLOP analysis in Appendix A, they do not provide actual latency or throughput measurements (e.g., tokens per second). In modern GPU execution, dynamic and irregular computation per sequence (as caused by token-choice selection) introduces severe thread divergence, load imbalance, and synchronization overheads in batched inference. Without wall-clock speedups or throughput evaluations, the claimed efficiency of the method is unconvincing.",
+        "Reproducibility Concerns regarding Base Models: The experiments are conducted on 'Qwen3-1.7B' and 'Qwen3-30B-A3B' models. As of today, Qwen3 is not a publicly released or open-source model series. Using unreleased/proprietary models makes it impossible for the community to reproduce, verify, or build upon the results. The authors should have validated their approach on popular, publicly available open models like Llama-3 or Qwen-2/2.5.",
+        "Marginal Performance Improvements: On the larger Qwen3-30B-A3B MoE model, the average performance improvement across 17 tasks is only +0.87%. Considering the added system complexity (secondary forward pass, dynamic routing, threshold and loss controllers, custom packing/unpacking), such a marginal improvement may not justify the engineering and runtime overhead in practice."
+      ]
+    }
+  },
+  "v2": {
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "The paper presents a highly practical and effective method, Dynamic Nested Depth (DND), to dynamically allocate test-time compute in the latent space during post-training SFT, which avoids the massive cost of training such models from scratch.",
+        "The proposed training strategies (Router Controlling Loss with push-pull forces, and Threshold Control Scheme with buffer proportional control and EMA) are well-designed to resolve the stability and leakage issues of token-choice routing in auto-regressive generation.",
+        "Extensive evaluation on multiple dense models (Qwen3-1.7B, Llama3.2-1B, Gemma3-1B) and a large 30B MoE model (Qwen3-30B-A3B) across a wide suite of benchmarks demonstrates consistent and notable improvements.",
+        "The authors provide a thorough analysis of the computational overhead, actual throughput measurements under vLLM/SGLang, and insightful qualitative visualizations of the selected tokens."
+      ],
+      "weaknesses": [
+        "The conceptual novelty of reprocessing critical tokens is closely aligned with recent works like MOR and ITT. Although the paper distinguishes itself well via post-training applicability and precise routing control, the core idea of nested processing has been explored.",
+        "Regarding the positional embeddings in Section 3.1.2: when selected tokens are packed into a compact subsequence and given 'new positional embeddings', how are these embeddings computed? Do they use sequential indices (0, 1, 2...) or preserve the original relative/absolute positions? Discarding the original positional spacing might negatively affect the attention mechanism in the nested pass.",
+        "The fusion formula in Equation 4 uses $\\beta \\cdot p^i$ for $x_v$ and $1 - \\beta \\cdot p^i$ for $x_d$. Given that $\\beta$ is initialized to 0.1, the gating weight for the reprocessed representation $x_d$ remains extremely high (above 0.9) regardless of the exact value of $p^i$. The paper would benefit from a clearer explanation of why this specific formulation was chosen and how sensitive the performance is to $\\beta$.",
+        "The paper evaluates on 'Qwen3' and 'Gemma3' base models, which are currently not publicly available. This might limit the immediate reproducibility of the exact numbers by the external community, although the evaluation on Llama 3.2-1B partially mitigates this concern."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper tackles an important problem in LLM efficiency: dynamically allocating more computation (depth) to harder/critical tokens while skipping it for easier ones.",
+        "The authors identify and address a key challenge of token-choice routing—unstable selection ratios and token clustering—by designing specific training stabilizers: Score Dispersion Loss, Distribution Preservation Loss, and a Threshold Control Scheme with EMA.",
+        "The proposed method is validated across multiple modern, competitive open-source models, including small dense models (Qwen3-1.7B, Llama3.2-1B, Gemma3-1B) and a larger Mixture-of-Experts model (Qwen3-30B-A3B)."
+      ],
+      "weaknesses": [
+        "Impracticality under Realistic Batched Inference: The throughput and speed measurements in Table 3 are conducted with a single batch (batch size = 1) on a single GPU. In production LLM serving (e.g., using vLLM), models are run with large batches and continuous batching. Dynamically packing, routing, and unpacking varying numbers of tokens across different sequences at multiple intermediate layers causes severe load imbalance and memory fragmentation, which degrades GPU Tensor Core efficiency. The paper lacks evaluation on batched inference (BS > 1), which is a critical bottleneck for any token-level adaptive depth method.",
+        "Missing Key Baseline (Depth-Equivalent Static Models): The paper shows that DND adds ~6% extra FLOPs during inference. A crucial baseline is a static model with equivalent compute/FLOPs (e.g., a standard transformer with 1 or 2 extra layers). Without this comparison, it is impossible to determine if the dynamic routing mechanism provides any actual benefit over simply training a slightly deeper static model.",
+        "Confounding Effects of Supervised Fine-Tuning (SFT): The proposed method requires full SFT on a massive dataset (1-2 million instances) with all parameters trainable. Because of this heavy training phase, it is hard to isolate whether the performance gains are primarily due to the high-quality SFT data and parameter updates or the actual dynamic depth architecture. A more rigorous control baseline (e.g., training a standard model on the exact same token budget and dataset) is required.",
+        "High Architectural and Training Complexity: The method introduces numerous hyperparameters and training heuristics ($λ_{sd}$, $λ_{dp}$, $k_{\\text{target}}$, $\\alpha$, $\\gamma$, $N_b$, $\\beta$). This high sensitivity to hyperparameters makes reproducing the results and adapting the method to other models or domains highly challenging.",
+        "Presentation and Formatting Issues: Figures 2 and 3 are cluttered and difficult to parse quickly. There are also typographical errors, such as 'wothout' in the caption of Table 2."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "The paper addresses a very relevant problem: adaptive token-level computation in Large Language Models (LLMs) to allocate more compute resources to harder or more critical tokens.",
+        "The proposed DND framework is a plug-and-play post-training (SFT) method, making it more flexible than methods requiring pre-training from scratch (like MOR).",
+        "To stabilize the token-choice routing, the authors introduce a set of well-designed training stabilizers, including Router Controlling Loss (combining score dispersion and distribution preservation) and a dual threshold control scheme (buffer proportional control + EMA synchronization).",
+        "The authors provide a thorough analysis of token selection behavior, demonstrating that DND preferentially selects tokens with higher logit entropy (uncertainty) and larger representation variations, and that it successfully reduces uncertainty after the nested passes."
+      ],
+      "weaknesses": [
+        "Lack of reproducibility due to unreleased base models: The paper conducts its main evaluations on 'Qwen3-1.7B', 'Gemma3-1B', and 'Qwen3-30B-A3B'. These models are not publicly available or standard open-source models, which makes it impossible for external researchers to reproduce the findings or run comparative baselines. Evaluating on standard public models like Qwen-2.5 or Gemma-2 would be much more appropriate.",
+        "High training cost for marginal gains: The post-training process requires extremely high computational resources (e.g., 256 H100 GPUs for 3 days for the 30B MoE model), yet the average accuracy improvement on the MoE model is relatively modest (+0.87%). This gain comes at the cost of a 7-8% decrease in inference throughput (91.6% - 93.1% relative speed in Table 3). Given the added system complexity, this trade-off may not be highly practical.",
+        "Mathematical errors in FLOPs calculation: In Appendix A, the absolute FLOP values are off by exactly three orders of magnitude. For example, for self-attention with $N_h = 32, d_h = 128, S = 16384$, the formula $4 N_h d_h S^2$ yields $4.40 \\times 10^{12}$ FLOPs, but the text reports $4.40 \\times 10^{15}$ FLOPs. A similar 1000x scaling error is present in the MoE MLP FLOP calculation. Although the relative percentage (6.27%) remains correct, these absolute values need to be fixed.",
+        "Complex training pipeline: The combination of two auxiliary router losses ($L_{sd}$, $L_{dp}$), real-time proportional control, and low-frequency EMA threshold synchronization significantly increases the complexity of the training code and hyperparameter tuning compared to standard SFT."
+      ]
+    }
+  }
+}

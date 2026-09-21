@@ -1,0 +1,92 @@
+{
+  "v4": {
+    "exp3_negative": {
+      "oa": 8,
+      "strengths": [
+        "Excellent algorithm-system co-design approach. The paper does not just propose a speculative retrieval algorithm but carefully addresses the physical hardware bottlenecks (fragmented PCIe transfers, transpose overheads) that would otherwise nullify the algorithmic gains.",
+        "The proposed speculative retrieval and fine-grained correction mechanism are elegant and highly practical. Leveraging the high query similarity of adjacent tokens to hide CPU-to-GPU latency is a sound observation, and the cosine similarity-based thresholding dynamically balances accuracy and efficiency.",
+        "The hybrid KV layout (HND on CPU for contiguous PCIe transfers, NHD on GPU to avoid per-step decoding transposes) is a very clever system-level design choice that elegantly resolves the memory fragmentation issue during page-wise retrieval.",
+        "Highly comprehensive and realistic evaluation. The inclusion of modern long-context reasoning models (e.g., DeepSeek-R1-Qwen/Llama) and challenging benchmarks (MATH500, AIME24, GPQA, LongGenBench) makes the experimental results very convincing. The reported speedup (up to 13.7x over ArkVale and 8.4x over ShadowKV) is exceptionally strong."
+      ],
+      "weaknesses": [
+        "Dependency on the threshold hyperparameter $\\tau$: The optimal value of $\\tau$ shifts from 0.8 (long-input) to 0.9 (long-generation). A more systematic analysis or discussion on how to dynamically/adaptively set this parameter without manual grid search across different model classes would improve the usability of FreeKV.",
+        "Lack of discussion on multi-GPU/Tensor Parallel (TP) settings: Since ultra-long context windows (up to 1M tokens) are often served using TP across multiple GPUs, it is unclear how FreeKV scales under TP. Specifically, how does speculative page retrieval interact with partitioned KV caches and inter-GPU NVLink communications?",
+        "Prefill and Offloading Overhead Profiling: In the hybrid layout scheme, the NHD-to-HND transpose is performed before offloading a KV page to CPU. While the authors state this amortizes the overhead, a quantitative breakdown of the prefill time and memory peak during offloading would help verify if this affects TTFT (Time-To-First-Token) significantly."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Excellent algorithm-system co-design: FreeKV brilliantly pairs the algorithmic insight of high query similarity between adjacent steps with system-level optimizations (hybrid layouts and double-buffered streamed recall).",
+        "Outstanding empirical efficiency gains: Achieves up to 13.7x speedup over ArkVale and up to 8.5x over InfiniGen while delivering near-lossless accuracy across most benchmarks.",
+        "Rigorous and realistic evaluation: Includes a wide range of state-of-the-art models (such as Qwen-2.5, Llama-3.1, and DeepSeek-R1) and robust benchmarks spanning long-context QA, long-form generation, and complex math/reasoning tasks (MATH500, AIME24, GPQA).",
+        "Comprehensive ablation and analysis: Provides deep dives into query similarity across model sizes, training stages, and architectures, alongside detailed analysis of correction thresholds, pooling choices, and hardware latency breakdowns."
+      ],
+      "weaknesses": [
+        "Limited multi-GPU discussion: The evaluation is confined to a single A100 GPU. It remains unclear how the proposed CPU-GPU hybrid KV layout and speculative recall synchronize or scale in distributed settings (e.g., Tensor Parallelism or Pipeline Parallelism) where KV cache might be split across multiple GPUs.",
+        "Throughput impact on high-correction tasks: For difficult reasoning tasks (like GPQA or AIME24), Table 9 indicates that the correction rate can go as high as 52%. Since correction forces selection and recall back into the critical path, the paper lacks an end-to-end latency/throughput evaluation specifically on these high-correction tasks to show if the speedup remains significant.",
+        "Dependency on sequence computation time: Fully hiding the recall latency relies on having sufficient attention/FFN computation time in the current layer and next-layer projections. For very small models or batch size of 1 with short generation contexts, the computation budget might be too brief to overlap the entire transfer, which is not quantitatively bounded or analyzed."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 8,
+      "strengths": [
+        "Excellent algorithm-system co-design: The paper successfully tackles both the algorithmic bottleneck (via speculative retrieval and fine-grained correction) and the system-level bottleneck (via hybrid memory layouts and double-buffered streamed recall) of offloaded KV cache retrieval.",
+        "Strong and rigorous empirical motivation: The authors perform a detailed analysis of query similarity across adjacent decoding steps, demonstrating that high similarity (>0.85-0.9) is a consistent property across various tasks, model scales, architectures, and training stages (including base, SFT, and RL-tuned models).",
+        "Comprehensive and realistic evaluation: The method is evaluated on challenging long-context tasks (LongBench v2, LongGenBench) as well as hard reasoning tasks (MATH500, AIME24, GPQA using DeepSeek-R1 models). It maintains near-lossless accuracy compared to full KV cache while outperforming previous KV dropping and retrieval methods.",
+        "Substantial speedup: FreeKV achieves up to 13.7x speedup over ArkVale and significant speedups over other competitive baselines like InfiniGen and ShadowKV, bringing retrieval-based offloading closer to practical viability.",
+        "Highly clear exposition: The figures (such as the timeline comparisons and the memory layout explanations) are outstandingly clear and make the paper easy to follow."
+      ],
+      "weaknesses": [
+        "Dependency on the correction threshold parameter ($\\tau$): The optimal choice of $\\tau$ depends on the workload (e.g., 0.8 for long-input vs 0.9 for long-generation / reasoning tasks). Although the paper conducts detailed ablations, an adaptive or dynamic threshold selection mechanism would make the framework more self-contained.",
+        "Multi-GPU/Distributed Inference Scaling: The evaluation is conducted on a single A100 GPU. However, for larger models (such as Llama-3-70B, which is motivated in the introduction), multi-GPU tensor parallelism is typically required. The authors do not discuss how the hybrid layouts, CPU-GPU page transfers, and head-wise speculative retrieval coordinate in a distributed environment.",
+        "Impact of higher interconnect bandwidth: Since the efficiency gains of speculative recall are highly tied to overlapping slow CPU-GPU transfers with GPU computation, the relative speedups might decrease on platforms with faster interconnects (e.g., PCIe Gen5, NVLink-C2C, or APUs with unified memory), which is worth discussing."
+      ]
+    }
+  },
+  "v3": {
+    "exp1_quality": {
+      "oa": 8,
+      "strengths": [
+        "Well-motivated algorithm-system co-design that addresses a major performance bottleneck (PCIe transfer and selection latency) in offloaded KV cache retrieval.",
+        "The core idea of speculative retrieval is supported by a solid empirical observation regarding query similarity across adjacent decoding steps, and the proposed query-based correction mechanism effectively maintains accuracy.",
+        "Clever system-side design using hybrid memory layouts (NHD on GPU and HND on CPU) to avoid both fragmented PCIe transfers and on-GPU transpose overheads.",
+        "Extensive and up-to-date evaluation on state-of-the-art models (including DeepSeek-R1-14B and Qwen-2.5) across challenging long-context and reasoning benchmarks (LongBench v2, MATH500, AIME24, GPQA).",
+        "Substantial, concrete performance improvements: achieving up to 13.7x and 8.4x speedups over state-of-the-art retrieval baselines (ArkVale and ShadowKV) while maintaining near-lossless accuracy."
+      ],
+      "weaknesses": [
+        "Lack of detailed sensitivity analysis for the correction threshold parameter $\\tau$. It would be beneficial to see a Pareto frontier curve showing the accuracy-efficiency trade-off under different values of $\\tau$.",
+        "Limited evaluation on larger models (e.g., 70B+). Since the KV cache size grows significantly with model size, evaluating whether CPU-GPU bandwidth remains the bottleneck or if speculative retrieval scales perfectly to larger parameters would strengthen the system-level claims.",
+        "The analysis is confined to single-GPU execution (PCIe Gen4). A discussion or experimental projection on how newer PCIe standards (Gen5) or multi-GPU pipeline/tensor-parallel settings would affect the proposed co-design would make the work more comprehensive."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 8,
+      "strengths": [
+        "An excellent algorithm-system co-design that addresses the key efficiency bottleneck of KV retrieval methods (i.e., latency from CPU-GPU data transfers and selection overhead) without sacrificing accuracy.",
+        "The proposed 'speculative retrieval' leverages high temporal similarity between query vectors of adjacent decoding steps to shift selection and recall out of the critical path, which is a novel and intuitive idea.",
+        "The system-side optimizations (hybrid CPU-GPU layouts to maintain contiguous memory transfers and double-buffering) directly target the PCIe bandwidth bottleneck and show significant practical engineering merit.",
+        "Strong empirical results across diverse, modern LLMs (including DeepSeek-R1 reasoning models and Qwen-2.5) on complex datasets (LongBench v2, LongGenBench, MATH500, GPQA, etc.), demonstrating up to 13.7x speedup over state-of-the-art KV retrieval baselines with near-lossless accuracy."
+      ],
+      "weaknesses": [
+        "The choice of the cosine similarity threshold $\\tau$ (e.g., 0.8 for long-input, 0.9 for long-generation) is crucial for balancing accuracy and efficiency. However, the paper lacks a systematic sensitivity analysis showing how varying $\\tau$ affects the trade-off between the correction frequency (which hurts speedup) and model performance.",
+        "The evaluation is restricted to a single-GPU (Nvidia A100 40GB) scenario with CPU offloading. In practice, long-context serving of large models (e.g., 70B+) often requires multi-GPU setups (Tensor Parallelism). It is unclear how the proposed CPU-GPU hybrid layouts and streamed recall scale when the KV cache is partitioned across multiple GPUs.",
+        "There are minor formatting issues and typos: for instance, on page 1, 'diverse tasks an have been' should be 'diverse tasks and have been'; in Table 1, the formula under ShadowKV is poorly aligned."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Strong motivation backed by empirical analysis: The paper identifies high query similarity across adjacent decoding steps and provides a clear latency breakdown of SOTA retrieval methods, successfully motivating the speculative retrieval design.",
+        "Comprehensive algorithm-system co-design: By combining speculative retrieval and fine-grained correction (algorithmic) with hybrid NHD/HND layouts and double-buffered streamed recall (system-level), FreeKV achieves significant acceleration without hurting accuracy.",
+        "Excellent evaluation: The paper evaluates on realistic long-context benchmarks (LongBench v2, LongGenBench) and advanced reasoning models (DeepSeek-R1-Llama/Qwen) on complex reasoning datasets (MATH500, AIME24, GPQA).",
+        "Impressive speedups: Achieving up to 13.7x speedup over ArkVale and up to 8.4x over ShadowKV while maintaining near-lossless accuracy is highly impressive and practical."
+      ],
+      "weaknesses": [
+        "Hyperparameter sensitivity analysis is limited: The correction threshold \\tau is a crucial parameter balancing accuracy and efficiency. The paper lacks a detailed sensitivity analysis showing how different values of \\tau impact the trade-off between latency and model performance across different tasks.",
+        "Scalability with larger batch sizes: Although evaluated on batch sizes of 1, 2, and 4, CPU-to-GPU bandwidth during recall could become a major bottleneck as the batch size scales further (e.g., 8, 16, or 32). An analysis of maximum throughput or scaling behavior under high-concurrency settings would make the system evaluation more complete.",
+        "Lack of detailed GPU memory overhead breakdown: Although FreeKV maintains an O(B) GPU memory footprint, the system requires extra memory for page summaries, double buffers, and the page cache. Quantifying this exact overhead compared to other offloading baselines would help clarify the memory footprint trade-offs."
+      ]
+    }
+  }
+}

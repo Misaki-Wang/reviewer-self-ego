@@ -1,0 +1,92 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Insightful problem identification: The paper clearly articulates why block-diffusion LLMs become compute-bound rather than memory-bound under serving workloads with concurrent requests, pinpointing that ~90% of intra-block token computation per denoising step is redundant.",
+        "Novel and elegant predictor: The discovery that the attention importance delta between Layer 1 and Layer 0 (\\Delta I) serves as an effective, training-free decodability predictor is compelling, well-justified conceptually (common-mode rejection of static Layer 0 noise), and validated across different benchmarks and model architectures.",
+        "Principled system and algorithm design: The framework addresses practical architectural constraints by incorporating AR-context preservation, placeholder integrity, dynamic budgeting (combining historical moving averages with variance-based thresholding), and a neighbor-aware stability criterion for intra-block KV caching.",
+        "Comprehensive full-stack implementation and evaluation: Implemented as an extension to LMDeploy with custom Triton kernels handling ragged PagedAttention, state compaction, and memory scheduling. Evaluated on multiple competitive benchmarks (GSM8K, Math500, HumanEval, MBPP, IFEval) and real-world workloads (ShareGPT, WildChat, MATH), achieving up to 2.32x (B=32) and 3.52x (B=64) end-to-end throughput improvements without quality loss."
+      ],
+      "weaknesses": [
+        "Idealized theoretical assumptions: The safety derivation in Appendix D assumes Gaussianity for the importance delta distributions to apply Chernoff bounds. While Figure 14 supports this empirically, actual attention statistics often have heavier tails.",
+        "Evaluation scope limited to single-GPU serving: All throughput experiments are conducted on a single NVIDIA A100-80GB GPU. Evaluating the system under multi-GPU tensor parallelism or pipeline parallelism would clarify how token gathering and ragged execution interact with cross-GPU communication primitives."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Compelling insight into DLLM decoding dynamics: The paper identifies that block-diffusion decoding shifts the inference bottleneck from memory-bound to compute-bound, and reveals that the layer-wise attention delta (Layer 1 minus Layer 0) strongly correlates with token decodability.",
+        "Comprehensive and practical systems implementation: Rather than merely simulating FLOP reductions, the authors integrated FOCUS into the production-grade LMDeploy engine with custom Triton kernels (handling ragged tensors, fused state compaction, and sparse KV cache management).",
+        "Strong and rigorous empirical results: Thorough benchmarking across reasoning (GSM8K, Math500), coding (HumanEval, MBPP), and instruction following (IFEval) demonstrates that FOCUS preserves or enhances model quality while delivering up to 2.32x (at B=32) and 3.52x (at B=64) wall-clock throughput speedups over LMDeploy.",
+        "Well-structured ablations and analytical justification: The paper provides clear validation through Top/Random/Bottom candidate selection comparisons, neighbor-aware KV cache ablations, and a signal detection theory formulation modeling eviction safety."
+      ],
+      "weaknesses": [
+        "Early-layer overhead floor: Because token eviction requires computing Layer 0 and Layer 1 Query/Key projections for the full block at every denoising step, there is an inherent upper bound on the achievable computational savings, especially for shallow architectures.",
+        "CUDA Graph incompatibility under dynamic eviction: As noted in Appendix F.1, CUDA Graphs had to be disabled for end-to-end throughput runs due to buffer copying overheads with dynamic shapes, which represents a practical engineering trade-off in production environments.",
+        "Scope of evaluated model families: Evaluations focus primarily on Block-Diffusion architectures (SDAR-8B and LLaDA2.0-mini). Although Appendix B shows the delta correlation holds on full-diffusion LLaDA, end-to-end system speedup on non-block diffusion architectures is left unexplored."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Compelling problem formulation: The paper clearly identifies and articulates the compute-bound nature of block-diffusion LLM inference at scale, demonstrating that ~90% of token computations per diffusion step are wasted on non-decodable tokens.",
+        "Novel and sound empirical insight: Uncovering the importance delta (difference between Layer 1 and Layer 0 incoming attention) as an accurate, training-free decodability predictor is original and well-supported by extensive empirical analysis across benchmarks and architectures.",
+        "Substantial engineering effort and end-to-end system realization: Rather than relying solely on theoretical FLOP counts, FOCUS is implemented as a full serving extension within LMDeploy using custom Triton kernels for ragged attention, memory compaction, and dynamic scheduling.",
+        "Comprehensive evaluation and ablations: The evaluation demonstrates consistent throughput speedups (up to 2.32x at B=32 and 3.52x at B=64) on realistic workloads (ShareGPT, WildChat, MATH) while maintaining or slightly improving downstream task accuracy across math, code, and instruction-following benchmarks."
+      ],
+      "weaknesses": [
+        "Evaluation is restricted to block-diffusion architectures: Although the correlation analysis in Appendix B suggests the importance delta signal exists in full-diffusion models like LLaDA-8B, the end-to-end system and throughput evaluations are strictly confined to block-diffusion models (SDAR and LLaDA2.0).",
+        "System-level compromises in production environments: As noted in Appendix E.3.4 and F.1, running FOCUS required disabling LMDeploy's multi-loop optimization (forcing num_loops=1) and disabling CUDA Graphs during throughput runs due to dynamic tensor shapes and buffer copy overheads, which could affect competitiveness in production pipelines optimized around continuous CUDA graph capture.",
+        "Single hardware platform: All empirical throughput and latency measurements are conducted solely on a single NVIDIA A100 GPU. Evaluating performance across different hardware configurations with differing arithmetic intensity balances (such as H100 or H200) would strengthen the universality of the compute-bound claims.",
+        "Stylized theoretical model: The theoretical analysis in Appendix D models attention deltas using Gaussian null and alternative distributions to derive exponential error bounds via Chernoff's inequality. While conceptually intuitive, this assumption is idealized and does not strictly capture the complex statistical properties of transformer attention."
+      ]
+    }
+  },
+  "v2": {
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Compelling and original core insight: The paper makes a perceptive shift from memory-centric KV cache eviction (common in autoregressive LLMs) to compute-centric query token eviction within blocks for Diffusion LLMs (DLLMs). The discovery that the early-layer attention importance delta (Layer 1 minus Layer 0) strongly correlates with token decodability is novel, intuitive, and thoroughly validated.",
+        "Comprehensive and rigorous evaluation: The method is validated across diverse model architectures (dense SDAR-8B and sparse MoE LLaDA2.0-mini), across multiple benchmarks spanning reasoning (GSM8K, Math500, MATH), coding (HumanEval, MBPP), and instruction following (IFEval), and across multiple hardware architectures (A100 and H100 GPUs).",
+        "Solid systems-level contribution: Rather than relying solely on theoretical FLOP reductions, the authors implemented custom Triton kernels (ragged paged attention, fused state compaction) within a production-grade inference engine (LMDeploy), demonstrating real wall-clock throughput speedups (up to 2.32x at B=32 and 3.52x at B=64).",
+        "Thorough ablation and baseline controls: The paper features robust control experiments, including comparing Top-K vs Random vs Bottom-K selection, ablating the Neighbor-Aware Stability Criterion for KV caching, and implementing Fast-dLLM v2 both in standalone form and within the identical LMDeploy runtime for fair comparison."
+      ],
+      "weaknesses": [
+        "Underperformance in low-concurrency / batch-size-1 regimes: As shown in Table 7, at batch size 1, the scheduling overhead and lack of compute saturation can result in a minor throughput regression compared to the baseline (e.g., on MATH, dropping from 122.5 to 89.6 tokens/s for SDAR). While the authors acknowledge this limitation in Appendix F.2, an automated dynamic switching policy between eviction and dense decoding is left unimplemented.",
+        "Conservatism of structural constraints: The 'Placeholder Integrity' constraint requires retaining all unprocessed masked tokens preceding the highest-indexed selected candidate. In cases where the decodable candidate is located near the end of a block, this significantly dampens the achievable eviction ratio.",
+        "Incompatibility with multi-loop optimizations: Enabling FOCUS currently necessitates disabling LMDeploy's host-overhead-amortizing multi-loop execution (`num_loops = 1`) due to host-synchronous state dependencies, leaving in-loop GPU-native state updates to future work.",
+        "Idealized theoretical assumptions: The safety derivation in Appendix D assumes a standard Gaussian distribution for both background and signal attention deltas. While empirical histograms in Figure 14 approximate this reasonably well, real-world attention dynamics often exhibit skewness and heavier tails."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Compelling and timely problem formulation: The paper clearly identifies that block-diffusion LLM decoding shifts inference from memory-bound to compute-bound due to large query blocks, where ~90% of per-step FLOPs are wasted on non-decodable tokens.",
+        "Novel and insightful finding: The authors discover that the attention importance delta between Layer 1 and Layer 0 serves as an effective, training-free predictor for token decodability, eliminating static positional/surface noise and isolating semantic emergence early in the forward pass.",
+        "Principled system design: The proposed structural constraints (AR-Context Preservation, Placeholder Integrity, and Neighbor-Aware Stability Criterion for intra-block KV caching) thoughtfully preserve autoregressive dependencies and cache consistency for pre-trained backbones.",
+        "Thorough systems implementation and extensive evaluation: The system is realized with custom Triton kernels integrated into LMDeploy, demonstrating robust throughput improvements (up to 2.32x at B=32 and 3.52x at B=64) on both A100 and H100 GPUs across multiple benchmarks (GSM8K, Math500, HumanEval, MBPP, IFEval) without generation quality loss."
+      ],
+      "weaknesses": [
+        "Ineffectiveness in low-batch/single-stream latency settings: In batch-size-1 scenarios (Table 7), the compute savings are limited and the scheduler overhead is less amortized, resulting in negligible improvements or slight slowdowns on complex reasoning tasks.",
+        "Scheduling trade-off with multi-loop execution: As detailed in Appendix E.3.4, FOCUS necessitates setting num_loops=1 to maintain strict per-step state synchronization and cache consistency, disabling LMDeploy's built-in multi-loop kernel launch amortization.",
+        "Idealized theoretical modeling: The theoretical safety bound in Appendix D relies on Gaussian approximations for both non-decodable and decodable delta distributions, which, while providing conceptual intuition via Signal Detection Theory, may not fully capture empirical non-Gaussian/skewed behavior."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Identifies a critical bottleneck in Diffusion Large Language Models (DLLMs): while standard autoregressive models are memory-bound during decoding, block-diffusion models become compute-bound at scale due to processing entire blocks while decoding only ~10% of tokens per step.",
+        "Presents an original and insightful discovery that the early-layer attention importance delta (Layer 1 minus Layer 0) strongly correlates with token decodability, providing an effective training-free heuristic for early token eviction.",
+        "Comprehensive system design and implementation within LMDeploy, featuring custom Triton kernels for ragged memory operations, dynamic budgeting, CUDA graph hybrid bucketization, and a neighbor-aware stability criterion for intra-block KV caching.",
+        "Thorough empirical evaluation across multiple benchmarks (mathematical reasoning, code generation, instruction following) and architectures (dense SDAR-8B and MoE LLaDA2.0-mini), demonstrating up to 3.52x throughput improvement while preserving or slightly improving quality.",
+        "Extensive ablations and appendices covering theoretical safety analysis, hardware generalizability (A100 and H100), and head-to-head comparisons against Fast-dLLM v2 under controlled engine settings."
+      ],
+      "weaknesses": [
+        "The system is primarily beneficial in high-concurrency (large batch size) regimes; at batch size 1, scheduling overhead and eager prefix execution offset FLOP savings, leading to neutral or degraded performance on certain benchmarks (e.g., MATH).",
+        "The explanation for why FOCUS occasionally improves generation quality over baseline at relaxed confidence thresholds is mostly empirical and speculative, lacking a formal causal proof.",
+        "While the attention correlation is shown to hold for full-sequence diffusion models, the end-to-end FOCUS engine implementation and exact intra-block KV caching are specific to the block-diffusion paradigm."
+      ]
+    }
+  }
+}

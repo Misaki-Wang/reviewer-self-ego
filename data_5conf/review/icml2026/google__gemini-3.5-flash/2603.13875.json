@@ -1,0 +1,96 @@
+{
+  "v1": {
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Introduces a novel and conceptually elegant approach (GradMem) that frames context memorization as a test-time optimization problem on prefix memory tokens.",
+        "Demonstrates a clear compute-capacity trade-off: unlike forward-only memory models, GradMem can improve its memory capacity at test-time simply by performing more gradient steps.",
+        "Provides a rigorous mathematical and empirical analysis of compute efficiency, detailing the break-even points for latency and throughput on physical hardware.",
+        "Offers interesting insights into selective compression, showing that the model naturally prioritizes memorizing 'value' tokens over 'key' tokens on retrieval benchmarks."
+      ],
+      "weaknesses": [
+        "The meta-training phase is highly resource-intensive due to the need for second-order gradients (backpropagating through the unrolled optimization steps), which limits the scalability of training to very large models or extremely long contexts.",
+        "Performance on natural language tasks is somewhat mixed; for example, on the more complex bAbI QA3 task, GradMem lags behind existing recurrent baselines like RMT and ARMT.",
+        "The method's success is highly dependent on meta-learning, as shown by the poor performance of the 'w/o meta-learning' ablation, making it difficult to apply directly to arbitrary off-the-shelf LLMs without expensive fine-tuning."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Novel perspective on test-time training: It treats the embeddings of prefix memory tokens as writable states and optimizes them via test-time gradient descent while keeping the base LLM frozen, which cleanly separates the memory from the model parameters.",
+        "Strong synthetic performance: On the associative KV-retrieval benchmark, GradMem significantly outperforms forward-only memory writing (like RMT) under the same memory footprint, and its retrieval capacity scales gracefully with more test-time gradient steps.",
+        "Deep analysis of computational trade-offs: The paper includes a thorough break-even analysis for when GradMem is compute-efficient and addresses the systems bottleneck of second-order backpropagation by implementing optimized custom HVP kernels.",
+        "Good exploration of test-time compute scaling: The ability to boost downstream performance at inference time simply by increasing the number of evaluation steps (Keval > Ktrain) is a highly desirable property."
+      ],
+      "weaknesses": [
+        "Scaling limitations in training: Because the training process requires backpropagating through the unrolled inner optimization loop (requiring second-order gradients), the computational and memory overhead of training is very high. This limits experiments to small models (e.g., GPT-2 124M, Pythia 160M) and relatively short contexts.",
+        "Mixed performance on natural language tasks: On natural language datasets like bAbI, SQuAD, and Language Modeling, GradMem often performs worse than or comparable to standard recurrent baselines like Mamba or ARMT, indicating that the task-agnostic reconstruction objective may not yet translate optimally to downstream task performance.",
+        "High test-time writing latency: Running gradient descent on the context at test-time is significantly slower than a single forward pass, which restricts the practical utility of GradMem to scenarios where the context is heavily reused across many subsequent queries.",
+        "Lack of comparison with First-Order Meta-Learning: While the authors demonstrate that optimization without meta-learning fails, they do not evaluate whether First-Order MAML (FOMAML) could perform reasonably. Evaluating FOMAML would be highly relevant since it avoids second-order gradients and could resolve some training-time scalability bottlenecks."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "An elegant and novel formulation that uses test-time gradient descent to write context into a small set of prefix memory tokens, enabling a trade-off between test-time compute (gradient steps) and memory quality.",
+        "Comprehensive synthetic evaluations on associative KV-retrieval, demonstrating that GradMem significantly outperforms forward-only memory baselines (RMT, ARMT) and exhibits strong capacity scaling with more optimization steps.",
+        "Insightful analysis of the inner loop behavior (Figure 8), demonstrating that the meta-learned memory selectively prioritizes storing values over keys, behaving as an active, loss-driven compressor.",
+        "The authors address the computational complexity of meta-learning with unrolled gradients by evaluating several double-backward optimization techniques (e.g., Flash HVP)."
+      ],
+      "weaknesses": [
+        "High training complexity and cost: The requirement of backpropagating through the unrolled optimization steps (requiring double-backwards) significantly increases GPU memory usage and training runtime. This makes meta-training hard to scale to larger models or very long context lengths.",
+        "Limited gains on real-world NLP tasks: While synthetic results are impressive, the performance on natural language benchmarks (bAbI, Short SQuAD, LM) is less convincing. For instance, Mamba-130m outperforms GradMem on bAbI QA3 by a large margin, and GradMem only shows marginal improvements over RMT on other tasks.",
+        "Unclear generalization of the meta-learned initialization: The paper lacks experiments showing whether the meta-learned memory initialization ($M_0$) and model weights ($\\theta$) can generalize to unseen tasks without undergoing the expensive meta-training phase again.",
+        "The practical utility of the compute-accuracy trade-off at inference is limited by the high initial 'WRITE' latency compared to standard KV-caching, requiring a very high number of subsequent queries ($N$) to amortize the cost."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "The paper introduces a novel and conceptually clean framework (GradMem) that bridges test-time training (TTT) and prefix memory compression, treating memory tokens as parameters optimized via self-supervised reconstruction.",
+        "Comprehensive evaluation on both synthetic associative retrieval (KV-retrieval) and diverse natural language processing tasks (bAbI, SQuAD, WikiText-103), demonstrating robust transferability.",
+        "The exploration of scaling test-time compute (increasing $K_{eval}$ at inference) is a valuable finding, showing that optimization-based memory can trade test-time computation for better compression fidelity.",
+        "Excellent attention to engineering and practical bottlenecks, specifically addressing the double-backward overhead of meta-learning through custom CUDA and PyTorch double-backward attention kernels (Flash HVP).",
+        "Highly detailed appendix containing implementation details, minimal code, hyperparameter tables, and thorough ablation studies (e.g., input-level vs. per-layer memory)."
+      ],
+      "weaknesses": [
+        "High computational cost of training: Backpropagating through unrolled gradient steps (MAML style) requires double-backward, which is computationally expensive and memory-intensive, limiting the feasibility of training on very long sequences or larger models from scratch.",
+        "Limited context lengths and scale in NLP experiments: While the Llama-3.2 results are a promising step, most downstream evaluations (bAbI, SQuAD) are performed on very short contexts (less than 300 tokens), which does not fully reflect real-world long-context scenarios.",
+        "Task-dependent and sometimes marginal gains on NLP tasks: In Table 2, GradMem is competitive but does not consistently outperform forward-only baselines (like RMT or ARMT) across all NLP benchmarks (e.g., bAbI QA3 and Wikitext-103 language modeling)."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "A novel and conceptually clean framework that uses per-sample test-time optimization of input-level prefix memory tokens, separating memory from model weights.",
+        "Demonstrates that loss-driven gradient writing provides iterative error-correction, significantly outperforming forward-only associative or recurrent writing mechanisms of the same state size.",
+        "The ability to trade compute for compression at inference time by scaling up the number of test-time gradient steps (K_eval > K_train) without any parameter updates or model fine-tuning.",
+        "Thorough and rigorous empirical evaluation, encompassing synthetic associative retrieval, natural language question answering (bAbI, SQuAD), language modeling, and scaling behavior up to 3B-parameter Llama models.",
+        "Excellent technical execution in addressing the engineering challenges of meta-learning, specifically by introducing and benchmarking memory-efficient double-backward implementations (Flash HVP) to mitigate the overhead of higher-order gradients."
+      ],
+      "weaknesses": [
+        "High computational and memory overhead during training due to backpropagating through unrolled optimization steps (second-order gradients), which restricts training to a small number of inner-loop steps (K <= 5).",
+        "Limited scalability to extremely long contexts during training, as the need to compute double-backwards over attention limits the sequence length and model sizes that can be practically meta-trained.",
+        "High initial write latency, meaning that the computational benefit of GradMem is only realized when a single context is repeatedly queried (large N), making it less efficient for single-query workloads."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Novel and elegant concept: The paper successfully bridges test-time training (TTT) and memory-augmented Transformers by using test-time gradient descent on prefix memory tokens via a self-supervised reconstruction loss.",
+        "Strong empirical results on capacity: On synthetic associative key-value retrieval, GradMem significantly outperforms forward-only memory writing mechanisms (like RMT) under the same memory budget, showing that gradient-based writing is more capacity-efficient.",
+        "Test-time compute scaling: The ability to scale up memory capacity at inference time by simply increasing the number of gradient steps (without any parameter updates or fine-tuning) is a highly desirable and practical property.",
+        "Systems-level contribution: To mitigate the extreme memory and runtime overhead of MAML-style second-order training, the authors implement custom double-backward passes for attention, showing a strong commitment to addressing the practical challenges of their method.",
+        "Thorough evaluation and analysis: The paper includes a detailed analysis of the compute-efficiency trade-off, latency comparisons on GPUs, state size utilization, and scaling tests with modern pretrained models like Llama-3.2 (1B and 3B)."
+      ],
+      "weaknesses": [
+        "Inherent meta-training overhead: Even with custom double-backward optimizations, training with second-order gradients (backpropagating through unrolled gradient steps) is computationally intensive and scales poorly, making it difficult to meta-train on very long contexts or massive models from scratch.",
+        "Underperformance in high-information-density contexts: On tasks like bAbI QA3 which require memorizing multiple facts amidst noise, GradMem lags behind models like Mamba and ARMT, suggesting that the model-level reconstruction objective may discard crucial fine-grained details when the state size is highly compressed.",
+        "Task-dependent gains at inference: The benefits of increasing the number of inference-time gradient steps ($K_{eval}$) are highly task-dependent. While it yields substantial improvements on SQuAD, it provides minimal to no gains on bAbI and language modeling tasks.",
+        "Evaluation on relatively short contexts: Most experiments in the main text are evaluated on short sequences (under 1k tokens), and the scaling experiments on Llama-3.2 (Table 9) only test reconstruction up to 64 tokens, leaving the performance on extremely long context regimes (e.g., >32k tokens) largely unexplored."
+      ]
+    }
+  }
+}

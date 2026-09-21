@@ -1,0 +1,81 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Clear and well-motivated problem: enabling error correction in pretrained masked diffusion LMs is practically important, especially in few-step regimes.",
+        "The star-shaped reformulation is simple, compatible with pretrained MDLM checkpoints, and the paper is transparent that it reduces to ReMDM under a specific σt choice — an honest and useful connection rather than an overclaimed novelty.",
+        "The empirical analysis (Section 4) is genuinely informative: the two-phase hypothesis (structure-building vs. refinement), the t_on ablation (Figure 2), and the step-to-step similarity diagnostics (Figure 1) give real insight into why and when remasking helps.",
+        "Strong ablation coverage: ReMDM hyperparameter sensitivity (C.1), loop size (C.2), predictor temperature (C.3), and error-predictor capacity (4.5), including the practically valuable finding that head-only training of the predictor suffices.",
+        "Breadth of evaluation: unconditional OWT generation, integration into Dream-Instruct 7B on seven downstream benchmarks, and conditional code generation on Conala; code and implementation details are provided, with an honest limitations section (no insert/delete, separate training stage)."
+      ],
+      "weaknesses": [
+        "Limited core novelty: the sampler itself is admitted to be mathematically equivalent to a ReMDM configuration, and error/targeted remasking is closely related to prior predictor-corrector and informed-corrector work (Lezama et al., 2023; Zhao et al., 2024b). The main new element is the learned error predictor applied to remasking, which is an incremental contribution.",
+        "Suspected data issue in Table 1: the Star-loop row is numerically identical to ReMDM-loop_η=0.1 across all nine cells (e.g., 18.1/34.9/44.7, 44.7/26.7/42.1, 67.7/20.7/39.3). If intentional (e.g., claiming exact equivalence at optimal η), this must be justified; as presented it undermines confidence in the experimental bookkeeping.",
+        "The paper criticizes ReMDM for requiring extensive hyperparameter search, yet G-Star introduces its own sensitive knobs (t_on, τ_remask, α_on, loop size), and Appendix C.3 shows non-monotonic sensitivity to temperature — the claimed robustness advantage is only partially realized.",
+        "The error-predictor training signal is defined against ground-truth tokens on training data, creating a distribution shift at inference where there is no ground truth; the paper does not analyze this mismatch or how predictor accuracy transfers to self-generated text.",
+        "Evaluation metrics are weak in places: code generation is judged only by conditional perplexity under Qwen2.5-Coder with no functional-correctness (pass@k) measure, and the Dream-Instruct gains are small (+1.3 MMLU, +1.8 GPQA) with no variance or significance reported. No human evaluation for text quality.",
+        "Quality–diversity trade-off is pronounced: G-Star variants show substantially lower diversity (DIV ~26–36) than MDLM/ReMDM (~38–48), and at 512 steps the best ReMDM-loop configuration (67.7 MAUVE) matches or exceeds G-Star; the advantage is essentially confined to very low-step regimes, which narrows the practical impact.",
+        "Presentation issues reduce polish: incomplete sentence in Section 4.2 ('...between adjacent steps,.'), truncated section title '3.2 LEARNED ERROR-TARGETED', and the τ_remask=0 setting in the Dream experiments seems inconsistent with the reported T≈4–32 optimum in C.3 without explanation."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "The two-phase analysis (Section 4.2) is a genuinely insightful empirical contribution: identifying that unguided star-shaped remasking destabilizes early generation but is effective in late-stage refinement, with a clean ablation over the activation time t_on (Figure 2) that motivates the hybrid design.",
+        "Honest theoretical positioning: the authors explicitly derive the connection to ReMDM (Proposition 1, showing the star-shaped sampler is ReMDM with sigma_t = 1 - alpha_{t-1}) and prove the VLB simplifies to the standard masked diffusion objective (Appendix A), which credibly justifies reuse of pre-trained MDLM weights.",
+        "The learned error predictor is trained on the diffusion model's actual error distribution rather than synthetic uniform noise, directly addressing a well-articulated weakness of prior refinement approaches, and the robustness analysis across out-of-domain datasets (Table 3, AUC-ROC >= 0.90) supports the claim that the predictor captures intrinsic diffusion-model artifacts.",
+        "Thorough computational accounting (Appendix D) with NFE and wall-clock measurements, showing the parameter-efficient head-only variant (12B,H) closely matches the fully fine-tuned variant (Figure 4b), which strengthens the plug-and-play usability claim.",
+        "Extensive ablations (loop size, predictor temperature, predictor capacity) and an honest limitations section covering the in-place-only restriction, the sequential training pipeline, and lack of throughput optimization.",
+        "Evaluation spans multiple regimes: unconditional text (OWT), large-scale instruction-tuned 7B model (Table 1), and conditional code generation (Table 2), with Pareto-frontier comparisons that avoid single-point evaluations of temperature-sensitive methods."
+      ],
+      "weaknesses": [
+        "Limited novelty of the core sampler: by the paper's own Proposition 1, the star-shaped transition is mathematically equivalent to ReMDM under a specific schedule, so the sampling contribution reduces to a schedule choice plus phase analysis; the residual novelty rests mainly on the error predictor, which is closely paralleled by concurrent work (Huang et al., 2025 trains a confidence-prediction module for detecting errors; Kim et al., 2025 learns remasking).",
+        "A conceptual weakness in the error predictor's training signal: errors are labeled as disagreement between the sampled candidate and ground truth x0 (Algorithm 1, y_i = I(x_hat0,i != x0,i)). In text, a sampled token differing from the ground truth is not necessarily an error (legitimate multi-modality), so the predictor may be trained to reward mode-collapsing, high-frequency predictions rather than true errors; this circularity is not analyzed.",
+        "Evaluation relies heavily on proxy metrics (generative PPL via GPT-2 Large, MAUVE, n-gram diversity) rather than likelihood or human evaluation; the code-generation claim rests solely on conditional perplexity under Qwen2.5B-Coder rather than execution-based metrics (pass@k), which substantially weakens the evidence for the 'code generation' claim.",
+        "Downstream gains on Dream-Instruct 7B (Table 1) are small and reported without error bars or significance testing: +0.1 on GSM8K and +1.2 on GPQA could plausibly be noise, and the reproduced baselines deviate noticeably from published numbers (e.g., IFEval 56.4 vs. 62.5, GPQA 31.0 vs. 33.0), complicating interpretation of the improvements.",
+        "Some internal inconsistencies: the large-scale configuration sets the error predictor temperature to zero (Appendix E.3) despite the paper's own recommendation against extreme low temperatures (Appendix G), and per-benchmark alpha_on values (Table 5) suggest nontrivial per-task tuning that is not fully accounted for in the 'no manual tuning' advantage claimed against ReMDM.",
+        "Several design choices appear tuned on the same OWT evaluation distribution used for headline results (t_on, tau_remask, tau_denoiser), and the claimed 'no hyperparameter tuning' advantage of G-Star over ReMDM is somewhat undercut by Appendix G's own recommendation to tune the activation timestep per task."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The method is practical and plug-and-play: it works with frozen, off-the-shelf masked diffusion models (MDLM, Dream-Instruct 7B) and requires training only a lightweight classification head, which is a genuinely useful engineering contribution.",
+        "The theoretical analysis (Claim 1 and Proposition 1) is clean and honest: the VLB derivation and the proof that the star-shaped sampler equals ReMDM at σt = 1 − αt−1 give a clear unification with prior work rather than an opaque heuristic.",
+        "The empirical analysis is unusually thorough for this area: ablations on activation time t_on, loop size, predictor temperature, predictor capacity (1B vs 12B, head-only vs full fine-tuning), out-of-domain generalization of the error predictor (Table 3), and careful NFE/wall-clock overhead accounting (Table 4).",
+        "Evaluation at scale on Dream-Instruct 7B across seven benchmarks, plus a code-generation task, demonstrates the method transfers beyond small MDLM backbones, and the honest reporting of reproduction discrepancies in Table 1 is commendable.",
+        "The limitations section (Appendix H) candidly identifies the in-place-substitution restriction, the sequential training-stage complexity, and the lack of throughput optimization."
+      ],
+      "weaknesses": [
+        "The core sampling novelty is limited by the authors' own Proposition 1: the star-shaped sampler is mathematically equivalent to ReMDM under a specific schedule, and pure star-shaped sampling 'exhibits poor performance and often leads to degenerate text' (Sec. 4.2). What remains is a hybrid MDLM/ReMDM schedule plus a learned error detector, which is close in spirit to concurrent learned-refinement work (Kim et al. 2025; Huang et al. 2025) that the paper discusses only briefly.",
+        "A fundamental conceptual flaw in the error predictor's training signal: labels yi = I(x̂0,i ≠ x0,i) conflate 'error' with 'differs from the single ground-truth sequence.' For open-ended text, a sampled token differing from x0 is often a valid alternative completion, not a mistake. This likely explains the systematic diversity loss the authors report (Figs. 6–7), and the framework structurally cannot distinguish diversity reduction from genuine error correction without further evidence that is not provided.",
+        "Evidence quality is weak for the central claims. Unconditional text quality rests on GPT-2-based PPL, DIV, and MAUVE with quite low absolute MAUVE values; these metrics are known to be unreliable and to reward low-diversity, locally fluent text. Code generation is evaluated only by conditional perplexity under Qwen2.5B-Coder, not execution accuracy (e.g., pass@k), so the claim of effectiveness for structured generation is not well supported.",
+        "Downstream gains in Table 1 are small (typically +0.1 to +1.9 points) with no error bars, seeds, or significance testing, and the reproduced IFEval baseline (56.4) is 6.1 points below the published number, weakening confidence in the evaluation pipeline; G-Star still falls below the originally reported score on that benchmark.",
+        "The claimed headline efficiency result (3× speedup, 128 vs 512 steps) conflates step budget with quality: the comparison is favorable only at the operating point shown on the Pareto front, and the guided configuration still incurs ~50% latency overhead or an additional full-depth pass, which the abstract's 'negligible computational and memory overhead' framing underplays.",
+        "The paper's narrative of a 'novel star-shaped paradigm' overstates the contribution given the admitted equivalence to ReMDM and the empirical finding that the paradigm is only usable in a restricted final phase; a more modest framing (targeted remasking schedule + learned error head for ReMDM) would be more accurate."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "The paper is well organized and presents a convincing empirical story: the two-phase analysis (Section 4.2) of when star-shaped remasking helps vs. hurts is a genuinely useful insight, supported by clear evidence (Figure 1 similarity/PPL trajectories, Figure 2 transition-point ablation).",
+        "The theoretical treatment is clean: Claim 1's VLB derivation (Appendix A.1) is essentially correct and Proposition 1 (equivalence to ReMDM at sigma_t = 1 - alpha_{t-1}) is a valuable clarification that positions the sampler relative to prior work rather than overselling it.",
+        "Training the error predictor on errors actually made by the diffusion model (Algorithm 1), rather than uniform noise, is a sensible and well-motivated design choice, and the ablations are thorough: predictor capacity (Fig. 4b), out-of-domain robustness of the predictor (Table 3), loop-size and temperature sweeps (Appendix C), and latency/NFE accounting (Table 4).",
+        "Evaluation goes beyond a single operating point: Pareto fronts over denoiser temperature (Fig. 4a) and comparison at reduced step budgets (128 vs. 512) directly address the practical claim of sample-efficiency, and the method is validated at scale on a 7B instruction-tuned model plus a code-generation task.",
+        "The limitations section (Appendix H) is honest and specific (no insert/delete operations, sequential training stage, no aggressive throughput optimization), and a reproducibility statement with code, datasets, and detailed hyperparameters is provided."
+      ],
+      "weaknesses": [
+        "The sampler itself is shown by the authors to be mathematically equivalent to ReMDM under a specific schedule (Proposition 1). This substantially narrows the core novelty to the learned error predictor, which is closely followed by concurrent work (Kim et al., 2025; Huang et al., 2025) and is conceptually reminiscent of earlier predictor-corrector schemes (Lezama et al., 2023). The contribution is more incremental than the framing suggests.",
+        "Evaluation quality is uneven. Text quality is measured only via GPT-2 PPL, DIV, and MAUVE — no human evaluation and no likelihood-based metric. Code generation (Table 2) is judged solely by conditional perplexity under Qwen2.5B-Coder, with no execution-based metric (pass@k), which is the standard for Conala/HumanEval-style claims; conditional PPL alone is a weak proxy for code correctness.",
+        "No statistical significance or variance is reported for the downstream benchmark gains in Table 1 (+0.1 to +2.9 points), and the reproduced IFEval baseline (56.4) still falls below the published number (62.5); with single-run evaluations and no seeds, some improvements may not be robust.",
+        "There is a potential circularity in hyperparameter selection: the optimal transition point t_on (~0.3, Section 4.2) and temperatures are tuned on the same OWT data and the same metrics (MAUVE/PPL) used to report final results, without a held-out tuning protocol.",
+        "An internal inconsistency: Appendix G explicitly recommends a non-zero error-predictor temperature, yet the large-scale Dream-Instruct experiments set the predictor temperature to 0 (Appendix E.3), which the paper itself warns may not be ideal — raising questions about whether the 7B results are from a well-tuned configuration.",
+        "Several details are under-explained or odd: Table 2 shows non-monotonic MDLM performance (128 steps worse than 64) without comment; Table 3 reports perplexity with a '⩽' sign; the error labels y in Algorithm 1 are defined against ground truth only when x0 is known, and the mismatch between discrete sampling of x̂0 and the continuous KL relaxation in Claim 1 is glossed over.",
+        "The claim that the error predictor adds 'negligible' overhead is partially contradicted by Table 4: the robust 12B configuration increases latency by ~50%, and only the weakest predictor variant (1B) is cheap — but Section 4.5 shows 1B is significantly less effective, so the favorable cost–quality trade-off claim relies on the head-only variant whose training details at 7B scale are given only briefly."
+      ]
+    }
+  }
+}

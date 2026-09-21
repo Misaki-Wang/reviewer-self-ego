@@ -1,0 +1,47 @@
+{
+  "v1": {
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The core idea of continuous-space recurrence by feeding back expected token embeddings (computed via a probability-weighted sum of vocabulary embeddings) into the model is straightforward and easy to implement.",
+        "The paper is clearly structured and well-written, providing an intuitive pseudocode snippet and detailed training setup.",
+        "Empirical evaluations span multiple popular architectures (GPT-2, LLaMA, Pythia) and include pretraining loss scaling, downstream task benchmarks, and MT-Bench instruction-following evaluations."
+      ],
+      "weaknesses": [
+        "Misleading compute efficiency claims: The paper emphasizes parameter efficiency (e.g., matching vanilla models with 2× parameters or 52% parameter count) while largely obscuring compute efficiency. With k=3 pondering steps, each training step and inference token requires k+1 = 4 full forward passes through the network. When factoring in the 4× FLOP cost, requiring '41% of training tokens' or achieving parity with '2.01× parameters*tokens' actually indicates that the method is substantially less compute-efficient than standard vanilla scaling (requiring ~1.6× to 2× more total FLOPs to achieve the same loss).",
+        "Flawed baseline comparisons: Because Pondering LM unrolls the entire model k+1 times, it essentially functions as a recurrent/weight-tied transformer with 4× effective depth and 4× inference compute. Comparing Pondering-1B directly against official Pythia-1B or OPT-1.3B at standard single-pass inference is an unfair comparison. Meaningful baselines should include compute-matched models, such as standard transformers with equivalent training/inference FLOPs (e.g., deeper/wider models or weight-tied recurrent transformers like Universal Transformers / Recurrent Depth models).",
+        "Omission of autoregressive decoding mechanics and KV-cache feasibility: In standard autoregressive generation, input embeddings across preceding positions are updated at each pondering step via full residual addition. The paper does not address whether or how KV caching is implemented during generation, whether prior token representations must be re-computed at every step, or what the actual generation latency and memory throughput impact is in practical inference.",
+        "Lack of essential ablations and conceptual justification: Adding the predicted next-token expected embedding (which estimates position i+1) residually onto the current token embedding at position i is conceptually idiosyncratic, yet there is no ablation comparing this with simply passing recurrent hidden states (as in standard recurrent/looped transformers) or shifting embeddings correctly. No ablation is provided for the top-K truncation either."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Clear, intuitive, and simple conceptual idea: feeding back expected token embeddings computed from the output probability distribution over multiple pondering iterations per token generation step.",
+        "Substantial pretraining compute investment: training multiple architectures (GPT-2, LLaMA, Pythia) from scratch up to 1.4B parameters on the 300B-token Pile dataset.",
+        "Comprehensive empirical evaluation across diverse settings: validation perplexity on multiple benchmarks, 9 zero-shot and few-shot downstream NLP tasks, and multi-turn instruction following on MT-Bench.",
+        "Clear ablation on pondering depth (Figure 5) demonstrating consistent, monotonic perplexity improvements as pondering steps increase from 1 to 10."
+      ],
+      "weaknesses": [
+        "Compute-efficiency vs. parameter-efficiency: With $k=3$ pondering steps, the model requires 4 full forward passes per token during both training and inference. While the paper claims performance comparable to models with twice the parameters, a $2\\times$ parameter model requires only $2\\times$ FLOPs, whereas the proposed method requires $4\\times$ FLOPs. Comparing against Table 2 shows that vanilla parameter scaling is often more FLOP-efficient (e.g., vanilla Pythia-410M achieves 8.85 Pile perplexity at $\\sim 2.5\\times$ the FLOPs of Pythia-160M, outperforming Ponder-160M at 9.87 which consumes $4\\times$ FLOPs).",
+        "Missing critical architectural baselines: The paper does not ablate or compare against recurrent/looped transformer baselines that feed hidden states back directly (e.g., Universal Transformers or Looped Transformers) rather than projecting through the vocabulary probability simplex ($T = PV$). It is unclear whether projecting onto the token embedding space provides any benefit over direct hidden state recurrence.",
+        "Flawed FLOP-matched experiment: In Figure 3 (right), the compute-matched baseline for Pythia-70M was obtained by training the vanilla model for 4 epochs over the same data. It is well known that multi-epoch training over repeated data suffers from diminishing returns/degradation; a fair FLOP-matched baseline should evaluate compute-optimal parameter scaling (larger model) or training on unique tokens.",
+        "Lack of inference benchmarks: Generating each token sequentially requires $k+1$ model evaluations. The paper lacks concrete runtime profiling, such as generation latency, tokens-per-second throughput, and analysis of KV-cache memory overhead across pondering iterations."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Simple and elegant formulation: Mapping output probability distributions back into the continuous embedding space via a weighted sum and adding it residually is intuitive, fully differentiable, and requires no discrete sampling or RL.",
+        "Comprehensive empirical evaluation across architectures: The authors evaluate the approach on multiple model families (GPT-2, LLaMA, Pythia) and sizes up to 1.4B parameters, covering pretraining perplexity, downstream few-shot/zero-shot benchmarks, and instruction tuning on MT-Bench.",
+        "Clear presentation and reproducible concept: The methodology is clearly described, and the inclusion of the PyTorch pseudocode snippet makes the mechanism easy to understand."
+      ],
+      "weaknesses": [
+        "Unfavorable Inference Compute / FLOPs Pareto Frontier: With $k=3$ pondering steps, each token generation requires $k+1 = 4$ complete forward passes through the model. At inference, PonderingPythia-1.4B requires the compute budget of a ~5.6B parameter model. However, Table 3 shows PonderingPythia-1.4B achieves an average score of 57.6%, which only matches the vanilla Pythia-2.8B model (which requires half the inference FLOPs). The claim of superior efficiency is therefore not substantiated when accounting for inference compute.",
+        "Flawed FLOP-Matched Training Baseline: In Figure 3 (right), to match pretraining FLOPs between vanilla Pythia-70M and PonderingPythia-70M, the authors trained the vanilla baseline for 4 epochs over the same data. It is well-established that multi-epoch training on small token budgets suffers from data repetition and plateaus quickly compared to training on unique tokens. A rigorous compute-matched baseline must scale unique tokens along the Chinchilla scaling frontier rather than simply running multiple epochs.",
+        "Missing Recurrent Transformer / Latent Thinking Baselines: The core hypothesis is that projecting through the vocabulary distribution ($P \\cdot V$) and adding back to embeddings is beneficial. However, the paper lacks comparisons against standard recurrent depth architectures (e.g., Universal Transformers or Looped Transformers) that directly recycle final/intermediate hidden states without the lossy vocabulary projection bottleneck. Without this baseline, it is unclear whether the gains come from the specific 'pondering' projection or merely from unrolling/weight-tying transformer depth.",
+        "Unjustified Alignment in Embedding Addition: At sequence index $i$, the model produces distribution $p_i$, which represents the predicted probability of the next token $x_{i+1}$. In Equation (5), $t_i = P_i V$ is added directly to $e^0_i$ (the embedding of $x_i$). Mixing the representation of token $x_i$ with the expected embedding of $x_{i+1}$ lacks theoretical and conceptual motivation compared to shifting the index or recycling hidden states."
+      ]
+    }
+  }
+}

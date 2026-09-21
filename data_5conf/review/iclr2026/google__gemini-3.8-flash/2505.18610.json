@@ -1,0 +1,94 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 6,
+      "strengths": [
+        "Addresses a timely and critical bottleneck: KV cache memory explosion during extended chain-of-thought (Long-CoT) reasoning in modern LLMs (e.g., DeepSeek-R1, QwQ).",
+        "The proposed positional interpolation calibration strategy is clever and well-motivated: it effectively addresses the long RoPE periodicity issue without incurring the high computational and memory cost of long-context calibration.",
+        "The progressive quantization and block-wise allocation strategies are intuitive and practically reasoned, maximizing memory utilization throughout generation rather than assuming a worst-case low bit-width from step zero.",
+        "Strong empirical results across multiple model architectures and scales (7B to 70B), showing substantial accuracy retention where existing 2-bit baselines (e.g., KIVI, RotateKV) severely degrade or collapse."
+      ],
+      "weaknesses": [
+        "The evaluation is conducted entirely via fake quantization; the paper does not provide an actual system implementation or measure inference latency/throughput. In practice, dynamically re-quantizing and repacking KV cache buffers during decoding (e.g., within PagedAttention frameworks) may introduce non-trivial kernel overheads and memory management complexity.",
+        "Ablations on progressive quantization overhead and dynamics are somewhat brief; it is unclear what percentage of total decoding time is spent on the periodic bit-width shrinking operations across large context lengths.",
+        "Positional interpolation scaling shows sensitivity to hyperparameters: performance improves at s=4 but degrades at s=16 (Table 4), yet guidance on selecting the optimal scale factor s for arbitrary target context lengths is limited."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Timely and relevant focus: The paper targets memory constraints in long-Chain-of-Thought (long-CoT) reasoning models (such as DeepSeek-R1 and QwQ), where KV cache growth over tens of thousands of tokens is a critical practical bottleneck.",
+        "Insightful calibration technique: Identifying that RoPE low-frequency channels require long sequence spans to capture distribution extremes, and utilizing positional interpolation (PI) to resolve this on short calibration sets without quadratic computational cost, is an elegant and novel observation.",
+        "Well-motivated progressive quantization: Capitalizing on underutilized memory capacity during earlier generation phases to maintain higher precision before progressively downscaling is practical and intuitively addresses cumulative autoregressive quantization errors.",
+        "Thorough empirical evaluation on challenging reasoning tasks: Experiments cover multiple competitive models (DeepSeek-R1-Distill from 7B to 70B, QwQ-32B) evaluated on rigorous benchmarks (AIME-2024/2025, CMIMC-2024, LiveCodeBench), demonstrating significant accuracy preservation over KIVI, MiKV, and RotateKV at ultra-low bit-widths (2-bit)."
+      ],
+      "weaknesses": [
+        "Reliance on simulated (fake) quantization without real system implementation: The evaluation is conducted entirely via simulated/fake quantization. The paper lacks custom CUDA/Triton kernels to demonstrate actual inference speedup, memory bandwidth utilization, or wall-clock throughput in an end-to-end serving engine.",
+        "Runtime overhead of dynamic progressive re-quantization: Periodically shrinking and shifting the entire existing KV cache during inference may incur non-trivial compute and memory movement overheads. A detailed profiling of the latency trade-offs introduced by dynamic bit-width shrinking operations is missing.",
+        "Unclear adaptation to dynamic batching and paged memory: Practical LLM serving systems rely on continuous/dynamic batching (e.g., vLLM, PagedAttention) where sequences within a batch terminate at varying lengths. The paper assumes a static maximum context budget per block and uniform sequence length assumptions, leaving the handling of disparate per-request memory allocation unclear.",
+        "Minor typographical and notation issues: For instance, on page 4, the text reads 'represent the b-bit ant 2b-bit tensor respectively', and the formalization around Equation (3) could benefit from clearer definitions regarding bit shifting across unsigned vs. signed integer formats."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "High practical relevance: Addressing the memory footprint of the Key-Value (KV) cache in long-Chain-of-Thought (CoT) reasoning models (e.g., DeepSeek-R1 distillations, QwQ) is a critical and timely challenge.",
+        "Insightful analysis on RoPE calibration: Connecting the low-frequency channels of RoPE with calibration data length limitations is well-reasoned, and using positional interpolation to simulate long contexts during calibration is an elegant, lightweight solution.",
+        "Conceptually neat progressive quantization: The idea of starting with higher precision to prevent early error accumulation and gradually reducing bit-widths via integer arithmetic ('Equivalent Right Shift') as the memory fills up is practical and intuitive.",
+        "Extensive evaluation across model families: The empirical evaluation covers multiple distilled DeepSeek-R1 models (from 7B up to 70B) and QwQ-32B across competitive mathematical reasoning and code generation benchmarks."
+      ],
+      "weaknesses": [
+        "Lack of real system implementation and runtime latency analysis: All experiments are carried out using simulated (fake) quantization. In actual deployment, periodically re-quantizing and repacking KV cache tensors in GPU memory during decoding incurs non-trivial memory bandwidth and latency overheads. Without real kernel benchmarks or serving engine integration (e.g., in vLLM or TensorRT-LLM), it is unverified whether progressive quantization remains practical under real-world throughput constraints.",
+        "Incomplete component-level ablation study: While the paper includes ablations for the bit-shift arithmetic (Table 3) and positional interpolation length (Table 4), it lacks an end-to-end ablation isolating the individual gains of each major component (i.e., baseline KIVI vs. +PI calibration vs. +Progressive quantization vs. +Block-wise allocation). Consequently, it is difficult to determine how much of the final benchmark improvement stems from the calibration scheme versus the dynamic memory reallocation.",
+        "Marginal gains from block-wise allocation: In Table 2, comparing the progressive uniform setting (BS=16/40) against the mixed-precision block-wise setting (BS=12/32) shows modest improvements that are frequently within standard deviation margins (e.g., DeepSeek-Qwen-7B on AIME-2024 improves only from 40.00% to 40.21%, and drops on CMIMC from 26.46% to 25.83%).",
+        "Missing comparisons with other KV cache reduction strategies: The paper evaluates exclusively against low-bit quantization methods (KIVI, RotateKV, MiKV). In long-context and long-CoT settings, KV eviction/sparsity methods (e.g., SnapKV, PyramidKV, DuoAttention) or hybrid eviction-quantization approaches are standard alternatives that should be discussed and compared.",
+        "Presentation and writing issues: The manuscript contains minor errors and unfinished placeholders, including an empty code link ('Our code is available at .'), typographical errors ('b-bit ant 2b-bit' on page 4, 'hardwares' on page 5, 'the effective of the positional interpolation' on page 8)."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 8,
+      "strengths": [
+        "Addresses an important and timely problem: long Chain-of-Thought (CoT) reasoning models (such as DeepSeek-R1 and QwQ) generate tens of thousands of tokens, rendering KV cache memory a major deployment bottleneck.",
+        "The core idea of progressive quantization is practical and well-motivated: rather than quantizing aggressively from step 1 when GPU memory is underutilized, retaining high-precision cache and progressively downscaling bit-widths via integer shifting preserves fidelity during earlier generation stages.",
+        "Strong technical execution: Theorem D.1 provides a rigorous mathematical proof showing that the proposed 'Equivalent Right Shift' is exactly equivalent to de-quantizing and re-quantizing, avoiding precision drift while operating directly on integers.",
+        "Insightful analysis of RoPE calibration: the observation that RoPE introduces very low frequency rotations across long contexts (up to tens of thousands of tokens) and the use of Positional Interpolation (PI) to resolve short-calibration data mismatch is elegant and computationally cheap.",
+        "Comprehensive empirical validation across diverse model scales (from 7B up to 70B) and challenging reasoning benchmarks (AIME-2024/2025, CMIMC, LiveCodeBench), demonstrating significant accuracy gains over strong baselines like KIVI and RotateKV while delivering real-world throughput improvements."
+      ],
+      "weaknesses": [
+        "The paper evaluates throughput with custom CUDA kernels, but provides limited discussion on how dynamic bit-width shrinking interacts with modern continuous-batching and paged memory management architectures (e.g., vLLM's PagedAttention), where dynamically reallocating physical page formats could introduce memory fragmentation.",
+        "Handling varying sequence lengths in dynamic batching: in a realistic serving scenario with asynchronous requests of mixed lengths, the memory budget trigger could cause uneven compression schedules across requests. Clarifying how this is handled at a system level would strengthen practical relevance.",
+        "The comparison to other very recent long-context KV cache reduction methods (e.g., hybrid sparse-attention + quantization methods) is somewhat brief, although the initial exploration with QuestAttention in the appendix is appreciated."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Addresses an important and timely challenge: managing the severe KV cache memory bottleneck and cumulative quantization error in long Chain-of-Thought (CoT) reasoning models.",
+        "Well-motivated and sound technical contributions: (1) progressive bit-width reduction that fully utilizes available memory budget before downcasting, accompanied by a rigorous proof for the Equivalent Right Shift operation; (2) block-wise sensitivity profiling via first-order Taylor expansion solved by integer programming; and (3) an ingenious use of RoPE positional interpolation (PI) to calibrate outlier reparameterization factors without the O(N^2) cost of long calibration sequences.",
+        "Thorough and convincing empirical evaluation on top reasoning benchmarks (AIME 2024/2025, CMIMC 2024, LiveCodeBench) across a broad suite of models (DeepSeek-R1-Distill-Qwen 7B/14B/32B, LLaMA-8B/70B, and QwQ-32B). PM-KVQ shows substantial accuracy improvements over SOTA methods like KIVI, RotateKV, and MiKV, especially preventing collapse in 2-bit regimes.",
+        "Practical efficiency validation: provides real throughput benchmarks (Table 3) using custom CUDA kernels rather than purely simulated latency, demonstrating 2.73-5.18x throughput over BF16 with minimal overhead compared to static low-bit kernels."
+      ],
+      "weaknesses": [
+        "Evaluation on native architectures: Experiments are conducted exclusively on GQA-based distilled models; evaluation on native DeepSeek-R1 (which employs Multi-head Latent Attention, MLA) is omitted, though appropriately acknowledged in the limitations.",
+        "Serving dynamics and continuous batching: The formulation assumes fixed maximum context length and static batch sizes to allocate memory budgets. In modern serving engines with continuous batching and PagedAttention, requests have dynamic arrival times and variable lengths, which may complicate the triggering of bit-width shrinking across concurrent sequences.",
+        "Limited bit-width flexibility: The block-wise allocation is currently constrained to power-of-two candidate sets (e.g., {2, 4} or {4, 8}) to simplify kernel implementation, which leaves some potential memory budget underutilized compared to finer-grained integer allocations."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 6,
+      "strengths": [
+        "Timely and practically important problem: Quantizing the KV cache for long Chain-of-Thought (CoT) reasoning models (such as DeepSeek-R1 and QwQ) is crucial, as reasoning tokens frequently exceed 16K–32K and cause severe memory bottlenecks.",
+        "Insightful problem identification regarding RoPE calibration: The paper astutely identifies that short calibration sequences fail to capture the long-period sine/cosine variations in low-frequency RoPE channels, and elegantly addresses this using positional interpolation without incurring quadratic attention cost during calibration.",
+        "Well-motivated progressive quantization and formal equivalence: Rather than quantizing to low precision prematurely when memory headroom exists, the progressive quantization scheme maximizes fidelity. The proposed 'Equivalent Right Shift' formulation allows fast in-place down-quantization via bit shifts without requiring costly floating-point dequantization.",
+        "Comprehensive experimental evaluation: The authors evaluate on multiple modern reasoning models ranging from 7B to 70B (DeepSeek-R1-Distill series, QwQ-32B) across challenging benchmarks (AIME 2024/2025, CMIMC, LiveCodeBench), including real-world throughput benchmarks using custom CUDA kernels."
+      ],
+      "weaknesses": [
+        "Practical deployment challenges in continuous batching / PagedAttention: Modern LLM serving engines rely on dynamic paging and continuous batching where concurrent requests have heterogeneous lengths. Dynamically resizing KV cache blocks from 16-bit down to 2-bit per sequence can induce memory re-allocation/re-packing overheads and fragmentation that are not fully evaluated under realistic dynamic serving workloads.",
+        "Heterogeneous precision handling across decoding steps: Storing different tokens at different bit-widths during generation complicates unified attention kernel execution, especially when batch instances are at different stages of shrinking.",
+        "Conflation of opportunistic memory utilization with quantization robustness: The baselines (e.g., KIVI, RotateKV) are evaluated strictly at uniform low bit-widths (e.g., static 2-bit), whereas PM-KVQ benefits from higher effective precision for shorter outputs (or the first 16K tokens). While this is the intended system design, it is partially an orthogonal memory-scheduling advantage rather than purely a more robust low-bit representation."
+      ]
+    }
+  }
+}

@@ -1,0 +1,95 @@
+{
+  "v1": {
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Clean and practical architectural insight: Chunking attention along the head dimension ('untying' Ulysses) significantly reduces peak intermediate activation and communication buffer footprints during context-parallel attention without altering model semantics.",
+        "Well-designed GQA-compatible scheduling: The paper addresses Grouped-Query Attention cleanly by scheduling unique KV heads in initial stages and reusing them across subsequent query head chunks, preventing redundant inter-GPU communication.",
+        "Convincing empirical results: On 8x and 16x H100 setups using Llama3-8B and Qwen3-32B, UPipe achieves up to 5M tokens on a single node and 8M tokens across two nodes, outperforming standard Ulysses and sequence-chunking baselines (FPDT) while matching the throughput of Ulysses at large sequence lengths.",
+        "Thorough memory and runtime analysis: The paper provides clear theoretical formulations (Tables 1, 2, and 6) and detailed runtime component breakdowns (Table 5) explaining why launch overheads are amortized at large context lengths."
+      ],
+      "weaknesses": [
+        "Limited cluster scale evaluation: The experiments are confined to at most 16 H100 GPUs (2 nodes). Demonstrating scalability on larger clusters (e.g., 32–64+ GPUs) would further validate whether headwise launch overheads and hybrid USP configurations remain competitive at larger scales.",
+        "Lack of detail on baseline failure modes: Table 3 and Table 4 note that FPDT fails at lengths >4M, but the exact failure mechanism (e.g., CPU host RAM exhaustion, PCIe saturation, or driver timeouts) is not thoroughly detailed.",
+        "Divisibility constraints: The approach inherits and tightens DeepSpeed-Ulysses constraints, requiring the head chunk size $U$ to be divisible by the context parallel degree $C$, and total heads $H$ to be divisible by $U$. A brief discussion on handling non-divisible architectures or high context parallelism degrees where $C \\approx H$ would be valuable."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Clear and well-motivated systems contribution: By recognizing that processing a subset of heads at multi-million token context lengths is sufficient to saturate modern GPUs, the authors propose a headwise chunked execution pipeline (UPipe) that drastically reduces intermediate activation and all-to-all buffer memory in DeepSpeed-Ulysses.",
+        "Well-designed GQA scheduling mechanism: The paper details how to reorder query head chunks to reuse communicated key/value tensors across stages, preserving the communication and memory benefits inherent to Grouped-Query Attention.",
+        "Comprehensive memory accounting: The manuscript provides thorough and clear theoretical breakdowns of peak activation memory across forward and backward attention stages (Tables 1, 2, and 6).",
+        "Strong empirical performance and scaling: UPipe achieves state-of-the-art context lengths (up to 5M tokens on a single 8xH100 node on Llama-3-8B and 8M on 16xH100) while matching Ulysses throughput and substantially outperforming CPU-offloading/chunking alternatives like FPDT in runtime throughput."
+      ],
+      "weaknesses": [
+        "Applicability bottleneck as context parallelism scale (C) approaches head count (H): UPipe requires the chunk size U to be a multiple of C, with U <= H. Consequently, when scaling to large context-parallel clusters (e.g., C = 32 or 64 on models with H = 32 or 64), U must equal H, which eliminates headwise chunking opportunities (number of chunks ν = 1) and reduces UPipe back to standard Ulysses.",
+        "Minor data discrepancy between Table 3 and Table 5: In Table 3, DS-Ulysses achieves higher throughput than UPipe at 128K tokens (2320.47 vs. 2281.05 tokens/s/GPU), whereas Table 5 reports a total step time of 7.40s for DS-Ulysses and 7.20s for UPipe at 128K (which would imply UPipe is faster). The authors should clarify or reconcile this measurement difference.",
+        "Limited exploration of modern non-standard attention variants: Architectures adopting Multi-Head Latent Attention (MLA, e.g., DeepSeek models) or architectures with very few KV heads/latent projections may alter the buffer sharing and GQA scheduling trade-offs; discussing or testing compatibility with MLA would strengthen the paper."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "The paper provides a rigorous and clear analytical breakdown of activation memory consumption across Transformer components during long-context distributed training (Tables 1 and 2), pinpointing the exact communication buffer bottlenecks in DeepSpeed-Ulysses.",
+        "The proposed GQA scheduling algorithm is clever and practical: by prioritizing unique key-value heads and reusing them across query chunks, it prevents communication overhead from scaling linearly with the number of head chunks.",
+        "Empirical results are compelling: UPipe achieves up to 5M context length on a single 8×H100 node for Llama3-8B and 8M tokens on two nodes (16×H100), surpassing DeepSpeed-Ulysses and FPDT while avoiding the throughput degradation associated with offloading-based approaches.",
+        "The paper provides helpful ablation and runtime profiling (Tables 3 and 5, Figure 6), detailing the trade-offs between chunk size U, kernel launch overheads, and memory consumption."
+      ],
+      "weaknesses": [
+        "The core conceptual contribution—chunking the execution of attention across heads to reduce peak intermediate tensor footprint—is relatively straightforward and represents an incremental, engineering-centric extension over DeepSpeed-Ulysses.",
+        "Crucial explanatory details are missing regarding baseline failure modes. Specifically, Table 4 reports FPDT having lower allocated GPU memory at 4M tokens (51.42 GiB), yet it cannot scale past 4M tokens; the exact bottleneck (e.g., host CPU RAM exhaustion, pinned memory limitations, or runtime crash) should be explicitly analyzed.",
+        "Footnote 1 on page 2 contains an empty URL placeholder ('The code for our experiments is available at .'), which hampers reproducibility verification.",
+        "The empirical evaluation is limited strictly to throughput and peak memory. While the method is mathematically identical to standard attention, providing a numerical equivalence check (e.g., matching loss curves or maximum gradient discrepancies over a short run) would strengthen the empirical rigor."
+      ]
+    }
+  },
+  "v2": {
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Clear, well-motivated problem formulation: DeepSpeed-Ulysses context parallelism is constrained at multi-million token contexts by intermediate activation and communication buffers that scale with the total number of attention heads.",
+        "The proposed headwise chunking mechanism (UPipe) is clean, elegant, and directly addresses the buffer memory bottleneck without requiring changes to underlying attention kernels like FlashAttention-3.",
+        "The GQA scheduling strategy (Section 4.1, Figure 4) is clever and practically valuable, avoiding redundant key/value head communication across chunk iterations and lowering the overall communication volume.",
+        "Rigorous theoretical memory accounting provided in both the main text (Table 2) and supplementary material (Appendix A) across forward and backward passes.",
+        "Comprehensive empirical evaluation on 8×H100 and 16×H100 systems with Llama 3-8B and Qwen3-32B, showing context scaling up to 5M tokens on a single node and 8M on two nodes while maintaining throughput on par with Ulysses and significantly outperforming FPDT.",
+        "Practical extensions and ablations exploring how memory savings can be reinvested into throughput via strided activation offloading (SAO), selective activation checkpointing (SAC), and larger batch sizes."
+      ],
+      "weaknesses": [
+        "Chunking granularity is inherently coupled to the context parallelism degree ($U$ must be a multiple of $C$), which limits flexibility when scaling $C$ to larger cluster configurations.",
+        "At smaller context lengths (<1M tokens), UPipe incurs a slight throughput penalty relative to standard Ulysses due to increased kernel launch overhead across stages.",
+        "The loss convergence evaluation (Appendix D) is conducted only up to 128K tokens for 1,000 steps; while the computation is theoretically mathematically equivalent up to floating-point order, convergence validation at multi-million token scales would further strengthen the empirical claims."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Clear and well-motivated problem formulation: the paper accurately identifies that all-to-all communication buffers and intermediate QKV activations represent the dominant memory bottleneck in DeepSpeed-Ulysses when scaling to ultra-long contexts.",
+        "Clever and practical design: the headwise chunking scheme coupled with an out-of-order GQA schedule elegantly avoids redundant key/value communication while reducing intermediate attention tensor memory proportionally to the chunk size.",
+        "Comprehensive theoretical memory accounting: Section 2.3, Table 2, and Appendix A provide rigorous, step-by-step tensor-level memory accounting across both forward and backward passes.",
+        "Solid empirical results: UPipe achieves up to 5M tokens context on a single 8×H100 node (Llama 3-8B) and 8M tokens across two nodes, effectively bridging the throughput-memory tradeoff between Ulysses and CPU-offload approaches like FPDT.",
+        "Extensive analysis and extensions: the manuscript includes valuable ablations on chunk size, strided activation offloading, selective checkpointing, batch size scaling, runtime breakdowns, and loss convergence validation."
+      ],
+      "weaknesses": [
+        "Architectural and topology constraints: headwise chunking requires the chunk size U to be divisible by the Ulysses context parallel degree C. For architectures where the number of heads H equals C (or is very small), the chunking factor H/U is 1, yielding no memory savings.",
+        "Evaluation scale is limited to at most two nodes (16 GPUs): while the hybrid Ulysses+Ring setting is tested on 16 GPUs, evaluating scalability on larger clusters (e.g., 32–64+ GPUs) would further validate how the approach behaves under broader distributed setups.",
+        "Missing code repository link: footnote 1 on page 2 ends abruptly with 'The code for our experiments is available at' without an anonymous repository link or mention of supplementary materials."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Targeted and practical insight: The paper addresses a concrete, pressing bottleneck in distributed long-context training—namely, the intermediate activation and communication buffer footprints during attention all-to-all collectives in DeepSpeed-Ulysses. The observation that processing attention over head chunks is sufficient to saturate modern GPUs at long contexts is both intuitive and well-justified.",
+        "Clever GQA-aware communication schedule: The proposed out-of-order scheduling for Grouped-Query Attention (GQA) is an elegant algorithmic design. By communicating all unique KV heads alongside a subset of query heads in the initial stage and subsequently transferring only query heads, UPipe avoids redundant KV transfers across stages while maintaining full GQA memory savings.",
+        "Thorough theoretical and empirical memory accounting: The paper provides precise, stage-by-stage memory breakdowns for both forward and backward passes (Tables 1, 2, and Appendix Table 7), accurately characterizing the memory tradeoffs against Ulysses and FPDT.",
+        "Strong experimental results: Evaluated on Llama 3-8B and Qwen3-32B across 8x and 16x H100 systems, UPipe pushes single-node context length to 5M tokens (a 25% increase over FPDT and substantially surpassing standard Ulysses) and multi-node context to 8M tokens without incurring the severe throughput penalties typical of CPU offloading.",
+        "Practical utility demonstrations: The paper goes beyond raw sequence length scaling by demonstrating how UPipe's memory savings can be reinvested into practical throughput enhancements, including strided activation offloading, selective activation checkpointing (SAC), and increased per-device batch sizes, alongside verifying convergence on C4."
+      ],
+      "weaknesses": [
+        "Divisibility and scaling constraints: UPipe requires that the head chunk size U be divisible by the context parallelism degree C (with U >= C), and the GQA schedule relies on head alignment. Given modern architecture trends with small numbers of KV heads (e.g., 8 KV heads in Llama 3), scaling pure Ulysses-style context parallelism to larger numbers of devices (e.g., C > 8 or 16) becomes constrained without relying on hybrid schemes.",
+        "Missed computation-communication pipelining: Despite chunking the attention layer across stages, UPipe serializes communication and computation within each stage rather than pipelining/overlapping the all-to-all communication of stage i+1 with the attention computation of stage i. While this keeps the implementation simpler, exploiting this overlap could have turned the multi-stage execution into an even stronger throughput advantage.",
+        "Limited distributed scale: The evaluation is restricted to at most 16 GPUs (2 nodes). Demonstrating scalability and performance behavior on larger clusters (e.g., 32 or 64 GPUs) under varied network fabrics would provide stronger validation of the hybrid USP-UPipe scaling claims."
+      ]
+    }
+  }
+}

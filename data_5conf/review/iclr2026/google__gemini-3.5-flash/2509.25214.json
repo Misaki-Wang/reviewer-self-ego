@@ -1,0 +1,92 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 8,
+      "strengths": [
+        "The paper addresses a highly practical and significant problem: adapting quantized Large Language Models (LLMs) to heterogeneous edge devices with varying bit-width budgets without incurring the massive computational cost of retraining separate LoRA adapters for each hardware profile.",
+        "The proposed method, CoA-LoRA, is elegant and parameter-efficient. Instead of predicting the entire high-dimensional LoRA parameter space, it models layer-wise low-rank adjustments ($r \\times r$ scaling/transformation matrices) conditioned on local quantization configurations, allowing for parallelization and small model overhead.",
+        "The Pareto-based search using Gaussian Processes (GPs) and expected hypervolume improvement (EHVI) combined with finite-difference coordinate search is a mathematically sound way to dynamically construct a high-quality, diverse training configuration set.",
+        "The experimental evaluation is extensive, spanning multiple tasks (GLUE benchmarks, language modeling on C4, and multiple zero-shot downstream tasks) and model sizes (RoBERTa-Large, Qwen-2.5, and LLaMA-2-7B). CoA-LoRA consistently matches or outperforms the stronger one-to-one baselines like Q-LoRA and LQ-LoRA on average, while being much more computationally efficient overall."
+      ],
+      "weaknesses": [
+        "While the total cumulative training time of CoA-LoRA is lower than training separate adapters for multiple configurations (as shown in Table 2), training CoA-LoRA is still more expensive than training a single standard Q-LoRA adapter for one specific configuration. The trade-off between the overhead of joint training and the flexibility of on-the-fly adaptation should be discussed more explicitly for users who might only target a single edge device.",
+        "The design of the configuration-aware model relies on the assumption that the shared components across different bit-widths are primarily captured in $L_2$, while the configuration-specific knowledge resides in $L_1$ (so that $L_2$ can be transformed by $U_\\theta(C_i)$). While this is empirically supported by the RoBERTa-Large similarity analysis in Appendix C.1, it remains unclear if this empirical pattern consistently holds across larger, decoder-only LLMs (e.g., LLaMA-2-7B).",
+        "Regarding GP scalability: The configuration space is high-dimensional since each layer has its own set of quantization parameters (e.g., $N=224$ layers for LLaMA-2-7B). Fitting a Gaussian Process on such high-dimensional inputs can be computationally challenging and prone to poor kernel estimation. The paper would benefit from a clearer explanation of how the GP handles this high dimensionality in practice."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Well-motivated problem: Addresses the need for flexible, on-the-fly quantization adjustments on heterogeneous edge devices without the prohibitive cost of training individual LoRA adapters for every per-layer bit-width allocation.",
+        "Technically sound and elegant design: Parameterizing the configuration-specific adjustment as $L_1(I + U_\\theta(C_i))L_2$ is highly effective. It restricts the generation space to a small $r \\times r$ matrix and naturally defaults to the base adapter when $U_\\theta$ is close to zero.",
+        "Well-designed search strategy: The Pareto-based configuration search using a Gaussian Process surrogate with finite-difference gradient approximation and diversity-preserving segmented Pareto filtering successfully tackles the high-dimensional, non-differentiable configuration space.",
+        "Thorough and convincing empirical evaluation: The method is validated on both GLUE and C4 language modeling using diverse LLMs (up to LLaMA-2-7B), consistently outperforming Shared-LoRA and matching or exceeding individual fine-tuning baselines.",
+        "Solid empirical justification: The block-wise similarity analysis in the appendix provides clear motivation for choosing to adjust only the $L_2$ matrix."
+      ],
+      "weaknesses": [
+        "Lack of discussion on inference and switching overhead: Although the configuration-aware model $\\theta$ is lightweight, generating the adjustments $U_\\theta(C_i)$ on-the-fly incurs some computational cost. The paper lacks a quantitative measurement of the latency or FLOPs required for this generation step.",
+        "Unclear scaling of GP search for larger models: The configuration search space scales exponentially with the number of layers $N$. The coordinate-wise finite-difference approximation requires $O(N)$ acquisition function evaluations per search step. It is unclear if this search becomes a bottleneck for deeper models (e.g., 70B models with 80+ layers).",
+        "Trade-off/Crossover point analysis: If a user only needs 1 or 2 specific quantization configurations, training CoA-LoRA is computationally more expensive than training separate Q-LoRA adapters. The paper would benefit from a more explicit analysis of the threshold (number of targeted configurations) where CoA-LoRA becomes more efficient.",
+        "Clarification on the architecture of $\\theta$: The main text lacks detail on how the layer name/index embedding is designed and whether these embeddings are trained jointly with $\\theta$."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Practical and highly relevant problem: Addressing the deployment of quantized LLMs across heterogeneous edge devices with varying bit-width budgets without the need to train individual LoRA adapters for every hardware configuration.",
+        "Efficient adjustment formulation: By only adjusting the $L_{2,i}$ matrix via a lightweight $r \\times r$ transformation ($I + U_\\theta(C_i)$), the method significantly reduces the dimensionality of the generation space compared to predicting entire LoRA weights.",
+        "Comprehensive evaluation scope: The paper covers multiple architectures (RoBERTa-Large, Qwen-2.5-1.5B/3B, LLaMA-2-7B) across GLUE, language modeling (C4), and zero-shot downstream tasks."
+      ],
+      "weaknesses": [
+        "Confounding Evaluation / Unfair Quantization Baseline: In Table 2 and Figure 5, CoA-LoRA is compared against Q-LoRA and LQ-LoRA. However, CoA-LoRA utilizes an optimized mixed-precision configuration (searched via the Pareto GP framework), whereas Q-LoRA/LQ-LoRA appear to use uniform bit-width quantization. It is well established in literature that mixed-precision quantization (allocating higher bits to sensitive layers and lower bits to insensitive layers) significantly outperforms uniform quantization at the same average bit-width. Therefore, the observed accuracy gains (+2.36% to +10.37%) might be entirely due to the mixed-precision search rather than the configuration-aware adapter. To demonstrate the value of the adapter, the authors must compare CoA-LoRA against Q-LoRA/LQ-LoRA trained on the *exact same* mixed-precision configurations discovered by the search.",
+        "Technical Ambiguity in Continuous Embeddings vs. Discrete Configurations: Section 4.2 states that the discrete, categorical quantization parameters are embedded into a learned vector $z_i$, and coordinate search (Equation 8) is performed using finite-difference gradients over these embeddings. It is unclear how a continuous update in the embedding space (e.g., $C^{(j)} \\leftarrow C^{(j)} - \\text{sign}(\\dots)e_{i^*}$) maps back to the discrete configuration space of Table 1. If a mapping or projection back to the discrete space is used, how is it performed? Moreover, if the embeddings $z_i$ are learned/updated during training, the historical dataset used to fit the Gaussian Process $\\mathcal{G}$ will become invalid, as the features of past configurations will have shifted. The paper does not address this representation drift.",
+        "Robustness of Single-Batch GP Calibration: To evaluate the black-box performance $f_1(C)$ during the Pareto search, the authors state (on page 15) that they use 'a single batch from the training dataset.' Relying on a single batch makes the accuracy/loss estimation highly noisy. It is highly questionable whether a Gaussian Process and finite-difference gradient estimation can reliably steer a high-dimensional search when the objective function evaluations are this noisy.",
+        "Incomplete Overhead Analysis: The training times in Table 2 suggest that training CoA-LoRA is faster than training 4 configurations of Q-LoRA. However, the GP surrogate fitting, the finite-difference coordinate search across all layers, and the multi-objective Pareto filtering should introduce non-trivial computational overhead. A detailed breakdown of the time spent on training the adapter $\\theta$ versus the time spent searching/evaluating configurations is missing."
+      ]
+    }
+  },
+  "v2": {
+    "exp3_negative": {
+      "oa": 8,
+      "strengths": [
+        "Highly practical and relevant research direction: targeting the computational bottleneck of fine-tuning separate LoRA adapters for diverse mixed-precision/quantization configurations on heterogeneous edge devices.",
+        "Well-designed technical approach: instead of predicting high-dimensional LoRA parameters directly, the authors leverage the insight that adaptation signals are concentrated in $L_2$, reducing the output dimension of the configuration-aware model to a lightweight $r \\times r$ modulation matrix.",
+        "Innovative training formulation: the Pareto-based configuration search combined with segmented Pareto front filtering ensures that the configuration-aware model is trained on a high-quality, diverse set of quantization configurations.",
+        "Comprehensive empirical validation: the method is evaluated on both encoder (RoBERTa-Large) and decoder (Qwen-2.5, LLaMA-2 up to 13B) models, demonstrating impressive accuracy/perplexity preservation while maintaining low overall training costs."
+      ],
+      "weaknesses": [
+        "Overhead of the search and SVD initialization: During training, the method computes the weight residual and applies SVD to obtain initial $L_1^{(C)}$ and $L_2^{(C)}$ for each configuration. SVD on large weight matrices can be computationally expensive. The paper would benefit from a detailed breakdown of the exact training overhead introduced by the BO search and SVD computations.",
+        "Inference/Selection complexity: To deploy on a device with a target bit-budget $b$, Eq. (13) requires solving a distance minimization problem over the discrete configuration space. Although the authors state it takes 3-5 seconds using Gurobi, this adds a dependency on an external solver and introduces a brief startup latency on the edge device.",
+        "Comparison with mixed-precision NAS: While the baselines are strong (QLoRA, LQ-LoRA, GPTQ-LoRA), the paper lacks a detailed positioning/comparison against modern mixed-precision Neural Architecture Search (NAS) or mixed-precision quantization frameworks that search for a single optimal config and then do standard fine-tuning."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Practical and Important Problem: The paper addresses a highly relevant bottleneck in deploying LLMs on heterogeneous edge devices. Training separate LoRA adapters for each specific quantization configuration is computationally prohibitive, making a single, configuration-aware adapter extremely valuable.",
+        "Clever and Parameter-Efficient Architecture: Instead of mapping configurations directly to high-dimensional LoRA matrices, CoA-LoRA uses SVD initialization combined with a lightweight MLP mapper that produces a compact $r \\times r$ adjustment matrix. This reduces the mapper parameter overhead to less than 0.5% of the total parameters.",
+        "Sound Pareto-Based Configuration Search: The inclusion of a Pareto-based Gaussian Process search combined with finite-difference gradients is a principled way to solve the high-dimensional discrete optimization problem of finding diverse and high-performing training configurations.",
+        "Strong Empirical Performance: CoA-LoRA is evaluated thoroughly across multiple model sizes (up to LLaMA-2-13B), different task types (GLUE, C4, zero-shot benchmarks), and different ranks. It consistently outperforms Shared-LoRA and achieves competitive or superior performance to dedicated, configuration-specific baselines (QLoRA, LQ-LoRA) with much lower total training overhead."
+      ],
+      "weaknesses": [
+        "Clarification on the Deployment Pipeline and SVD Overhead: According to Section 4.2, the base LoRA adapters $L_{1,i}^{(C)}$ and $L_{2,i}^{(C)}$ are computed by applying SVD to the quantization error $W - W_C$. Since SVD requires access to the unquantized weights $W$ (which are too large to fit on edge devices) and is computationally demanding, this SVD cannot be run on the edge device itself. The authors should explicitly clarify the deployment workflow (e.g., that the server performs the SVD and runs the configuration-aware mapper to generate the adapter before transmitting it to the edge device) and report the exact time required to perform SVD across all layers of a 7B or 13B model.",
+        "Computational Cost of the GP-Based Search: The training process alternates between training the mapper and running the GP-based configuration search. Although a single batch of calibration data is used, evaluating $f_1(C)$ repeatedly during the finite-difference guided search can still introduce overhead. A more detailed training time breakdown (SVD time vs. GP search time vs. backpropagation time) would benefit the paper's completeness.",
+        "Lack of Harder Generative Benchmarks: While the paper evaluates zero-shot performance on tasks like ARC and Winogrande, it lacks evaluation on standard hard generative LLM benchmarks such as MMLU or GSM8K, which are commonly used in modern LLM quantization and PEFT literature."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 6,
+      "strengths": [
+        "Addresses a highly practical and challenging problem: deploying quantized LLMs on heterogeneous edge devices with diverse compression requirements without the need for costly per-configuration fine-tuning.",
+        "The proposed method cleverly combines a lightweight configuration-aware MLP ($U_\\theta$) with a Pareto-based GP configuration search. The extremely fast adapter generation makes the iterative task-aware configuration search computationally feasible.",
+        "Comprehensive empirical evaluations on both encoder-only (RoBERTa-Large on GLUE) and decoder-only (Qwen-2.5, LLaMA-2 on C4 and zero-shot tasks) models, demonstrating solid performance gains over the Shared-LoRA baseline.",
+        "Thorough appendix with detailed parameter breakdowns, ablation studies (such as the impact of the number of segments $U$), and visualization of matrix similarities."
+      ],
+      "weaknesses": [
+        "High computational overhead of the SVD step for edge deployment: To adapt to a new configuration $C$, the method requires computing the SVD of the weight residual $W - W_C$ for all layers to obtain $L_1^{(C)}$ and $L_2^{(C)}$. For a 7B LLM with over 200 large projection matrices, performing SVD locally on a resource-constrained edge device (e.g., smartphone) is extremely slow and energy-intensive, which severely limits the feasibility of 'on-the-fly' adaptation.",
+        "Confounded evaluation comparison: The baselines (QLoRA and LQ-LoRA) are evaluated on standard configurations determined solely by reconstruction error (Eq. 11), while CoA-LoRA is evaluated on configurations optimized via task-aware Pareto search. This makes it difficult to decouple the benefits of the configuration-aware adapter from the benefits of the configuration search. To demonstrate the quality of the adapter, the paper should compare CoA-LoRA against the baselines on the *same* Pareto-searched configurations.",
+        "Clarity on continuous-to-discrete mapping in search: During the finite-difference guided optimization (Section 4.3), the coordinate search updates the continuous embedding of the configuration. The paper does not clearly explain how these updated continuous embeddings are mapped back to the discrete parameter space of NormalFloat quantization to enable actual model evaluation."
+      ]
+    }
+  }
+}

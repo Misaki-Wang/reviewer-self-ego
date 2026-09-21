@@ -1,0 +1,91 @@
+{
+  "v1": {
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Theoretical Rigor: Casting KV cache eviction as a structured pruning problem under the Optimal Brain Damage (OBD) framework is highly principled and mathematically sound, moving away from pure heuristics.",
+        "Unifying Perspective: The paper elegantly demonstrates that existing attention-based eviction methods (H2O, TOVA, SnapKV) can be recovered as special cases of the proposed formulation by ignoring value states and simplifying the perturbation target.",
+        "Comprehensive Evaluation: Experiments are conducted on strong and modern open-source LLMs (LLaMA-3.1-8B and Qwen-2.5-7B) across multiple representative long-context benchmarks (Needle-in-a-Haystack, LongBench, PG19), yielding consistent improvements.",
+        "Clarity and Reproducibility: The manuscript is well-written and includes clear PyTorch pseudo-code that describes how the proposed value, key, and joint pruning scores are calculated."
+      ],
+      "weaknesses": [
+        "Lack of Wall-Clock Latency/Throughput Benchmarks: The primary goal of KV cache eviction is to reduce latency and memory to speed up inference. However, the paper lacks end-to-end speedup or throughput (tokens/sec) evaluations to show the actual systems-level benefits.",
+        "Computational Overhead of Score Computation: Evaluating the output-aware scores requires extra tensor contractions. For example, computing the key-pruning score involves an einsum between the attention outputs $O$ and the value states $V$ (Algorithm 1, line 22). This operation scales with sequence length and head dimension, which may introduce non-trivial computational overhead and partially offset the efficiency gains of cache eviction.",
+        "Interaction with FlashAttention: FlashAttention is used during prefill to avoid materializing the attention matrix. However, to calculate the proposed saliency scores, the attention weights/logits must be partially recomputed. The paper lacks a quantitative analysis of the memory and latency overhead incurred by this recomputation.",
+        "Scoring Complexity in Decoding Phase: While prefill-phase eviction is straightforward, the dynamic accumulation of these second-order Taylor approximation scores during autoregressive decoding is less clearly formulated, especially since queries arrive step-by-step."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Grounds KV cache eviction in a principled, theoretically sound framework by formulating it as a layer-wise structured pruning problem using Optimal Brain Damage (OBD).",
+        "Derives closed-form, output-aware saliency scores for keys, values, and joint key-value pairs, which go beyond simple attention-weight heuristics by incorporating value-state information, pre-softmax logits, and historical attention outputs.",
+        "Provides an elegant unifying perspective showing that existing attention-only heuristic methods (e.g., H2O, TOVA, SnapKV) are special cases of the proposed framework under simplified objectives.",
+        "Demonstrates strong and consistent empirical performance improvements over baseline methods across representative models (LLaMA-3.1 and Qwen-2.5) on diverse benchmarks (Needle-in-a-Haystack, LongBench, and PG19 perplexity)."
+      ],
+      "weaknesses": [
+        "The manuscript lacks a detailed wall-clock time latency evaluation. Although the scores are closed-form, computing terms like the key-pruning score (which requires historical attention logits and output deviations) introduces additional computational overhead that needs to be quantified in terms of inference throughput.",
+        "As noted in the experiments (e.g., PG19 perplexity), the joint pruning score does not consistently outperform the key-pruning score, suggesting potential limitations in the simple additive combination or the diagonal Hessian approximation when both keys and values are pruned concurrently.",
+        "While the diagonal assumption makes the OBD formulation computationally tractable, the paper could provide deeper analysis on the accumulated error propagation over long sequence generation, as local approximations might degrade under highly non-linear autoregressive generation."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Grounds KV cache eviction in a solid, principled theoretical framework by formulating it as a layer-wise structured pruning problem based on Optimal Brain Damage (OBD).",
+        "Derives closed-form, output-aware saliency scores for keys, values, and joint key-value pairs, which are elegant, mathematically rigorous, and explain existing attention-weight-based heuristics as special cases.",
+        "Exhibits consistent, solid performance improvements when integrated into existing baselines (H2O, TOVA, SnapKV) across multiple benchmarks (Needle-in-a-Haystack, LongBench, and PG19 perplexity) and backbone LLM families (LLaMA-3.1, Qwen-2.5).",
+        "Highly readable, with very clear illustrations (Figures 1 and 2) and clean pseudo-code in PyTorch style that ensures ease of reproducibility."
+      ],
+      "weaknesses": [
+        "While the theoretical derivation is elegant, the joint-pruning score (OBCACHE-JOINT) does not consistently outperform OBCACHE-KEY during dynamic decoding-time eviction, suggesting that the simple additive formulation of the joint score might not fully capture the interaction in all scenarios.",
+        "Although the paper argues for low computational overhead and leverages FlashAttention recomputation, a concrete wall-clock time/latency comparison against the original baselines would be highly valuable to verify that the extra computation of output-aware terms doesn't offset the latency savings of cache eviction."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Grounds KV cache eviction in classical model pruning theory (Optimal Brain Damage), providing a solid and elegant theoretical framework that unifies and generalizes several existing heuristic attention-based and value-aware methods.",
+        "Derives novel closed-form saliency scores for isolated key pruning (S_key) and joint key-value pruning (S_joint). Prior works focused heavily on value-norm scaling, but this work convincingly shows that accounting for key-state perturbations is highly effective because keys shape the entire attention distribution.",
+        "Demonstrates strong and consistent empirical improvements when plugged into existing representative baselines (H2O, TOVA, SnapKV, AdaKV) on standard, challenging long-context benchmarks (RULER, LongBench, PG19) using state-of-the-art models (LLaMA-3.1-8B, Qwen-2.5-7B).",
+        "Provides a thorough computational complexity analysis and empirical latency/memory profiling, showing that the proposed output-aware scores introduce negligible computational overhead in practical deployment scenarios.",
+        "The manuscript is exceptionally well-written, easy to follow, and includes detailed mathematical derivations, pseudo-code, and comprehensive task-by-task experimental results in the appendix."
+      ],
+      "weaknesses": [
+        "As noted by the authors in the decoding evaluation (Section 5.3), the joint key-value pruning score (S_joint) does not consistently outperform the key-pruning score (S_key). This suggests that the additive combination under the diagonal Hessian approximation might be sub-optimal and could benefit from further investigation.",
+        "OBCache is primarily evaluated as a plug-in score replacement within existing eviction pipelines (e.g., AdaKV, SnapKV, H2O) rather than as an independent end-to-end compression framework.",
+        "While modern models support context lengths up to 128K or even 1M, the core experimental evaluations on RULER are limited to a maximum of 32K tokens. Demonstrating performance at even longer scales (e.g., 128K) would strengthen the practical claims."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Principled Theoretical Grounding: Grounding KV cache eviction in classical pruning theory (specifically, Optimal Brain Damage) is highly elegant. It provides a solid, unified mathematical framework that explains and generalizes several heuristic-driven methods in the literature.",
+        "Comprehensive Mathematical Derivations: The authors derive closed-form saliency scores for isolated values, isolated keys, and joint key-value pairs, accommodating multi-head attention and Grouped-Query Attention (GQA) settings.",
+        "Extensive and Solid Evaluation: The framework is rigorously evaluated on modern LLMs (LLaMA-3.1-8B, Qwen-2.5-7B) using diverse benchmarks (RULER, LongBench, PG19) under both query-aware and challenging query-agnostic compression scenarios, showing consistent improvements.",
+        "Thorough Overhead Analysis: The paper contains realistic latency and memory benchmarks (TTFT and per-token decoding latency) on actual GPU hardware, validating the practical feasibility of the proposed scoring mechanisms."
+      ],
+      "weaknesses": [
+        "Diagonal Hessian Approximation Study: The framework relies heavily on the diagonal Hessian assumption from Optimal Brain Damage (OBD). However, the paper lacks an empirical or theoretical analysis of how much information/accuracy is lost due to ignoring off-diagonal correlations between different tokens compared to a full-Hessian approach.",
+        "Integration with Optimized Systems: Although latency is measured within a PyTorch environment, score-based eviction methods often face practical deployment challenges when integrated into highly optimized production serving engines (like vLLM or TensorRT-LLM) using PagedAttention. The paper would benefit from a discussion on how these operations can be fused into custom kernels.",
+        "Clarity on Notation: In Section 4.2, the mathematical definition and dimensions of the sub-blocks of the Hessians ($H_{pp}^{vv}$, $H_{pp}^{kk}$, $H_{pp}^{vk}$) could be spelled out more explicitly to improve readability for researchers not fully familiar with OBD formulations."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Principled Theoretical Framework: The paper successfully formulates KV cache eviction as a structured pruning problem grounded in the classical Optimal Brain Damage (OBD) theory, providing a solid and elegant mathematical foundation.",
+        "Unifying Generalization: It elegantly demonstrates that prior attention-based (such as H2O, TOVA, SnapKV) and value-aware (VATP, CriticalKV) eviction heuristics can be recovered as special cases or variations under different pruning objectives/units within this framework.",
+        "Thorough and Solid Evaluation: Extensive experiments on LLaMA-3.1-8B and Qwen-2.5-7B models across diverse benchmarks (RULER, LongBench, and PG19 language modeling) show consistent performance improvements in both query-aware and query-agnostic settings.",
+        "Honest Efficiency Analysis: The authors provide a clear and transparent complexity analysis and empirical latency benchmarks (both for prefill TTFT and per-token decoding), highlighting the practical trade-offs of the different score variants."
+      ],
+      "weaknesses": [
+        "Computational Latency Overhead: Calculating the key-pruning ($S^{\\text{key}}$) and joint-pruning ($S^{\\text{joint}}$) scores involves computing $O(W \\cdot d_{\\text{head}})$ operations per token, which introduces non-trivial decoding latency overhead (up to ~15ms per token as shown in Figure 6). This may limit its deployment in highly latency-critical real-time applications.",
+        "Suboptimal Joint Pruning Interaction: As observed in the PG19 perplexity evaluation, the joint score $S^{\\text{joint}}$ does not consistently outperform the isolated key score $S^{\\text{key}}$. This indicates that the simple additive second-order expansion might not fully model the complex interaction between key and value pruning.",
+        "Redundant Computations with FlashAttention: Since FlashAttention-2 does not materialize the intermediate attention weights, the implementation relies on a workaround that recomputes attention weights within the perturbation window $W$, causing some compute redundancy during the prefill stage."
+      ]
+    }
+  }
+}

@@ -1,0 +1,95 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 6,
+      "strengths": [
+        "Clear motivation addressing a fundamental limitation in certified generative planners: existing methods (like SafeDiffuser) intervene on intermediate latent states across denoising steps, causing semantic misalignment, distributional shift, and severe local traps near obstacle boundaries.",
+        "Well-formulated Prediction-Correction (PC) framework that decouples unconstrained trajectory generation from certified safety correction, paired with vanishing time-scaled flow dynamics (VTFD) to curb integration error and prevent drift.",
+        "Rigorous theoretical support establishing finite-time convergence and forward invariance of a robust safe set using finite-time convergence CBFs with slack-variable relaxation.",
+        "Impressive empirical improvements on Maze2D navigation: completely eliminates local trapping (0% trap rate vs. 65%–100% for baseline safe diffusers/flow matchers) while achieving higher path quality and smoothness.",
+        "Comprehensive ablation studies demonstrating the importance of the two-phase setup, the vanishing time scaling, and the sensitivity to prediction/correction step allocation."
+      ],
+      "weaknesses": [
+        "The experimental validation is primarily centered on 2D maze navigation with static geometric obstacles; the high-dimensional locomotion evaluation (Walker2D and Hopper) is relatively brief (Table 4) and tests only a simple 1D roof height constraint without reporting trap rates, curvature, or wall-clock runtimes.",
+        "Potential confusion regarding latency claims: Table 1 reports 'TIME (ms)' as per-step time (~4.7 ms) rather than total trajectory generation time. With the default 256 steps, overall generation takes over 1.2 seconds, which may not be suitable for high-frequency real-time control unless low NFE regimes are strictly adopted.",
+        "Discrepancy in metric description: Appendix D.2 states that the Maze2D Score is normalized and 'lies in [0, 1]', yet Table 1 and Table 2 report scores around 1.5 to 1.63 without explaining the normalization or offset.",
+        "The CBF is formulated over the generative ODE flow time rather than the robot's physical dynamical system, meaning physical dynamic feasibility and actuator limits are not directly certified during the generation phase."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Clear motivation and insight: The paper convincingly identifies that enforcing safety constraints on intermediate noisy latent representations during generative sampling leads to semantic misalignment, trajectory distortion, and local traps.",
+        "Well-designed method: The proposed Prediction-Correction (PC) integrator and vanishing time-scaled flow dynamics (VTFD) provide an elegant way to decouple candidate path generation from safety refinement while mitigating integration drift.",
+        "Theoretical analysis: Theorem 1 and Proposition 1 provide rigorous guarantees on forward invariance and finite-time convergence to the robust safe set within the generative integration time domain.",
+        "Extensive empirical validation and ablations: The empirical evaluation across Maze2D navigation and locomotion tasks shows clear improvements in success score, trap rate elimination (0%), and trajectory smoothness. The ablations in Section 4.2 systematically justify the choice of NFE allocation and vanishing time scaling."
+      ],
+      "weaknesses": [
+        "Distinction between generative time CBF and physical execution CBF: The barrier certificate is established with respect to the generative integration time $t \\in [0, 1]$ over waypoints, rather than continuous-time robot execution dynamics. While this is valid for generating safe waypoints, the paper should more explicitly clarify that this acts as a generative/optimization filter rather than an online runtime controller handling real-time dynamic uncertainty.",
+        "Discrepancy in metric description: In Appendix D.2, the Maze2D score is described as 'the fraction of remaining steps and lies in [0, 1]', yet Table 1 and Table 2 report scores such as $1.632$. This apparent discrepancy should be clarified.",
+        "Limited obstacle and constraint complexity: The experiments primarily test simple geometric shapes (two superquadric/elliptical obstacles in 2D maze) and a single linear roof constraint in locomotion. Evaluating on environments with dynamic obstacles, kinodynamic constraints, or narrow passages would further demonstrate the generalizability of the approach.",
+        "Inference latency presentation: Table 1 reports per-step time (around 4.7 ms), which totals over 1 second when using 256 steps. While Figure 3 shows competitive performance at lower step counts (e.g., 8–16 steps), the paper should highlight total end-to-end planning latency across different budgets to clearly substantiate the real-time efficiency claim."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Relevant and well-motivated problem: Addressing safety violations, out-of-distribution drift, and local traps in generative trajectory planners (diffusion and flow matching) is an important topic for safe robot autonomy.",
+        "Decoupled generation concept: The high-level idea of decoupling unconstrained trajectory generation from safety-critical refinement via a prediction-correction structure is conceptually intuitive.",
+        "Visual path smoothness: On the Maze2D navigation benchmark, the proposed method produces visibly smooth trajectories that satisfy the 2D obstacle constraints without obvious discontinuities."
+      ],
+      "weaknesses": [
+        "Severe out-of-distribution issue in the Flow Matching formulation: In conditional flow matching, the vector field $v_t(\\cdot; \\theta)$ is trained along trajectories transporting noise at $t=0$ to data at $t=1$. In SafeFlowMatcher, the prediction phase ends at $t=1$ yielding $\\tau_1^p \\approx \\tau_1^\\star$ (data distribution). The correction phase then restarts integration at $t=0$ initialized with $\\tau_0^c = \\tau_1^p$. As a result, at early times $t \\approx 0$, the neural network $v_0$ is evaluated on data-like inputs $\\tau_1^p$, which is completely out-of-distribution since the network was trained exclusively on Gaussian noise at $t=0$. Consequently, the theoretical derivations in Lemmas 2 and 3—which assume $v_t$ accurately represents the true conditional velocity field—do not hold.",
+        "Misleading reporting of computational efficiency: The abstract and introduction emphasize flow matching's ability to plan in 'a single or a few steps' for real-time responsiveness. However, in the experiments (Table 1, Table 7, Appendix D.2), SafeFlowMatcher uses $T^p = 1$ prediction step and $T^c = 256$ correction steps (257 total evaluations). Furthermore, Table 1 reports 'TIME (ms)' as 4.71 ms, but Appendix D.2 clarifies that this is only the per-step time ($Total / 257$); the actual planning time is $\\approx 1.2$ seconds. Reporting per-step time in the main table obscures the real latency and overstates the speed advantage over diffusion.",
+        "Trivialized CBF formulation over generative pseudo-time: The control barrier certificate (Theorem 1, Proposition 1) is applied over the generative sampling time $t \\in [0, 1]$ to an artificial single-integrator system $\\dot{\\tau}_t = u_t$, completely detached from physical robot dynamics, actuation limits, and real-time disturbances. Applying standard finite-time CBF results to a fictitious kinematic integrator in algorithmic time reduces the CBF-QP to standard Euclidean projection/barrier optimization, making the claims of 'certified safety' for robot systems misleading.",
+        "Dubious 'Local Trap' metric and baseline results: The authors redefine the local trap metric (Definition 2) by removing the barrier contact condition $b(\\tau^k)=0$ and relying solely on an inter-waypoint threshold $\\|\\tau_1^k - \\tau_1^{k-1}\\| > \\zeta$. Crucially, the numerical value of $\\zeta$ is never specified anywhere in the paper or appendix. Under this opaque definition, almost all existing baselines (including SafeDiffuser, which was specifically proposed to eliminate local traps) inexplicably achieve 65%–100% trap rates, and baselines exhibit degenerate acceleration numbers (e.g., $1.2 \\times 10^{10}$ in Table 1), raising serious concerns about baseline tuning and evaluation fairness.",
+        "Superficial evaluation on complex tasks: The evaluation beyond Maze2D is limited to two MuJoCo tasks (Walker2D and Hopper) under a single linear roof-height constraint. In Table 4, Barrier Safety is reported merely as a binary 'Yes/No' without quantitative margins, trap rates, or trajectory smoothness metrics, providing insufficient evidence of scalability to complex, high-dimensional robotic control."
+      ]
+    }
+  },
+  "v3": {
+    "exp1_quality": {
+      "oa": 8,
+      "strengths": [
+        "Clear motivation and conceptual insight: The paper identifies a fundamental issue in existing safety-certified generative planners (such as SafeDiffuser)—namely, that applying CBF interventions directly to unformed latent noise during early generation causes severe distributional drift and local traps. Decoupling generation (prediction) and safety refinement (correction) is a well-reasoned and effective formulation.",
+        "Sound theoretical framework: The authors provide theoretical justification for both the vanishing time-scaled flow dynamics (error contraction towards target path via Lemmas 2 and 3) and the barrier certificate (forward invariance and finite-time convergence via Theorem 1 and Proposition 1).",
+        "Substantial empirical gains: Across Maze2D navigation, locomotion, and robot manipulation tasks, SafeFlowMatcher consistently reduces the trap rate to 0% (compared to 65%–100% for SafeDiffuser and SafeDDIM baselines) while maintaining valid barrier safety, higher task scores, and significantly lower runtime.",
+        "Thorough evaluation and ablations: The manuscript includes extensive ablations exploring prediction vs. correction horizon trade-offs, scaling parameter $\\alpha$, sensitivity to CBF hyperparameters $(\\rho, \\epsilon)$, scaling up to multiple constraints, and an energy-distance analysis of distributional drift."
+      ],
+      "weaknesses": [
+        "Hyperparameter selection across domains: While $T^p=1, T^c=256$ works exceptionally well in Maze2D and locomotion, block stacking requires an entirely different balance ($T^p=600, T^c=400$). The paper would be strengthened by providing clearer heuristics or guidelines on how practitioners should choose $T^p$ and $T^c$ for novel tasks.",
+        "Continuous-time vs. discrete-time implementation gap: While the barrier certificate guarantees forward invariance and finite-time convergence in continuous time, the actual implementation uses discrete Euler integration steps. Although introducing the robustness margin $\\delta=0.01$ practically absorbs numerical overshoot, the theoretical analysis does not formally bound the discrete-time integration error during the correction phase.",
+        "Simplicity of constraints in high-dimensional tasks: For the locomotion and manipulation benchmarks, the constraints evaluated are relatively simple (a static roof height barrier and box joint limits). Evaluating performance on more complex or non-convex constraints in high dimensions would demonstrate even stronger generalizability."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 6,
+      "strengths": [
+        "Clear conceptual insight: Identifying the semantic misalignment in prior safe generative planners (such as SafeDiffuser)—which enforce CBFs on noisy, non-executable intermediate latent variables—is insightful and effectively motivates the proposed decoupled architecture.",
+        "Sound theoretical formulation: The proposed two-phase prediction-correction (PC) scheme, coupled with vanishing time-scaled flow dynamics (VTFD) and finite-time convergence CBFs, is supported by formal convergence analysis and barrier certificates (Theorem 1, Proposition 1, and Lemmas 2–3).",
+        "Compelling computational and safety advantages: Across maze navigation, locomotion, and manipulation tasks, SafeFlowMatcher drastically reduces runtime (up to 50x faster total time than SafeDiffuser variants) while effectively eliminating the local trap problem (0% trap rate vs. 70-100% in baseline methods).",
+        "Thorough experimental validation and ablations: The empirical analysis is comprehensive, including energy-distance metrics to quantify distribution drift, parameter sweeps over prediction/correction horizons, sensitivity analysis over CBF hyperparameters, and illustrative visualizations of intermediate trajectories."
+      ],
+      "weaknesses": [
+        "Simplified constraint geometries and lack of full system dynamics in CBF formulation: The evaluated safety constraints are relatively elementary (2D circular/super-elliptical obstacles in Maze2D, a scalar roof-height threshold in locomotion, and box joint limits in manipulation). The CBFs operate at the waypoint kinematic level rather than incorporating higher-order robot dynamics (e.g., velocities, torques, underactuation, or contact constraints).",
+        "Environment-dependent tuning of the prediction-correction split: While the method sets $T^p = 1$ in Maze2D and locomotion, block manipulation requires $T^p = 600$ and $T^c = 400$ to avoid severe degradation. General principles or adaptive mechanisms for setting $T^p$ vs. $T^c$ without empirical trial-and-error remain underdeveloped.",
+        "Strong theoretical assumptions on discretization error: Lemmas 2 and 3 rely on the assumption that the prediction error $\\varepsilon$ is symmetric, zero-mean, and has a locally strongly convex negative log-density. While empirically checked for Maze2D in 2D, this property is unlikely to hold strictly across general complex, multi-modal velocity fields.",
+        "Slack variable relaxation requirement: The necessity of handcrafted relaxation functions $w_t^k$ with time thresholds $t_w$ in non-convex settings (Maze2D) introduces extra hyperparameters to tune to prevent infeasibility near barrier boundaries."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Clear motivation and insight: The paper accurately identifies a key limitation of existing certification-based generative planners (e.g., SafeDiffuser)—namely, that applying CBF interventions throughout the entire reverse sampling process on noisy latents leads to severe distributional drift, slow sampling, and frequent local traps.",
+        "Well-designed technical approach: The proposed two-phase Prediction-Correction (PC) integrator is elegant and effective. Running an unconstrained prediction phase to reach the trajectory manifold followed by a vanishing time-scaled flow dynamics (VTFD) correction phase with finite-time convergence CBFs neatly decouples generative modeling from constraint satisfaction.",
+        "Solid theoretical support: The paper provides theoretical justification for the error contraction of VTFD (Lemmas 2 and 3) as well as formal guarantees for forward invariance and finite-time convergence to the safe set (Theorem 1 and Proposition 1).",
+        "Extensive empirical evaluation and ablations: The experimental validation is thorough, spanning Maze2D navigation, Gym locomotion (Walker2D, Hopper), and robotic manipulation (Block Stacking). The ablations thoroughly examine the effects of prediction horizon T^p, correction horizon T^c, scaling factor alpha, hyperparameter sensitivity (rho, epsilon), and scaling to multiple (up to six) CBF constraints."
+      ],
+      "weaknesses": [
+        "Simplicity of constraints in high-dimensional tasks: For the locomotion and manipulation experiments (Table 4), the evaluated safety constraints are relatively simple geometric/state bounds (e.g., a roof height limit z <= h_r in locomotion and joint limits q_min <= q <= q_max in block stacking). Demonstrating obstacle avoidance or dynamic collision avoidance in these higher-dimensional domains would have provided even stronger validation.",
+        "High sampling horizon required for manipulation: While the paper emphasizes the low-latency, few-step integration capability of flow matching, the Block Stacking task required T^p = 600 and T^c = 400 (total T = 1000 steps, Table 8 and Figure 12). A clearer discussion on why such a large number of integration steps was necessary for this task compared to Maze2D and Locomotion would strengthen the paper.",
+        "Metric granularity in robotic experiments: In Table 4, the safety evaluation metric BS is reported solely as a binary indicator ('Yes'), which obscures whether trajectories were close to the boundary or had comfortable safety margins across different methods."
+      ]
+    }
+  }
+}

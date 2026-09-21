@@ -1,0 +1,50 @@
+{
+  "v1": {
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Identifies a subtle, critical mathematical inconsistency in FlashAttention's backward pass under QAT: the algebraic reduction $P_i^\\top dP_i = dO_i^\\top O_i$ breaks when $O_i$ is computed with quantized probabilities $P^F$ while $dP_i$ relies on the continuous chain rule. The proposed fix—accumulating an auxiliary high-precision output $O'_i$ during the forward pass—is mathematically sound and well-motivated.",
+        "Provides both Triton kernels (for training with inline PTX / bitwise emulation) and optimized CUDA kernels (for inference), running benchmarks on modern Blackwell-generation consumer hardware (RTX 5090).",
+        "Comprehensive empirical validation across two major domains: video diffusion (Wan 2.1 1.3B and 14B) and large language models (Qwen-3 14B, Llama 3.1 70B), demonstrating that QAT enables un-augmented FP4 attention to match BF16 quality while outperforming training-free methods like SageAttention3.",
+        "Eliminating runtime outlier-mitigation heuristics (e.g., QK smoothing and two-level quantization) leads to concrete end-to-end inference speedups (1.1x–1.5x) over SageAttention3.",
+        "Ablation studies clearly confirm the necessity of the proposed backward pass design: removing $O'$ causes exploding gradient norms, training collapse, and severe degradation in downstream evaluation."
+      ],
+      "weaknesses": [
+        "Attn-QAT increases training memory overhead because it requires calculating and caching the high-precision forward tensor $O'$ and storing fake-quantized activation buffers, necessitating aggressive gradient checkpointing and sequence parallelism.",
+        "There are minor inconsistencies and typos in model descriptions: Appendix B.2 refers to continuing training on 'Qwen3-8B' while Section 3.1 and Table 4 refer to 'Qwen3-14B'.",
+        "On Llama 3.1 70B continued training (Table 4), Attn-QAT exhibits a visible performance gap compared to BF16 (e.g., WikiText perplexity of 0.3076 vs 0.2838; MMLU of 0.7773 vs 0.7881), which is attributed to computational budget constraints rather than systematically resolved.",
+        "Comparison against SageAttention3 is missing on the LLM benchmarks due to asserted kernel issues in SageAttention3's causal implementation, leaving the LLM comparisons limited to naive FP4 and BF16."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Insightful mathematical and architectural analysis: The paper pinpoints the exact failure modes when integrating QAT into tiled FlashAttention backward passes, specifically showing how the standard FlashAttention algebraic shortcut $P_i^\\top dP_i = dO_i^\\top O_i$ breaks when $O_i$ is computed with quantized probabilities $P^F$ while the softmax Jacobian uses unquantized $P$. Introducing an auxiliary high-precision output $O'$ neatly resolves this while preserving linear memory complexity.",
+        "Elimination of PTQ runtime heuristics: By training the model to adapt directly to standard NVFP4 representations, the method eliminates runtime Q/K smoothing and two-level quantization overheads required by PTQ approaches like SageAttention3, achieving a 1.1x–1.5x speedup on an RTX 5090.",
+        "Comprehensive empirical validation across modalities: The authors validate their method on both large-scale video diffusion models (Wan-2.1 1.3B and 14B) and LLMs (Qwen3-14B, Llama-3.1 70B), showing strong recovery of BF16 quality via continued training and direct supervised fine-tuning.",
+        "Thorough ablations: Table 2 and Figure 3 convincingly demonstrate the necessity of the proposed backward modifications, proving that omitting $O'$ leads to gradient explosion and unstable training."
+      ],
+      "weaknesses": [
+        "Quantization scope restricted to attention: All linear layers (projections and FFNs) remain in BF16. In standard LLM decoding and moderate context lengths, linear layers typically dominate runtime and memory bandwidth, which constrains the end-to-end model speedup beyond isolated attention microbenchmarks.",
+        "Memory overhead during training: Computing and retaining the auxiliary high-precision output $O'$ adds memory pressure during the forward pass. As acknowledged in Appendix B.1, full gradient checkpointing and sequence parallelism were required to mitigate OOM errors; a quantitative memory profiling analysis comparing Attn-QAT against standard FlashAttention training would strengthen the paper.",
+        "Omission of FP4 PTQ baseline for LLMs: SageAttention3 is excluded from LLM experiments due to causal mask issues in its open-source kernel. While understandable, this leaves the LLM evaluation without an FP4 PTQ comparison to benchmark quality recovery against training-free alternatives.",
+        "Minor editorial inconsistency: Appendix B.2 refers to 'Qwen3-8B' in several places when describing continued training configurations, whereas the main text and Tables 3 and 4 report results for 'Qwen3-14B'."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Identifies and addresses a critical mathematical and architectural bottleneck: naively combining FP4 forward passes with FlashAttention-style backward passes breaks the key identity $P_i^\\top dP_i = dO_i^\\top O_i$. The proposed solution of computing and caching an auxiliary high-precision output $O'$ for backward gradient computation while keeping linear memory complexity is elegant and mathematically sound.",
+        "First systematic study successfully enabling quantization-aware training (QAT) for fused 4-bit attention, supported by custom Triton kernels for training and optimized CUDA kernels for FP4 inference.",
+        "Comprehensive evaluation across two major domains: video diffusion models (Wan-2.1 1.3B and 14B) and large language models (Qwen-14B and Llama-3.1 70B), validating both continued training and supervised fine-tuning.",
+        "Ablation studies convincingly show that QAT eliminates the need for complex, runtime-costly outlier mitigation heuristics (such as QK smoothing and two-level softmax quantization), yielding an end-to-end kernel speedup of 1.1x–1.5x over SageAttention3 on an RTX 5090 GPU."
+      ],
+      "weaknesses": [
+        "Caching the extra high-precision tensor $O'$ increases training activation memory. While the paper mentions resorting to full activation checkpointing and Ulysses sequence parallelism to avoid out-of-memory errors (Appendix B.1), it lacks a systematic quantitative analysis/profiling of memory footprint and training speed overhead introduced by Attn-QAT compared to standard BF16 FlashAttention training.",
+        "In the LLM evaluations, SageAttention3 is omitted entirely due to reported implementation bugs in causal attention, leaving naive uncalibrated FP4 as the sole low-precision baseline for LLMs in Tables 3 and 4.",
+        "Minor inconsistencies in model names in Appendix B.2 (referencing 'Qwen3-8B' in the text of page 13, whereas Table 3 and Table 4 denote 'Qwen3-14B').",
+        "On video generation benchmarks (Table 1), while overall quality matches BF16, certain sub-metrics such as 'Dynamic Degree' show a noticeable drop from BF16 (0.5193 vs 0.3646), which warrants deeper discussion."
+      ]
+    }
+  }
+}

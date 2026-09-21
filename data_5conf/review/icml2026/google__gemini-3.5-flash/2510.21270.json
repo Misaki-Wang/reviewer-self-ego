@@ -1,0 +1,91 @@
+{
+  "v2": {
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Original and elegant approach: Using token permutation to cluster scattered 'heavy-hitter' key tokens into high-density blocks is highly intuitive and addresses a fundamental limitation of block-sparse attention.",
+        "Solid theoretical backing: The paper successfully proves the permutation invariance and equivariance properties of attention (Theorem 3.3) and designs a segmented permutation strategy that mathematically preserves causal constraints.",
+        "Strong hardware realization: Rather than relying purely on simulated sparsity, the authors implement custom permuted-FlashAttention kernels in Triton, demonstrating realistic end-to-end speedups (up to 2.75x on H100 GPUs).",
+        "Comprehensive evaluation: The method is tested across multiple state-of-the-art LLMs (Llama-3.1-8B, Qwen-2.5, Qwen3) and robustly validated on long-context benchmarks like LongBench, LongBenchv2, and RULER."
+      ],
+      "weaknesses": [
+        "Overhead at smaller context lengths: At context lengths below 16K, the overhead of sorting and permuting exceeds the computational savings of sparsity, leading to a slowdown compared to standard FlashAttention (Table 7).",
+        "Dependency on proxy scoring: While the 'Last-Block-Query' proxy works remarkably well for estimating global key importance across many tasks, it might yield suboptimal permutations in scenarios where query attention distributions change dramatically from the start to the end of the sequence."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Innovative and elegant core idea: Leveraging the token-level permutation invariance of attention to actively restructure the attention matrix (via segmented permutation) to maximize block-level sparsity.",
+        "Successfully addresses the causality constraint of auto-regressive LLMs by introducing 'Segmented Permutation', maintaining inter-segment causality while allowing intra-segment reordering.",
+        "Excellent hardware-aware implementation: The authors developed custom Triton kernels for permuted-FlashAttention, achieving real end-to-end prefilling speedups of up to 2.75x, demonstrating the practical viability of the method.",
+        "Comprehensive and rigorous evaluation: Evaluated across several state-of-the-art long-context LLMs (Llama-3.1-8B, Qwen-2.5, Qwen3) and challenging benchmarks (LongBench, LongBenchv2, RULER), showing minimal performance drop compared to full attention.",
+        "Thorough ablation and analytical studies: Detailed analysis on failure modes (such as diagonal patterns), head-wise/layer-wise behavior, and key hyperparameters (segment size, block size)."
+      ],
+      "weaknesses": [
+        "Focus is restricted to the prefilling stage. It is not fully clear how the permuted key/value representations affect the downstream decoding stage and KV cache management. Clarifying the integration with decoding would strengthen the work.",
+        "High relative overhead for shorter context lengths: As shown in the timing breakdown (Table 7), the permutation and block selection overhead is significant for context lengths of 32K and below (e.g., 28.7% at 16K). The paper would benefit from discussing a dynamic thresholding mechanism to only trigger PBS-Attn for very long contexts."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Innovative and well-motivated approach: Actively restructuring the key sequence via segmented token permutation to solve the information fragmentation problem in block-sparse attention is highly original and effective.",
+        "Solid theoretical and mathematical formulation: The paper clearly proves key-value pair permutation invariance and query permutation equivariance to justify their design.",
+        "Hardware-aware and practical implementation: The authors implement a custom Triton kernel for permuted-FlashAttention, achieving significant wall-clock speedups (up to 2.75x end-to-end) rather than relying solely on theoretical FLOP savings.",
+        "Comprehensive evaluation: The method is rigorously tested across multiple state-of-the-art LLMs (Llama-3.1, Qwen-2.5, Qwen3) and challenging benchmarks (LongBench, LongBenchv2, RULER), showing minimal accuracy drop compared to full attention while consistently outperforming existing block-sparse baselines.",
+        "Thorough ablation and overhead analysis: Detailed breakdowns of permutation overhead, GQA handling, segment/block sizes, and failure modes provide valuable insights for practitioners."
+      ],
+      "weaknesses": [
+        "Tracking original key indices for causal masking in the custom Triton kernel adds implementation complexity and could slightly affect peak memory bandwidth utilization in some hardware configurations.",
+        "The global token importance estimation relies on the last block of queries. While empirically robust, this proxy may be less representative in complex, highly non-uniform tasks where query distributions change drastically across the sequence.",
+        "The physical tensor permutation step (using `torch.gather`) introduces a small memory and time overhead, although the authors demonstrate this overhead is negligible at very long contexts."
+      ]
+    }
+  },
+  "v1": {
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "An elegant and novel idea: leveraging the permutation-invariance of attention to physically reorder tokens, co-locating important keys (vertical lines) into fewer blocks to enhance block-level sparsity.",
+        "The proposed segmented permutation strategy effectively overcomes the causality constraint in autoregressive LLMs, allowing intra-segment token sorting while preserving inter-segment causality.",
+        "The method is backed by sound mathematical proofs of attention permutation invariance/equivariance and a custom, high-performance Triton kernel implementation.",
+        "Comprehensive empirical evaluations on competitive benchmarks (LongBench and LongBenchv2) with state-of-the-art models (Llama-3.1-8B and Qwen-2.5-7B) demonstrate superior accuracy-sparsity trade-offs and actual end-to-end wall-clock speedups (up to 2.75x) on modern hardware."
+      ],
+      "weaknesses": [
+        "The paper lacks an explicit discussion on how Rotary Position Embeddings (RoPE) are handled during permutation. Since RoPE encodes absolute/relative position information into Q and K, permuting them prior to attention can affect the positional signal unless done after RoPE calculation. Clarification on this interaction is critical.",
+        "The choice of segment size $S$ presents a tricky trade-off. While larger $S$ allows better clustering of keys, it expands the unskippable on-diagonal causal blocks, limiting maximum sparsity. This hyperparameter may require per-model tuning.",
+        "The key-importance estimation uses the last block of queries to perform a global reduction (Eq. 10). While the benchmarking in Appendix C shows negligible overhead, the paper could benefit from a more detailed analysis of how this query-aware estimation generalizes across highly dynamic or multi-turn conversational attention patterns."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "The proposed Permuted Block-Sparse Attention (PBS-Attn) introduces a novel and mathematically grounded approach to scaling block-sparse attention by exploiting the permutation invariance/equivariance properties of self-attention.",
+        "The segmented permutation strategy is a clever way to handle the causal mask constraint in auto-regressive LLMs, allowing intra-segment sequence reorganization while strictly preserving causality between segments.",
+        "The paper achieves practical, end-to-end wall-clock speedups (up to 2.75x) by delivering custom GPU kernels implemented in Triton, bridging the gap between theoretical block sparsity and actual hardware acceleration.",
+        "Comprehensive evaluation on representative long-context benchmarks (LongBench, LongBenchv2) using modern LLMs (Llama-3.1-8B, Qwen-2.5-7B-1M) shows strong empirical gains, outperforming several state-of-the-art baselines."
+      ],
+      "weaknesses": [
+        "The query-aware key permutation relies on estimating key importance using only the last block of queries. While effective in clustering 'Vertical Lines', this global approximation might fail in documents with multiple shifts in topics or long-range dependencies where key importance varies drastically across different query blocks.",
+        "The paper could benefit from a more detailed breakdown of the sorting and permutation overhead across different batch sizes, sequence lengths, and hardware architectures, as tensor re-layout and sorting operations on GPUs can sometimes incur non-trivial overhead under specific scale settings.",
+        "The description of the baseline 'MeanPooling' suggests it forcibly keeps initial and recent blocks to handle attention sinks. It is not completely clear from the text whether PBS-Attn also explicitly employs this forced selection, or if the permuted structure naturally handles attention sinks without hardcoded rules."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "The paper introduces an elegant and novel way to improve block-sparse attention for causal autoregressive LLMs by using local 'segmented permutation'. This successfully sidesteps the challenge of global permutation breaking the causal mask structure.",
+        "The proposed method is theoretically grounded with clear proofs of permutation invariance/equivariance in the attention mechanism.",
+        "The authors provide a hardware-aware implementation with custom Triton kernels, achieving up to 2.75x end-to-end wall-clock speedup on H100 GPUs, showcasing the practical utility of the method.",
+        "The empirical evaluation is strong, testing on competitive, modern models (Llama-3.1-8B and Qwen-2.5-7B-1M) across standard long-context benchmarks (LongBench and LongBenchv2), showing excellent accuracy preservation compared to full attention.",
+        "Comprehensive ablation studies are provided, analyzing key hyperparameters such as segment size, permutation targets (keys vs. queries), and showing orthogonality with other block selection algorithms."
+      ],
+      "weaknesses": [
+        "The key importance estimation heuristic (using the last block of queries) might not represent the entire attention dynamics perfectly for extremely long context lengths (e.g., 512K+). A deeper discussion on why this works and when it might fail is lacking.",
+        "There is limited discussion on how Grouped-Query Attention (GQA) is handled. Since multiple query heads share a single key head, it's not fully clear if key permutation is done on a per-head, per-group, or global level, and how this impacts the computational overhead.",
+        "The segmented permutation is fundamentally bounded by the segment size $S$. Keys cannot cross segment boundaries, which restricts the clustering of vertical lines that span across segments, requiring a trade-off between the segment size and the size of the unskippable on-diagonal dense blocks."
+      ]
+    }
+  }
+}

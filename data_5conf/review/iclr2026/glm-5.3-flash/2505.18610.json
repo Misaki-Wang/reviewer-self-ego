@@ -1,0 +1,120 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Addresses a timely and practically important problem: KV cache memory overhead for long-CoT reasoning LLMs, where existing short-context KV quantization methods demonstrably fail (e.g., near-0% accuracy for some baselines at 2-bit).",
+        "Well-motivated technical analysis: the RoPE low-frequency channel argument for why short calibration data fails is clear and quantitatively supported (e.g., a 54,410-token period for the lowest-frequency channel in DeepSeek-R1-Distill-Qwen-7B).",
+        "The proposed combination (progressive bit-width shrinking via an equivalent right-shift operation, ILP-based block-wise bit allocation, and positional-interpolation-based calibration) is coherent, and each component is individually ablated (Tables 3, 4; Figures 2-4).",
+        "Fairly broad evaluation across model scales (7B to 70B), multiple reasoning benchmarks (AIME-2024/2025, CMIMC, LiveCodeBench), with repeated sampling, mean/std reporting, and voting accuracy."
+      ],
+      "weaknesses": [
+        "All experiments use fake quantization on GPUs; there is no real-system implementation, no latency/throughput measurement, and no accounting for the runtime cost of repeated dequantize-requantize bit-width shrinking operations during decoding. For a systems-oriented contribution, this is a significant gap.",
+        "Comparison fairness is questionable: baselines are evaluated at batch sizes chosen so 'all methods fully utilize memory,' but the effective memory budgets and configurations across rows (e.g., KIVI BS=32/40 vs. PM-KVQ BS=32 with 2/4-bit mixed precision) are confusing and not rigorously controlled, making the headline 'up to 8%' gain hard to attribute cleanly.",
+        "The core ideas are incremental relative to prior work: progressive/deferred quantization is a known technique in weight quantization, sliding-window FP16 retention and first-token INT16 are directly adopted from KIVI, Taylor-based sensitivity + ILP mixed-precision allocation is standard (LLM-MQ, MixQ), and positional interpolation is borrowed as-is; the novelty lies mainly in the specific composition and the right-shift shrinking trick.",
+        "The claimed benefit of positional-interpolation calibration is thin: the ablation shows only a 1.66% pass@1 gain, s=16 actually degrades performance, and the method assumes PI-transformed short-data distributions match real long-sequence distributions — the calibration data (arXiv papers) also may not match long-CoT generation distributions. No long-context task (e.g., LongBench/needle-in-haystack) is used to validate the long-context distribution claim directly.",
+        "Several methods, including the proposed one, sometimes underperform the 16-bit baseline (e.g., QwQ-32B voting on AIME-2024, PM-KVQ 2/4-bit), and the paper does not discuss when/why the method degrades.",
+        "Missing strong recent baselines relevant to the setting (e.g., SKVQ, WKVQuant); RotateKV, the strongest 2-bit competitor, is only partially evaluated (fails on some models, and only on Qwen-7B/LLaMA-8B in Table 2).",
+        "Reproducibility is undermined: the code link in the abstract is empty ('available at .'), and some details (e.g., exact memory budgets per configuration, how the 16-bit headroom interacts with variable-length generations) are under-specified.",
+        "Acknowledged limitations are substantial: no MLA support (excluding DeepSeek-V3-style models, arguably the most relevant modern long-CoT LLMs), and no integration with real inference engines."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper targets a timely and practically important problem: KV cache memory overhead in long-CoT reasoning LLMs, which is indeed a real deployment bottleneck.",
+        "The proposed system combines three reasonable components (progressive bit-width shrinking, block-wise mixed-precision allocation via integer programming, and positional-interpolation-based calibration), and the 'Equivalent Right Shift' re-quantization operator is a concrete technical contribution.",
+        "Evaluation covers a reasonably broad model range (7B to 70B) across several reasoning and code benchmarks, with vote-based accuracy, standard deviations, and ablation studies for the main design choices.",
+        "Code availability is claimed, supporting reproducibility of the algorithmic side."
+      ],
+      "weaknesses": [
+        "Limited novelty: each component is a straightforward adaptation of known ideas — progressive quantization is essentially memory-budget-triggered bit-width shrinking; block-wise mixed precision via first-order Taylor sensitivity plus an integer program closely follows prior mixed-precision work (LLM-MQ, MixDQ, MiKV); positional interpolation is reused verbatim from Chen et al. [3]. The paper reads as an engineering combination rather than a new methodological insight.",
+        "Evaluation uses 'fake quantization' only. There is no real quantized kernel, no measured memory savings, throughput, or latency, so the central practical claim (making low-bit KV cache viable under memory budgets) is not validated in an actual system. For a systems-flavored efficiency paper this is a significant gap.",
+        "Baseline comparisons raise fairness concerns: the authors explicitly choose bit-widths that 'lead to significant performance degradation when using baseline methods,' and batch sizes/GPU targets differ across configurations, making the headline 'up to 8%' improvement hard to interpret as an apples-to-apples comparison.",
+        "Statistical rigor is weak: AIME contains only 30 problems per year, and several claimed gains (e.g., the 0.84% additional gain from block-wise allocation, or the 1.66% gain from positional interpolation) are well within reported confidence intervals. The positional-interpolation benefit is demonstrated on a single model only and reverses at s=16, undermining the generality of the calibration claim.",
+        "The 'large cumulative error' motivation is asserted but never analyzed quantitatively (no error accumulation measurements, no perplexity or long-context evaluations), and the paper does not compare against non-quantization baselines such as KV eviction or sliding-window attention, which may be more natural competitors under the same memory budget.",
+        "Inconsistencies and incomplete details: CMIMC-2025 in the text vs. CMIMC-2024 in Table 2; Equation (3) is presented without derivation or correctness argument; the block-allocation IP is essentially a small knapsack trivially solvable in closed form, so framing it as integer programming overstates the contribution; MLA models are excluded, which limits applicability to modern reasoning models.",
+        "PM-KVQ generally remains below the 16-bit model on most benchmarks, and the paper does not carefully discuss when the method is truly lossless vs. merely less degraded, which matters for deployment claims."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Timely and well-motivated problem: KV cache memory overhead is a genuine bottleneck for long-CoT reasoning LLMs, and the paper clearly identifies two concrete failure modes (cumulative quantization error and RoPE-induced miscalibration of low-frequency channels) that prior short-context methods do not address.",
+        "The progressive quantization idea is sensible and well-motivated: the observation that fixed low-bit quantization under-utilizes the memory budget at the start of decoding is correct, and the 'Equivalent Right Shift' bit-width shrinking trick is a neat, non-obvious engineering contribution supported by a dedicated ablation (Table 3).",
+        "Comprehensive evaluation for the area: five long-CoT models spanning 7B–70B, four recent reasoning benchmarks (AIME-2024/2025, CMIMC-2025, LiveCodeBench), competitive SOTA baselines (KIVI, MiKV, RotateKV) with std across sampled responses, and ablations of each proposed component.",
+        "Block-wise allocation is cleanly formalized as a memory-constrained integer program using first-order Taylor sensitivity, and the sensitivity analysis in Appendix B yields interpretable findings (e.g., first-block sensitivity in Qwen-based models, deeper blocks more sensitive).",
+        "The positional-interpolation calibration is an elegant zero-overhead solution to the RoPE channel-coverage problem, with an ablation showing it recovers the accuracy of 4x-longer calibration data.",
+        "Honest reporting: the limitations (MLA not supported, no system-level integration) and broader impacts are explicitly discussed."
+      ],
+      "weaknesses": [
+        "Novelty is incremental: each component is a recombination of established techniques — sliding window and first-token INT16 retention are taken directly from KIVI/SKVQ, block-wise mixed precision via sensitivity is standard (LLM-MQ, MixDQ), and positional interpolation is borrowed from Chen et al. The main novelty is applying them in the long-CoT setting and the shifting-based shrinking rule.",
+        "All experiments use fake quantization on a single server; there is no real kernel implementation, no measured wall-clock speedup, effective throughput, or real memory savings, so the practical system-level value of the method is unverified. The authors acknowledge this but it substantially weakens the significance of the contribution.",
+        "The 'cumulative error' motivation is asserted rather than directly measured: no token-level error curves, perplexity trajectories, or degradation-vs-length analyses are provided to substantiate that progressive quantization reduces cumulative error as opposed to merely amortizing memory.",
+        "Comparison fairness is muddled by varying batch sizes across methods and configurations (e.g., PM-KVQ BS=32 vs KIVI BS=40 for Qwen-7B), making some head-to-head numbers difficult to interpret; the memory-budget accounting across the different (BS, Fbit) configurations should be stated more precisely.",
+        "Generalization is narrow: essentially one model lineage (DeepSeek-R1-Distill family plus QwQ-32B, which is also Qwen-based). No non-reasoning long-context evaluation (e.g., RULER/LongBench) to test whether the method helps or hurts general long-context tasks, and no other model families with different RoPE/attention designs.",
+        "Ablations are limited to a single model (DeepSeek-LLaMA-8B) and small effect sizes: the positional interpolation gain (1.66% pass@1 on 30-problem AIME) is within plausible sampling noise, and s=16 degrading performance suggests the approach is heuristic without a principled way to choose s.",
+        "The sensitivity metric uses gradients computed on short calibration data, which may not reflect sensitivity during 32K-token generation; this mismatch is not analyzed.",
+        "Technical sloppiness: Eq. (3) is stated without derivation or verification of its equivalence claim; the claim that CVXPY solves the integer program 'within a few seconds' is imprecise (CVXPY is a convex modeling layer and requires an external MIP solver); benchmark sizes (30 problems per AIME year) make several of the headline deltas statistically fragile."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 6,
+      "strengths": [
+        "The paper addresses a timely and practical problem: KV cache memory overhead in long-CoT reasoning LLMs (32K+ token generations), where existing short-context quantization methods indeed break down.",
+        "The core observation that existing methods underutilize the memory budget (storing fixed low-bit cache even when memory is free) is well-motivated, and progressive quantization with bit-width shrinking to exploit this is a sensible solution.",
+        "The 'Equivalent Right Shift' bit-width shrinking operation is technically clean, with a full correctness proof in Appendix D and a convincing ablation (Table 4) showing it substantially outperforms naive shifting strategies.",
+        "The positional-interpolation-based calibration trick is clever: it approximates long-context RoPE channel distributions with short calibration data at no extra cost, with an ablation (Table 5) supporting the choice of scaling factor s=4.",
+        "Comprehensive empirical evaluation: 5 models spanning 7B–70B, multiple benchmarks (AIME, CMIMC, LiveCodeBench, IFEval), comparisons against strong recent baselines (KIVI, RotateKV, MiKV, KVTuner), multiple batch-size/GPU configurations, throughput analysis, sensitivity analysis across blocks, and integration with sparse attention (QuestAttention) in the appendix.",
+        "The paper is generally well-written and reproducible, with code release, detailed experimental settings, and an honest ethics/limitations discussion."
+      ],
+      "weaknesses": [
+        "Novelty is incremental. Each component builds heavily on prior art: the sliding window and INT16 first-token schemes are adopted from KIVI; layer-wise mixed-precision allocation via Taylor sensitivity closely resembles KVTuner and general mixed-precision quantization; positional interpolation is a direct reuse of Chen et al. (2023). The main new ideas (quantize progressively as memory fills; a fixed integer-shift re-quantization formula) are more engineering than conceptual advances.",
+        "The 'large cumulative error' framing is somewhat overstated: the claimed error accumulation across decoding steps is not formally characterized or measured (no error-growth analysis, perplexity curves, or token-level divergence statistics), and the alternative explanation (memory underutilization) conflates two different phenomena.",
+        "Benchmark sizes are small and noisy: AIME-2024/2025 have only 30 problems each, and several headline gains (e.g., the 0.84% extra gain from block-wise allocation at BS=32) are within the reported standard deviations (±4–7%), making the significance of some comparisons questionable. No statistical significance testing is provided.",
+        "Fairness of comparisons is debatable: PM-KVQ temporarily stores the KV cache at higher bit-width (16/8/4-bit) before shrinking, so during early decoding it uses more memory/precision than baselines; the throughput comparison with KIVI also relies on custom 16/8-bit kernels whose implementation quality could affect results. The C.3 comparison truncates KIVI outputs when memory is exhausted, which is a somewhat artificial protocol.",
+        "Efficiency claims are weaker than accuracy claims: PM-KVQ has 2.45–16.18% throughput degradation versus KIVI, and the pre-inference cost grows for larger models (120 min for 70B); end-to-end serving metrics (e.g., latency under concurrent load) are not evaluated.",
+        "Generality is limited: only DeepSeek-R1-Distill and QwQ models (all GQA, RoPE-based) are tested; MLA models and non-distilled long-CoT models are excluded (acknowledged in limitations), and the method's dependence on known maximum output length for budget computation may not hold in open-ended serving scenarios."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Addresses a practically important and timely problem: KV cache memory overhead in long-CoT reasoning LLMs, where prior short-context quantization methods demonstrably fail (e.g., RotateKV/MiKV producing 0.00 accuracy at 2-bit).",
+        "Comprehensive empirical coverage: five long-CoT models from 7B to 70B, four benchmarks (AIME-2024/2025, CMIMC-2024, LiveCodeBench) plus IFEval, multiple batch-size and GPU configurations, and comparisons with several SOTA baselines including KVTuner in the appendix.",
+        "Well-executed ablations: the three bit-width shrinking strategies are compared (Table 4), sensitivity analysis across all blocks is shown (Figures 3-4), and the positional interpolation scaling factor is studied (Table 5).",
+        "The 'Equivalent Right Shift' requantization scheme is clean and accompanied by a full correctness proof (Appendix D), which is more rigor than many quantization papers provide.",
+        "Efficiency analysis includes real CUDA kernels, throughput measurements, and pre-inference calibration latency (Tables 3 and 11), and code release plus reproducibility statement support reproducibility."
+      ],
+      "weaknesses": [
+        "Limited novelty: each component is a relatively straightforward combination of existing ideas. Progressive quantization is essentially staged requantization; block-wise mixed-precision allocation closely overlaps prior work (KVTuner already does sensitivity-aware layer-wise mixed-precision KV quantization; MiKV does token-level mixed precision); positional interpolation is borrowed directly from Chen et al. (2023) and applied to calibration. The framing as three new techniques overstates the conceptual contribution.",
+        "The headline gains for individual components are small and possibly within noise: block-wise memory allocation adds only ~0.84% and positional interpolation only ~1.66% on AIME-2024, while the reported standard deviations on these 30-problem benchmarks are ±4-7%. The main benefit appears to come from the progressive scheme (i.e., simply using more bits for early tokens), which weakens the significance of the more 'novel' components.",
+        "Evaluation on small, high-variance benchmarks: AIME-2024/2025 and CMIMC contain ~30 problems each, and pass@1 differences of 1-3% are not clearly statistically significant; the 70B model is evaluated only on AIME-2024, further limiting evidence at scale.",
+        "The motivating claim that existing methods 'waste memory' is somewhat misleading: at maximum context length, uniform-bit methods use the full budget; the waste only occurs for shorter generations, so the benefit of progressive quantization is conditional on the response-length distribution (partially acknowledged in C.8 but not confronted honestly in the main narrative).",
+        "Accuracy results are obtained with fake quantization; only throughput uses real kernels. The interaction between progressive shrinking and real kernel accuracy/latency (e.g., mixed-precision attention over caches at different bit-widths) is not validated end-to-end.",
+        "Throughput comparisons are confounded: PM-KVQ and KIVI are evaluated at much larger batch sizes (110/4) than the FP16 baseline (18/1), and the 2.73-5.18x speedup largely reflects memory savings from any 2-bit scheme rather than the specific contributions.",
+        "Fixed hyperparameters (s=4, group size 128, grid-searched alpha) are presented without sensitivity analysis in the main text, and the method is restricted to GQA-style models, excluding MLA architectures that are increasingly standard in long-context reasoning LLMs."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Well-motivated problem: KV cache quantization for long-CoT reasoning LLMs is timely and practically important, and the paper clearly identifies two concrete failure modes (cumulative quantization error and short-context calibration under RoPE) that existing short-context methods suffer from.",
+        "The three proposed techniques are coherent and well-integrated: progressive quantization with a formally proven 'Equivalent Right Shift' strategy (Appendix D), block-wise bit-width allocation formalized as an Integer Programming problem with Taylor-estimated sensitivities, and positional-interpolation-based calibration that increases effective calibration length at no extra cost.",
+        "Extensive empirical evaluation: 5 models from 7B to 70B, comparisons against multiple strong baselines (KIVI, RotateKV, MiKV, KVTuner), plus ablations for each component, efficiency/throughput analysis, multiple GPU configurations, short-context (IFEval) generalization, and integration with sparse attention (QuestAttention).",
+        "Results are meaningful: up to 8% improvements over SOTA at 2-bit settings where baselines collapse (e.g., RotateKV/MiKV produce 0.00), and demonstrated 2.73-5.18x throughput over 16-bit inference.",
+        "Reasonable reproducibility: calibration data, hyperparameters (s=4, alpha grid search, group size 128), batch size setups, and latency of the pre-inference pipeline are described in detail, with code release promised."
+      ],
+      "weaknesses": [
+        "Limited novelty of individual components: progressive bit-width shrinking is a natural engineering extension, positional interpolation is directly borrowed from Chen et al. (2023), and Taylor-sensitivity-based integer programming for mixed-precision allocation is standard practice from prior mixed-precision quantization work. Layer-wise mixed-precision KV quantization also already exists (KVTuner), and the head-to-head comparison with KVTuner is limited to a single 7B model.",
+        "Statistical significance is a concern: the main benchmarks are tiny (AIME has 30 problems per year; CMIMC ~30), and several headline claims fall within the reported error bars (e.g., PM-KVQ 40.21±5.71 vs. 16-bit baseline 41.04±6.74 on AIME-2024; some QwQ-32B and 14B comparisons are within ±2-4%). The abstract's 'up to 8%' improvement should be contextualized against this variance.",
+        "All accuracy results use fake quantization on 8xA100 hardware; real quantized execution is only verified for 7B/32B throughput with KIVI-style kernels. Consistency between the fake-quantization accuracy pipeline and the deployed kernels (especially the new 16/8-bit and bit-shrinking kernels) is not validated end-to-end.",
+        "The memory-budget comparison framing is somewhat circular: PM-KVQ's advantage comes largely from being allowed to temporarily store higher-precision cache, and comparisons at different batch sizes (32 vs. 40, 12 vs. 16) make some rows difficult to interpret; notably, in Table 2 the uniform 2-bit PM-KVQ (BS=16) sometimes outperforms the mixed 2/4-bit variant, which is counterintuitive and unexplained.",
+        "The positional interpolation calibration uses effective length 8K while inference runs to 32K outputs; the paper does not justify why 8K effective calibration suffices, and the ablation showing degradation at s=16 suggests the approach's scope is narrow, but the boundary conditions are not analyzed.",
+        "Writing/presentation issues: the abstract's code URL is cut off, there are typos ('memory memory', 'can indeed performance drop'), and discrepancies exist between the reported gains and what the tables strictly support in a few places."
+      ]
+    }
+  }
+}

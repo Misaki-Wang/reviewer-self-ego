@@ -1,0 +1,95 @@
+{
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Principled and lightweight formulation: The paper re-examines group-based RLVR through the lens of statistical distribution estimation rather than purely advantage design. The Discounted Beta–Bernoulli (DBB) model provides an elegant, computationally negligible mechanism to prevent variance collapse and stabilize reward signals without requiring replay buffers or extra forward passes.",
+        "Solid analytical characterization: The authors provide formal derivations of the mean, variance, and MSE of the DBB estimator under non-stationary reward distributions (Section 3.3 and Appendix B), and directly benchmark it against other shrinkage baselines (EMA, Laplace smoothing, Empirical Bayes).",
+        "Extensive and rigorous evaluation: The method is benchmarked across two model scales (1.7B and 8B) on six in-distribution math datasets and three out-of-distribution reasoning benchmarks. Experiments report mean and standard deviation over four independent runs with paired t-tests, demonstrating statistically significant gains over naive GRPO and specialized baselines (RePO, GRESO, DAPO).",
+        "Thorough diagnostics and ablation studies: The submission includes comprehensive analyses of training dynamics (entropy, response length), discount factor sensitivity across model scales, MSE vs. rollout count $N$, and an important ablation isolating the effect of the wider PPO clipping range (Appendix D)."
+      ],
+      "weaknesses": [
+        "Reliance on multi-epoch training per prompt: The DBB mechanism tracks posterior parameters $(\\alpha^q, \\beta^q)$ on a per-prompt basis across epochs. In common large-scale RL post-training regimes where models train for only a single epoch over massive prompt datasets, per-prompt historical discounting cannot accumulate information across steps, limiting its direct applicability without prompt repetition.",
+        "Scale-dependent hyperparameter tuning: The optimal discount factor $\\lambda$ exhibits strong dependence on model scale (0.25 for 0.6B, 0.5 for 1.7B, and 0.75 for 8B) and the rate of non-stationarity. While the authors discuss this relationship, finding the optimal $\\lambda$ adds hyperparameter search overhead for new models and task distributions.",
+        "Interaction with advantage scaling and clipping: Because DBB departs from zero-sum per-group normalization, it significantly alters advantage dynamic ranges, necessitating an asymmetric clipping range adjustment to $(0.98, 0.98)$ (Appendix D). Although the authors analyze this, such co-dependencies complicate the optimization dynamics and baseline comparisons."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Principled statistical formulation: Framing reward and advantage estimation in RLVR as a Bayesian inference problem over non-stationary Bernoulli outcomes provides a theoretically grounded and clean alternative to heuristic sampling or prompt-filtering strategies.",
+        "Negligible computational and memory overhead: Unlike replay-based methods (e.g., RePO) that require storing token-level probabilities and running additional forward passes, or dynamic sampling (e.g., DAPO) that expends extra rollout budget, DBB only requires updating two scalar parameters (alpha and beta) per prompt across training epochs.",
+        "Comprehensive empirical evaluation: The paper evaluates two model scales (1.7B and 8B) across six in-distribution math benchmarks and three out-of-distribution reasoning benchmarks, reporting mean and standard deviations over four random seeds with rigorous statistical significance tests.",
+        "In-depth analytical and ablation studies: The paper provides complete derivations for the estimator's bias, variance, and MSE under non-stationarity, alongside insightful ablations on the discount factor lambda, comparisons to alternative shrinkage estimators (EMA, Laplace, Empirical Bayes), and training dynamics analysis (entropy, response length, and Best@8)."
+      ],
+      "weaknesses": [
+        "Dependence on multi-epoch prompt revisiting: The historical discounting mechanism inherently relies on multi-epoch training where the exact same prompts are revisited across epochs (e.g., 4 epochs in the experimental setup). In common RLVR settings where training runs for only a single epoch over large corpora or uses streaming prompt mixtures, the historical posterior update offers no accumulation, leaving the method dependent solely on the static prior.",
+        "Entanglement of reward estimation with advantage scale and clipping range: As noted in Appendix D, GRPO-DBB relies on a significantly widened PPO clipping range of (0.98, 0.98), whereas all baselines are trained under (0.2, 0.28). While the authors ablate this for GRPO, the change in advantage scale caused by removing empirical group-variance normalization directly alters the optimization dynamics, making it difficult to fully disentangle the benefits of variance reduction from larger unclipped policy gradient updates.",
+        "Missing explicit advantage formula in the main text: While Equations (12) and (13) define the posterior mean and variance, Section 3 and Algorithm 1 (Line 11) do not explicitly define the exact mathematical formula used to compute A_hat_i from X_i and the posterior statistics, requiring the reader to deduce the exact normalization employed."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Principled reformulation: Reformulating advantage estimation in group-based RLVR through the lens of non-stationary Bayesian reward estimation is elegant, well-motivated, and directly tackles the root cause of variance collapse without requiring expensive resampling or complex replay caches.",
+        "Theoretical soundness: The paper provides rigorous analytical derivations for the expectation, variance, bias, and MSE of the Discounted Beta-Bernoulli (DBB) estimator under non-stationary reward distributions (Section 3.3 and Appendix B), clearly formalizing the bias-variance trade-off.",
+        "High compute and memory efficiency: Unlike trajectory replay methods (e.g., RePO) that require storing token-level probabilities and executing off-policy importance sampling passes, DBB tracks only two scalar parameters per prompt, incurring virtually zero computational or memory overhead.",
+        "Comprehensive empirical validation: Evaluated across two model scales (1.7B and 8B, plus 0.6B in Appendix G) across six in-distribution math benchmarks and three out-of-distribution reasoning benchmarks over four independent seeds with paired statistical significance tests, consistently outperforming GRPO, RePO, GRESO, and DAPO.",
+        "Thorough diagnostics and ablations: The manuscript provides insightful analyses of training dynamics, empirical MSE validation against 128-rollout reference estimates, Best@8 exploration curves, comparisons with alternative shrinkage baselines (EMA, Laplace, Empirical Bayes), and careful examination of clipping range effects."
+      ],
+      "weaknesses": [
+        "Dependence on multi-epoch prompt revisitation: DBB maintains state (alpha, beta) on a per-prompt basis across epochs. In large-scale RL training settings where prompts are sampled from massive datasets and trained for only a single epoch (or streaming data regimes), the discounting mechanism cannot leverage historical statistics and degrades to a static prior update.",
+        "Confounding optimization dynamics from clipping range: GRPO-DBB uses a significantly wider PPO clipping range (0.98, 0.98) than standard GRPO (0.2, 0.28) due to different advantage dynamic ranges. While Appendix D studies this isolation, widening clipping to 0.98 essentially turns off clipping on the lower side, which represents a substantial shift in policy optimization dynamics.",
+        "Heuristic nature and sensitivity of discount factor lambda: The optimal discount factor varies notably across model sizes (0.25 for 0.6B, 0.5 for 1.7B, 0.75 for 8B). Although the authors provide an intuitive explanation regarding the rate of distribution drift, lambda currently requires manual tuning per model and dataset difficulty, with dynamic adaptation left as future work.",
+        "Uniform penalty on zero-variance failed batches: When all rollouts fail, DBB assigns a uniform negative advantage to all generated responses. In complex multi-step reasoning, failed trajectories often contain correct reasoning prefixes; penalizing all tokens indiscriminately on all-zero batches could risk suppressing valid reasoning primitives."
+      ]
+    }
+  },
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Principled reformulation: Reformulating reward and advantage computation in RLVR from a statistical estimation perspective provides a clean and intuitive framework for addressing sample inefficiency and variance collapse.",
+        "Computational efficiency: Unlike replay-based approaches (e.g., RePO) that require storing token probabilities and running extra forward passes, DBB maintains only two scalar statistics per prompt, incurring negligible memory and compute overhead.",
+        "Comprehensive evaluation: The method is evaluated across two model scales (Qwen-1.7B and 8B) on six in-distribution math benchmarks and three out-of-distribution reasoning benchmarks, alongside MSE analyses and ablations on the discount factor lambda."
+      ],
+      "weaknesses": [
+        "Severe hyperparameter confounder: In Appendix C, the authors state that while baseline methods use a clipping range of (0.2, 0.28), GRPO-DBB uses a much wider clipping range of (0.98, 0.98) ('we therefore adopt a wider clipping range of (0.98, 0.98) specifically for RLVR-DBB'). This is a critical experimental flaw: changing the clipping bound from ~0.2 to 0.98 permits substantially larger policy gradient steps. Without evaluating GRPO under the same clipping parameter or testing DBB with the baseline clipping parameter, it is impossible to disentangle the gains of DBB from the effect of using a dramatically relaxed clipping range.",
+        "Strong reliance on multi-epoch training: The DBB estimator tracks historical Beta parameters per prompt index q in the training set across multiple epochs (4 epochs in the paper). However, many modern large-scale RL post-training pipelines train on large prompt sets for only a single epoch. In a single-epoch regime, DBB reduces to simple Laplace/add-1 smoothing (Beta(1,1)). The paper lacks an analysis or baseline comparing multi-epoch DBB against single-epoch training or static smoothing.",
+        "Missing standard variance-collapse baselines: A well-known simple heuristic to mitigate variance collapse in GRPO is adding a small regularizer or floor to the standard deviation (e.g., sigma + eps, or assigning a default non-zero advantage). The paper compares against standard GRPO and RePO, but omits this natural and direct baseline.",
+        "Unexplored implications of non-relative updates: Under DBB, when all N rollouts for a prompt succeed (r_i = 1 for all i), every response receives a strictly positive advantage A_i = +sqrt(beta / alpha). Consequently, the policy reinforces all generated responses equally, breaking the group-relative / zero-sum baseline property of GRPO and acting as self-imitation learning on all-correct prompts. The consequences of this dynamic on policy drift and exploration warrant deeper theoretical and empirical discussion.",
+        "Minor editorial errors: On page 5, Section 4 begins with 'We empirically demonstrate that HBB estimation is effective...', mistakenly using 'HBB' instead of 'DBB'. Additionally, the caption in Figure 3 refers to Figure 2(b) instead of Figure 3(b)."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Principled statistical perspective: Formulating reward estimation in RLVR through the lens of Bayesian parameter estimation under non-stationarity is conceptually clean, providing a well-motivated alternative to sample-based point estimation.",
+        "Computational efficiency: Unlike replay-based methods (e.g., RePO) that require storing full token sequences, caching old action probabilities, and executing off-policy forward passes, DBB maintains only two scalar parameters (alpha and beta) per prompt, incurring virtually zero compute and memory overhead.",
+        "Comprehensive empirical gains: GRPO-DBB demonstrates consistent Acc@8 improvements over standard GRPO across six in-distribution reasoning benchmarks (+3.22 on 1.7B, +2.42 on 8B) and three out-of-distribution benchmarks (+12.49 on 1.7B, +6.92 on 8B).",
+        "Thorough analytical support: The paper provides exact closed-form derivations for the mean, variance, and MSE under non-stationary dynamics (Appendix B), corroborated by empirical MSE measurements against a 128-sample reference ground truth and ablations over the discount factor lambda."
+      ],
+      "weaknesses": [
+        "Confounded baseline comparison due to mismatched clipping ranges: In Appendix C, the clipping range is configured as (cliplow, cliphigh) = (0.2, 0.28) for GRPO and RePO, but is widened to (0.98, 0.98) specifically for RLVR-DBB. Because clipping thresholds directly govern the effective optimization step size and update magnitude in PPO/GRPO variants, altering this hyperparameter exclusively for the proposed method confounds the experimental evaluation.",
+        "Reliance on multi-epoch training over a fixed prompt set: The method explicitly requires tracking prompt-specific posterior parameters (alpha_q, beta_q) across successive epochs (4 epochs on DAPO-Math-17k). In many large-scale RL post-training pipelines, training is conducted for a single epoch over large prompt pools to avoid overfitting. In such single-epoch or streaming settings, historical tracking across epochs does not apply, reducing DBB to static prior smoothing for first-time prompts.",
+        "Uncentered advantage and baseline drift: In standard GRPO, group-relative advantages strictly sum to zero per prompt group, serving as a zero-mean baseline. Under DBB, advantages are normalized against historical posterior statistics, meaning the sum of advantages over a rollout group is generally non-zero. While this allows learning from groups where all rollouts fail, it introduces a baseline shift and potential gradient drift that is not formally analyzed in the text.",
+        "Absence of error bars and statistical significance: All reported results across the 9 benchmarks are single-run point estimates without standard deviations or confidence intervals across multiple random seeds, which is important given the stochastic nature of LLM reinforcement learning."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Principled statistical perspective: Framing reward baseline estimation in RLVR as Bayesian distributional inference provides an intuitive and mathematically grounded way to address sample inefficiency and the zero-variance problem in group-relative methods.",
+        "Computational and memory efficiency: Unlike rollout-replay methods (e.g., RePO) that require storing token-level log-probabilities and performing extra forward passes, the proposed DBB approach only tracks two scalar parameters per prompt, incurring negligible memory and compute overhead.",
+        "Comprehensive benchmark coverage: The authors evaluate across two model scales (Qwen3-1.7B and 8B) on six in-distribution math benchmarks and three out-of-distribution reasoning benchmarks, demonstrating broad empirical improvements over naive GRPO.",
+        "Clear bias-variance derivations: Appendix B provides rigorous, step-by-step derivations of the conditional expectation, variance, and MSE of the discounted estimator under non-stationary Bernoulli sequences."
+      ],
+      "weaknesses": [
+        "Severe experimental confounder in clipping range: In Appendix C, the authors state that while all baselines use a standard clipping range of (cliplow, cliphigh) = (0.2, 0.28), DBB specifically uses a much wider clipping range of (0.98, 0.98) to 'avoid overly aggressive clipping'. Widening the clipping bounds to 0.98 effectively removes PPO/GRPO clipping and allows significantly larger policy updates. Because this critical hyperparameter was changed exclusively for the proposed method and never ablated on the baselines, it is unclear whether downstream gains stem from the DBB estimator or simply from a looser trust region / larger effective update step.",
+        "Reliance on multi-epoch prompt repetition: The discounted tracking mechanism across time steps τ fundamentally depends on encountering the exact same prompts over multiple training epochs (4 epochs in the paper). However, standard large-scale LLM post-training often operates in single-epoch or near-single-epoch regimes across vast prompt sets to prevent overfitting and reward hacking. In a single-epoch regime, DBB reduces merely to static prior smoothing (Laplace smoothing). The paper lacks evaluation and discussion of how DBB behaves in single-pass settings.",
+        "Missing explicit advantage formula in Section 3: While Algorithm 1 (line 11) states 'Compute advantage A_hat_i with (alpha, beta) and X_i', Section 3 never provides the explicit mathematical formula for the normalized advantage used in GRPO-DBB (e.g., whether and how Var_hat^dbb is normalized with Bessel correction or epsilon stabilization). Only in Section 5.4 is the unnormalized advantage for Dr.GRPO explicitly defined.",
+        "Presentation flaws and inconsistencies: Figure 1 exhibits broken font rendering and placeholder symbols (e.g., p_! instead of proper notation). Section 4 erroneously introduces the acronym 'HBB' instead of 'DBB' ('We empirically demonstrate that HBB estimation is effective...'), and Section 5.4 on page 8 mistakenly references 'Figure 2(b)' when discussing Figure 3(b)."
+      ]
+    }
+  }
+}

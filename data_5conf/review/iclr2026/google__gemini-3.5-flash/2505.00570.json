@@ -1,0 +1,91 @@
+{
+  "v3": {
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Innovative frequency-domain perspective for KV cache compression, utilizing Discrete Cosine Transform (DCT) to retain low-frequency components containing global semantic information.",
+        "Excellent performance under extreme compression rates; at an aggressive 1% retaining ratio, FreqKV significantly outperforms token-eviction baselines on LongBench.",
+        "Clever handling of Rotary Position Embedding (RoPE) by compressing before RoPE application, which avoids out-of-bounds position embedding issues that typically degrade sequence extrapolation.",
+        "Comprehensive evaluation across various benchmarks (PG-19, Proof-pile, LongBench, RULER, Needle-in-a-Haystack, and LongGenBench) demonstrating the approach's capability for both understanding and generation tasks."
+      ],
+      "weaknesses": [
+        "Unlike training-free token-eviction methods (such as SnapKV or PyramidKV), the proposed approach requires a fine-tuning/adaptation phase to align the model to the frequency-compressed KV cache, which limits its zero-shot plug-and-play capability.",
+        "Performance degrades on tasks requiring highly precise, localized, or symbolic details, such as formula-heavy mathematical tasks on Proof-pile (where FreqKV trails full-cache baselines like LongLoRA due to the loss of high-frequency components).",
+        "While the theoretical complexity of DCT/IDCT is low ($O(N \\log N)$) and the FLOP overhead is shown to be minimal, actual system-level execution on GPUs for iterative DCT transformations during autoregressive decoding can be tricky to optimize compared to simple index-slicing methods."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 8,
+      "strengths": [
+        "Innovative perspective: The paper introduces a novel approach to key-value (KV) cache compression by transforming KV states into the frequency domain using the Discrete Cosine Transform (DCT) and retaining low-frequency components.",
+        "Solid theoretical and empirical motivation: The authors provide detailed analysis (power spectrum and perturbation studies) demonstrating that LLM KV states have strong energy concentration in the low-frequency components, which primarily encode global semantic contexts, whereas high-frequency components encode local details.",
+        "Impressive performance: FreqKV achieves state-of-the-art or highly competitive results across various long-context benchmarks (LongBench, RULER, Needle-in-a-Haystack, LongGenBench) and scales LLaMA-2-7B's context window up to 256K with stable perplexity.",
+        "Negligible computational overhead: Because DCT and IDCT can be computed very efficiently in $O(N \\log N)$ time, the compression overhead is extremely small (accounting for less than 0.3% of the total decoding time).",
+        "Detailed analysis and ablations: The paper provides thorough ablation studies regarding different retaining ratios, mismatched training/evaluation ratios, sink token sizes, and the necessity of the rescaling factor."
+      ],
+      "weaknesses": [
+        "Requirement of fine-tuning: Unlike training-free KV eviction methods (e.g., SnapKV, PyramidKV), FreqKV requires minimal training (supervised fine-tuning or pre-training) to adapt the model to the frequency-domain compressed representation. This limits its immediate plug-and-play capability on arbitrary off-the-shelf LLMs.",
+        "Performance on token-sensitive/dense formats: As shown in the evaluation on the Proof-pile dataset (Table 9), FreqKV trails LongLoRA. The frequency compression inevitably loses local details (high frequencies), which degrades performance on formula-heavy and symbolic tasks where exact character/token-level details are critical.",
+        "RoPE mismatch: When performing IDCT to project the low-frequency spectral coefficients back to the time-domain, the resulting $L$ compressed tokens are linear combinations of the original $N$ tokens. Applying RoPE directly to these $L$ tokens based on their new positions ($0 \\dots L-1$) introduces a semantic-positional mismatch, which is likely why the 'minimal training' phase is mandatory for the model to recover and function."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "The paper introduces an innovative perspective by compressing the KV cache in the frequency domain using Discrete Cosine Transform (DCT), which is a relatively unexplored and interesting direction for autoregressive decoder-only LLMs.",
+        "The method demonstrates exceptional robustness under aggressive compression ratios (e.g., retaining only 1% of the cache), outperforming traditional token-eviction strategies which tend to collapse.",
+        "By compressing key states before applying RoPE, the method elegantly bypasses the need for position extrapolation or interpolation, allowing stable context extension up to 256K."
+      ],
+      "weaknesses": [
+        "Confounded and potentially unfair evaluation: FreqKV requires fine-tuning (SFT on LongAlpaca or pre-training on RedPajama) to adapt the LLM to the frequency-compressed representation. However, it is compared directly against training-free, zero-shot baselines (e.g., SnapKV, PyramidKV, FastKV) in Tables 3, 4, and 5. The fine-tuning process on long-context datasets likely gives FreqKV a substantial advantage. For a fair comparison, either FreqKV should be evaluated zero-shot, or the training-free baselines should be evaluated on the same fine-tuned checkpoints.",
+        "Lack of realistic system-level evaluation: While the FLOP overhead of DCT/IDCT is theoretically low, executing on-the-fly FFT operations on GPU tensors disrupts the contiguous memory layout and can hinder the memory-access efficiency of optimized kernels like FlashAttention-2. Furthermore, the evaluation is limited to a batch size of 1. Under real serving workloads with larger batch sizes and dynamic sequence lengths, batched DCT/IDCT operations would introduce substantial system complexity and queuing overhead.",
+        "Blurring of causal boundaries: Truncating the spectrum and performing IDCT maps the representations back to a sequence of virtual tokens where each token is a linear combination of the entire compressed block. This process blurs the temporal and causal alignment of individual tokens. The paper should provide a deeper theoretical or qualitative analysis of how this information-mixing affects the causal structure of autoregressive generation."
+      ]
+    }
+  },
+  "v1": {
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Novel and Elegant Idea: Applying frequency-domain analysis (via Discrete Cosine Transform) for KV cache compression in decoder-only LLMs is a highly creative and mathematically sound approach. It shifts the paradigm from heuristic spatial/temporal token eviction/merging to systematic signal filtering.",
+        "Strong Empirical Justification: The paper provides clear visualization and analysis (Figures 1 and 6) showing that the energy of key and value states indeed concentrates heavily in the low-frequency components in the deeper layers of the transformer, which strongly justifies the proposed low-pass filtering.",
+        "Low Computational Complexity: The compression mechanism operates with $O(N \\log N)$ complexity using DCT. It adds negligible overhead (less than 0.5% of total decoding time at 32K context) as validated in the latency and FLOP analyses (Table 3, Table 5, Figure 5).",
+        "RoPE Compatibility: By compressing key and value states before applying Rotary Position Embeddings (RoPE), FreqKV naturally handles positional indices within the original context window, avoiding out-of-bound position issues or complex position interpolation/extrapolation.",
+        "Convincing Benchmarking: FreqKV achieves strong performance across multiple long-context benchmarks (PG-19, Proof-pile, LongBench, and Needle-in-a-Haystack), demonstrating superior or highly competitive retrieval capability and language modeling perplexity compared to existing baselines."
+      ],
+      "weaknesses": [
+        "Requirement of Fine-Tuning: Unlike popular training-free, plug-and-play KV compression methods (e.g., StreamingLLM, SnapKV, PyramidKV), FreqKV requires a \"minimal training\" phase (using LoRA) to adapt the LLM to the frequency-domain compressed cache. The paper lacks zero-shot/training-free evaluation of FreqKV, which would be highly informative to quantify the absolute necessity and impact of the fine-tuning stage.",
+        "Slightly Unbalanced Comparison on LongBench: In Table 2, FreqKV (which benefits from instruction fine-tuning on the long-context LongAlpaca dataset) is compared against training-free methods like SnapKV and PyramidKV. To ensure a fair comparison, the authors should evaluate these training-free compression methods on the same fine-tuned model, or clearly discuss how much of the performance gain is due to the LoRA fine-tuning vs. the compression strategy itself.",
+        "Lack of Analysis on Iterative Information Smearing: Repeatedly downsampling the representations (Time Domain -> DCT -> Truncation -> IDCT -> Concatenate with new tokens -> Repeat) could mathematically lead to \"information smearing\" or loss of temporal locality over multiple compression steps. An analysis or ablation study tracking representation quality/fidelity across multiple compression iterations would strengthen the technical depth."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 6,
+      "strengths": [
+        "Novel frequency-domain perspective: Applying DCT/IDCT to compress the KV cache along the sequence dimension based on the energy concentration of low-frequency components is an intuitive and novel idea for autoregressive LLMs.",
+        "Negligible computational overhead: The use of O(N log N) DCT/IDCT operations adds very little latency (<0.7% of decoding time according to Table 3 and Table 5) compared to the quadratic cost of full self-attention.",
+        "Strong empirical results: The method achieves competitive results on PG-19 and Proof-pile, outperforming baseline models (like LoCoCo) and demonstrating strong performance on LongBench and Needle-in-a-Haystack.",
+        "Detailed analysis: The paper provides useful empirical analyses, including head-wise power spectrums, different retaining ratios, and decoding latency measurements."
+      ],
+      "weaknesses": [
+        "Inconsistent baseline comparison: In Table 2 (LongBench), FreqKV is compared with training-free compression methods like SnapKV and PyramidKV. However, FreqKV requires fine-tuning (using SFT on LongAlpaca as specified in Section 5.3), while SnapKV and PyramidKV are training-free/zero-shot. This makes the comparison somewhat unfair. The authors should evaluate how FreqKV performs in a zero-shot (training-free) setting, or compare with other fine-tuned compression methods under identical training settings.",
+        "Relative position distortion via RoPE: Section 4.3 states that cached keys are compressed before RoPE and then encoded with sequential position indices in the compressed cache (0 to L-1). Since the L tokens represent a compressed version of a much longer sequence (N tokens), assigning them contiguous indices distorts the relative distance/position information. The paper lacks a detailed discussion or evaluation of how this relative distance distortion impacts tasks that are highly sensitive to precise relative token positions.",
+        "Iterative compression degradation: Since compression is performed iteratively (i.e., compressing previously compressed tokens along with new ones), earlier parts of the sequence undergo multiple lossy compression cycles. It is important to analyze whether this repeated compression leads to eventual information loss or drift as sequence lengths scale even further (e.g., beyond 64K to 128K+)."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "An interesting exploration of applying frequency-domain analysis (specifically, the Discrete Cosine Transform) to KV cache compression in decoder-only LLMs.",
+        "The manuscript is well-written, with clear illustrations (such as Figure 2) that help explain the iterative compression mechanism.",
+        "Evaluations cover multiple facets of context extension, including perplexity, downstream benchmarks (LongBench), and retrieval accuracy (Needle-in-a-Haystack)."
+      ],
+      "weaknesses": [
+        "Theoretical Flaw in Iterative Compression: In Section 4.3 and Figure 2, the iterative compression concatenates previously compressed tokens (which represent a heavily downsampled historical context) with new, uncompressed tokens (which represent recent tokens at full resolution). Applying DCT over this combined sequence assumes uniform sampling. However, because the historical and recent parts have drastically different temporal resolutions, this represents a non-uniformly sampled signal. Treating it as uniform violates basic signal processing principles, introducing severe aliasing and distortion.",
+        "Position Embedding (RoPE) Inconsistency: Applying RoPE to the compressed cache using compressed position indices (0 to L-1) distorts the original relative distance between tokens. RoPE's effectiveness depends on preserving actual sequence distances to enforce attention decay. Compressing the positions scaling-wise breaks the mathematical assumptions of RoPE, meaning the model is forced to overfit/adapt to a heavily deformed coordinate space during fine-tuning.",
+        "Unfair Evaluation on Downstream Tasks: In Table 2 (LongBench), FreqKV (which is fine-tuned on the LongAlpaca dataset for 5 epochs) is directly compared against training-free KV compression methods like SnapKV, PyramidKV, and LM-Infinite. This is highly unfair, as fine-tuning on instruction-following datasets inherently improves long-context instruction performance. Furthermore, other fine-tuning-based context extension baselines (such as LongLoRA, Activation Beacon, or LoCoCo) are omitted from the downstream task comparisons.",
+        "Anomalous Perplexity Results: In Table 1, FreqKV (compressed cache) consistently outperforms LongLoRA (full cache) on the PG-19 dataset under longer evaluation context lengths (e.g., 6.98 vs 7.22 at 32k context). Since FreqKV's compression is lossy, it should theoretically perform worse or equivalent to the full-cache baseline. The authors do not provide a clear explanation or analysis for why discarding high-frequency components would lead to such a massive perplexity improvement over retaining the entire sequence."
+      ]
+    }
+  }
+}

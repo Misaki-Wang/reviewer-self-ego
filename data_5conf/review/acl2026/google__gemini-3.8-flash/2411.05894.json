@@ -1,0 +1,94 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3.5,
+      "strengths": [
+        "Addresses a crucial, practical bottleneck in speculative decoding: maintaining throughput and latency benefits under realistic data-center workloads with high batch sizes (up to batch size 64) and continuous batching.",
+        "Provides a sound, in-depth hardware and roofline analysis (Section 3.2 and Table 1) detailing the mathematical interaction between batch size, speculation query length, and memory-bandwidth versus compute bounds.",
+        "The proposed method is parameter-free, avoiding the training and operational complexity of maintaining separate draft models or specialized architectural heads, while improving significantly upon prior parameter-free baselines (REST and PIA) via efficient suffix-array sampling and multi-source candidate fusion.",
+        "Evaluations are conducted inside a realistic continuous batching serving engine (vLLM-based), measuring end-to-end latency versus throughput across varying context lengths and batch sizes."
+      ],
+      "weaknesses": [
+        "The hardware platform evaluated is limited to a single Huawei Ascend 910B4 NPU; validating the end-to-end continuous batching speedups on widely standard accelerator hardware (such as NVIDIA A100 or H100 GPUs) would significantly strengthen empirical generalizability.",
+        "In the end-to-end serving experiments (Figures 6 and 7), the method is compared mainly against standard autoregressive decoding and PIA; head-to-head serving comparisons against leading draft-based or draft-head methods (e.g., EAGLE/EAGLE-2, Medusa, ReDrafter) under continuous batching are missing.",
+        "The paper lacks detailed profiling of host-side resource consumption (CPU core utilization, host RAM footprint of the suffix array, and host memory bandwidth) during large-batch continuous serving, which is critical for parameter-free retrieval methods running on the host CPU.",
+        "Hyperparameter selection (e.g., prefix length thresholds, dampening factors for datastore vs. prompt) relies on empirical grid search, but the robustness and sensitivity of these parameters across different domains and prompt styles are not thoroughly analyzed."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Practical and deployment-friendly design: The proposed SSSD method is parameter-free and training-free, offloading draft candidate generation to the CPU and avoiding the operational complexity of deploying separate draft models or modifying target architectures.",
+        "Solid roofline and hardware-oriented analysis: Section 3.2 and Table 1 provide a clear, principled discussion of the FLOP-to-memory IO ratio under batching and speculation length, offering valuable intuition on why and when speculative decoding can remain advantageous at higher batch sizes.",
+        "Realistic end-to-end serving evaluation: The method is integrated into a continuous batching runtime (vLLM-based) and evaluated across a range of batch sizes (1 to 64) and prompt lengths, demonstrating that parameter-free speculation can deliver throughput improvements even under moderate-to-high concurrency."
+      ],
+      "weaknesses": [
+        "Limited algorithmic novelty: The core mechanism primarily combines and refines existing concepts—specifically prefix/prompt-lookup retrieval (Prompt Lookup Decoding / PIA) and suffix-array datastore retrieval (REST)—with heuristic discounting and engineering optimizations (such as OpenMP parallelization and uniform stride sampling).",
+        "Restricted hardware and model diversity: All serving experiments are conducted on a single hardware accelerator (Huawei Ascend 910B4) and restricted to 7B/8B parameter models. Because kernel optimization and memory-bandwidth characteristics differ substantially on mainstream NVIDIA platforms (A100/H100) and for larger model scales (e.g., 70B+), the empirical generality of the speedup claims is somewhat constrained.",
+        "Incomplete baseline comparisons in the serving benchmark: In Figures 6 and 7, the continuous batching results are primarily compared against non-speculative autoregressive decoding (and PIA in Figure 7). Comparisons against pure Prompt Lookup Decoding (PLD) or state-of-the-art draft-head/small-model methods (e.g., Medusa or EAGLE-2) under identical serving constraints are absent.",
+        "Limitations with non-greedy sampling: As acknowledged in Section 4.2, the heuristic pseudo-probabilities make lossless speculative sampling difficult, requiring a greedy/naive fallback that may alter output distributions or degrade acceptance rates at standard sampling temperatures."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3.0,
+      "strengths": [
+        "Clean decoupling of drafting to CPU/host: Running drafting entirely on the CPU using parallelized suffix array search and dynamic trie structures eliminates GPU compute and memory contention, simplifying deployment without requiring extra draft models.",
+        "Comprehensive roofline and hardware analysis: The paper provides a clear breakdown of operator-level FLOPs-to-IO ratios across batch size, speculation length, and context length, giving valuable insights into when speculative decoding transitions between memory-bandwidth-bound and compute-bound regimes.",
+        "Practical serving evaluation: Assessing throughput and latency under continuous batching in a vLLM-like serving environment up to batch size 64 demonstrates practical viability over standard autoregressive decoding in realistic serving workloads.",
+        "Effective combination of complementary sources: Fusing local context/self-output with global corpus statistics using calibrated priority-queue merging yields higher token acceptance rates than individual retrieval components alone."
+      ],
+      "weaknesses": [
+        "Limited speculative decoding baselines in serving benchmarks: In the main continuous batching experiments (Figure 6), the method is only compared against vanilla autoregressive decoding. It lacks direct end-to-end serving comparisons against standard Prompt Lookup Decoding (PLD), REST, or trained multi-head/speculative methods (e.g., Medusa, EAGLE, ReDrafter) under identical batching conditions.",
+        "Sampling and losslessness guarantees: A key property of standard speculative decoding is provable preservation of the target LLM distribution under nucleus/temperature sampling via rejection sampling. SSSD resorts to a greedy check heuristic under sampling which causes distribution drift and suffers degradation at higher temperatures, restricting full validation primarily to greedy decoding.",
+        "Evaluation scale and hardware generality: Serving evaluations are conducted on small prompt subsets (100 prompts per condition; 80 prompts for GSM8K) on a single non-standard accelerator (Huawei Ascend 910B4). Given that the paper emphasizes hardware-specific operator optimizations and memory bandwidth balance, validation on mainstream NVIDIA platforms (A100/H100) is missing.",
+        "Incremental algorithmic novelty: The algorithmic framework is largely an integration of existing techniques—specifically REST's suffix-array retrieval combined with Prompt Lookup Decoding's n-gram matching—augmented with OpenMP batch parallelization and heuristic probability dampening."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 4.0,
+      "strengths": [
+        "Addresses a crucial practical bottleneck in speculative decoding by proposing a training-free, accelerator-KV-cache-free method that shifts drafting to host CPU lookups, avoiding costly model distillation and draft model maintenance.",
+        "Provides a thorough, principled hardware-aware roofline analysis (Table 2 and Appendix B) that derives optimal speculation lengths ($s_q \\approx I_{\\text{knee}} / b$) based on compute-to-memory-bandwidth ridge points across batch sizes and context lengths.",
+        "Extensive empirical evaluation integrated into a production-grade LLM engine (SGLang), benchmarking against strong state-of-the-art baselines (EAGLE-2/3, Lookahead, REST, PLD) across multiple model sizes (8B, 14B, 70B) and architectures.",
+        "Evaluates critical real-world regimes often neglected in speculative decoding literature, including batched continuous serving, prefill-decode disaggregation, cold-start adaptation, multilingual transfer, and extended reasoning traces (DeepSeek-R1-Distill)."
+      ],
+      "weaknesses": [
+        "Algorithmic novelty is relatively incremental: the approach mainly synthesizes prior prompt-matching ideas (PLD/Lookahead) with suffix-array datastore retrieval (REST), combined via heuristic scaling and discount factors.",
+        "The paper lacks comprehensive profiling of the CPU host overhead under heavy concurrent load (e.g., CPU core utilization, cache contention, and RAM footprint as the datastore scales to gigabytes).",
+        "Candidate probability calibration relies on hardcoded heuristic discount multipliers (e.g., 0.6 and $0.6 + 0.1 \\cdot \\text{match}$ in Algorithm 3); sensitivity analyses or ablation of these hyperparameters across diverse domains are not fully explored.",
+        "Minor presentation polish issues, such as a trailing comma at the end of the first paragraph of Section 4 ('We provide code to reproduce all experiments,')."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3.5,
+      "strengths": [
+        "Practical, deployment-focused design: SSSD eliminates the complex training pipelines, accelerator memory overhead, and maintenance burden associated with draft models (e.g., EAGLE, Medusa) by performing lightweight drafting entirely on the host CPU.",
+        "Principled hardware-aware speculation: The derivation of dynamic speculation length ($s_q = I_{\\text{knee}} / b$) based on the roofline model bridges hardware limits and decoding parameters, moving beyond purely heuristic parameter choices.",
+        "Extensive and realistic evaluation: Experiments are implemented natively within an industrial serving framework (SGLang) and cover diverse setups including continuous batching, prefill-decode disaggregation, long context (SWE-Bench, PG-19), reasoning generation (DeepSeek-R1 Distill), and multilingual workloads across multiple model families (Llama-3, Qwen, DeepSeek).",
+        "Consistently outperforms existing training-free baselines (PLD, Lookahead, REST) and remains robust across domain and language shifts where trained draft heads often suffer performance degradation."
+      ],
+      "weaknesses": [
+        "Algorithmic novelty is relatively incremental: The method primarily integrates and refines established building blocks—namely suffix-array retrieval over corpora (REST) and trie-based prefix matching over prompt/output (Lookahead / Prompt Lookup Decoding)—combined with heuristic discount factors and interval sampling.",
+        "Datastore dependency and curation nuance: While the method is described as requiring 'no data preparation', optimal performance across diverse tasks (e.g., German MT-Bench, HumanEval) relies on augmenting the datastore with targeted datasets (such as The Stack and translated corpora). The trade-offs between completely uncurated real-time updates versus curated task-specific datastores warrant deeper ablation.",
+        "Incomplete characterization of CPU/host resource overhead: Because retrieval and candidate tree merging occur on the host CPU, the paper lacks detailed profiling of host memory footprint, CPU core scaling, and potential CPU-GPU synchronization bottlenecks under high-concurrency production batching regimes.",
+        "Acceptance rate ceiling compared to trained drafters: In standard high-resource English short-context domains (e.g., MT-Bench on Llama-3.3-70B), state-of-the-art trained drafters like EAGLE-3 maintain an advantage in acceptance rate and end-to-end latency."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Practical, deployable framework: By relying strictly on an n-gram trie over the local context and an asynchronously updated suffix-array datastore on the CPU, SSSD completely avoids draft-model training, head fine-tuning, and accelerator KV-cache memory overhead.",
+        "Principled, hardware-aware speculation sizing: Grounded in a rigorous roofline analysis of transformer decoding operations (Table 2), the paper provides a simple, effective rule (sq = Iknee / b) to adaptively balance compute-bound and memory-bound regimes under batched decoding.",
+        "Comprehensive and realistic empirical evaluation: Rather than evaluating solely at batch size 1 under synthetic conditions, the method is integrated into a modern serving system (SGLang) and evaluated under continuous batching, disaggregated prefill-decode architectures, long contexts (PG-19, SWE-Bench), reasoning models (DeepSeek-R1-Distill), and multiple languages.",
+        "Strong handling of distribution and language shifts: The experiments clearly demonstrate that SSSD avoids the degradation typical of draft models under non-English and out-of-domain workloads, adapting rapidly even from an empty datastore (cold-start)."
+      ],
+      "weaknesses": [
+        "Incremental algorithmic novelty: The core primitives—suffix arrays for text retrieval (REST), trie-based n-gram matching (Lookahead, PLD), and tree-based verification—are already established in the speculative decoding literature. The algorithmic contribution lies primarily in the practical fusion and interval sampling of these components rather than a fundamentally new decoding mechanism.",
+        "Heuristic candidate fusion: The probability scoring and discount parameters in Algorithm 3 (e.g., fixed discounts of 0.6 and depth multipliers) are determined by empirical tuning. The paper lacks an ablation study demonstrating the sensitivity of acceptance rates and latency to variations in these specific hyperparameters.",
+        "Host memory and CPU overhead analysis is limited: While accelerator memory and latency are thoroughly analyzed via the roofline model, the paper provides limited profiling of host RAM usage, datastore memory growth, and CPU core utilization when running at scale under high concurrent batch loads."
+      ]
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 6,
+      "strengths": [
+        "Novel and insightful concept: Rather than discarding loaded KV entries after the current decoding step, RetroAttention creatively reuses them to retrospectively refine the attention outputs and downstream KV representations of past tokens within a local window.",
+        "Strong systems and theoretical grounding: The authors provide a thorough arithmetic intensity analysis demonstrating that autoregressive decoding is memory-bound, meaning that augmenting computations across a small retrospective window (w) incurs minimal latency overhead.",
+        "Solid engineering and implementation: The method is integrated cleanly into FlashInfer with custom CUDA kernels for page masking and incremental attention updates, supported by granular kernel-level latency breakdowns.",
+        "Consistent empirical improvements: The proposed technique yields tangible performance and perplexity gains over the primary baseline (Quest) on long-generation benchmarks (LongGenBench, PG-19) and reasoning tasks (AIME 2024, LiveCodeBench) without increasing the total KV budget."
+      ],
+      "weaknesses": [
+        "Evaluation is limited to 8B model scales (Llama-3.1-8B-Instruct and DeepSeek-R1-Distill-Llama-8B). Evaluating on larger models (e.g., 70B) would significantly strengthen the empirical claims regarding memory-bound behavior and multi-query projection efficiency.",
+        "Baseline comparisons are somewhat narrow: while eviction-based baselines (StreamingLLM, TOVA) and one state-of-the-art non-eviction method (Quest) are evaluated, comparisons against other recent non-eviction dynamic sparse attention approaches (e.g., InfLLM, RetrievalAttention) are absent.",
+        "Theoretical approximation gap: In deeper layers, Query, Key, and Value representations evolve due to retrospective updates, which breaks the exact mathematical equivalence of the online softmax combination. While the paper empirically shows that vector drifts are small (<5-10%), a more formal analysis of error accumulation or potential numerical instability over long rollouts is lacking.",
+        "Benchmark setup: LongGenBench relies primarily on artificially concatenated independent QA tasks to simulate long generation, which may exhibit different attention locality patterns compared to naturally cohesive long-form writing or multi-step reasoning."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Novel and insightful perspective on KV cache reuse: rather than discarding loaded KV entries after the current decoding step or reloading them repeatedly, RetroAttention opportunistically reuses currently loaded KV pages to retrospectively update the attention outputs of recent prior queries.",
+        "Sound mathematical formulation and systems integration: the paper neatly adapts online softmax accumulation (akin to FlashAttention) to merge original and supplementary attention outputs across a sliding retrospective window, and propagates these updates across transformer layers to refresh stale KV cache representations.",
+        "Thorough hardware and arithmetic intensity analysis: the authors clearly demonstrate that single-token decoding is heavily memory-bound (GEMV), so computing supplementary attention and linear updates for small window sizes (w <= 8) utilizes idle compute cores with negligible latency (<1-2 ms per decode step) and minimal extra memory traffic.",
+        "Comprehensive empirical validation: the approach is evaluated on LongGenBench (GSM8K, MMLU, CSQA), challenging reasoning tasks (AIME 2024, LiveCodeBench, GPQA-Diamond), and PG-19 perplexity, demonstrating consistent gains over SOTA sparse attention (Quest) and mitigating the accuracy degradation typical in long generation sequences."
+      ],
+      "weaknesses": [
+        "Approximation error from asynchronous Query representations: as acknowledged in Appendix A, updating representations layer-by-layer causes past Query vectors to shift slightly across updates, making the linear combination of softmax outputs an approximation rather than exact attention. More in-depth empirical quantification of this representation drift across deep network layers would strengthen the theoretical justification.",
+        "Model scale diversity: all experiments are conducted on 8B models (LLaMA-3.1-8B-Instruct and DeepSeek-R1-Distill-LLaMA-8B). It remains to be seen how the latency and accuracy benefits generalize to larger scales (e.g., 70B models) where GEMV/GEMM roofline characteristics and KV cache proportions differ.",
+        "Evaluation at larger batch sizes: the latency and kernel evaluations are primarily reported at batch size 8. In high-throughput serving regimes with larger batches (e.g., 32-64+), linear layers may transition closer to compute-bound regimes, which could alter the latency trade-offs of processing w-times larger projection inputs."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 6,
+      "strengths": [
+        "Novel and insightful concept: Rather than treating past attention outputs as immutable, RetroAttention cleverly exploits the idle compute capacity in memory-bound decoding to retrospectively update past attention outputs and higher-layer KV states using newly loaded KV cache pages.",
+        "Sound systems and arithmetic intensity analysis: The paper provides clear theoretical and empirical justification (Sec. 3.5 and Appendix B) showing that autoregressive decoding operates well below the GPU's compute roofline, allowing retrospective computation and linear projections with minimal runtime latency overhead.",
+        "Solid empirical implementation and evaluation: The authors developed custom CUDA kernels integrated with FlashInfer, providing thorough kernel-level and end-to-end latency breakdowns on an A100 GPU, demonstrating tangible gains over Quest and eviction-based baselines across multiple benchmarks (LONGGENBENCH, PG-19, and reasoning benchmarks)."
+      ],
+      "weaknesses": [
+        "Evaluated model scale is limited: All experiments are performed on 8B parameter models (LLaMA-3.1-8B-Instruct and DeepSeek-R1-Distill-Llama-8B). Validating whether the latency-accuracy trade-offs hold on larger models (e.g., 70B) or under larger batch sizes (where decoding shifts closer to compute-bound) would substantially strengthen the findings.",
+        "Asynchronous representation drift: In multi-layer models, retrospectively updated attention outputs from layer l change the Query and Key representations at layer l+1. As acknowledged in Appendix A, this introduces a slight mismatch between the original and supplementary attention projections. While empirical drift is reported to be small (<5%), deeper theoretical error analysis or bounds on this approximation are lacking.",
+        "Single non-eviction base method: Although the paper claims RetroAttention can be integrated into any non-eviction dynamic sparse attention scheme, experiments are exclusively layered on top of Quest. Demonstrating compatibility with at least one other non-eviction method (e.g., InfLLM or SqueezedAttention) would better support the generalizability claim.",
+        "Implications for advanced serving features: In production inference systems, KV cache entries are often shared across requests via prefix caching. Retrospectively overwriting past KV states across layers complicates immutable cache sharing and speculative decoding, which warrants discussion."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 8,
+      "strengths": [
+        "Novel and insightful conceptual contribution: The paper addresses an important and under-explored issue—cumulative attention error propagation in long-context generation under sparse attention—by introducing retrospective attention output updates. Rather than treating past attention outputs as fixed, it opportunistically reuses newly fetched KV entries to refine past representations without fetching additional KV data from memory.",
+        "Rigorous hardware and systems-level grounding: The authors provide a solid arithmetic intensity (AI) and memory traffic analysis explaining why retrospective updates can be effectively hidden within the memory-bandwidth-bound decoding regime. The custom CUDA kernels built on FlashInfer demonstrate realistic end-to-end wall-clock latency and throughput improvements.",
+        "Convincing empirical validation: The method is evaluated across a variety of settings, including LongGenBench, reasoning benchmarks (AIME 2024, GPQA-Diamond, LiveCodeBench), and PG-19 language modeling. The empirical results consistently demonstrate meaningful gains over strong sparse attention baselines like Quest and ArkVale.",
+        "Well-structured motivational study: The paper clearly contrasts the differing error accumulation behaviors of long-input/short-output vs. long-generation tasks, and empirically justifies the high semantic relevance of newly loaded KV entries to nearby previous queries."
+      ],
+      "weaknesses": [
+        "Approximation and representation drift: Updating past attention outputs across layers implies that representations ($Q, K, V$) computed at step $t$ drift slightly as subsequent steps update preceding layer activations. While Appendix C.2 provides empirical measurements showing $\\ell_2$ norm differences under 5-10%, a more formal theoretical error bound or deeper discussion on error stability would strengthen the technical soundness.",
+        "Evaluation on synthetic long generation: The primary testbed, LongGenBench, simulates long generation by concatenating multiple independent QA tasks into a single prompt. While reasoning tasks (AIME, LiveCodeBench) provide more organic long CoT generation, broader evaluation on naturally long generation tasks (e.g., full multi-turn conversational histories, book/script generation, or extensive agentic trajectories) would further bolster the practical claims.",
+        "Throughput scaling under high batch sizes / multi-GPU serving: Because retrospective updates perform linear projections for $w$ steps instead of 1, throughput degradation and memory overhead become non-negligible at larger batch sizes (as shown in Table 6). In production systems employing tensor parallelism and speculative decoding, where the decoding regime can become less strictly memory-bound, the latency overhead might be higher than observed in single-batch/single-GPU scenarios."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Novel and insightful perspective: The paper identifies a key limitation of existing dynamic sparse attention methods—namely, error accumulation during long autoregressive generation—and addresses it with an original retrospective update mechanism that breaks the fixed-attention-output assumption.",
+        "Sound hardware and algorithmic formulation: The formulation leverages online softmax aggregation (FlashAttention-style) to update past outputs using newly fetched KV entries without reloading historical pages. The arithmetic intensity (AI) analysis clearly demonstrates why adding retrospective computation incurs negligible latency overhead in memory-bandwidth-bound decoding regimes.",
+        "Thorough experimental validation: Evaluated across various long-generation tasks (LongGenBench, AIME 2024, GPQA-Diamond, LiveCodeBench, PG-19) and multiple modern model architectures (LLaMA-3.1-8B, Qwen2.5-14B/32B, DeepSeek-R1-Distill-8B), consistently outperforming strong baselines like Quest and ArkVale.",
+        "Detailed system profiling and custom implementation: The authors implement custom CUDA kernels on top of FlashInfer, providing detailed kernel-level breakdowns and decoding throughput measurements across various batch sizes and context lengths."
+      ],
+      "weaknesses": [
+        "Prerequisite of keeping the full KV cache in DRAM: Like other non-eviction dynamic sparse attention approaches (e.g., Quest), RetroAttention relies on storing the full sequence KV cache in memory while sparsely loading pages. Consequently, peak memory capacity constraints in long-context serving remain unaddressed compared to eviction-based techniques.",
+        "Asynchronous representation drift across layers: Retrospectively re-projecting updated attention outputs produces updated Q, K, and V vectors at subsequent layers, creating a slight representation mismatch because past query representations evolve asynchronously across decoding steps. While empirical drift is small (<5-10% norm), the paper could provide deeper theoretical bounds on this approximation.",
+        "Throughput scalability under compute-bound regimes: As the batch size or retrospective window increases (e.g., Table 6 at B=8, w=8), throughput degrades by over 7%, indicating that the method's overhead grows as decoding approaches compute-bound conditions."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 6,
+      "strengths": [
+        "Addresses an important and timely problem: mitigating cumulative attention errors and quality degradation in long-generation autoregressive decoding under sparse KV cache regimes.",
+        "The core idea of RetroAttention—retrospectively refining past attention outputs using newly loaded, previously unseen KV pages and propagating updated representations into deeper layers—is novel, creative, and well-motivated.",
+        "Solid systems-level analysis: The authors provide a detailed roofline/arithmetic intensity analysis demonstrating that decoding is heavily memory-bound, which explains why the extra retrospective computations introduce negligible latency overhead.",
+        "Comprehensive empirical evaluation across diverse benchmarks (LongGenBench, PG-19, AIME 2024, GPQA-Diamond, LiveCodeBench, LongBench) and model scales (up to Qwen-2.5-32B), demonstrating consistent gains over state-of-the-art sparse attention baselines like Quest and ArkVale.",
+        "Good engineering rigor, providing custom CUDA kernels integrated with FlashInfer and demonstrating practical latency/throughput tradeoffs."
+      ],
+      "weaknesses": [
+        "Theoretical approximation drift: Retrospectively updating past attention outputs using representations derived across different decoding steps introduces asynchronous representation mismatch (as acknowledged in Appendix C.2). While the authors show that empirical L2 distance is relatively small, rigorous theoretical error bounds on the compounded drift across layers are lacking.",
+        "Throughput scalability under higher concurrency: The low overhead argument depends strictly on the system operating in a memory-bound regime with small batch sizes. As shown in Table 6, throughput drops become noticeable (up to 7.3%) as batch size increases, and the added computation could become a bottleneck under high-throughput serving systems or speculative decoding frameworks.",
+        "Marginal utility on short-output tasks: As demonstrated in the LongBench experiments (Table 10 and 11), the method provides virtually no benefit over standard sparse attention (Quest) when generation lengths are modest, limiting the technique's applicability primarily to long-form generation / reasoning.",
+        "Evaluation in distributed and tensor-parallel settings: The paper evaluates models on a single A100 GPU. Modern long-context serving often utilizes tensor and pipeline parallelism across multiple GPUs, where maintaining synchronized output caches, retrospective masks, and overwriting KV caches could incur additional communication or synchronization overheads that are not discussed."
+      ]
+    }
+  }
+}

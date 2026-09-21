@@ -1,0 +1,93 @@
+{
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Compelling conceptual motivation: Decomposing rank-$r$ LoRA adapters into atomic rank-one experts directly addresses the granularity mismatch, inter-subspace interference, and routing ambiguity present in standard coarse-grained MoE-LoRA methods.",
+        "Elegant and parameter-free routing mechanism: Exploiting the intrinsic key-value associative memory interpretation of LoRA ($A$ as keys, $B$ as values) allows rank-one components to self-evaluate relevance via intermediate activations ($A_i x$), eliminating the need for separate learned routing modules and avoiding router degradation across continual tasks.",
+        "Thorough and multi-modal empirical evaluation: The approach is evaluated across vision-language benchmarks (CLIP on MTIL and X-TAIL), language models (T5-large and LLaMA2-7B on both standard 5-task and challenging 15-task sequences), and LLM generalization/retention (LLaMA-3.1-8B on CodeAlpaca, HumanEval, and MMLU), demonstrating consistent gains over strong baselines.",
+        "Insightful qualitative analysis: Visualizations of rank activations across sequential tasks (Figures 3, 5, and 6) convincingly illustrate how individual ranks specialize into specific visual/semantic concepts and are stably retained or reused without catastrophic overwriting."
+      ],
+      "weaknesses": [
+        "Lack of wall-clock latency and inference efficiency analysis: As the number of tasks $T$ grows, all accumulated $r_t = r \\times T$ rank keys must be evaluated against token inputs $x$ to compute relevance scores $s_i$ prior to top-$k$ gating. The paper discusses parameter efficiency and memory usage (Table 15) but lacks measurements of runtime throughput or FLOP overhead during inference compared to standard dense LoRA or static MoE architectures.",
+        "Potential cold-start / training bias toward mature ranks: In tasks $t > 1$, newly initialized rank keys may naturally produce smaller activations than well-trained, frozen past ranks. The paper does not clarify whether an initialization scheme or exploration mechanism is required to ensure newly added ranks receive sufficient gradient signal and are not starved by top-$k$ masking early in task training.",
+        "Ambiguity in parameter count reporting (Table 10): Table 10 reports MoRA's trainable parameters per task as $r d_{\\text{in}} + k d_{\\text{out}}$. However, introducing $r$ new rank-one components allocates $r(d_{\\text{in}} + d_{\\text{out}})$ learnable parameters; $r d_{\\text{in}} + k d_{\\text{out}}$ corresponds to the dynamically activated subset of parameters during a forward pass rather than total trainable parameters stored for the task.",
+        "Notational inconsistency in relevance score computation: In Equation (8), $A_i \\in \\mathbb{R}^{1 \\times d_{\\text{in}}}$ produces a scalar dot product $A_i x$, making the denominator notation $\\sqrt{\\sum_{j=1}^{r_t} \\|A_j x\\|_2^2}$ unnecessarily ambiguous compared to the standard scalar formulation $\\sqrt{\\sum_j (A_j x)^2}$."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Comprehensive empirical evaluation spanning multiple architectures and modalities: CLIP (ViT-B/16) on MTIL and X-TAIL benchmarks, T5-large and LLaMA2-7B on both standard (5-task) and long-sequence (15-task) continual learning streams, as well as code adaptation and out-of-domain evaluation on Llama3.1-8B.",
+        "The self-activation formulation neatly eliminates the need for an external, parameterized router network by treating the low-rank projection matrix A as key memory slots that directly score input relevance.",
+        "Thorough qualitative and quantitative introspection into rank activation patterns (Figures 3, 5-9), providing concrete visual evidence of rank specialization across semantic concepts and cross-task rank reuse."
+      ],
+      "weaknesses": [
+        "Lack of wall-clock latency and throughput benchmarking: Token-level dynamic selection of rank-1 components creates irregular sparsity patterns. Without dense batched matrix multiplications, this can cause significant runtime slowdowns unless specialized kernels are used, yet the paper reports only parameter counts and static GPU memory rather than actual inference latency or training throughput.",
+        "Ambiguity in handling signed activations: The relevance score $s_i$ is computed via raw dot product $A_i x / \\|Ax\\|_2$, which can take negative values. The paper does not clarify whether negative activations imply irrelevance or opposing features, nor does it justify why magnitude/absolute activation $|A_i x|$ is not considered before top-k filtering and softmax thresholding.",
+        "Naming conflict with existing literature: 'MoRA' is widely known in the parameter-efficient fine-tuning literature as 'High-Rank Updating for Parameter-Efficient Fine-Tuning' (Jiang et al., 2024), which could create confusion in the PEFT/continual learning communities.",
+        "Misleading parameter accounting in Table 10: Expressing MoRA's trainable parameters per task as $r d_{in} + k d_{out}$ blurs the distinction between static allocated parameters and dynamically activated parameters per token."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "The core conceptual idea is elegant and well-motivated: interpreting LoRA's low-rank factorization as an associative key-value memory where the row projections in matrix A act naturally as self-activating routers for the value columns in matrix B, eliminating the need for separate external router parameters.",
+        "Operating at the rank-one granularity rather than the coarse whole-adapter level effectively resolves subspace interference and router ambiguity, allowing fine-grained rank reuse and specialization across tasks.",
+        "Extensive empirical evaluation across multiple modalities and architectures, including vision-language models (CLIP ViT-B/16 on MTIL and X-TAIL) and language models (T5-large, LLaMA2-7B, Llama-3.1-8B on standard and 15-task sequences, as well as CodeAlpaca/MMLU transfer experiments).",
+        "Thorough ablation studies and intuitive qualitative visualizations (Figures 3, 5, and 6) that clearly demonstrate rank specialization, persistent semantic reuse (e.g., background vs. foreground concepts), and the individual contributions of top-k gating, temperature scaling, and test-time thresholding."
+      ],
+      "weaknesses": [
+        "Table 10 reports the 'trainable parameters per task' of MoRA as $r d_{in} + k d_{out}$. This is somewhat misleading: while $k$ ranks are sparsely activated per input token, the newly allocated task adapter physically contains $r$ columns in $B$ ($r d_{out}$). Conflating per-token active parameters with allocated trainable parameter capacity per task should be clarified.",
+        "The acronym 'MoRA' is identical to an already prominent parameter-efficient fine-tuning method in the literature ('MoRA: High-Rank Updating for Parameter-Efficient Fine-Tuning', Jiang et al., 2024), which could create unnecessary confusion in the community.",
+        "The method introduces several hyperparameters (activation budget $k$, temperature $\\tau_{\\text{MoRA}}$, and threshold $\\delta$), and as noted in Section A.1, the optimal temperature can vary considerably across model architectures (e.g., 0.1 for CLIP/T5 vs. 0.5 for LLaMA-3.1), requiring careful task- or architecture-dependent tuning."
+      ]
+    }
+  },
+  "v3": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Original and elegant formulation: Reconceptualizing LoRA adaptation through the lens of linear associative memory into atomic rank-1 experts is conceptually clear and provides a compelling rationale for eliminating external routers via intrinsic self-activation.",
+        "Elimination of external router drift: By utilizing the key projection itself ($A_{i,:} x$) for relevance scoring, MoRAM avoids the optimization instability, routing collapse, and auxiliary parameter overhead typical of traditional MoE-LoRA methods in continual learning.",
+        "Extensive and solid empirical evaluation: The proposed method is thoroughly validated across diverse modalities and architectures, including vision-language models (CLIP ViT-B/16 on X-TAIL and MTIL) and autoregressive/seq2seq language models (LLaMA-2/3, Gemma, T5 on TRACE, SuperNI, and long-sequence text classification), showing consistent improvements in stability-plasticity trade-offs.",
+        "Insightful qualitative and quantitative analyses: Activation visualizations and statistical aggregation over tasks (Figures 3, 5, 6-10) convincingly illustrate how rank-1 memory atoms specialize in distinct semantic concepts and maintain stability across sequential tasks.",
+        "Comprehensive ablation studies: The paper systematically isolates the contributions of intrinsic scoring, top-k sparsity, temperature scaling, and test-time thresholding, substantiating each architectural choice."
+      ],
+      "weaknesses": [
+        "Hyperparameter sensitivity across domains: The optimal temperature hyperparameter $\\tau_{\\text{MoRAM}}$ varies considerably across different settings (ranging from $0.03$ on TRACE, to $0.1$ on CLIP/text classification, and $0.5$ on CodeAlpaca), indicating that the sharpness of self-activation requires non-trivial manual tuning per backbone/dataset.",
+        "Linear parameter and forward compute scaling: Introducing $r$ new rank-1 atoms per task leads to linear growth in stored parameters and key-activation compute ($A_{1:r_t} x$). Although post-pruning is evaluated in Appendix A.10, real-world deployment on very long task sequences will still face cumulative overhead.",
+        "Lack of wall-clock latency and throughput benchmarks: While theoretical parameter counts and GPU memory are reported, the paper lacks runtime wall-clock latency analysis for batched inference, where token-level dynamic selection of sparse rank-1 experts may incur kernel launch and memory scatter/gather overhead on modern accelerators."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Conceptual Elegance and Motivation: The paper introduces MoRAM, an intuitive and well-motivated framework that reconceptualizes low-rank adaptation as an incremental associative memory. By decomposing rank-r adapters into atomic rank-1 experts and using the key projection vectors A directly for content-addressable self-activation routing, MoRAM eliminates external routing networks. This elegantly resolves the routing collapse, drift, and parameter overhead commonly observed in conventional MoE-LoRA architectures.",
+        "Computational and Parameter Efficiency: Because the relevance scores s_i in Eq. (5) are derived from the inner products A_{i,:} x that are already computed during the LoRA forward pass, the self-activation routing adds virtually zero additional parameter overhead and minimal FLOPs. Trainable parameters per task remain strictly comparable to or smaller than standard LoRA and prior MoE adapter methods (as demonstrated in Tables 11 and 18).",
+        "Extensive and Multi-Domain Evaluation: The empirical evaluation is thorough across both vision-language and NLP domains, covering diverse architectures (CLIP ViT-B/16, T5-Large, Gemma-2B, LLaMA-2-7B, LLaMA-3-1B, and LLaMA-3.1-8B) across multiple benchmarks (X-TAIL, MTIL, TRACE, SuperNI, and 15-task CL streams). MoRAM consistently achieves state-of-the-art stability-plasticity trade-offs, outperforming competitive PEFT-CL baselines such as CoDyRA, O-LoRA, HiDeLoRA, and TreeLoRA.",
+        "Insightful Analyses and Visualizations: The paper provides compelling qualitative and quantitative analyses (Figures 3, 5, 6, 7, and 8–10). Visualizations of patch activations clearly demonstrate semantic specialization (e.g., foreground object vs. sky background), stability across subsequent tasks without forgetting, and reuse of generic features across tasks. The cumulative activation mass analysis further substantiates the intrinsic sparsity of the rank mixture."
+      ],
+      "weaknesses": [
+        "Inference Scaling with Accumulated Tasks: While freezing prior ranks avoids catastrophic forgetting, the total pool of ranks r_t grows linearly with the number of tasks T. Consequently, computing the self-activation denominator and Top-K over all r_t keys requires a matrix multiplication scaling with O(T). Although Appendix A.10 demonstrates post-hoc pruning of low-utility ranks, a clearer discussion or benchmark on inference latency and memory growth over long task streams (e.g., T >= 50) would strengthen the practical claims.",
+        "Hyperparameter Sensitivity of Temperature and Threshold: The routing sharpness relies heavily on the temperature hyperparameter tau_MoRAM (varying from 0.01/0.03 to 0.5 across CLIP, TRACE, and LLaMA-3.1-8B) and threshold delta. The performance and out-of-domain transfer appear sensitive to tau_MoRAM (as seen in Figure 4b), suggesting that manual tuning of tau_MoRAM is necessary for different model scales and domains rather than operating in a plug-and-play manner.",
+        "Treatment of Negative Key-Input Projections: In Eq. (5), raw relevance is computed as s_i = (A_{i,:} x) / ||Ax||_2, which can produce negative values when the inner product is negative. The interaction between negative relevance scores, Top-K selection (Eq. 6), and temperature-scaled softmax (Eq. 7) is not fully discussed. Clarifying whether non-negative activation (e.g., ReLU or absolute value) was considered or why signed projections are preferable would improve theoretical clarity."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Conceptual elegance: Reinterpreting low-rank adaptation through the lens of linear associative memories (with rows of A acting as keys and columns of B acting as values) provides an intuitive, principled framework for continual learning.",
+        "Elimination of auxiliary routing overhead and collapse: By using self-activation via the intrinsic projection onto the key vectors (A), MoRAM sidesteps the routing collapse and catastrophic drift typically caused by separate learnable routing modules in MoE-LoRA architectures.",
+        "Thorough and multi-faceted empirical validation: The paper evaluates across diverse domains, including vision-language continual learning on CLIP (X-TAIL, MTIL across 10-11 domains), LLM continual instruction tuning on TRACE (LLaMA-2-7B, Gemma-2B, LLaMA-3-1B), long-sequence text classification streams (T5-Large, LLaMA-2-7B), and pre-training knowledge preservation during code fine-tuning.",
+        "Insightful qualitative and statistical interpretability: The visualizations of patch-level activations (Figures 3, 6, and 7) and the aggregate activation ratio heatmaps (Figure 5) convincingly show that individual rank-1 components specialize in distinct semantic features (e.g., object vs. background) and facilitate cross-task knowledge reuse without corrupting old representations."
+      ],
+      "weaknesses": [
+        "Misleading characterization of parameter counts in Table 11: The authors report MoRAM's trainable parameters per task as 'r d_{in} + k d_{out}'. All r introduced rank-1 value vectors B are trainable parameters for the incoming task, even if only k are sparsely activated per token during a given forward/backward pass. Conflating dynamically activated parameters with static trainable parameters per task is confusing and should be clearly separated.",
+        "Linear scaling of the key-matching compute: Although value matrix computation is budgeted to top-k (O(k d_{out})), self-activation relevance scoring in Eq. (5) requires projecting every token hidden state against all accumulated keys (O(r_t d_{in})), which grows linearly with the number of tasks. While post-pruning is discussed in Appendix A.10, the practical computational latency and memory bandwidth overhead of evaluating all historical keys during long task streams should be formally benchmarked.",
+        "Missing ablation on expert granularity: The central premise of the work is that coarse rank-r adapters cause interference and that rank-1 units provide atomic specialization. However, the ablations only compare rank-1 MoRAM against coarse MoE-LoRA (full adapter). It would strengthen the manuscript to include an ablation over intermediate expert ranks (e.g., r_expert in {1, 2, 4, 8}) under an equal parameter budget to verify whether rank-1 is strictly optimal.",
+        "Handling of negative scores in relevance gating: The raw score in Eq. (5) computes the inner product A_{i,:} x / ||A x||_2, which can be negative. The paper does not thoroughly clarify how negative activations behave when interacting with the Top-K selection, temperature scaling, and the fixed hard threshold δ (e.g., edge cases where few or no experts meet the threshold δ)."
+      ]
+    }
+  }
+}

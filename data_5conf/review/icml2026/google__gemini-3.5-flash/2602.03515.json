@@ -1,0 +1,89 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Compelling and novel insight connecting gradient staleness in asynchronous pipeline parallelism with the basis misalignment of coordinate-wise adaptive optimizers like Adam.",
+        "Strong theoretical support, showing through formal convergence analysis (Theorem 2.3) that the negative effect of gradient delay is multiplicatively scaled by the coordinate-wise smoothness parameter (which acts as a proxy for basis misalignment).",
+        "Thorough empirical validation, including toy experiments (spiral loss) that beautifully isolate the phenomena, and large-scale decoder-only Transformer training up to 1B parameters.",
+        "Practical design space exploration (Algorithm 2) covering different approximation sources (1st/2nd order) and rotation geometries (unilateral/bilateral), showing that even lightweight variants (e.g., 1st order unilateral) significantly outperform standard asynchronous baselines."
+      ],
+      "weaknesses": [
+        "Limited novelty in the underlying rotation mechanism itself, as it heavily relies on concepts and techniques from existing works such as SOAP (Vyas et al., 2025) and GaLore (Zhao et al., 2024).",
+        "Lack of detailed peak GPU memory usage analysis. Since pipeline parallelism is primarily employed due to GPU memory constraints, storing additional preconditioning states (L and R matrices in the 2nd-order bilateral case) could limit the maximum batch size or sequence length. Explicit memory overhead figures would strengthen the paper.",
+        "The experimental evaluation uses a relatively short sequence length of 512. It remains to be shown if the proposed approach scales up cleanly to modern long-context LLM pre-training scenarios where activation memory is a major bottleneck."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Identifies a novel and critical pathology—basis misalignment—as the root cause of optimization degradation under gradient delay in asynchronous pipeline parallelism.",
+        "Provides a rigorous theoretical analysis with a convergence proof for asynchronous Adam under delay, clearly showing how delay and basis misalignment interact multiplicatively in the convergence bound.",
+        "Proposes a practical, computationally tractable framework ('basis rotation') using Kronecker factorization and power iterations to realign the optimization space with minimal overhead.",
+        "Conducts extensive and convincing empirical validation on language modeling tasks (up to 1B parameters), demonstrating that the proposed method significantly outperforms established baselines (such as PipeDream-LR and Nesterov momentum), reduces delay-induced slowdown, and successfully restores model scaling laws."
+      ],
+      "weaknesses": [
+        "Although Figure 10a shows overall wall-clock efficiency, a systematic breakdown of the exact computational and memory overhead (extra FLOPs and memory footprint of the L and R matrices) for the different S (1st vs 2nd) and G (bilateral vs unilateral) configurations would help practitioners better understand the trade-offs.",
+        "The paper assumes a pure pipeline parallel setting. In practice, pipeline parallelism is rarely used in isolation and is typically combined with Tensor Parallelism (TP) and Fully Sharded Data Parallelism (FSDP / ZeRO-3). A discussion on how basis rotation interacts with these 3D-parallelism techniques would strengthen the paper's practical relevance."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Strong Motivation & Important Problem: The paper addresses gradient staleness in asynchronous pipeline parallelism, which is a major bottleneck preventing the scalability of bubble-free distributed training for large-scale models.",
+        "Deep Insight (Demystifying the Failure Mechanism): Uncovers the connection between basis misalignment (where the Hessian eigenbasis does not align with the coordinate axes) and Adam's sensitivity to gradient delays. This is a very interesting and novel perspective that helps explain why delayed gradients cause large oscillations in coordinate-wise adaptive optimizers.",
+        "Rigorous Theoretical Analysis: Outlines a convergence theorem for asynchronous Adam under coordinate-wise smoothness (Theorem 2.3), showing that the delay enters the bound multiplicatively with the misalignment factor. This formally supports the empirical observation.",
+        "Solid Empirical Evaluation: Demonstrates strong results on Transformer models up to 1B parameters on OpenWebText. It shows that basis rotation can successfully recover scaling laws and dramatically improve training efficiency in terms of both iterations and wall-clock time compared to established baselines (PipeDream, Nesterov, etc.)."
+      ],
+      "weaknesses": [
+        "Algorithmic Novelty is Limited / Overclaimed: The proposed 'Basis Rotation' framework (specifically the 2nd/bilateral variant) is virtually identical to SOAP (Vyas et al., 2025) or pre-existing preconditioned optimizers (like Shampoo/EShampoo). While the authors acknowledge this in Appendix E, presenting this as a newly proposed method ('we propose...') rather than an application and analysis of SOAP/Shampoo in the context of asynchronous training feels like overclaiming. The paper would be stronger if it positioned itself as explaining and leveraging the robustness of SOAP-style optimization against delayed gradients.",
+        "Incomplete Mathematical Consistency in Momentum Updates: In Algorithm 1, the second-order momentum is accumulated in the rotated coordinate space (Line 10). However, when the basis matrices U and V are updated (Line 6), the historical momentum is not rotated to the new basis. This creates a mathematical mismatch where past gradients accumulated in the old coordinate system are directly mixed with the current gradient in the new system. The authors should address how this basis-mismatch in the second momentum buffer affects convergence.",
+        "Unaddressed Memory Overhead of Kronecker Factors: In Section A, the authors analyze the memory footprint of training to estimate the number of pipeline stages P. However, they do not include the memory overhead of storing the Kronecker factors L and R for the proposed Basis Rotation method. For large-scale models (e.g., Llama-3 70B/405B), the hidden dimension is very large (e.g., 16,384), meaning L requires significant memory. Since pipeline parallelism is primarily used to overcome memory constraints, this overhead must be explicitly quantified and discussed.",
+        "Lack of Baseline SOAP Comparison: The paper lacks a direct, explicit baseline comparison showing standard SOAP under the same asynchronous pipeline parallel setup to clarify if the proposed implementation differs in any meaningful way from running SOAP out-of-the-box."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Deep and highly intuitive connection between two seemingly disparate concepts: gradient staleness in asynchronous pipeline parallelism and basis misalignment in coordinate-wise adaptive optimizers like Adam.",
+        "Solid theoretical foundation, including a convergence bound showing how the delay penalty scales multiplicatively with the basis misalignment metric, which is further extended to stage-dependent delays and momentum.",
+        "Highly impressive empirical validation, with experiments scaling up to a 3B-parameter LLM, demonstrating substantial reduction in required iterations (up to 81.7%) and restoring standard scaling laws.",
+        "Thorough ablation and design-space studies, exploring different approximation sources (1st vs 2nd order) and geometries (unilateral vs bilateral), as well as a novel stage-aware allocation of the computational budget."
+      ],
+      "weaknesses": [
+        "The core mathematical framework for basis rotation is closely related to existing methods like SOAP and Shampoo, meaning the algorithmic novelty of the rotation mechanism itself is somewhat incremental, though its application to asynchronous PP is highly novel.",
+        "While the paper shows that the overall GPU hours are reduced due to faster convergence, a more granular breakdown of the computational overhead per step (e.g., overhead of power iteration and QR decomposition vs. forward/backward passes) would help practitioners assess the exact trade-offs."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Identifies a novel and deep connection between basis misalignment in adaptive optimizers and convergence degradation due to gradient staleness in asynchronous pipeline parallelism.",
+        "Provides a strong theoretical foundation, including a convergence bound for asynchronous Adam under delay that clearly highlights how the delay penalty is amplified by basis misalignment, with extensions to stage-dependent delays and momentum.",
+        "Proposes a highly practical framework (basis rotation) using Kronecker factorization, block-diagonal structures, and low-frequency updates to keep the computation and memory overhead minimal.",
+        "Demonstrates excellent empirical results on models up to 3B parameters, showing significant speedups (up to 81.7% fewer iterations to reach the same loss) and restoring standard scaling laws that standard asynchronous baselines violate."
+      ],
+      "weaknesses": [
+        "The experiments rely on virtual stages sharing physical GPUs to emulate pipeline parallelism, which, while scientifically sound for emulating delay, does not capture actual system-level distributed communication overheads on real multi-node networks.",
+        "The paper would benefit from a more detailed and explicit breakdown of the runtime overhead of the eigenbasis estimation steps (power iteration and QR decomposition) relative to the standard forward/backward pass time."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Identifies a novel and deep connection between gradient staleness in asynchronous pipeline parallelism and the basis misalignment of coordinate-wise adaptive optimizers (like Adam), providing a highly original perspective on a long-standing challenge.",
+        "Provides a solid theoretical foundation, including a rigorous convergence analysis showing that the delay penalty scales multiplicatively with the Hessian (1,1)-norm, which serves as a proxy for basis misalignment.",
+        "Proposes a practical and computationally efficient basis rotation framework leveraging block-diagonality, Kronecker factorization, and power iteration to minimize both memory and computational overhead.",
+        "Demonstrates strong empirical performance on language modeling tasks up to 3B parameters, achieving massive savings in iterations (up to 81.7% fewer iterations) and actual GPU-hour speedups over competitive asynchronous baselines.",
+        "Includes extensive empirical validation of the core mechanism, showing that the proposed method indeed dampens update oscillations along dominant eigenvectors and reduces the measured Hessian (1,1)-norm."
+      ],
+      "weaknesses": [
+        "Lacks a direct wall-clock time comparison against state-of-the-art synchronous pipeline parallelism methods (e.g., interleaved 1F1B with activation checkpointing). Since synchronous pipeline parallelism is the de facto industry standard, demonstrating that asynchronous pipeline parallelism with basis rotation can beat synchronous setups in overall training time would significantly boost the paper's practical impact.",
+        "The pre-training scale in terms of tokens is relatively small (1B tokens). While the model sizes go up to 3B parameters, it remains to be verified whether the advantages of basis rotation persist throughout a complete, compute-optimal pre-training trajectory (which typically requires trillions of tokens).",
+        "Integrating basis rotation and frequent power iterations into highly optimized distributed training libraries (like Megatron-LM or DeepSpeed) adds non-trivial software complexity, which might hinder immediate adoption in large-scale systems."
+      ]
+    }
+  }
+}

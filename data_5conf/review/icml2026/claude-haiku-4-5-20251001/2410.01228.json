@@ -1,0 +1,128 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Well-motivated problem with concrete evidence from real ChatGPT traces showing 3x load variation within minutes",
+        "Sound technical approach with balanced design choices: layer-granularity preemption, incremental KV cache checkpointing, and SLO-aware scheduling are sensible and well-justified",
+        "Clear presentation with detailed algorithms, comprehensive figures (especially Figure 4), and thorough implementation discussion (4165 LoC built on vLLM)",
+        "Comprehensive single-GPU evaluation including real-world trace (BurstGPT), document summarization workload, synthetic loads with configurable burstiness, and ablation studies showing individual component contributions",
+        "Demonstrates significant practical improvements: 2.35x higher throughput vs. online-only serving while maintaining SLO compliance, and 84x latency reduction vs. naive co-serving",
+        "Practical engineering considerations including tensor/pipeline parallelism support, asynchronous I/O overlapping, and adaptive checkpointing policies"
+      ],
+      "weaknesses": [
+        "Severely limited experimental scope: only 1 GPU evaluated (production uses 8+), single model (Llama-2-7B), single offline workload type (document summarization). Results may not generalize to realistic multi-GPU deployments or other LLM scales",
+        "Baseline comparison limitations: vLLM++ is a strawman in-house baseline with naive priority scheduling; no empirical comparison with mentioned related systems (DistServe, Splitwise, Llumnix); 84x improvement claim is against naive co-location, not state-of-the-art alternatives",
+        "Preemption cost analysis incomplete: safepoint overhead measured (988µs) but actual preemption recovery cost not characterized; no quantification of tail latency impact when preemptions occur during bursts; 3.99ms instrumentation overhead assumes zero preemptions",
+        "Adaptive checkpointing policy lacks rigor: 50% memory threshold and gradual rate increase are heuristic-based without formal analysis; no proof that checkpointing rate guarantees memory safety; fallback to discarding KV caches is reactive and may cause SLO violations",
+        "Profiling dependency: requires offline profiling before deployment and must be rerun for new models/hardware; profiling overhead and update frequency not discussed; limits practical deployability",
+        "Design parameter choices lack justification: why 8-layer batching? Why 50% memory threshold? No sensitivity analysis or ablation studies for these critical hyperparameters; unclear how choices generalize across different architectures",
+        "Algorithm specification gaps: relationship between token budget and request count budget in SLOAWARESCHEDULE unclear; priority handling under contention not specified; chunked prefill integration with preemption not explained",
+        "Missing evaluations: no multi-GPU analysis, no evaluation on larger models (70B), limited offline workload diversity, no comparison with related systems, no sensitivity analysis for design parameters, no failure case analysis"
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Addresses practical and timely problem of GPU underutilization in LLM serving with real-world motivation (BurstGPT traces)",
+        "Novel incremental checkpointing mechanism that cleverly exploits the stateless nature of LLM KV caches to enable asynchronous per-iteration checkpoint/restore",
+        "Thoughtful system design with coordinated components: layer-wise preemption for responsiveness, background prefetching for efficiency, and SLO-aware scheduling for correctness",
+        "Concrete implementation on vLLM (4165 LoC) demonstrates feasibility and enables reproducibility of core mechanisms",
+        "Clear presentation with well-designed algorithms and informative figures (especially Figure 4 resume strategies comparison)",
+        "Achieves substantial improvements on tested configuration (2.35× throughput vs. vLLM, 84× latency reduction vs. naive colocation)"
+      ],
+      "weaknesses": [
+        "Critically limited experimental scope: evaluation restricted to single model (Llama-2-7B), single GPU type (A100), single GPU instance, and single datacenter node. No evidence of scalability to multi-GPU deployments despite claims of tensor/pipeline parallelism support",
+        "Weak and insufficient baselines: vLLM Online-Only is handicapped by design; vLLM++ strawman priority scheduler lacks rigor. Missing comparisons with other co-serving systems (Llumnix), disaggregated approaches (claimed compatible), and simple static partitioning baselines",
+        "Limited novelty: preemption and checkpointing are standard OS concepts; continuous batching and chunked prefill are from prior LLM work (Orca, Sarathi-Serve). Main contribution is engineering adaptation rather than novel technical insight",
+        "Insufficient ablation studies: checkpointing threshold (50%) lacks justification, preemption granularity (8 layers) unjustified, no sensitivity analysis for SLO parameters, no comparison of alternative design choices",
+        "Unclear practical deployment: profile management (storage, lookup, staleness) not addressed; SLO specification guidance missing; interaction with cluster schedulers (Kubernetes) not discussed; cost-benefit analysis vs. larger separate clusters not provided",
+        "Technical questions unresolved: formal correctness of layer-wise preemption unclear, potential race conditions between Algorithms 1-2 not analyzed, behavior under extreme load (when preemption insufficient) not specified",
+        "Missing critical experiments: no multi-GPU evaluation; no evaluation on model sizes beyond 7B; no profiling overhead quantification; no host memory bandwidth saturation analysis; no real-world deployment case study"
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Well-motivated problem with real-world evidence (BurstGPT traces showing 3× load variation); addresses genuine GPU underutilization in LLM services",
+        "Thoughtful technical design with clear engineering justifications: layer-granularity preemption balances responsiveness and overhead, incremental checkpointing cleverly exploits autoregressive LLM properties",
+        "Strong empirical results on real workloads: 2.35× throughput improvement while maintaining online latency SLOs, with comprehensive ablation study demonstrating contribution of each component",
+        "Solid implementation foundation with reproducibility details: built on vLLM, 4165 lines of code, clear description of synchronization mechanisms and CUDA stream management",
+        "Clear presentation and logical flow: well-structured progression from motivation through problem demonstration to design solutions with informative figures"
+      ],
+      "weaknesses": [
+        "Limited evaluation scope significantly reduces generalizability: only single A100 GPU tested despite claims about tensor/pipeline parallelism support; only Llama-2-7B evaluated across diverse model sizes and architectures",
+        "Somewhat strawman baseline: vLLM++ implemented by authors as priority scheduler; high-throughput baseline violates SLOs dramatically (83.8s TTFT), making comparison somewhat unfair; missing comparisons with other recent co-scheduling approaches",
+        "Profiler dependency limits practical deployment: offline profiling required for each hardware configuration; paper lacks analysis of profiler error tolerance, generalization to new setups, or handling of execution variance from GPU features (DVFS, power gating)",
+        "Incomplete analysis of system tradeoffs: incremental checkpointing memory overhead and scalability to many concurrent preempted requests not analyzed; synchronization every 8 layers during offline batching could be problematic for different workloads",
+        "Missing sensitivity analysis: no evaluation of parameter space (50% memory threshold, 8-layer batching), impact of different input/output lengths, online/offline ratio, or SLO tightness variations; limited characterization of failure modes under extreme memory pressure"
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Well-motivated problem with real data: ChatGPT traces demonstrate 3× load variability and >70% idle GPU capacity at average load, providing compelling motivation for GPU harvesting",
+        "Rigorous problem diagnosis: Section 3 identifies three specific root causes (coarse-grained scheduling, iteration-level preemption, request-level KV management) with concrete measurements (970ms delay, 3.59× TTFT increase)",
+        "Well-designed technical approach: The polynomial performance model is well-justified for transformer operations; layer-wise preemption cleverly exploits natural computation boundaries; incremental KV cache checkpointing elegantly decouples preemption cost from sequence length",
+        "Solid systems engineering: 9,169 lines of production code on vLLM; thoughtful handling of tensor parallelism, CUDA graphs, and graceful degradation; overhead analysis shows negligible per-layer cost (21µs safepoint, <500µs KV gathering)",
+        "Comprehensive evaluation: Three models (8B-70B), real-world traces plus synthetic workloads, strong baselines (Sarathi-P, DistServe-P), sensitivity analysis, ablation study, and substantial results (2.2× offline throughput, 2.9× TBT reduction, 82% of optimal throughput)",
+        "Opens new research direction: First systematic study of online+offline co-serving for LLMs; timely given industry batch API adoption by OpenAI and Anthropic",
+        "Clear presentation: Well-structured motivation, effective use of figures to diagnose problems, concise algorithms, time-series visualizations showing real-time SLO adherence"
+      ],
+      "weaknesses": [
+        "Limited scalability evaluation: All experiments on single DGX with 8 H100s; tensor parallelism only tested with 4 GPUs; no multi-node evaluation or study of how safepoint synchronization overhead scales with higher TP degrees",
+        "Performance model validation gaps: Polynomial form appears hand-crafted without justification vs. alternatives; generalization to different hardware (A100, L40S) or batch configurations unclear; profiling requires per-setup calibration (20 minutes) with generalizability concerns",
+        "Real-world applicability constraints: Requires simultaneous online and offline workloads (not universal); 24-hour batch SLO specific to certain providers; fairness implications unclear when online SLOs tighten causing offline progress unpredictability; integration required per serving framework",
+        "Evaluation limitations: Real-world workload evaluation uses only 10-minute traces (longer-term stability unclear); baselines (Online-Only, Non-Preemptive) somewhat artificial; no comparison with training/fine-tuning harvesting or CPU-based approaches; performance degrades significantly for short inputs (<2K tokens) or long outputs (>512 tokens)",
+        "Technical claims slightly overstated: 'Near-zero cost' preemption actually requires 10ms for 2048-token transfer; 'single-digit milliseconds' conflicts with stated 13ms maximum; 'negligible' overhead doesn't account for cumulative 1.1% latency increase",
+        "Incomplete technical details: 4-layer instrumentation interval introduces 3ms overhead but latency tail impact not analyzed; host memory constraint handling only validated on systems with 3.3× GPU memory (unrepresentative of commodity setups); 16-token KV granularity optimality not justified",
+        "Limited novelty in components: Individual techniques build on existing work (chunked-prefill, safepoints, KV paging); primary novelty is in combination and application to co-serving rather than algorithmic innovation",
+        "Reproducibility concerns: Code not released; profiler availability for new hardware unclear; baseline tuning details insufficient; DVFS/GC disabled for latency control impacts realism"
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Well-motivated practical problem with convincing evidence of GPU underutilization from real-world traces (BurstGPT); Figure 3 clearly demonstrates failures of existing systems",
+        "Comprehensive systems engineering that coherently integrates three complementary techniques across scheduling, execution, and state management",
+        "Strong empirical results across multiple model sizes (8B, 14B, 70B) and real-world datasets with clear improvements (2.9× latency reduction, 2.2× throughput increase)",
+        "Thorough ablation study (Section 6.5) clearly demonstrates individual contributions of each component; solid implementation with 9,169 lines of code",
+        "Solid polynomial performance model with reasonable latency predictions (4% error) and proper profiling methodology"
+      ],
+      "weaknesses": [
+        "Limited technical novelty: Each technique is incremental—polynomial model is straightforward empirical fitting, layer-wise preemption directly adapts existing runtime designs, token-level KV checkpointing refines existing mechanisms. Primary contribution is engineering integration rather than algorithmic insight.",
+        "Severely restricted experimental scope: Evaluation limited to single hardware platform (8 H100 GPUs) with no cross-hardware validation; only 10-minute real-world traces insufficient for diurnal patterns; offline tasks limited to inference (excludes fine-tuning despite motivation); no evaluation of FP8, INT8, or mixed precision",
+        "Performance model generalization unclear: Trained only on Llama-3.1 and Qwen-2.5; unknown behavior on other architectures (LLaVA, Mistral, Phi); MQA/GQA attention patterns not addressed; cross-architecture validation absent; 20-minute profiling burden undocumented for new model+hardware combinations",
+        "Preemption overhead not negligible: 13ms per iteration represents 6-26% of typical iteration latencies; 167.2μs for 4 GPUs with TP; actual overhead depends on preemption frequency which is not characterized; contradicts claims of minimal overhead",
+        "SLO guarantees overstated: Figure 6(b) shows 86% attainment at s=1.0, directly contradicting abstract claims of 'strict SLO guarantees'; paper should clarify probabilistic vs. deterministic guarantees",
+        "Weak baseline comparisons: Sarathi-Preemptive is straightforward extension by similar authors; DistServe-Preemptive performance poor, unclear if due to algorithmic limitations or tuning; missing recent work (FlexLLM); Non-Preemptive not practical for online serving; no comparison to simple partitioning or autoscaling",
+        "Unvalidated assumptions in KV cache management: Assumes host memory >> GPU memory with only qualitative discussion of graceful degradation; no worst-case analysis of host memory exhaustion; interconnect bandwidth assumptions (64GB/s PCIe) may not generalize; append-only requirement limits applicability to tree-structured generation and other patterns",
+        "Reproducibility concerns: No mention of code release; implementation tightly coupled to vLLM 0.8.4; offline profiling burden makes adaptation costly; H100-specific optimizations may not transfer; hardware-dependent features complicate generalization",
+        "Insufficient sensitivity analysis: Performance degrades significantly for short (<2K) or long (>16K) input requests (Figure 9) with no guidance on applicability; no robustness analysis for model architecture changes or adversarial workloads; no analysis of performance model staleness",
+        "Narrow offline task scope: Motivation emphasizes 'model testing/evaluation' and fine-tuning but evaluation limited to summarization/QA; no evaluation on actual fine-tuning tasks mentioned in introduction, limiting practical applicability claims"
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Clearly motivated problem with strong empirical evidence of GPU underutilization (70%+ idle during moderate loads); root-cause analysis identifies three specific bottlenecks in existing systems",
+        "Well-designed technical solutions at multiple granularities: context-aware performance model (polynomial with <4% profiling error), layer-wise preemption enabling single-digit millisecond responsiveness, and incremental token-level KV cache management exploiting append-only property",
+        "Comprehensive evaluation combining real-world workloads (BurstGPT traces, three offline datasets), multiple models (8B, 14B, 70B with/without TP), strong baselines (Online-Only, Non-Preemptive, Sarathi-P, DistServe-P), ablation study, and sensitivity analysis",
+        "Strong empirical results with significant improvements: 2.37× P99 TTFT reduction, 2.72× P99 TBT reduction, 3.0× offline throughput improvement compared to best baselines, while maintaining near-optimal online latency (within 25% of Online-Only)",
+        "Practical implementation on vLLM 0.8.4 with ~9K lines of code; careful attention to deployment concerns (tensor parallelism, CUDA graphs, graceful degradation); detailed profiling process and reproducibility information provided",
+        "Clear system design elegantly addressing three distinct problems; safepoint overhead analysis rigorous (21µs single-GPU, 167µs with TP, negligible vs layer execution); KV cache transfer feasibility well-analyzed"
+      ],
+      "weaknesses": [
+        "Hardware and deployment specificity: evaluation limited to H100 GPUs only; no testing on A100, L40S, or other popular inference GPUs; assumes well-provisioned infrastructure (2TB host memory, 900GB/s NVLink); scalability on systems with limited PCIe bandwidth unclear",
+        "Performance model limitations: polynomial with 5 terms is relatively simple; profiling granularity not specified; model generalization to different hardware and edge cases (extreme contexts) not demonstrated; non-polynomial effects at saturation unexplored",
+        "Real-world validation gaps: only one trace source (BurstGPT from single campus); no production deployment experience or long-term stability evidence; offline workload diversity limited to three task types; behavior with compute-intensive or very-long-context offline tasks unclear",
+        "Incomplete analysis of extreme system behavior: GPU saturation scenarios and SLO violation recovery not explored; host memory exhaustion fallback performance not quantified; concurrent burst handling and offline task starvation risks not analyzed",
+        "Baseline comparison concerns: DistServe-P shows consistently poor performance across experiments; unclear if disaggregated architecture was fairly implemented or if poor results reflect implementation limitations rather than architectural issues; deeper analysis needed",
+        "Scope limitations: requires offline batch API availability (not universal); assumes shared model between online and offline workloads; applicability to single-task or heterogeneous workload scenarios unclear; specific to scenarios matching OpenAI/Anthropic batch API patterns",
+        "Presentation gaps: Algorithm 1 informal and incomplete (TBT management logic not explicit); no dedicated limitations section; design choices lack justification (16-token checkpointing granularity, every-4-layer safepoints); preemption signal latency ('within 13ms') seems coarse for claimed millisecond-scale benefits"
+      ]
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Formulates KV cache budget allocation across attention heads as a global combinatorial optimization problem based on long-term marginal utility (Oracle Importance), addressing a key limitation of existing heuristic methods that assume uniform or simple rule-based budgets.",
+        "Proposes an elegant and efficient optimization method using convex-hull relaxation via the Pool Adjacent Violators Algorithm (PAVA) to solve the non-convex discrete allocation problem, which achieves identical allocation to exact dynamic programming with much lower overhead.",
+        "Introduces a practical, offline profiling protocol that leverages the structural consistency of attention heads across tasks, making the online execution extremely lightweight with negligible latency and memory overhead.",
+        "Provides highly comprehensive evaluations on diverse benchmarks (LongBench, RULER) across multiple models (Mistral-7B, Llama-3.1-8B, Qwen2.5-32B) and underlying metrics (SnapKV, KeyDiff, EA, KVZip, CAKE), showing dramatic improvements under high compression ratios (e.g., 80%)."
+      ],
+      "weaknesses": [
+        "The method requires offline profiling with a calibration corpus. While the paper shows good transferability across diverse calibration datasets (such as Chinese Novel and English SAT), it still adds an extra preprocessing step, and performance might degrade if deployed on tasks with vastly different attention dynamics than the calibration set.",
+        "The paper lacks a comprehensive discussion or empirical analysis on the sensitivity of the choice of $K_{max}$ (the future decoding window size) used in defining Oracle Importance.",
+        "The computation cost of the offline profiling phase (e.g., in GPU hours) is not clearly quantified, which would be helpful for understanding the practical overhead of calibration."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "The paper identifies a crucial limitation in current KV cache eviction methods: the assumption that heuristic importance scores are well-calibrated and comparable across different attention heads. The theoretical decomposition of eviction loss into Oracle Metric Loss and Optimality Gap Loss is elegant and well-reasoned.",
+        "The formulation of head-level budget allocation as a global combinatorial optimization problem, solved efficiently using a convex-hull relaxation via the Pool Adjacent Violators Algorithm (PAVA), is mathematically rigorous yet practical.",
+        "The proposed LU-KV framework is metric-agnostic. It acts as a general allocation layer that can be seamlessly integrated on top of various existing token-eviction policies (e.g., SnapKV, KeyDiff, CAKE, KVZip) to consistently improve their performance.",
+        "Extensive empirical validation across prominent benchmarks (LongBench and RULER) with diverse model families (Mistral, Qwen, Llama) demonstrates substantial gains, recovering a large portion of the performance gap under aggressive (e.g., 80%) compression."
+      ],
+      "weaknesses": [
+        "The practical implementation relies on offline profiling to obtain a static allocation table. While the authors demonstrate high transferability across domains, this static approach might struggle to adapt to extreme out-of-distribution inputs or real-time focus shifts during very long generation phases compared to fully online dynamic allocation methods.",
+        "Although offline calibration is a one-time cost, computing the Oracle Importance via full-attention decoding over multiple queries can be computationally heavy, especially for larger models (e.g., 32B scales). A brief discussion of the wall-clock time required for this profiling phase would improve completeness."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Well-motivated core concept: The paper correctly identifies the heterogeneity of predictive fidelity across different attention heads and proposes governing budget allocation by long-term marginal utility rather than raw instantaneous attention magnitudes.",
+        "Elegant mathematical formulation: Formulating the budget allocation as a global combinatorial optimization problem and solving it efficiently via convex-hull relaxation (using the Pool Adjacent Violators Algorithm for isotonic regression) and a greedy solver is a strong and elegant technical contribution.",
+        "Comprehensive and robust evaluation: The authors evaluate their method on diverse and challenging long-context benchmarks (LongBench and RULER) across multiple representative LLMs of different scales (Mistral-7B, Llama-3.1-8B, and Qwen2.5-32B).",
+        "Practically efficient: By offloading the expensive utility profiling to an offline calibration step, the runtime overhead of LU-KV is negligible, maintaining the latency and throughput advantages of KV cache eviction."
+      ],
+      "weaknesses": [
+        "Assumption of scale-invariance across sequence lengths: The offline profiling is performed on relatively short contexts (~4,000 tokens), and the resulting budget allocation ratios $r_{\\ell,h}$ are applied statically to much longer sequences (e.g., up to 128k in RULER-16K). The paper does not sufficiently analyze or justify whether optimal head-wise budget allocation ratios remain scale-invariant as the context window scales by orders of magnitude.",
+        "Potential vulnerability to severe domain shifts: Although the authors provide a transferability analysis in Appendix F.2, both the Chinese Novel and English SAT calibration sets are QA/reading comprehension tasks. Highly specialized domains (e.g., code execution, mathematical reasoning, multi-turn dialogue) often activate completely different attention heads. A static offline profile calibrated on standard narrative text may be suboptimal for these distinct domains.",
+        "Inconsistent baseline hyperparameters: In Table 8, the baseline configurations use different local window sizes (e.g., 32 for SnapKV/AdaKV vs. 8 for PyramidKV vs. 1 for KeyDiff). Using a smaller window size of 8 for PyramidKV could disadvantage it and skew the comparison, as a larger window is typically essential for maintaining model stability. The baselines should ideally be compared under consistent intra-head settings.",
+        "Discrepancy in the Oracle Importance formulation: Equation 4 defines the oracle importance assuming full-attention decoding. However, during progressive sequential eviction, the eviction of some tokens dynamically alters the attention distribution of the remaining tokens due to Softmax re-normalization. The oracle metric does not model these complex dynamic interactions, introducing a discrepancy between the profiled 'oracle' and the actual run-time behavior."
+      ]
+    }
+  },
+  "v1": {
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "The paper targets an important and practical bottleneck in LLM deployment: Key-Value (KV) cache compression, specifically focusing on the under-explored area of global cross-head and cross-layer budget allocation.",
+        "Provides a clear and mathematically rigorous formulation of the budget allocation problem, defining Oracle Importance and decomposing the eviction loss into oracle loss and the optimality gap.",
+        "The proposed convex-hull relaxation via Isotonic Regression (PAVA) successfully transforms a non-convex combinatorial optimization problem into a tractable surrogate that can be solved greedily with guarantees.",
+        "The offline profiling protocol is a clever way to address the causality and latency issues of online optimization, enabling zero-overhead online deployment via a simple static lookup table.",
+        "Extensive evaluation on demanding benchmarks (LongBench and RULER) across multiple base models (Mistral, Llama-3.1, Qwen2.5) demonstrates substantial accuracy improvements over existing heuristic and dynamic allocation baselines."
+      ],
+      "weaknesses": [
+        "Model-Specificity of Profiles: The offline profiling phase must be executed separately for every individual model architecture and weight configuration. This adds a pre-computation overhead whenever a new model or fine-tuned variant is deployed.",
+        "Under-explored Generalization of the Profiling Dataset: The static profile is calibrated on a single synthetic context (an AI-generated novel of ~4,000 words with 30 queries). It is unclear how sensitive the generated profile is to the choice of this calibration dataset, or if using a more diverse calibration set would significantly alter the allocation strategy.",
+        "Lack of Comparison with Recent Cross-Head Baselines: Although related works like CAKE (Qin et al., 2025) and HeadKV (Fu et al., 2025) are cited, they are not empirically compared in the main experiments, which makes it harder to fully assess the performance of LU-KV against the most recent state-of-the-art in cross-head allocation.",
+        "Computational Overhead of Profiling: While online execution has zero overhead, the offline profiling step requires running full-attention decoding over multiple queries to compute the Oracle Importance (Eq. 4). The paper lacks a detailed discussion of the exact time and resource costs required for this profiling step."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "The paper addresses a critical and highly relevant problem: optimal head-wise and layer-wise KV cache budget allocation during LLM inference.",
+        "The proposed LU-KV framework is theoretically well-founded, introducing a formal optimization objective, proving its non-convexity, and proposing an elegant convex-hull relaxation via PAVA that allows a greedy solver to find the optimal allocation.",
+        "The offline profiling protocol is a practical design choice that enables zero-overhead online execution through a simple lookup table, bypassing the runtime sorting overhead typical of dynamic allocation methods.",
+        "Extensive evaluations on challenging benchmarks (LongBench and RULER) across multiple models (Mistral-7B, Llama-3.1-8B, Qwen2.5-32B) demonstrate significant performance improvements over existing state-of-the-art allocation baselines like AdaKV and PyramidKV.",
+        "The ablation study is thorough, clearly demonstrating the benefit of accounting for the 'optimality gap' (the alignment discrepancy between heuristic metrics and the oracle) rather than allocating budget solely based on oracle importance."
+      ],
+      "weaknesses": [
+        "While the paper claims the compression profiles remain remarkably stable across tasks, more analysis on the generalization of the calibration text would be beneficial (e.g., how a profile calibrated on a standard narrative performs on highly structured data like code completion or mathematics).",
+        "There is little discussion on how the calibration scales or generalizes across vastly different sequence lengths. For instance, does a profile calibrated on a 4,000-token sequence work optimally when deployed on 16k or 128k context windows?",
+        "The paper does not explicitly detail the computational cost (in GPU hours) required to run the offline calibration protocol, especially for larger models like Qwen2.5-32B."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Provides a clear and mathematically grounded formulation of the cross-head KV cache budget allocation problem. The decomposition of eviction loss and the formal definition of the 'Optimality Gap' are highly insightful.",
+        "Proposed a highly practical and efficient design. By identifying the structural stability of LLM attention heads across different tasks, the authors move the optimization offline. The online phase has zero computational overhead, utilizing a simple pre-computed lookup table.",
+        "Shows great universality: the framework is agnostic to both the task and the underlying token-scoring metric, allowing it to easily sit on top of existing techniques like SnapKV or KeyDiff.",
+        "Conducts a thorough and rigorous evaluation on multiple diverse models (Mistral-7B, Llama-3.1-8B, Qwen-2.5-32B) and challenging long-context benchmarks (LongBench, RULER), showing substantial performance improvements at high compression ratios (80%)."
+      ],
+      "weaknesses": [
+        "The sensitivity of the calibration process to the profiling dataset is not fully explored. Profiling relies on a single AI-generated novel (~4k tokens) and 30 questions. It is unclear if calibrating on vastly different distributions (e.g., code, mathematical formulas, or multilingual data) would lead to distinct head profiles and how robust the current profile is to such domain shifts.",
+        "The paper lacks details and sensitivity analysis on the choice of the decoding window $K_{\\max}$ in the definition of Oracle Importance (Eq. 4). It is important to know how $K_{\\max}$ affects the resulting allocation profiles and performance.",
+        "While the question-agnostic protocol focuses on compressing the context prefill, the paper does not explicitly detail the strategy during the subsequent autoregressive decoding phase (e.g., whether the budget allocation is maintained dynamically as new tokens are generated or if decoding tokens are simply kept)."
+      ]
+    }
+  }
+}

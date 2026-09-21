@@ -1,0 +1,93 @@
+{
+  "v3": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Highly effective method: The proposed HQ-DM framework achieves remarkable performance improvements in low-bit diffusion model quantization (W4A4 and W4A3), significantly outperforming state-of-the-art methods like EfficientDM and QuEST.",
+        "Well-motivated design: The paper correctly identifies the limitations of Double Hadamard Transformation (DHT) in terms of weight outlier amplification and convolution incompatibility, and addresses them elegantly via the Single Hadamard Transformation.",
+        "Comprehensive evaluation: The experiments are conducted across multiple datasets (ImageNet, LSUN-Bedrooms, LSUN-Churches), architectures (both UNet-based LDM and Transformer-based DiT), and bit-widths, demonstrating strong generalization.",
+        "Detailed ablation studies: The ablation study clearly separates the effects of LSQ, LoRA, and the Hadamard transformation, showing that the performance gains are robust and orthogonal to other components."
+      ],
+      "weaknesses": [
+        "Analysis of inference overhead: While the authors state that the computational overhead of the sparse Hadamard matrix is negligible, they do not provide a direct latency comparison against standard quantized models (without Hadamard, such as EfficientDM). In Table 6, latency is only compared between DHQ-DM and HQ-DM. Since HQ-DM requires online multiplication with H between the activation and weight matrices (Eq. 12), a comparison with standard INT4 GEMM is necessary to fully assess the practical hardware speedup.",
+        "Clarity on the online computation: The paper could benefit from a more detailed explanation of how the term $(XH)_{int} \\cdot H \\cdot W_{int}$ is efficiently computed on actual hardware during inference, particularly since H sits between the two quantized matrices and prevents a direct single GEMM of $(XH)_{int}$ and $W_{int}$."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "The paper targets low-bit quantization (such as W4A4 and W4A3) for diffusion models, which is a highly challenging and important problem due to severe activation outliers and non-stationary distributions.",
+        "Evaluating the proposed framework across multiple generative backbones (both CNN-based U-Net LDM and Transformer-based DiT-XL) provides a comprehensive view of the empirical performance.",
+        "The paper is well-written and structured, with detailed ablation studies evaluating individual components (such as LSQ, LoRA, and the Hadamard transformation)."
+      ],
+      "weaknesses": [
+        "Factually Incorrect Claim on Matrix Sparsity: On page 10, the authors state that 'by extracting the floating-point factor $2^{-k/2}$, the $H_k^{raw}$ matrix becomes a sparse integer matrix.' This is mathematically incorrect. A Hadamard matrix $H_k^{raw}$ of size $2^k \\times 2^k$ is completely dense, with every single entry being $+1$ or $-1$. While the overall block-diagonal structure of $H$ is sparse, the dense operations within each block represent a significant computational footprint.",
+        "Hardware Inefficiency and Tensor Core Incompatibility: In conventional Double Hadamard approaches (e.g., QuaRot), the transformation $H^T$ is fused into the weight matrix offline, allowing the online operation to remain a standard GEMM: $Y \\approx (XH)_{int} \\cdot (H^T W)_{int}$. This enables standard low-bit (e.g., INT4) Tensor Core acceleration. In contrast, HQ-DM's Single Hadamard approach requires computing $(XH)_{int} \\cdot H \\cdot W_{int}$ online. This is a three-matrix multiplication where the intermediate tensor $(XH)_{int} \\cdot H^{raw}$ inevitably has a wider dynamic range and larger bit-width (e.g., 4-bit activation scaled by a block size of $2^k$ results in up to $4+k/2$ bits). Multiplying this intermediate higher-precision tensor by $W_{int}$ cannot leverage standard INT4 Tensor Cores, rendering the method highly inefficient for actual hardware deployment.",
+        "Unexplained Latency Results: In Table 6, HQ-DM (8/8) is reported to have a latency of 0.9419s, whereas DHQ-DM (8/8) is reported to have 1.0688s. Theoretically, DHQ-DM fuses the transformation into the weights offline and avoids the online multiplication by $H$ during inference, which should make it faster. The manuscript lacks an explanation of why DHQ-DM is slower. Additionally, 4/4 bit-width in HQ-DM is slower (1.0581s) than 8/8 bit-width (0.9419s), which should be clarified (e.g., if this is due to simulated quantization or hardware packing overhead).",
+        "Suspiciously Poor Baseline (DHQ-DM) Performance: In Table 6, DHQ-DM (Double Hadamard) performs catastrophically (e.g., an Inception Score of 5.72 for 8/8 bit-width compared to 363.22 for HQ-DM). In existing literature, Double Hadamard does not lead to complete failure under Quantization-Aware Training (QAT) since the network can adapt to the transformed weights. The extremely poor baseline results suggest a potential implementation bug in the reference DHQ-DM baseline.",
+        "Limited Algorithmic Novelty: Utilizing Hadamard transforms to suppress activation outliers is a well-established concept in LLM quantization. The core contribution here lies in applying it to diffusion models combined with LoRA-based QAT (from EfficientDM), which represents a relatively straightforward combination of existing techniques."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3,
+      "strengths": [
+        "The paper addresses a very challenging and important topic: low-bit quantization (e.g., W4A4, W4A3) for diffusion models, which suffer from severe performance degradation due to activation outliers and non-stationary distributions.",
+        "Strong empirical results: The proposed HQ-DM shows significant improvements in Inception Score (IS) and FID on LDM-4 and DiT-XL models (e.g., W4A3 on ImageNet 256x256), outperforming current state-of-the-art methods like EfficientDM.",
+        "The evaluation is comprehensive, covering multiple datasets (ImageNet, LSUN-Bedrooms, LSUN-Churches) and architectural backbones (both CNN-based UNet and Transformer-based DiT).",
+        "Detailed ablation studies are provided to validate the effectiveness of individual components, such as LoRA distillation, LSQ, and the Hadamard transform."
+      ],
+      "weaknesses": [
+        "Mathematical Error regarding Sparsity: In Section 4.2 (page 10), the authors state that 'by extracting the floating-point factor $2^{-k/2}$, the $H_k^{raw}$ matrix becomes a sparse integer matrix'. This is incorrect. A Hadamard matrix consists entirely of $+1$ and $-1$ entries and contains no zero elements. Therefore, it is completely dense (0% sparsity), not sparse.",
+        "Loss of True Low-Bit Activation Computation: In the proposed Single Hadamard Transformation, the activations are transformed, quantized, and then immediately reconstructed (de-transformed) back to the original space before being multiplied by the weights or passed to the convolution (as shown in Eq. 12 and 14). Because of this online reconstruction, the input to the actual matrix multiplication or convolution layer is high-precision (or high-bit integer). Consequently, the actual heavy computational workloads (GEMM and Conv) are not performed using low-bit (e.g., 4-bit) activation arithmetic. The paper claims W4A4 or W4A3 computation benefits, but the actual execution of the most expensive layers does not run on low-bit activation hardware accelerators (such as INT4/INT8 Tensor Cores) because the activations are reconstructed to high precision prior to the GEMM/Conv.",
+        "Unclear Latency Comparison and Missing Baselines: In Table 6, the authors compare the latency of HQ-DM against DHQ-DM (Double Hadamard). However, they do not provide the latency of the FP32 baseline or standard quantized models without Hadamard (e.g., EfficientDM). Since HQ-DM introduces multiple online transformations (reshaping, multiplying by $H_c$, and multiplying by $H_c$ again), it must introduce substantial computational overhead compared to standard quantization. Without comparing against a standard quantized model, the claim of being a 'hardware-friendly scheme' is not fully supported.",
+        "Inconsistency in Latency Speedup: Single Hadamard requires more online operations than Double Hadamard because it performs the de-transformation online, whereas Double Hadamard merges the transformation into the weights offline. Despite this, Table 6 shows that HQ-DM is faster than DHQ-DM. The explanation that DHQ-DM is regressed to Single Hadamard for Conv layers is insufficient to justify why HQ-DM is faster overall, raising questions about the latency measurement environment and whether these speedups represent real-world hardware execution or merely PyTorch simulation overheads."
+      ]
+    }
+  },
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "HQ-DM presents a well-motivated and novel Single Hadamard Transformation framework designed specifically to address the unique challenges of activation outliers in low-bit diffusion models.",
+        "The proposed approach successfully overcomes key limitations of conventional Double Hadamard Transformation (such as QuaRot), notably by seamlessly supporting integer convolution operations and avoiding the amplification of weight outliers.",
+        "The experimental results are highly impressive. HQ-DM achieves outstanding performance improvements in ultra-low bit scenarios, particularly under the W4A3 configuration on ImageNet and LSUN datasets, where it significantly outperforms existing state-of-the-art QAT methods like EfficientDM.",
+        "The paper provides thorough visualization and analysis of the activation distributions before and after the Hadamard transformation across different timesteps, which clearly validates the theoretical motivation."
+      ],
+      "weaknesses": [
+        "Intermediate Bit-Width Expansion: Under the proposed Single Hadamard formulation, the term $(XH)_{int} \\cdot H^{raw}$ is computed. Since $H^{raw}$ is a Hadamard matrix of size $2^k \\times 2^k$ containing $\\pm 1$ values, multiplying a $b$-bit integer activation tensor by $H^{raw}$ expands the range of values by up to $k$ bits. For the optimal $k=5$ (corresponding to $32 \\times 32$ blocks), a 4-bit activation is expanded to a 9-bit intermediate integer tensor before the core multiplication with $W_{int}$. This means the hardware cannot perform a simple low-bit (e.g., 4-bit) integer convolution/multiplication, but instead requires higher-precision (e.g., INT16) accumulators. The authors should discuss this hardware implication and its impact on the actual hardware efficiency.",
+        "Inference Overhead of Online Transform: The proposed method requires performing the Fast Walsh-Hadamard Transform (FWHT) online during inference (and also its inverse for the convolutional layers). While FWHT has a low complexity of $O(C \\log C)$, the authors do not provide any quantitative evaluation of the actual runtime latency or FLOPs overhead introduced by these online transformations.",
+        "Evaluation on Modern Architectures: The experiments are conducted on U-Net based models (LDM-4, LDM-8). Modern state-of-the-art diffusion models are increasingly shifting towards Transformer-based architectures (e.g., DiT - Diffusion Transformers). It would significantly strengthen the paper to demonstrate the effectiveness of HQ-DM on DiT-style architectures, where the linear-layer-only structure might fit the Hadamard transform even more naturally.",
+        "Implementation Details of Timestep-Wise Quantization: The paper mentions adopting timestep-wise learnable quantization factors from LSQ but lacks a detailed formulation of how these factors are trained, stored, and retrieved during inference across different denoising timesteps."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Addresses low-bit quantization (such as W4A4 and W4A3) in diffusion models, which is a challenging task due to temporal non-stationarity and activation outliers.",
+        "Proposes 'Single Hadamard Transformation' as a way to avoid the weight-outlier amplification issues and convolution incompatibility associated with traditional Double Hadamard Transformation.",
+        "Demonstrates strong quantitative improvements in generative quality metrics (e.g., Inception Score and FID) on ImageNet 256x256, LSUN-Bedrooms, and LSUN-Churches compared to the state-of-the-art QAT method (EfficientDM).",
+        "Includes extensive qualitative visualization (sample images) and channel-wise outlier analysis across multiple timesteps and blocks."
+      ],
+      "weaknesses": [
+        "Conceptual contradiction/confusion regarding spatial vs. channel outlier smoothing: For convolutional layers (Section 4.2), the paper describes reshaping the activation tensor and applying the block-diagonal Hadamard matrix $H_c$ of size $w \\times w$ along the last (width) dimension. This spatial-only transformation mixes features across spatial coordinates within each row, rather than across channels. However, Figures 2 and 5–10 analyze and show 'Channel-wise analysis of outlier distribution'. If the transform is applied spatially and does not mix channels, the mechanism by which it reduces channel-wise outliers is mathematically unclear and needs justification.",
+        "Lack of actual inference latency/overhead measurements: Performing online Hadamard transformations on activations introduces computational overhead ($O(k \\cdot 2^k)$ operations). Since the spatial dimensions in diffusion models (especially in U-Net blocks) can be large, this extra step can significantly impact real-world inference latency. The paper does not provide actual latency measurements (e.g., in milliseconds or frames per second) on target hardware (such as GPUs or edge accelerators) to prove that the overall framework achieves a practical speedup compared to standard precision or other quantized baselines.",
+        "Incremental technical novelty: Utilizing Hadamard transforms to smooth out activation outliers is a well-established concept in the quantization literature (e.g., QuaRot [2] and Xi et al. [60] for LLMs). Adapting this by omitting one of the transforms ('Single' instead of 'Double') to make it compatible with convolutions represents a fairly straightforward engineering adjustment rather than a fundamental algorithmic breakthrough.",
+        "Some methodological and training details are missing, such as the exact training time overhead introduced by the distillation and QAT processes, and how the learning rates for the timestep-wise quantization scales were tuned."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Addresses a key bottleneck in low-bit quantization of diffusion models (activation outliers) by proposing a novel application of the Hadamard transform within a Quantization-Aware Training (QAT) framework.",
+        "Overcomes the limitations of traditional Double Hadamard Transformation (which is incompatible with convolutions and can introduce weight outliers) by proposing a Single Hadamard Transformation.",
+        "Demonstrates impressive empirical improvements in generative quality metrics (Inception Score, FID, sFID) on benchmarks like ImageNet and LSUN, outperforming recent state-of-the-art QAT methods (such as EfficientDM) under low-bit configurations.",
+        "Symmetric quantization is used for activations, which is generally more hardware-friendly than asymmetric quantization."
+      ],
+      "weaknesses": [
+        "The claim of low-bit activation quantization (A4/A3) is misleading for convolutional layers. In Equation 18, because the Hadamard matrix $H_c$ is applied along the spatial dimension, it cannot be folded offline into the convolution weights $W_c$. Therefore, the inverse transform must be applied online to the quantized activation $(\\tilde{X}_c H_c)_{int}$ before running the convolution. Since $H_c^{raw}$ contains entries in $\\{+1, -1\\}$, multiplying an $N$-bit integer matrix of dimension $w$ by $H_c^{raw}$ increases the dynamic range of the values by a factor of $2^k$. For the optimal order $k=5$ (matrix size $32\\times32$) and 4-bit activations, the resulting values can require up to 10 bits of precision. Thus, the actual convolution operation (which constitutes the vast majority of FLOPs in the UNet) is executed with 10-bit activations (W4A10) rather than 4-bit (W4A4). This significantly diminishes the claimed computational savings.",
+        "The online computation of both the forward and inverse Hadamard transforms for every convolutional layer introduces non-trivial overhead in terms of FLOPs and memory bandwidth. The paper lacks a detailed analysis or benchmark of this additional latency cost.",
+        "There are no actual hardware deployment results, latency measurements, or energy benchmarks on target hardware platforms (e.g., edge devices or GPUs) to validate the claim of being a 'hardware-friendly scheme' and achieving actual speedups."
+      ]
+    }
+  }
+}

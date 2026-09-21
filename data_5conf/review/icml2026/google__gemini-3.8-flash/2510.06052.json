@@ -1,0 +1,98 @@
+{
+  "v1": {
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Compelling motivation: The paper addresses an important and timely problem in large reasoning models (LRMs)—namely, that long chain-of-thought (CoT) traces suffer from substantial verbosity and redundancy across routine sub-steps, whereas existing compression techniques typically apply uniform global shortening or problem-level binary routing.",
+        "Interesting architecture-aware ablation: The layerwise LoRA ablation (Section 4.4, Figure 5) provides an intriguing finding that MLP layers predominantly govern reasoning length and conciseness compared to attention K/V projections, which has meaningful implications for KV-cache preservation during dynamic adapter switching.",
+        "Broad empirical token reduction: Experiments across multiple benchmarks (GSM8K, MATH-500, AIME24) and open model backbones (QwQ-32B, Qwen-8B/14B) demonstrate non-trivial reductions in average output token length while maintaining or slightly improving accuracy."
+      ],
+      "weaknesses": [
+        "Unclear and potentially contradictory rollback/regeneration mechanism: In Section 3.2, the method defines an uncertainty window $W_t = [t-B, t+F]$ and states that upon detecting high uncertainty ($H_t \\ge \\tau_\\uparrow$), the system rolls back to $t-B$ and re-decodes in thinking mode. However, autoregressive decoding with modified model weights (diminished LoRA strength) will almost certainly cause token trajectories to diverge from the original concise path. It is mathematically and mechanically unclear what $[t-B, t+F]$ means when the generated sequence diverges, how the window end boundary is determined post-rollback, and how the model splices back into concise mode without semantic discontinuity.",
+        "Lack of wall-clock latency and throughput evaluation: The paper claims significant efficiency improvements, yet evaluates efficiency strictly through output token counts (#Tokens). The proposed mechanism involves token rollbacks (discarding already generated tokens), dynamic adapter adjustment, and re-prefilling the KV cache. Without wall-clock time measurements (e.g., end-to-end latency, tokens per second, or throughput under batched serving), it remains unproven whether MixReasoning achieves real-world speedups over standard generation.",
+        "Incomplete baseline comparisons and missing data: In Table 1, four baseline results (DEER, NoWait, ConciseHint, and part of CoT-Valve) are omitted for QwQ-32B-Preview with no rationale provided, weakening the comparative empirical validation on the largest evaluated model backbone.",
+        "Generalization concerns regarding concise LoRA training: The concise adapter is fine-tuned solely on the GSM8K training set (elementary math word problems), but then deployed on competition-level benchmarks like MATH-500 and AIME24. The paper does not thoroughly analyze whether an adapter trained on simple arithmetic generalizes reliably to elicit effective 'concise reasoning' on advanced mathematics without suppressing crucial intermediate steps.",
+        "Hyperparameter sensitivity and tuning: The framework relies on several sensitive hyperparameters (trigger threshold $\\tau_\\uparrow$, anneal threshold $\\tau_\\downarrow$, backward window $B$, forward window $F$, and adapter scales $\\alpha_{low}, \\alpha_{high}$). The paper does not adequately specify how these thresholds were selected across distinct task difficulties or whether they require per-benchmark tuning."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Compelling and intuitive motivation: recognizing that reasoning difficulty is non-uniform within a single chain-of-thought, the paper tackles intra-response adaptive thinking depth rather than coarse problem-level routing.",
+        "Hardware-friendly design: modulating LoRA adapter strength on a single served base model avoids the significant memory footprint and coordination complexity of multi-model speculative architectures.",
+        "Insightful architectural analysis (Finding 3): demonstrating that reasoning length control is primarily governed by MLP layers rather than attention projections offers valuable practical insight for KV-cache reuse and low-overhead adapter switching.",
+        "Promising empirical results on token reduction: MixReasoning consistently reduces generated token count across GSM8K, MATH-500, and AIME24 while maintaining or slightly improving accuracy."
+      ],
+      "weaknesses": [
+        "Lack of wall-clock latency and inference throughput measurements: the evaluation relies almost entirely on generated token counts. Because the method involves rollback ($t-B$), re-decoding, and prefilling (especially since all-layer LoRA is used in the main experiments), discarded tokens and switching overhead could offset gains in real-world wall-clock latency.",
+        "Incomplete baseline reporting in Table 1: for QwQ-32B-Preview, results for key baselines (DEER, NoWait, ConciseHint) are marked with dashes ('–') without clear justification.",
+        "Heuristic rollback window and threshold tuning: introducing parameters ($B, F, \\tau_\\uparrow, \\tau_\\downarrow$) adds tuning complexity. It is not clear how robust a single set of hyperparameters is when transferred across tasks of vastly different difficulty levels.",
+        "Limited dataset diversity for concise LoRA distillation: the concise adapter is trained solely on the GSM8K training set (7.47k elementary math problems). A deeper ablation evaluating how domain transfer of this concise LoRA affects advanced reasoning tasks (e.g., AIME or non-math domains) is missing."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3,
+      "strengths": [
+        "Compelling and intuitive motivation: dynamically allocating extended reasoning compute specifically to pivotal, high-uncertainty decision steps while remaining concise on routine steps is a timely and promising direction for scaling inference-time efficiency.",
+        "Lightweight serving architecture: using a single base model paired with an interpolatable LoRA adapter avoids the high memory footprint, dual-model maintenance, and communication overhead required by multi-model speculative decoding frameworks.",
+        "Insightful layerwise ablation (Figure 5): the experiment demonstrating that reasoning-chain length compression is predominantly governed by MLP layers rather than attention projections offers valuable mechanistic insight and suggests a practical path toward seamless KV-cache reuse.",
+        "Broad evaluation across three distinct reasoning benchmarks spanning varying difficulty levels (GSM8K, MATH-500, and AIME 2024)."
+      ],
+      "weaknesses": [
+        "Absence of wall-clock latency and throughput measurements: The efficiency claims rely entirely on generated token counts. However, the method requires rolling back $B$ tokens, re-generating windows, and re-prefilling KV caches whenever transitioning between full-layer LoRA configurations. Discarded tokens during rollbacks and switching overhead could substantially erode actual wall-clock speedups, making latency/throughput benchmarks essential.",
+        "Ambiguity in rollback and windowed decoding mechanics: In Section 3.2, the paper specifies opening a window $W_t = [t-B, t+F]$, rolling back to $t-B$, and re-decoding under thinking mode ($\\alpha_{low}$). Because switching adapter strength alters the token distribution, the generated sequence starting at $t-B$ will immediately diverge from the original trajectory. It is unclear how a predetermined future boundary $t+F$ is defined or enforced post-divergence, and whether discarded rollback tokens are factored into the reported token counts in Table 1.",
+        "Overstated empirical superiority over baselines: The manuscript claims that MixReasoning consistently exceeds the accuracy of existing methods at matched or lower token budgets. However, in Table 1 on Qwen3-14B for AIME 2024, both DEER (Pass@1 0.6834, 7894 tokens) and NoWait (Pass@1 0.6881, 8786 tokens) achieve strictly higher accuracy with substantially fewer tokens than MixReasoning (Pass@1 0.6789, 9431 tokens).",
+        "Missing baseline results and key implementation parameters: In Table 1, baselines DEER, NoWait, and ConciseHint are omitted entirely for QwQ-32B-Preview without justification. Furthermore, the paper omits the exact values used for key inference hyperparameters, including the uncertainty thresholds $\\tau_\\uparrow, \\tau_\\downarrow$, window bounds $B, F$, and adapter strengths $\\alpha_{low}, \\alpha_{high}$, hindering reproducibility.",
+        "Presentation inconsistencies in qualitative figures: The text and captions state that thinking mode tokens are highlighted in red and concise mode tokens in blue. However, in Figure 6, no red tokens are highlighted despite the text claiming windowed expansion occurred, creating confusion regarding the actual switching behavior."
+      ]
+    }
+  },
+  "v2": {
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Novel and well-motivated conceptual framework: Intra-response dynamic mode switching effectively bridges the gap between problem-level hybrid routing (which treats reasoning as a binary choice) and uniform length compression (which risks underthinking on critical sub-steps).",
+        "Pragmatic and elegant system design: By modulating a lightweight concise LoRA adapter's scaling factor on a single served model and reusing the prefix KV-cache via localized prefill and windowed hysteresis, the method avoids the latency and memory overhead of co-serving multiple models.",
+        "Comprehensive empirical validation: MixReasoning is benchmarked across four strong reasoning models (DeepSeek-R1-7B, Qwen3-8B/14B, QwQ-32B) on prominent benchmarks (AIME24, GPQA, MATH-500, GSM8K, plus code and commonsense tasks in the appendix), consistently achieving 13%-49% token savings with negligible accuracy loss (and occasional accuracy gains).",
+        "Thorough ablations and theoretical grounding: The authors provide formal justifications linking the top-k confidence metric to reverse-KL concentration, validate sliding-window aggregation against single-token and keyword-triggered switching, and compare against standard uncertainty alternatives (entropy, margin, max probability)."
+      ],
+      "weaknesses": [
+        "Practical batch serving implications: While the authors evaluate latency in vLLM (Figure 6) and provide switching cost analysis (Appendix C.3), intra-sequence rollback and heterogeneous per-token LoRA scaling across batched sequences can introduce execution divergence and KV-cache management fragmentation under realistic high-concurrency serving workloads.",
+        "Reliance on teacher-generated concise data: The concise LoRA adapter relies on SFT data generated from a specific non-thinking model (Qwen3-14B-nonthinking on DeepScaleR). The paper does not thoroughly explore how dependent performance is on the quality of the non-thinking teacher or whether this approach generalizes seamlessly to domains where high-quality concise teachers are unavailable.",
+        "Potential domain shift in confidence distribution: While Figure 4 demonstrates that sliding-window confidence distributions are stable across several mathematical benchmarks, vocabulary entropy and distribution shapes can differ significantly in non-STEM or less constrained generative domains, potentially requiring recalibration of the thresholds (tau_low, tau_high)."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Compelling and intuitive conceptual framework: The paper introduces intra-response mode switching between fast (concise) and slow (deliberative) reasoning within a single model, addressing the critical limitation of existing work that either compresses reasoning globally or routes only at the coarse problem level.",
+        "Technically clean and practical execution: Implementing mode switching via dynamic LoRA adapter strength scaling (interpolating between base model and concise adapter) avoids serving two full models, eliminates catastrophic forgetting of deep reasoning capabilities, and enables on-the-fly modulation.",
+        "Comprehensive empirical validation: Evaluated across four popular open reasoning models (DeepSeek-R1-7B, Qwen3-8B, Qwen3-14B, QwQ-32B) on diverse benchmarks (AIME24, MATH-500, GPQA, GSM8K, plus code and commonsense tasks in the appendix). MixReasoning achieves 13%–49% token reduction while maintaining or slightly improving accuracy.",
+        "Extensive ablations and baseline comparisons: The manuscript compares against six representative baselines (prompting, SFT compression, RL pruning, early-exit, cue-suppression, and hybrid routing) and provides detailed ablations covering confidence metrics (entropy, margin, max prob), sliding window sizes, thresholds, and SFT datasets.",
+        "Principled analysis of the switching metric: Appendix C.1 provides a rigorous mathematical connection between the sliding-window top-k negative log-probability and reverse-KL divergence from uniformity, proving monotonicity under majorization."
+      ],
+      "weaknesses": [
+        "Generalization and dependency on concise adapter training: The concise mode requires supervised fine-tuning of a LoRA adapter (trained on DeepScaleR-40K). While the authors show empirical transfer to code and commonsense tasks in the appendix, domain shift could still degrade the concise mode if applied to radically different task distributions without dedicated adapter tuning.",
+        "Batching and serving complexity: Although the paper implements KV cache reuse and validates wall-clock speedups in vLLM, dynamic per-sequence mode switching and rollback operations in heavily loaded, multi-tenant continuous batching environments can introduce non-negligible scheduling fragmentation and cache recomputation overheads that are not fully analyzed under high-concurrency loads.",
+        "Missing isolated ablation on the rollback mechanism: The rollback mechanism (discarding $m$ tokens upon switching from concise to think mode) is intuitively motivated to prevent committing to erroneous reasoning, but the exact accuracy and compute trade-off of having rollback versus no rollback is not quantitatively isolated in the ablation studies.",
+        "Sensitivity of confidence thresholds across non-STEM domains: Confidence distributions are demonstrated to be consistent across math benchmarks, but token-level uncertainty can vary substantially in open-ended generation, creative tasks, or ambiguous knowledge retrieval, potentially requiring manual tuning of the hysteresis thresholds $\\tau_{\\text{low}}$ and $\\tau_{\\text{high}}$."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Compelling conceptual motivation: Addressing the limitations of both uniform CoT compression (which risks underthinking on hard steps) and instance-level hybrid reasoning (which treats reasoning as a binary all-or-nothing choice) by enabling intra-response, step-level mode switching.",
+        "Sound and elegant technical design: Combining LoRA strength scaling at decoding time with sliding-window token confidence provides a smooth, controllable mechanism for mode switching without requiring multiple co-served model instances.",
+        "Comprehensive empirical validation: Evaluated across diverse model families and scales (DeepSeek-R1-7B, Qwen3-8B/14B, QwQ-32B) and challenging reasoning benchmarks (AIME24, MATH-500, GPQA, GSM8K, plus coding and commonsense tasks). The method consistently reduces token usage by 13%–49% while matching or slightly exceeding base Pass@1 accuracy.",
+        "Thorough ablations and theoretical grounding: The manuscript connects the proposed confidence metric to reverse-KL concentration and majorization, and conducts rigorous comparisons against alternative switching criteria (entropy, margin, max-prob, keywords, random, reverse-confidence) as well as window sizes and thresholds.",
+        "Practical latency verification: The authors implement MixReasoning within vLLM and demonstrate actual wall-clock speedups, accounting for KV-cache reuse and prefill overhead rather than merely reporting theoretical token savings."
+      ],
+      "weaknesses": [
+        "Numerical stability of the confidence metric: Because $c_t$ is connected to the reverse-KL divergence $D_{KL}(U_k \\parallel \\tilde{q}_t)$, probabilities close to zero for the tail items within the top-$k$ can cause $c_t$ to grow very large or become numerically unstable. The manuscript should explicitly discuss clipping or regularization used to stabilize $\\log p_t(v_{t,j})$.",
+        "Serving complexity under batched workloads: Mode switching requires rollbacks ($t \\leftarrow t - m + 1$) and selective re-prefilling of KV cache spans. While shown to be fast for isolated requests, this introduces non-uniform sequence lengths and irregular execution flows that could complicate memory management and scheduling in high-concurrency continuous-batching systems.",
+        "Threshold transferability across model scales: Although Figure 4 shows that confidence distributions are relatively consistent, logit calibration and distribution sharpness typically shift across model architectures and parameter scales (e.g., 7B vs. 32B). It is not completely clear whether a single static pair of thresholds ($\\tau_{low}, \\tau_{high}$) suffices globally or if per-backbone calibration is needed.",
+        "Requirement of SFT concise data: Unlike purely inference-time steering methods, MixReasoning depends on training a model-specific concise LoRA adapter using distilled short trajectories, adding an offline adaptation step."
+      ]
+    }
+  }
+}

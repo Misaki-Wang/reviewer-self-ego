@@ -1,0 +1,124 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "The paper addresses a practically important and timely problem: making speculative decoding cost-effective in large-scale LLM serving at batch sizes (≥8) where most prior methods fail. The framing around throughput-latency tradeoffs in continuous batching is relevant to real deployments.",
+        "The roofline-style analysis (Table 1, Figure 3) of how batch size, speculation length, and context length interact with FLOPs and memory IO is careful and useful; it gives a principled explanation for why free speculation budget exists at large batch sizes and clarifies why empirical forward-pass scaling deviates from theoretical predictions due to under-optimized operators.",
+        "The method is genuinely simple and deployable: parameter-free, fully CPU-side drafting, no model training or architecture changes. The empirical component analysis (Figure 4a) convincingly shows the complementarity of prompt/self-output and datastore candidates.",
+        "Evaluations cover multiple relevant dimensions: two models (Llama2-7b, Llama3-8B), datasets of varying prompt lengths (NQ, MT-Bench, GSM8k, Dolly-15k, PG-19), batch sizes 1-64, temperature effects, and tokenizer/vocabulary effects. Comparisons against REST and PIA use improved re-implementations, which strengthens fairness.",
+        "The end-to-end results (Figure 6, 7) are detailed and presented as latency-cost Pareto curves rather than single speedup numbers, giving a more honest picture of the tradeoff."
+      ],
+      "weaknesses": [
+        "Reproducibility is weak: no code release is mentioned, the system is a customized vLLM on Huawei Ascend 910B4 hardware with custom OpenMP/C++ retrieval implementations, and many hyperparameters (P, M, dec_len, discount factors found by grid search) are only loosely specified. This makes independent validation difficult.",
+        "Generality of the hardware claims is uncertain: all device measurements are on a single accelerator (Ascend 910B4), and the central claim that 'most libraries under-utilize hardware' is tied to that platform. Results on the widely-used NVIDIA stack are asserted but not shown.",
+        "The core algorithmic idea is incremental: it is essentially a merge of Prompt Lookup Decoding and a REST-style suffix-array datastore with tuned weighting/discounting. The contributions are largely engineering optimizations and analysis rather than a new mechanism; novelty relative to REST and PIA is appropriately acknowledged but modest.",
+        "Comparisons are limited to parameter-free baselines. Stronger methods designed for large-batch SD (ReDrafter, MagicDec, Medusa/EAGLE with trained drafters) are discussed but not compared end-to-end, so the 'state-of-the-art in continuous batching' claim is only established against the weaker parameter-free class.",
+        "The method's interaction with sampling is under-examined: the naive candidate selection does not preserve the target output distribution (unlike standard speculative sampling), and the reported 1-2% acceptance-rate drop for temperatures in [0,1] suggests output drift. The 'lossless' framing common in the SD literature deserves more careful discussion of what is and is not preserved.",
+        "Some headline claims are harder to verify than they appear: the '4x throughput at no latency cost' comes from scaling batch size 8→32 on a specific prompt-length subset, and the latency metric (batch size / throughput, including prefill) is a coarse proxy for user-perceived latency (TBT/TFT are only mentioned, not reported).",
+        "Datastore considerations (storage footprint, memory bandwidth consumed by host-side retrieval, sensitivity to datastore domain match with the workload) are not quantified, though they affect real deployability."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3.0,
+      "strengths": [
+        "Clear and well-motivated problem: the paper directly targets speculative decoding (SD) at data-center batch sizes (>=8) under continuous batching, a practically important regime that most prior SD work ignores.",
+        "The decoupled design (drafting entirely on CPU via prompt/self-output lookup plus a suffix-array datastore; verification on device) is a clean, deployment-friendly contribution that requires no training, no draft model, and no architecture changes, which is genuinely valuable for real serving systems.",
+        "The roofline/hardware analysis in Section 3.2 (Table 1, Figure 3) is a useful and fairly rigorous treatment of how batch size, speculation length, and context length interact with compute-vs-bandwidth limits, and it explains when free speculation budget exists — this analysis has standalone value for practitioners.",
+        "Comprehensive and mostly fair empirical comparisons: the authors reimplement and improve baselines (REST, PIA) rather than using strawman numbers, use the same datastore for REST, and evaluate across multiple datasets (MT-Bench, GSM8k, Dolly-15k, NQ, PG-19), models (Llama2-7b, Llama3-8B), context lengths, and batch sizes up to 64.",
+        "Honest reporting of limitations in places: e.g., the negative results on speculative sampling/Sequoia-style calibration (Section 4.2), the ~1-2% acceptance loss under sampling, and the discussion of why empirical forward-pass scaling diverges from theoretical predictions.",
+        "The throughput-latency Pareto analysis (Figure 6) supports the central practical claim: consistent speedups (1.37-1.80x) even at batch size 64 and ~4x throughput at constant latency in short-context settings, which is a meaningful result if it holds."
+      ],
+      "weaknesses": [
+        "Novelty is limited: the core method is essentially a careful combination of well-known ingredients (prompt lookup decoding, REST-style suffix-array datastore, tree-based verification) plus substantial engineering (OpenMP parallelization, tuned weighting/discount factors via grid search). The algorithmic contribution (Algorithm 1) is a straightforward priority-queue tree merge, and the theoretical 'explanation' promised in the abstract is more of an empirical roofline analysis than a theory.",
+        "Reproducibility is a significant concern: no code or data release is mentioned, and all hardware results are on a Huawei Ascend 910B4, a device most labs cannot access. Since a substantial part of the contribution is low-level optimization of operators and retrieval, independent verification will be difficult.",
+        "Baseline coverage is incomplete for the central claim that SD is practical at scale: comparisons are restricted to parameter-free methods (REST, PIA). Stronger trained/learned drafters known to work under batching — ReDrafter, SpecInfer, EAGLE/EAGLE-2, TriForce, MagicDec — are discussed in related work but not empirically compared, so the state-of-the-art claim in continuous batching is not fully substantiated.",
+        "The evaluation protocol has loose ends: the losslessness of the outputs is not rigorously established (outputs may differ between baseline and speculative runs due to float16 precision, which is acknowledged but not quantified); latency is defined as batch size / throughput rather than measured per-request; only 100 prompts per condition; and greedy decoding is used for all headline results despite real deployments using sampling.",
+        "The method's effectiveness plausibly depends on datastore-prompt domain match and on the prompts containing retrievable material; the paper evaluates mostly instruction/chat and math data built from Ultrachat/ShareGPT/Magpie, and the 'effective in all use cases' claim (Section 1) is not tested against adversarial or out-of-domain workloads, code generation, or low-resource languages.",
+        "Some claims are overstated or loosely supported: the abstract promises a 'theoretical explanation' of SD at large batch sizes, but the analysis assumes optimized operators and is validated only partially (the empirical Figure 3(a) actually deviates from theory); the conclusion's claim that SD is 'the only way to increase throughput' in long-context cases is asserted rather than demonstrated against alternatives like KV-cache compression."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3.5,
+      "strengths": [
+        "Addresses a problem of clear practical relevance: whether speculative decoding can help in realistic large-scale serving (continuous batching, batch sizes >= 8), where most prior SD work degrades. The central thesis (SD can work at large batch sizes with a nearly cost-free drafter) is well motivated and convincingly supported by end-to-end experiments.",
+        "The hardware analysis (Table 1, Figure 3) is a genuine contribution: a careful FLOPs/memory-IO decomposition of the verification forward pass under batching and speculation, showing that the effective compute threshold scales with b*s_q and that KV-cache loading dominates at long context. This gives practitioners a principled way to set speculation parameters from hardware specs, and the discrepancy between theoretical and empirically measured (unoptimized) operators is honestly discussed.",
+        "Comprehensive empirical evaluation: multiple datasets (MT-Bench, GSM8k, Dolly-15k, NQ, PG-19), multiple context lengths, batch sizes up to 64, two model families (Llama2-7b, Llama3-8b), and ablations of the candidate sources (prompt/self-output vs. datastore, Figure 4a).",
+        "Fair-to-generous comparisons: the authors improved the implementations of REST and PIA baselines (parallelization, C++ reimplementation) before comparing, and warmed up the PIA cache, which strengthens the credibility of the reported wins.",
+        "Honest treatment of limitations in several places: negative results on speculative sampling/Sequoia-style sampling (Section 4.2), on datastore pruning, temperature sensitivity, and the MoE case are all discussed openly.",
+        "The parameter-free, CPU-drafted design is genuinely deployable, which distinguishes it from most SD methods requiring trained drafters or architectural changes; the throughput-vs-latency Pareto analysis (Figure 6) is the right way to frame serving gains."
+      ],
+      "weaknesses": [
+        "No code, datastore, or calibration artifacts are reported as released. Given that the method's value depends on many engineering details (grid-searched discount factors, source scaling factors, suffix-array implementation choices, OpenMP parallelization), reproducibility is a significant concern for a paper whose contribution is substantially an optimized system.",
+        "Novelty is incremental. The method combines known ingredients: prompt lookup (PTL), a REST-style suffix-array datastore, and a PIA-like fusion of sources with a dynamic pool. The claimed advances are implementation optimizations (regular-interval sampling from the suffix array, threshold-based prefix fallback, source fusing weights) rather than a new algorithmic idea, and the positioning against PIA in particular needs sharper justification.",
+        "Baseline coverage for the headline claim is limited: the end-to-end serving comparisons (Figures 6-7) only include PIA and the autoregressive baseline. Trained-drafter methods reported to work at large batch sizes (ReDrafter, MagicDec, SpecInfer) are discussed but never compared head-to-head, so 'state-of-the-art in continuous batching' is asserted against a narrow baseline set.",
+        "All experiments are on a single Huawei Ascend 910B4 with Llama2-7b/Llama3-8b only. Claims of transferability to NVIDIA GPUs are not validated empirically, and the rope-dependent cost analysis (especially FlashAttention/operator optimization levels) may differ across hardware stacks.",
+        "Several methodological details are under-specified: the exact composition and size of the datastore, memory footprint and CPU utilization at batch size 64, how the calibrated discount/scaling parameters were tuned and how dataset-dependent they are, and whether outputs are strictly lossless under the greedy setting.",
+        "Key results are presented mainly as plots without tables, variance estimates, or confidence intervals; some figures (e.g., Figure 6) are dense and hard to read, and statistical variability of acceptance rates across prompt types is not quantified.",
+        "The theory-to-practice link is loose in places: the theoretical 'free speculation budget' derivation is presented, but the serving system actually uses unoptimized operators, so the analysis partly justifies a situation (operator under-optimization) that better kernels could eliminate."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 3.5,
+      "strengths": [
+        "Practically valuable and well-motivated contribution: SSSD is a training-free speculative decoding method explicitly designed for deployability, addressing a real gap between research SD methods and production constraints (batching, cold-start, domain/language shift).",
+        "Comprehensive, systems-level evaluation: integration into SGLang with end-to-end latency–throughput measurements across batch sizes, multiple models (Llama-3.1-8B, Llama-3.3-70B, Qwen3-14B, DeepSeek-R1-Distill), multiple tasks, multilingual settings, long-context (PG-19), agentic workloads, and reasoning traces with speculative sampling.",
+        "The hardware-aware speculation-length rule is grounded in a clear roofline analysis (Appendix B provides a detailed FLOPS/IO accounting per operator), and the resulting simple rule (sq = Iknee/b with caps) is a useful, deployable insight.",
+        "Interesting empirical findings on data sources: complementarity of prompt/self-output and datastore candidates (Fig. 3a), rapid cold-start adaptation (1.1×–1.23× immediately, 1.6×–1.8× after 1,000 conversations), and the benefit of model-generated vs. dataset-derived datastore entries (up to 35% more correct predictions).",
+        "Robustness results are convincing: SSSD outperforms EAGLE-3 on MATH-500, German, long-context, and lower-resource languages, and is reportedly the only method achieving speedups at large batch sizes—supporting the core deployability claim.",
+        "Honest limitations section covering MoE, MLA, CPU/host-memory dependence, plus a thoughtful ethical discussion of cross-lingual performance disparity and privacy of stored outputs.",
+        "Code is stated to be provided for reproducing all experiments, and the appendix includes pseudocode for the retrieval and merging algorithms, aiding reproducibility."
+      ],
+      "weaknesses": [
+        "Limited conceptual novelty: the method is largely a careful combination of existing ideas—REST-style suffix-array datastore, PLD-style prompt lookup, Lookahead-style live statistics—with the main novel elements being the multi-source fusion heuristics and the hardware-aware speculation-length rule. The paper would benefit from sharper articulation of what is fundamentally new versus engineered.",
+        "Fusion hyperparameters appear under-justified: the discount constants in Algorithm 3 (0.6, 0.6 + 0.1·match) and the input-probability scaling factors are chosen by a 'simple grid search'; the claim that they 'transfer well across models and tasks' is asserted but supported only lightly. Sensitivity analysis is missing.",
+        "Baseline fairness concerns: EAGLE/Lookahead use SGLang default parameters while SSSD uses its own tuned settings; the authors note SSSD-tuned parameters can degrade EAGLE, but a more systematic tuning-effort-matched comparison would strengthen the headline claims (e.g., 'outperforms EAGLE-3 across all evaluated languages').",
+        "Evaluation subsets are small and somewhat ad hoc: the first prompt of each MT-Bench conversation and only the first 80 GSM8k prompts for the speculation-quality comparisons; averages over five runs are reported but variance/confidence intervals are generally not shown.",
+        "Many results are presented only in dense multi-line latency–throughput figures that are hard to read precisely; key numeric speedups would be better supported with tables. Datastore composition also changes across experiments (Magpie data, German translations, The Stack, public reasoning traces), making it hard to isolate the effect of data choices.",
+        "The roofline-based analysis involves acknowledged simplifications (ignored TP communication costs, idealized kernel behavior) and the paper itself notes empirical trends deviate from theoretical predictions; the 'almost free speculation' framing should be treated as approximate.",
+        "Minor presentation issues: some claims lack rigor ('almost adds up perfectly'), a stray comma/typo ('We provide code to reproduce all experiments,'), duplicated reference entries (Chen et al. 2023a/b), and Figure 1's system diagram would benefit from clearer labeling."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3.5,
+      "strengths": [
+        "The paper is well-motivated from a deployment perspective: the argument that adoption complexity (training draft models/heads, retraining under domain shift) limits practical speculative decoding is convincing and grounded in cited literature.",
+        "The evaluation is unusually comprehensive for an SD paper: end-to-end SGLang integration, latency-throughput trade-offs across batch sizes, multiple models (Llama-3.1-8B, Qwen3-14B, DeepSeek-R1-Distill, Llama-3.3-70B), multiple tasks (MT-Bench, MATH-500, HumanEval, SWE-Bench, PG-19), multilingual settings, cold-start behavior, and reasoning-style sampling with temperature > 0.",
+        "Comparisons include strong trained baselines (EAGLE-2/3, a same-family draft model) rather than only weak parameter-free ones, and the results are reported honestly, including settings where EAGLE-3 wins (short-context MT-Bench/HumanEval on Llama-3.3-70B).",
+        "The hardware-aware analysis (roofline-based selection of speculation length as a function of batch size and hardware, Appendix B) is a useful, transferable contribution that goes beyond speculation quality and connects SD to real serving constraints.",
+        "The cold-start and cross-lingual adaptation experiments directly support the central deployability claim with quantitative evidence (e.g., speedups after 1,000 conversations, negligible English degradation from multilingual datastores).",
+        "Code for reproducing experiments is provided, and the appendix contains pseudocode for the candidate retrieval and merging procedures."
+      ],
+      "weaknesses": [
+        "Algorithmic novelty is modest: the method is essentially a careful combination of known ingredients — REST-style suffix-array retrieval, PLD/Lookahead-style prompt/self-output n-gram lookup, and tree-based verification — plus a heuristic scaling-rule for speculation length. The paper frames this as a deliberate design choice, but the conceptual contribution is incremental.",
+        "Some methodological details undermine confidence: the fusion weights are set by 'a simple grid search' with no details of the search space or sensitivity; Algorithm 3 contains hard-coded constants (discount 0.6, 0.6 + 0.1·match, tree size 50, sampling every 100 continuations) with no ablation; and the appendix states the pseudocode is 'not exact replicas of the implementation,' which weakens reproducibility.",
+        "Baseline fairness is a concern: EAGLE methods use SGLang defaults while SSSD uses its own tuned parameters, and the authors acknowledge that SSSD-tuned parameters 'often degrade' EAGLE — this asymmetry is disclosed but not fully resolved. The Lookahead comparison is also run cold, which disadvantages it.",
+        "The host-side costs that the method depends on (CPU retrieval latency at scale, host memory footprint for a 13 GB datastore and suffix arrays) are acknowledged in Limitations but never quantified; this is a material omission for a paper whose central claim is deployability.",
+        "Headline numbers rely on 'up to' framing (2.9× on reasoning at batch size 1); typical-case gains across the latency-throughput frontier are smaller and the figures are dense and hard to read, making cross-method comparison difficult.",
+        "Presentation issues: a truncated sentence ('We provide code to reproduce all experiments,'), a duplicated reference (Chen et al. 2023a/b share the same arXiv ID), and several figures whose legends and curves are difficult to parse.",
+        "The datastore-dependence of results (which data, how much, from which sources) varies across experiments, making it hard to isolate what drives the reported gains versus the baselines."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3.5,
+      "strengths": [
+        "Practical, deployment-oriented contribution: SSSD is training-free, requires no auxiliary GPU models, and is integrated end-to-end into SGLang, which is exactly the setting (batching, prefill–decode disaggregation, TTFT, throughput–latency trade-offs) that matters for real adoption but is often missing from speculative decoding papers.",
+        "Comprehensive empirical evaluation: multiple models (Llama-3.1-8B, Llama-3.3-70B, Qwen3-14B, DeepSeek-R1-Distill-8B), multiple workloads (MT-Bench, MATH-500, HumanEval, SWE-Bench, PG-19 long context, multilingual settings), and a broad baseline set (EAGLE-2/3, Lookahead, PLD, REST, and a fully aligned 1B draft model), with ablations of the data sources (Figure 3a) and datastore-size/cold-start analyses.",
+        "The hardware-aware speculation-length rule is a genuine and useful system contribution: the roofline analysis in Appendix B is reasonably careful (FLOPS:IO ratios per operator, GQA group-size interaction with batch size, context-length effects) and yields a simple, hardware-derivable formula, which the paper validates against the empirical curves.",
+        "Strong robustness results: uniform speedups across lower-resource languages, rapid adaptation (1.6–1.8× after ~1,000 conversations), no cold-start degradation, and stability in long-context regimes—these differentiate SSSD from trained drafters and are well supported by Figures 3–4 and Table 1.",
+        "Sound methodology for lossless acceleration: speculative sampling preserves the target distribution, and the paper transparently reports cases where EAGLE-3 wins (short-context conversational/coding, English on 70B), which supports credibility.",
+        "Reproducibility is supported by promised code release, pseudocode for the retrieval and merging algorithms, and detailed hardware specifications for all experiments."
+      ],
+      "weaknesses": [
+        "Limited algorithmic novelty: the core design is a combination of well-known components—REST-style suffix-array datastore, prompt lookup (PLD), and self-output statistics—plus a hardware-based speculation-length heuristic similar in spirit to prior roofline analyses (e.g., MagicDec/Sequoia). The paper's case rests mainly on systems integration and empirical results rather than a new technical insight, so the delta over REST+PLD needed to be (and largely is, via Figure 3) demonstrated, but the conceptual advance is modest.",
+        "Some baseline fairness concerns: EAGLE and Lookahead are run with SGLang defaults while SSSD uses tuned parameters; the Lookahead comparison omits cache warm-up. The authors acknowledge both issues and give reasons, but the comparisons are not perfectly symmetric.",
+        "Hyperparameters (source-discount factors 0.6, the 0.6 + 0.1·match scaling, prefix length P=4, sampling interval 100) are selected by grid search and only briefly justified; the transferability claim across models/tasks is asserted but not systematically shown.",
+        "The datastore construction depends on substantial auxiliary data (Magpie-generated corpora, reasoning traces from larger same-family models, translated ShareGPT/Synthia/The Stack subsets); while the paper argues this is easy in production, the exact data mixture and its sensitivity are under-specified, and the requirement for a large CPU-side datastore plus fast CPU drafting may be nontrivial in some deployments (partially acknowledged in Limitations).",
+        "Presentation issues: duplicated reference entries (Chen 2023a/2023b share the same arXiv ID), minor grammatical/typographical errors, and several figures (Figure 5/6 latency–throughput curves) are dense and hard to read precisely, making exact speedup claims difficult to verify from the plots alone.",
+        "Restriction to models with publicly available EAGLE-3 heads limits the breadth of model-family coverage, and no MoE or MLA results are reported (acknowledged as limitations)."
+      ]
+    }
+  }
+}

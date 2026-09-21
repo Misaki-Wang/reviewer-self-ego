@@ -1,0 +1,95 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Addresses an important and timely challenge in machine learning systems: serving tool-augmented LLM workflows characterized by multi-turn pause/resume phases, external API latency, and variable return token lengths.",
+        "Well-motivated empirical analysis demonstrating that standard FCFS scheduling and fixed batch token limits induce severe head-of-line blocking and SLO violations in augmented serving scenarios.",
+        "The two-stage scheduling approach is thoughtfully designed: it combines lightweight upfront predictions (output length and API duration) with stage-II runtime corrections and anti-starvation mechanisms to mitigate the accumulation of prediction error.",
+        "Dynamic token-level batching sensibly incorporates both free GPU memory and preemptible memory from paused requests while enforcing bounded safeguards.",
+        "Extensive experimental evaluation across diverse hardware platforms (RTX 4090, A100, H800), models (GPT-J-6B, OPT-13B), datasets (Merge, ToolBench), and arrival patterns (Poisson and bursty Gamma processes), showing convincing improvements in goodput and TTFT."
+      ],
+      "weaknesses": [
+        "The evaluation only compares against vLLM and InferCept. While InferCept is the most relevant baseline for augmented LLM context management, comparison against scheduling-focused LLM baselines (such as FastServe or SJF/SRPT variants adapted to inference) would provide additional clarity on how much gain stems specifically from the augmented-call-aware formulation versus general shortest-job-first scheduling.",
+        "The evaluated model scale is somewhat limited (GPT-J-6B and OPT-13B). Incorporating modern, widely deployed open-weight models (e.g., Llama 3 8B or 70B with tensor parallelism) would strengthen the practical impact of the empirical results.",
+        "The predictor accuracy is moderate on certain datasets (e.g., 65% accuracy on Merge for output length). A dedicated sensitivity analysis examining system degradation under varying synthetic prediction error rates would make the robustness claims regarding Stage II corrections more definitive."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Addresses an important and emerging problem in LLM systems: efficient serving of tool-augmented LLM requests (e.g., Function Calling, MCP), where asynchronous external tool invocations introduce unique latency bottlenecks and GPU memory management challenges.",
+        "The insight regarding the role of API return lengths—formalized in Proposition 1 showing that total length alone is insufficient to determine completion time due to batch-prefill mechanics—is insightful and well-motivated.",
+        "Comprehensive empirical evaluation across multiple GPU architectures (RTX 4090, H800, dual A100) and workload settings (Poisson, fixed volume, and bursty Gamma arrivals), evaluating both goodput and fine-grained latency metrics (TTFT, normalized latency, TPOT)."
+      ],
+      "weaknesses": [
+        "Contradiction in the anti-starvation formulation: Section 4.3 specifies that requests are prioritized by 'lower expected costs and faster completion' (i.e., smaller scheduling values indicate higher priority). However, Equation (26) defines the scheduling value as $V_i^{\\text{sched}} = V_i^{\\text{final}} + \\alpha \\cdot (\\text{now} - \\text{last\\_schedule\\_time}_i)$. Because $\\alpha > 0$ and the elapsed time is positive, this formula increases $V_i^{\\text{sched}}$ for long-waiting requests, which would penalize rather than boost their priority under a min-value ordering. Either the ranking logic or the sign in the anti-starvation term is inconsistent.",
+        "Outdated model selection for tool-augmented evaluation: The experiments exclusively evaluate GPT-J-6B (2021) and OPT-13B (2022). Modern agentic and tool-calling workflows rely on newer architectures with native tool-use/chat capabilities (e.g., Llama-3-8B-Instruct, Mistral, Qwen-2.5). Demonstrating the system solely on base models from several generations ago undermines the contemporary relevance and applicability of the findings.",
+        "Limited novelty over prior art: The architectural foundation heavily builds on InferCept (ICML 2024) for context handling (Preserve, Swap, Discard), while the scheduling philosophy adapts classic Shortest-Job-First (SJF) length prediction (using a small BERT model, similar to FastServe/S3). The technical delta—combining InferCept's cost equations with length-guided priority ranking and adaptive batch bounding—is relatively incremental.",
+        "Lack of comparison with priority/SJF-based serving baselines: The paper compares AugServe only against strict FCFS implementations (vLLM and InferCept). Since FCFS is known to experience severe head-of-line blocking under heavy load, baseline throughput drops dramatically. It remains unclear how much of AugServe's advantage comes specifically from its augmented-LLM-tailored heuristics versus simply applying existing general-purpose SJF/priority schedulers (e.g., S3 or FastServe) to the workload."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Addresses an important and timely challenge: serving augmented LLMs with external tool invocations, where asynchronous pauses, context handling, and unpredictable return lengths create severe head-of-line (HoL) blocking and resource underutilization.",
+        "The two-stage scheduling design is well-reasoned: it pairs an initial predictive estimation (Stage I) with runtime correction (Stage II) using actual return lengths and context-handling policies, effectively mitigating prediction errors that typically plague static shortest-job-first schedulers.",
+        "Proposition 1 effectively illustrates the analytical insight that total sequence length alone does not determine processing time in augmented LLMs due to the disparity between per-iteration generation and batch processing of returned API tokens.",
+        "Extensive experimental evaluation across diverse GPU platforms (RTX 4090, H800, 2x A100), models, arrival processes (Poisson, fixed volume, Gamma burstiness), and metrics (goodput, SLO attainment, TTFT, normalized latency, TPOT, P95 tail latency)."
+      ],
+      "weaknesses": [
+        "Evaluated models (GPT-J-6B and OPT-13B) are relatively dated; modern tool-use serving systems typically deploy Llama-3/3.1, Mistral, or Qwen-2.5 families with longer context windows (8k-32k+ tokens), where KV cache management pressure and scheduling trade-offs may exhibit different dynamics.",
+        "Incremental conceptual novelty over InferCept: the underlying context-handling mechanisms (Preserve, Swap, Discard) and their memory waste formulas (Eqs. 4-8) are directly adopted from InferCept, limiting the core contribution primarily to priority queue ordering and dynamic batch sizing.",
+        "Absence of comparisons against other priority-based LLM schedulers: the baselines are limited to FCFS-based vLLM and InferCept. Benchmarking against an adapted length-aware or multi-level feedback queue baseline (e.g., adapted FastServe or S3) would better isolate the gains of tool-specific scheduling from general SJF benefits.",
+        "Limited analysis of predictor robustness under heavy out-of-distribution network/API latency shifts: while Table 4 shows low predictor runtime overhead, the evaluation does not thoroughly explore how severe real-world API variance or latency spikes impact Stage I scheduling quality before Stage II corrections take effect."
+      ]
+    }
+  },
+  "v3": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Addresses an important and increasingly prominent systems bottleneck: serving tool-augmented LLMs where multi-stage execution and tool-call pausing cause severe Head-of-Line (HoL) blocking and resource underutilization.",
+        "Formulates a principled request lifecycle and space-time cost model that explicitly accounts for execution phases (prefill, decode, wait, context resumption, incremental prefill) and context-handling policies (Preserve, Swap, Discard).",
+        "Introduces a dynamic batch-level token budget that effectively captures both free memory and reclaimable memory from paused requests, overcoming the rigidity of static token budgets.",
+        "Extensive experimental evaluation across diverse models (6B to 70B), hardware configurations (RTX 4090, A100, H800), and arrival workloads (Poisson and bursty Gamma), demonstrating large improvements in goodput and tail latency.",
+        "Thorough ablation and robustness analysis, including prediction error injection, latency breakdowns, sensitivity analyses, and scheduling overhead measurements."
+      ],
+      "weaknesses": [
+        "Comparison against closely related contemporary work such as MARS (Shahout et al., 2025b) is deferred to the appendix (Appendix D.6) rather than evaluated in the main text alongside vLLM and INFERCEPT.",
+        "The theoretical result presented in Appendix E is a standard, textbook 1/2-approximation proof for the static 0-1 knapsack problem; while the authors acknowledge its limitations, it offers limited insight into the dynamic, online multi-stage scheduling problem.",
+        "The 110M BERT prediction module assumes external tool latency can be reliably predicted from input metadata; in real-world deployments with external web APIs and variable network conditions, out-of-distribution latency spikes and unpredictability could present larger challenges than the uniform noise tested in Section 6.3."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Timely and high-impact problem: As tool use and agentic workflows (e.g., via Model Context Protocol) proliferate, addressing Head-of-Line (HoL) blocking and context management overheads during asynchronous external tool calls is crucial for production LLM serving.",
+        "Principled and state-aware formulation: Modeling requests as multi-stage execution segments with space-time memory cost integrals (capturing prefill, decode, tool-wait, and context resumption under Preserve/Swap/Discard policies) provides a sound abstraction for request scheduling in augmented LLM workloads.",
+        "Dynamic token budgeting: Integrating reclaimable memory from paused requests (under Swap or Discard policies) into the per-iteration token budget prevents underutilization and excessive context thrashing, which is confirmed by the ablation study.",
+        "Comprehensive empirical evaluation: The system is evaluated across multiple hardware setups (RTX 4090, H800, A100 clusters), diverse model scales (from GPT-J-6B up to Llama-3-70B-Instruct), realistic workloads (ToolBench, INFERCEPT), and arrival distributions (Poisson, Gamma burstiness).",
+        "Thorough sensitivity and overhead analyses: The paper provides meaningful analyses on prediction error tolerance (evaluating up to 50% synthetic noise), per-iteration scheduling overhead, latency breakdowns, and sensitivity to the aging parameter beta."
+      ],
+      "weaknesses": [
+        "Omission of key competing baseline from the main body: MARS (Shahout et al., 2025b), which specifically targets memory-aware scheduling for augmented LLMs, is discussed and evaluated only in Appendix D.6 rather than alongside vLLM, INFERCEPT, and SSJF in Section 6.1.",
+        "Sensitivity to aging parameter beta: Although the authors claim robustness, Table 5 shows that tail latency (P99 TTFT) nearly triples (from ~98s to ~278s) when beta varies by one to two orders of magnitude (e.g., at 10^-3 or 10^-6), indicating that the throughput-delay trade-off still requires non-trivial tuning across varying arrival intensities.",
+        "Predictor dependency in high-variance network environments: External API calls in production environments often exhibit heavy-tailed latencies and unexpected network timeouts. While the lightweight BERT predictor performs adequately on benchmark distributions, its real-world generalization across diverse, unmodeled third-party APIs remains an open operational challenge.",
+        "Theoretical approximation gap: The theoretical guarantee in Appendix E is standard for the classic offline 0-1 knapsack problem (1/2-approximation for greedy value density with best singleton) and does not extend to the online, multi-stage stochastic setting characteristic of real-time augmented serving."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Timely and well-motivated problem: As agentic workflows and tool-augmented LLMs become standard, handling external API pauses and the resulting KV cache management challenges within the inference serving pipeline is a critical and practical bottleneck.",
+        "Principled system design: The proposed framework effectively couples a space-time cost model (incorporating prefill, decode, tool-wait, and policy-dependent context resumption) with dynamic batch-level token budget adjustment that accounts for reclaimable memory from paused requests.",
+        "Strong and comprehensive empirical evaluation: The paper demonstrates significant gains in effective throughput (goodput) and TTFT across multiple hardware configurations (RTX 4090, H800, multi-A100) and model scales (GPT-J-6B up to Llama-3-70B), validating the approach under both Poisson and bursty traffic distributions.",
+        "Insightful robustness and ablation analysis: The submission provides thorough ablations dissecting the contributions of the dynamic token budget and state-aware scheduling, tests sensitivity to the aging hyperparameter beta, and evaluates robustness under synthetic prediction errors."
+      ],
+      "weaknesses": [
+        "Comparison with state-of-the-art specialized schedulers in the main text: While MARS (Shahout et al., 2025b) is evaluated in Appendix D.6, it directly targets augmented LLM scheduling; moving this comparison into the main text alongside INFERCEPT would strengthen the paper's positioning relative to concurrent work.",
+        "Practical deployment considerations of the predictor: The framework relies on a fine-tuned BERT-base (110M parameter) model invoked at request arrivals and tool returns. Although reported as lightweight (<0.1% latency overhead), more architectural detail on where this predictor runs (dedicated CPU vs. GPU) and whether it induces resource contention with the main serving engine under high concurrency would improve reproducibility and clarity.",
+        "Disconnect between theoretical analysis and actual algorithm: The 1/2-approximation guarantee in Appendix E relies on comparing the greedy packing solution with the best feasible singleton, but Algorithm 1 executes standard greedy packing without the singleton fallback step. Clarifying this distinction in the text would make the formal discussion more rigorous."
+      ]
+    }
+  }
+}

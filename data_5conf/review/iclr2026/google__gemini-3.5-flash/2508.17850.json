@@ -1,0 +1,95 @@
+{
+  "v6": {
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Highly relevant and timely motivation: Addresses the stability issue of off-policy reinforcement learning for LLMs in decentralized, heterogeneous, and latency-prone environments (HeteroRL).",
+        "Solid theoretical foundation: Theorem 1 provides a rigorous exponential variance reduction guarantee for the proposed group-level expectation weighting over standard importance sampling in high-KL divergence regimes.",
+        "Decisive empirical validation: Demonstrates state-of-the-art performance and exceptional training stability (preventing the typical reward collapse observed in GRPO/GSPO) under simulated and real latency settings on mathematical reasoning benchmarks (MATH500, AMC, AIME).",
+        "Detailed analysis and ablation study: Thoroughly investigates token- vs. sequence- vs. group-level weights, analyzes the correlation/causality between network latency and optimization metrics, and compares 'think' versus 'no-think' modes."
+      ],
+      "weaknesses": [
+        "Inherent bias of the estimator: The Group Expectation Importance Weight (GEIW) is theoretically biased (as acknowledged in Eq 12). While the variance reduction is prominent, the potential long-term negative effects of this systematic bias on optimal policy convergence are not fully analyzed mathematically.",
+        "Sensitivity to group size (G): The estimation of the group expectation relies heavily on the group size $G$ (empirically set to 8). The paper lacks a comprehensive ablation or sensitivity analysis showing how GEPO performs with smaller (e.g., $G=4$) or larger (e.g., $G=16$) group sizes.",
+        "System-level details and evaluation: Although the paper describes 'HeteroRL' as a heterogeneous computing environment, the systems evaluation is mostly focused on algorithmic behavior (accuracies and training curves under latency steps) rather than actual system throughput, compute/network utilization, or hardware-specific heterogeneity impacts.",
+        "Clarification on model naming: The paper frequently refers to 'Qwen3-1.7B/8B' (and a corresponding 2025 reference). It would be beneficial to clarify if this is indeed an unreleased model, a typo for Qwen2.5, or a simulated model/dataset setup, to improve readability and clarity."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 6,
+      "strengths": [
+        "Strong Practical Motivation: Decoupling rollout sampling from parameter updates (HeteroRL) is highly valuable for scaling RL training of LLMs across geo-distributed, heterogeneous resources, successfully resolving GPU idling and synchronization bottlenecks.",
+        "Simple and Effective Algorithm: The proposed GEPO algorithm replaces individual token-level or sequence-level importance weights with group-level expectation weights. It is exceptionally simple to implement (requiring only a few lines of code as shown in Listing 1) yet provides substantial training stability.",
+        "Solid Empirical Performance: The paper presents a thorough evaluation on competitive mathematical reasoning benchmarks (MATH500, AMC2023, AIME24, AIME25) using Qwen3-1.7B/8B models. GEPO demonstrates superior resistance to performance degradation over long training runs and under high simulated latency (up to 1800s) compared to strong baselines like GRPO and GSPO.",
+        "Comprehensive Analysis: The work provides insightful empirical studies analyzing the relationships among latency, KL divergence, importance weight variance, and estimation error, alongside system-level engineering optimizations like localized reward computation."
+      ],
+      "weaknesses": [
+        "Significant Theoretical Bias: By replacing the individual sequence proposal probability $q(y|x)$ with a group-wise constant denominator $\\hat{\\mathbb{E}}_q[q(y|x)]$, the importance weight $w_{\\text{GEIW}}(y|x) = \\frac{p(y|x)}{\\hat{\\mathbb{E}}_q[q(y|x)]}$ no longer corrects for the proposal distribution $q(y|x)$ per sequence. Under the expectation $\\mathbb{E}_{y \\sim q}$, the gradient update is proportional to $\\sum_y p(y|x) q(y|x) \\nabla_\\theta \\log p(y|x) A(x, y)$ instead of the true policy gradient. This heavily biases updates toward sequences with high probability under both the target and behavior policies. While the paper notes that the estimator is biased, it does not quantify or bound this bias, nor does it discuss its impact on the asymptotic convergence of the policy.",
+        "Gap Between Theory and Practice: In Theorem 1, the 'Group Expectation' term is treated as a constant over the action space. However, in the actual algorithm, this expectation is empirically approximated per prompt using a small group of size $G$ (typically $G=8$): $\\hat{\\mathbb{E}}_q[q(y|x)] = \\frac{\\sum_{i=1}^G q(y^i|x)^2}{\\sum_{i=1}^G q(y^i|x)}$. This empirical estimate is itself a random variable with its own sampling variance. Theorem 1's proof does not account for this source of variance, which can be non-trivial when $G$ is small.",
+        "Confusing Claim on Sequence Probability Sums: In Section 3.1, the authors state: 'top-P/top-K sampling leads to $\\sum_{i=1}^G q(y^i|x) \\gg 1$'. This is mathematically confusing. For typical LLM generation, sequence-level probabilities $q(y|x)$ (which are products of token-level probabilities over long sequences) are extremely small, meaning their sum over a small group of size $G$ is actually $\\ll 1$ in practice.",
+        "Potential Numerical Underflow: Since sequence-level probabilities can be extremely close to zero for long outputs, computing $\\sum_{i=1}^G q(y^i|x)^2$ and $\\sum_{i=1}^G q(y^i|x)$ may suffer from numerical underflow or precision issues in float16/bfloat16. The paper would benefit from discussing how numerical stability is maintained in these edge cases."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper is exceptionally well-structured and written, featuring professional diagrams (e.g., Figures 1, 3, 10, 11) and clear, easy-to-read code listings.",
+        "Decoupling rollout sampling and learning (HeteroRL) to address geographical and hardware heterogeneity is a highly practical and relevant engineering direction for scaling LLM post-training.",
+        "Comprehensive empirical evaluations are presented on competitive mathematical reasoning benchmarks (MATH500, AIME, AMC) under varying network latency conditions."
+      ],
+      "weaknesses": [
+        "Fundamental Mathematical Flaw in the Core Estimator: The key contribution of GEPO is replacing the proposal density $q(y|x)$ in the importance weight denominator with its group expectation $\\hat{\\mathbb{E}}_q[q(y|x)]$, which acts as a constant over the sampling group. This fundamentally violates the mathematical identity of importance sampling. Under $y \\sim q$, the expectation of the GEPO objective becomes $\\mathbb{E}_{y \\sim q}[ \\frac{p(y)}{C} A(x,y) ] = \\frac{1}{C} \\sum_y q(y) p(y) A(x,y)$, which does not equal the target expectation $\\mathbb{E}_{y \\sim p}[ A(x,y) ]$. Because $q(y)$ is in the numerator but is not canceled out by the denominator, the gradient updates are heavily biased towards the behavior policy $q$. This is mathematically unsound and changes the optimization objective to a hybrid behavior-cloning-style regularizer.",
+        "Misleading Variance Reduction Claims: The claim that GEPO 'exponentially reduces the variance of importance weights' is trivial and misleading. Any estimator's variance can be reduced to zero by replacing variable terms with constants (the extreme case being a constant prediction). The paper fails to address the bias-variance tradeoff; the massive bias introduced by removing $q(y)$ from the denominator makes the resulting policy gradient updates invalid. Theorem 1 simply proves that the variance of this biased estimator is smaller, which is expected but does not justify its mathematical correctness.",
+        "Unfair Comparison with Baselines: In Section 4.1, the authors state that they 'remove KL divergence constraints during training under online RL' to evaluate inherent stability. This is highly unfair to standard algorithms like GRPO and GSPO, which mathematically rely on KL constraints to prevent importance sampling collapse. Disabling these necessary guardrails for the baselines, while presenting GEPO (which is implicitly regularized and forced to stay close to $q$ due to its mathematical bias) as more 'stable', is a flawed experimental setup.",
+        "Unclear Setup and Reproducibility Concerns: The paper conducts training on 'Qwen3-1.7B/8B' and cites multiple papers from mid-to-late 2025 (e.g., Qwen3 technical report, GSPO Zheng et al. 2025). As these models and manuscripts are either simulated, unreleased, or from a future timeline, it creates major reproducibility and transparency concerns for current peer review."
+      ]
+    }
+  },
+  "v1": {
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Clear and highly practical motivation: Designing stable RL post-training algorithms for geographically distributed and high-latency heterogeneous computing environments is a timely and valuable problem.",
+        "Strong theoretical foundation: Theorem 1 provides a mathematical guarantee that the proposed Group Expectation Importance Weighting (GEIW) exponentially reduces the variance of importance weights under a high KL divergence regime compared to standard importance sampling.",
+        "Elegantly simple implementation: As shown in Listing 1, the proposed GEPO can be implemented in just two lines of code over existing sequence-level policy optimization baselines, making it highly practical for real-world adoption.",
+        "Convincing empirical visualization and analysis: The 3D surface plots of variance reduction (Figure 3) and the correlation analyses (Figures 6 and 7) provide deep insights into the relationship between latency, KL divergence, and training stability."
+      ],
+      "weaknesses": [
+        "Limited experimental scope: The evaluations are restricted to a single model family/scale (Qwen3-1.7B-Instruct, which seems to be a non-public or prospective model name) and a single task type (mathematical reasoning on MATH-500). Generalization to other tasks like code generation (e.g., HumanEval) or instruction-following would strengthen the results.",
+        "Discrepancy regarding Defensive Sampling: In Section 3.3, a defensive sampling mechanism (Eq 15) is introduced to mitigate bias. However, in Section 4.3, the authors state that 'None of the methods employed defensive sampling mechanisms' during the main experiments. It remains unclear whether this defensive mechanism is necessary, how it affects performance, and why it was excluded from the main evaluation.",
+        "Theoretical vs. Empirical gap in the denominator: The proof in Appendix A assumes the denominator $\\mathbb{E}_q[q]$ is a constant (or computed exactly). In practice, it is estimated empirically from a small group of $K$ samples. The estimation error of this denominator itself introduces additional variance and bias, which is not fully addressed in the theoretical analysis.",
+        "Lack of wall-clock time and throughput analysis: Since HeteroRL is designed to solve latency and resource idling, an end-to-end wall-clock time comparison (e.g., showing training throughput vs. accuracy Pareto frontier) against synchronous baselines would clearly demonstrate the system-level efficiency gains."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Decouples the rollout sampler and the parameter learner to address the engineering challenges of training LLMs using RL on geographically distributed, heterogeneous networks.",
+        "Provides a theoretical analysis (Theorem 1) comparing the variance of the proposed weight estimator against standard importance sampling.",
+        "Evaluates on a math reasoning task (MATH-500) under simulated network latency conditions."
+      ],
+      "weaknesses": [
+        "Fundamental Mathematical Flaw: The proposed Group Expectation Importance Weight (GEIW) in Equation 12, $w_{GEIW}(y|x) = \\frac{p(y|x)}{\\hat{\\mathbb{E}}_q[q(y|x)]}$, is mathematically invalid for importance sampling. In off-policy RL, we draw trajectories $y$ from a proposal distribution $q$. To compute an unbiased estimate of the objective under $p$, we must divide each sample's objective by its specific proposal probability $q(y|x)$. By replacing $q(y|x)$ with a group-wise expected value $\\hat{\\mathbb{E}}_q[q(y|x)]$ (which is treated as a constant over the group), the estimator fails to correct for the sampling bias. This introduces a severe, unconstrained bias into the gradient estimation, rendering it mathematically unsound.",
+        "Misleading Variance Reduction Proof: Theorem 1 and the proof in Appendix A show that the proposed weight has lower variance than standard importance sampling. This is mathematically trivial and scientifically misleading. One can trivially achieve zero variance by setting the importance weight to a constant (e.g., $w(y) = 1$), but such an estimator is useless due to massive bias. Proving variance reduction without bounding or analyzing the resulting bias does not justify the validity of the algorithm.",
+        "Flawed Defensive Sampling Formulation: In Equation 15, when $\\epsilon = 1$, the gradient of the objective simplifies to the standard policy gradient $\\nabla \\log p(y|x) A(y)$ (REINFORCE). The authors state that this is 'inherently immune to high variance.' However, running REINFORCE on off-policy samples $y \\sim q$ (where $q \\neq p$ due to high latency) without any importance sampling correction is mathematically invalid and produces highly biased updates.",
+        "Flawed Experimental Setup for Baselines: In Section 4.1, the authors state: 'For the online scenario, we do not use KL divergence for optimization...'. Disabling the KL penalty/regularization for online GRPO and GSPO is a critical setup flaw. Without a KL penalty, standard RL algorithms for LLMs are well-known to suffer from policy divergence and catastrophic collapse. This explains why GRPO and GSPO collapse so heavily in the online setting (Table 2, Last performance drops to 41.2% and 31.6% respectively). This setup creates an artificial strawman comparison rather than evaluating against properly tuned baselines.",
+        "Unclear Model Nomenclature: The paper references a 'Qwen3-1.7B' model and a 'Qwen3 technical report (2025)'. It is unclear whether this refers to a publicly available model or is a placeholder/typo, which compromises reproducibility."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a highly relevant and timely problem: enabling stable asynchronous decentralized RL training for LLMs under realistic network latency.",
+        "Provides a thorough empirical analysis of the relationship between network latency, policy divergence (KL), importance weight variance, and training stability.",
+        "Includes a solid system-level implementation (HeteroRL) with a custom communication toolkit based on ZeroMQ, making the experiments highly realistic."
+      ],
+      "weaknesses": [
+        "Severe mathematical flaw in the motivation of the Group Expectation estimator (Eq 11). The authors claim that using the simple arithmetic mean of $q(y_i|x)$ is biased, which is incorrect; since $y_i \\sim q$, the arithmetic mean is the standard unbiased Monte Carlo estimator of $\\mathbb{E}_q[q(y|x)]$. Their proposed weighted expectation actually introduces a non-vanishing bias.",
+        "Unacknowledged and significant bias in the policy gradient. By replacing the sample-specific denominator $q(y_i|x)$ with a group-level constant, the gradient is scaled by $q(y_i|x)$ compared to the true off-policy gradient. This biases the gradient updates heavily towards sequences with high probability under the stale policy $q$, fundamentally altering the optimization objective.",
+        "Practical inapplicability of Theorem 1. The variance reduction guarantee only holds when $D_{KL}(p||q) > \\log(n^2 + 1)$. For LLMs, $n$ is the sequence space size $V^T$, making the threshold astronomically large (e.g., >10000), while actual training KL divergences are typically less than 1.0.",
+        "Lack of clarity in the policy definition (Eq 9), which uses the geometric mean of token probabilities rather than the standard joint probability. While often used as a heuristic, this should be explicitly discussed as it violates standard probability theory.",
+        "Limited empirical evaluation. The method is only evaluated on a single dataset (MATH-500) and a single small model (Qwen3-1.7B). Testing on broader reasoning/coding benchmarks and larger models is needed to fully demonstrate the generalizability of the proposed method."
+      ]
+    }
+  }
+}

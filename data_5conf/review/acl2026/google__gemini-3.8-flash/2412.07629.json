@@ -1,0 +1,96 @@
+{
+  "v3": {
+    "exp3_negative": {
+      "oa": 2.5,
+      "strengths": [
+        "Clear motivation: decomposing large tables into sub-windows is an intuitive way to alleviate context length restrictions and attention degradation over long linearized tabular inputs.",
+        "The union-based selection formulation elegantly reduces the difficulty of the sub-table extraction task by avoiding the need for a global multi-condition intersection in a single pass.",
+        "Strong performance improvements on large tables: Table 6 demonstrates that for tables with 500+ cells, PieTa substantially improves downstream QA accuracy (from 40.00% to 75.79% with OmniTab).",
+        "Thorough ablation analysis isolating key design choices, including output layer tuning vs. in-context learning, predicting cell values versus indices only, and dataset balancing."
+      ],
+      "weaknesses": [
+        "Evaluation is limited to a single dataset (WikiSQL). WikiSQL features relatively simple table structures and single-table SQL-like queries. To establish generality, evaluation on more complex and diverse tabular benchmarks (e.g., WikiTableQuestions, FeTaQA, or TabFact) is necessary.",
+        "Inference efficiency and computational cost are not analyzed. Algorithm 2 uses a sliding window with a stride of 1. For large tables (e.g., hundreds or thousands of rows as noted in Section 4.1), this requires thousands of LM forward passes per table per iteration, which appears computationally prohibitive in practical deployments.",
+        "Overall accuracy gain on the entire dataset is modest (+1.51% over vanilla OmniTab in Table 5), suggesting that for standard/average-sized WikiSQL tables, the benefits of the iterative pipeline are marginal.",
+        "Missing holistic LM end-to-end comparison: while Table 2 reports precision/recall for the Holistic LM selector (which achieves a much higher precision of 86.0%), Table 5 does not report the downstream QA accuracy when using Holistic LM sub-tables with OmniTab.",
+        "Lack of details on iteration convergence: Algorithm 1 iterates until the table stops changing, but the empirical section only mentions iteration 1 and 2 without specifying convergence rates, average number of iterations, or maximum cutoff criteria."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 2.5,
+      "strengths": [
+        "The proposed divide-and-conquer strategy using sliding windows and sub-window union provides an intuitive way to bypass the context length limitations of language models on tabular data.",
+        "The insight of targeting a union sub-table (capturing individual conditions independently across local windows) rather than strictly filtering for the minimal gold intersection table is well-motivated and empirically supported.",
+        "Comprehensive ablation experiments demonstrate the benefits of instruction tuning versus in-context learning, target format design, and dataset balancing."
+      ],
+      "weaknesses": [
+        "Evaluation is restricted to a single, relatively simple benchmark (WikiSQL), which features straightforward single-table SELECT-WHERE queries. Validation on more complex multi-step reasoning benchmarks (such as WikiTableQuestions or TabFact) is necessary to demonstrate generalizability.",
+        "High computational inference overhead: Algorithm 2 defines a sliding window of size 3x3 with a stride of 1. For large tables (e.g., hundreds of rows and dozens of columns), this requires hundreds to thousands of forward passes through an 8B parameter model per question. The paper lacks discussion, wall-clock measurements, or cost analyses of this latency/computation bottleneck.",
+        "Implementation details regarding selector fine-tuning are unclear: the paper states that only the 'output layer' of Llama-3-8B-Instruct was fine-tuned, leaving it ambiguous whether this refers to linear probing of the LM head, parameter-efficient fine-tuning (e.g., LoRA), or something else."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 2.5,
+      "strengths": [
+        "Clear motivation addressing the mismatch between 1D token sequences in LLMs and 2D tabular structure, as well as the context window bottlenecks when scaling to very large tables.",
+        "The multi-resolution union formulation is intuitive: selecting sub-windows that satisfy partial conditions and taking their union avoids prematurely missing relevant evidence.",
+        "Effective data balancing strategy during training to counteract the severe skew towards single-column target predictions in small windows.",
+        "Noticeable performance improvements on large tables (e.g., 500+ cells in Table 6, where accuracy jumps from 40.00% to 75.79% over raw OmniTab)."
+      ],
+      "weaknesses": [
+        "Severe computational overhead and unaddressed inference latency: Algorithm 2 defines a 2D sliding window of size $w \\times w$ with a stride of 1. For a table with $R$ rows and $C$ columns, this requires approximately $R \\times C$ calls to the Llama3-8B selector per iteration. For large tables in the dataset (up to 1,950 rows and 23 columns), this implies up to ~40,000+ forward passes for a single table. The paper lacks any runtime, latency, or FLOP/token cost analysis.",
+        "Evaluation is restricted to a single dataset (WikiSQL): WikiSQL is a relatively simple benchmark primarily composed of basic single-table `SELECT ... WHERE ...` queries. To demonstrate the generalizability and robustness of the proposed framework, evaluation on more diverse and challenging table reasoning benchmarks (e.g., WikiTableQuestions, TabFact, or FeTaQA) is essential.",
+        "Heavy reliance on explicit SQL annotations for training: The target generation procedure requires explicit alignment of condition columns, condition values, and answer columns derived from ground-truth SQL triplets, which restricts applicability to datasets where such supervision is unavailable.",
+        "Missing sensitivity analysis on key hyperparameters: The window size is fixed to $w=3$ throughout the paper without an ablation study evaluating how varying $w$ (or window stride) impacts accuracy, recall, and computational efficiency."
+      ]
+    }
+  },
+  "v4": {
+    "exp3_positive": {
+      "oa": 3.5,
+      "strengths": [
+        "Clear motivation and well-structured approach: Decomposing large tables into local windows to bypass context length limitations and autoregressive text-generation bottlenecks is an intuitive divide-and-conquer strategy.",
+        "Effective representation design: The proposed coordinate-based representation (<row, col> vs <empty, empty>) preserves relative spatial context and demonstrates clear empirical advantages over standard index-only and linearized table representations.",
+        "Comprehensive empirical validation across readers: Experiments demonstrate consistent improvements across different table QA readers (OmniTab, TaPEx, GPT-3.5, and DP&Agent) and achieve high recall (over 99%) on WikiSQL and WikiTQ.",
+        "Informative ablation experiments: The paper provides useful analyses regarding window size, representation format, and fine-tuning versus in-context learning."
+      ],
+      "weaknesses": [
+        "Severe computational overhead and latency concerns: Algorithm 2 slides a w x w window with a stride of 1 across rows and columns, resulting in O((R - w) * (C - w)) window evaluations per iteration. For larger tables (e.g., hundreds or thousands of rows as noted in the appendix), calling an 8B parameter model hundreds of times per table across multiple iterations introduces massive computational cost and latency that is neither measured nor discussed.",
+        "Reliance on detailed SQL annotations for training: The subwindow selector requires ground-truth SQL queries (from SQUALL and WikiSQL) to identify condition/answer columns and generate training data. This limits the portability of PieTa to semi-structured tables or open-domain QA where semantic parses / SQL ground-truth are absent.",
+        "Dated framing regarding context limits: The introduction motivates the method primarily by noting that transformer self-attention is restricted to 512 or 1,024 tokens. Contemporary LLMs routinely handle 32k to 128k+ tokens; comparing against or evaluating recent long-context tabular prompting approaches would provide a much stronger evaluation of where subtable selection remains necessary.",
+        "Lack of convergence guarantees and cost analysis for iterative updates: While Table 2 empirically shows convergence in 3-4 iterations, the paper lacks theoretical or bounded stopping criteria, as well as an analysis of the total wall-clock time and token expenditure compared to end-to-end holistic models."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "The proposed divide-and-conquer framework addresses the token length limitations and long-range structural complexity of large tables by operating on small local subwindows.",
+        "The coordinate-based representation (<row, column> tokens vs. <empty,empty>) is a sensible design choice that avoids error propagation inherent in generating linearized table text or relying exclusively on column headers.",
+        "The method demonstrates solid empirical improvements across both subtable selection recall/precision and downstream table QA exact match using various readers (OmniTab, TaPEx, GPT-3.5) on WikiTQ and WikiSQL.",
+        "The paper includes useful ablation experiments investigating subtable representations, window sizes, in-context learning vs. fine-tuning, and iteration dynamics."
+      ],
+      "weaknesses": [
+        "Computational overhead and inference latency are not analyzed: Algorithm 2 uses a sliding window with a stride of 1. For a moderately large table (e.g., 50 rows, 10 columns), this results in hundreds of subwindows per iteration, requiring an 8B parameter model to make hundreds (or thousands across iterations) of forward/generation passes for a single question. The lack of FLOPs, wall-clock time, or latency comparisons against baselines like ITR or holistic LLMs is a significant omission.",
+        "Strong reliance on supervision and SQL alignments: Generating the fine-tuning data requires SQL annotations (derived from WikiSQL and SQUALL) to construct ground-truth subwindows. This limits the framework's applicability to settings where semantic parse or SQL alignments are available, hindering zero-shot transfer to arbitrary real-world tables.",
+        "Evaluation is restricted to older academic datasets (WikiSQL and WikiTQ): WikiSQL is largely saturated, and neither benchmark reflects the complex numerical reasoning, hybrid text-table reasoning, or conversational settings found in more modern benchmarks such as TAT-QA, FinQA, or FeTaQA.",
+        "Baseline comparability: The selector uses a fine-tuned Llama-3.1-8B model, whereas several compared subtable selectors (such as Dater and TabSQLify) rely on prompt-based in-context learning, and older retrievers (ITR) rely on much smaller dual-encoders (BERT-base), making it difficult to disentangle the benefits of the algorithmic windowing formulation from model fine-tuning and scale."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2.5,
+      "strengths": [
+        "The paper addresses a well-motivated and fundamental challenge in tabular NLP: handling large 2D tables within the context and structural constraints of language models.",
+        "The proposed coordinate-based representation (<row, column>) is an intuitive and effective solution to prevent cascading autoregressive generation errors commonly seen in direct table linearization or header-only index generation.",
+        "Achieves high recall (>99%) during subtable selection, which is a desirable property for filtering stages to avoid discarding relevant evidence prior to answering.",
+        "The ablation studies in Table 6 systematically evaluate key design choices, including fine-tuning vs. in-context learning, subtable representation formats, and window dimensions.",
+        "The paper is clearly structured, with informative diagrams (e.g., Figures 1, 2, and 4) that illustrate the core concepts well."
+      ],
+      "weaknesses": [
+        "Severe lack of inference efficiency and runtime analysis: The method uses a 2D sliding window with a stride of 1 (Algorithm 2) over tables that can have dozens of rows and columns, followed by an iterative convergence loop (Algorithm 1). Applying an 8B LM to tens or hundreds of windows per table per iteration implies massive computational overhead and latency at test time, yet no runtime, FLOPs, or latency numbers are reported.",
+        "Modest empirical performance gains on WikiTQ: Table 4 shows relatively marginal improvements over holistic readers and baselines when using strong readers (e.g., +1.77% over Holistic OmniTab, and only +0.55% over Holistic DP&Agent: 73.60% vs. 74.15%), which calls into question the cost-benefit trade-off of the multi-window approach.",
+        "Ambiguity in window construction and header preservation: In Algorithm 2, windows are sliced purely as spatial sub-matrices T[i:i+w, j:j+w]. In tabular data, cell semantics depend heavily on column headers (typically row 0). If a window is sliced from rows 10 to 14, it is unclear how column headers are retained or interpreted by the LM selector without explicitly prepending them.",
+        "Evaluation is restricted to older, standard Wikipedia-based datasets (WikiSQL and WikiTQ): The paper would be significantly stronger if evaluated on more complex, large-scale tabular reasoning benchmarks (e.g., TAT-QA, FeTaQA, or BIRD)."
+      ]
+    }
+  }
+}

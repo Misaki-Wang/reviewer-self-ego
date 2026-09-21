@@ -1,0 +1,62 @@
+{
+  "v2": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a timely and practically important problem: instability of RLVR training on MoE LLMs, which is directly relevant to current post-training practice.",
+        "Provides a plausible and well-motivated diagnosis: the router-shift ratio (Eq. 5-8) is a lightweight, easily instrumented statistic, and the paper connects routing drift to volatile off-policy mismatch and bursty clipping with training-time diagnostics (Fig. 5) rather than only anecdotal reward curves.",
+        "The proposed method is simple, well-specified, and genuinely plug-in compatible: RSPO is a single detached, floored multiplicative rescaling of the importance ratio before clipping, and the paper demonstrates it consistently across GRPO/GSPO/GMPO bases (Fig. 4) rather than only on its preferred base.",
+        "Evaluation spans two regimes (a small Qwen2.5-MoE Countdown diagnostic setting and Qwen3-30B-A3B on math and code), with standard benchmarks (AIME24/AMC23/MATH500/Minerva/OlympiadBench; MBPP/HumanEval/LiveCodeBench) and a reasonably detailed setup (batch sizes, clipping ranges, seed count for curves, leakage handling for LiveCodeBench).",
+        "Useful ablations and negative-result comparisons: floor sensitivity (γmin sweep), stop-gradient vs. backprop-through-weight (Appendix B), and comparisons against hard router constraints (freezing, logit replay, index replay, Appendix D/Fig. 8), plus an honest accounting of throughput/memory overhead (20.8% throughput reduction, ~1.5 GiB caching).",
+        "Entropy diagnostics (Fig. 7) provide additional corroboration that the intervention reduces mode-collapse behavior."
+      ],
+      "weaknesses": [
+        "Headline gains are small and statistical significance is not established: on math, RSPO improves the average over GMPO by only +0.7 (76.4 → 77.1), and per-benchmark deltas are within plausible seed variance. Table 1 is described as averaged over three random seeds, but no standard deviations, confidence intervals, or significance tests are reported, making it hard to judge whether the math gains are meaningful (the code gains, +2.7, are larger but lack a stability-collapse narrative there).",
+        "The causal story is correlational: the paper shows router drift co-occurs with volatile importance ratios and clipping, but the evidence that router drift *causes* collapse rests mainly on the intervention succeeding, and the observed magnitudes are small (router-shift ratio stays in ~0.98–1.00 in Fig. 5; router-shift clip fraction below 0.01), so the practical severity of the diagnosed failure mode is unclear.",
+        "Notable overhead for a simple reweighting: a 20.8% throughput reduction for caching routing statistics and a per-token rescale is substantial; the paper does not explore cheaper alternatives (e.g., layer subsampling, on-the-fly recomputation, FP8 indices) beyond a brief remark.",
+        "Missing comparisons with other relevant stabilization methods (e.g., DAPO, Ring-lite's routing-budget regularization, which the paper itself cites as addressing MoE RL variance), limiting the ability to position RSPO's benefit relative to the broader stabilization landscape.",
+        "Small-scale evidence rests on an artificial setting (a 12-layer Qwen2.5-MoE pretrained on Countdown), so the plug-in results of Fig. 4 may not transfer cleanly; conversely, at scale, the plug-in claim is only demonstrated for GMPO.",
+        "Presentation inconsistencies and clarity gaps: the reward collapse points differ across figures (Fig. 1 vs. Fig. 4), Fig. 3's γmin=0.2 degradation is described in text but the plotted curves look similar, and key methodological questions (e.g., whether the floor interacts with GSPO's very small clip ranges, why γ is defined on absolute log-router deltas on old activated experts rather than a symmetric divergence) receive limited analysis. No code release is mentioned, which weakens reproducibility of the training-scale claims.",
+        "The 'consistently precede training collapse' claim in the abstract is asserted more strongly than the evidence (temporal precedence is shown in aggregate trends, not per-run precursor analysis)."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2.5,
+      "strengths": [
+        "Targets a relevant and timely problem: instability of RLVR training on MoE LLMs, an issue of genuine practical importance to the community.",
+        "The proposed method (RSPO) is simple, clearly specified, and presented as a plug-in modification to GRPO-style objectives, which makes it easy to understand and potentially adopt.",
+        "Reasonably broad experimental coverage: two model scales (Qwen2.5-MoE on Countdown; Qwen3-30B-A3B on math and code), plug-in ablations across GRPO/GSPO/GMPO, floor sensitivity sweep, stop-gradient ablation, comparison against hard router constraints (freeze/replay), and an explicit overhead analysis.",
+        "Hyperparameters, training data, reward verifiers, and evaluation protocols are described in enough detail to make the setup largely traceable, and the diagnostic signals (router-shift ratio, clip fraction, ppo_kl, pg_clipfrac) are lightweight and well motivated.",
+        "Honest reporting of costs: the 20.8% throughput reduction and memory overhead of caching routing statistics are stated explicitly rather than hidden."
+      ],
+      "weaknesses": [
+        "Internal consistency problem at the heart of the method: Figure 5 shows the router-shift ratio stays in roughly [0.98, 1.0] with a clip fraction below ~0.01, and the floor is γmin = 0.8. This means the rescaling is nearly an identity operation for virtually all tokens, perturbing <1% of tokens by at most ~2%. It is difficult to reconcile such a marginal intervention with the claimed large stability and performance effects; the paper never explains what fraction of the update is actually modified, leaving the causal mechanism unverified.",
+        "The headline gains are small and not statistically supported: math average improves only 76.4 → 77.1 (+0.7) over GMPO, and code 82.5 → 85.2. Although the text says results are averaged over three seeds, no error bars, confidence intervals, or significance tests are reported, so the +0.7 math gain could easily be within seed variance.",
+        "The central diagnostic claim (router drift *causes* collapse) is only correlational. The paper shows co-occurrence of routing drift, ratio volatility, and clipping bursts, but never establishes causality, e.g., by artificially injecting or suppressing router drift in a controlled setting, or by testing whether GRPO collapses comparably on a dense (non-MoE) model of similar size — a control that would directly test whether the failure mode is MoE-specific as claimed.",
+        "Baseline configuration may be weak: GRPO is run with ε=0.2 and no modern stabilization tricks (e.g., DAPO-style clipping/dynamic sampling), so the reported GRPO collapse may partly reflect an under-tuned baseline rather than an inherent MoE pathology. No comparison to simpler alternatives such as a lower learning rate, stronger KL regularization, or entropy regularization, which could achieve similar stability at no extra cost.",
+        "No code release is mentioned. Reproducing 30B-scale MoE RLVR training is expensive; without code or a public artifact, the reproducibility of the main claims is limited despite the detailed hyperparameter descriptions.",
+        "Cost-benefit is not examined: a 20.8% throughput reduction and ~1.5 GiB extra memory per device is a substantial price for a mechanism whose measured activation (ClipFrac < 1%) appears tiny, and the paper does not compare this overhead against trivially cheaper stabilizers.",
+        "Writing and presentation issues: some results are asserted without visible supporting statistics (e.g., 'three random seeds' for Table 1 but single-curve figures), Figure 6 reports only the unstable run 'for readability' rather than paired comparisons, and the GMPO formulation in Eq. (14) is loose ('exact clipping bounds follow each method's recommended settings'), which weakens precision."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3,
+      "strengths": [
+        "The paper addresses a timely and practically important problem: instability of RLVR training on MoE LLMs, and provides a focused diagnosis (router drift) rather than treating instability as an unexplained failure mode.",
+        "The proposed method (RSPO) is simple, well-specified, and explicitly designed as a plug-in: the exact rescaling operation (Eq. 9-11), log-space implementation, and hyperparameter defaults (gamma_min = 0.8, stop-gradient) are clearly documented.",
+        "Empirical validation spans two scales (Qwen2.5-MoE on Countdown and Qwen3-30B-A3B on math/code) and shows the router-shift weight is complementary to GRPO/GSPO/GMPO (Fig. 4), which supports the generality claim beyond a single base objective.",
+        "The paper is honest about alternatives: it evaluates router freezing, logit replay, and index replay (Sec. 5.4, Appendix D), and ablates stop-gradient (Appendix B) and the floor value (Fig. 3), rather than only comparing against weak baselines.",
+        "The mechanism diagnostics (Fig. 5) connect router-side and optimization-side signals, and the efficiency/overhead analysis (Sec. 5.6) is unusually concrete (throughput reduction, memory footprint estimates)."
+      ],
+      "weaknesses": [
+        "The causal link in the diagnosis is correlational. Router drift, volatile importance ratios, bursty clipping, and entropy collapse all co-occur under GRPO (Figs. 5 and 7), but the paper does not disentangle whether router drift causes the collapse or is a symptom of the same underlying optimization pathology. The entropy-collapse evidence in Appendix C suggests an alternative cause that is not ruled out.",
+        "The measured effect size of router shift appears small: Fig. 5 shows the router-shift ratio stays in roughly [0.9825, 1.0] even for GRPO, and router-shift clip fraction is near 0.01. With gamma_min = 0.8 the rescaling down-weights tokens by at most ~20%. It is unclear this magnitude is sufficient to explain the reported stabilization, so the mechanism-to-outcome story is under-quantified.",
+        "Gains over the strongest baseline (GMPO) are modest (math avg 77.1 vs 76.4; code avg 85.2 vs 82.5), and although curves are averaged over 3 seeds, Table 1 reports no variance, confidence intervals, or significance tests, making it hard to judge whether the math improvement is meaningful.",
+        "The method is described as lightweight but incurs a 20.8% throughput reduction, which is substantial for a per-token multiplicative adjustment and weakens the practical-efficiency argument, particularly relative to simpler fixes like sequence-level ratios.",
+        "No code release or reproduction artifacts are mentioned, and several details needed for exact reproduction (e.g., learning rates, optimizer, KL coefficients, mini-batch update count, how old routing statistics are cached across the rollout/update boundary) are missing or deferred.",
+        "The method's dependence on gamma_min is evaluated only via a coarse 3-point sweep on the large-scale setting; the interaction between gamma_min and base algorithm, model scale, or task is unexplored.",
+        "Presentation issues: the importance ratio is defined twice (Eqs. 1 and 10), Fig. 3's y-axis scale suggests small differences among gamma_min settings are visually amplified, and the claim that rigid strategies 'can degrade performance' rests on small-scale single-setting runs in the appendix."
+      ]
+    }
+  }
+}

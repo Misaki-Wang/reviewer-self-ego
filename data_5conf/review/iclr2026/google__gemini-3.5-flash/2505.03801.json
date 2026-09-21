@@ -1,0 +1,49 @@
+{
+  "v1": {
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper addresses an important problem: the joint optimization of low-rank and sparse components in LLM compression without relying on manual thresholding.",
+        "Applying Robust Principal Component Analysis (RPCA) to separate structured global patterns from sparse outliers is a mathematically elegant starting point.",
+        "The proposed framework is evaluated on several LLM architectures (LLaMA, LLaMA-2) and tasks (commonsense reasoning, perplexity, and GLUE)."
+      ],
+      "weaknesses": [
+        "Highly Questionable Optimization Scalability and Variance: The authors propose using REINFORCE (policy gradient) to learn individual Bernoulli retention probabilities for both singular values and every sparse matrix entry. Since an LLM has tens of millions of active sparse parameters, the action space of this RL formulation is extremely high-dimensional. Standard REINFORCE is notorious for catastrophic variance under high-dimensional action spaces. The paper does not satisfactorily explain how optimizing millions of discrete policy parameters converges stably in only 3 iterations using a tiny calibration set of 128 sequences.",
+        "Severe Performance Degradation at Low Pruning Ratios: In Tables 6 and 7, under a very mild '75% parameter retention' (meaning only 25% of parameters are pruned), the accuracy drops drastically. For example, on LLaMA-7B, BoolQ accuracy drops from 75.08% to 63.33%, and on LLaMA2-7B, it drops from 77.71% to 62.67%. A drop of ~12-15% in accuracy for removing only 25% of the weights is extremely high compared to established unstructured pruning baselines, which often retain close to original accuracy at these levels.",
+        "Lack of Hardware Speedup/Inference Latency Measurements: Standard hardware does not naturally accelerate composite low-rank plus unstructured sparse matrices. Without custom CUDA kernels or specialized hardware support, storing and computing the model in this format ($U'V' + S \\odot m_S$) will likely result in slower inference than the uncompressed dense model. The lack of wall-clock speedup or practical latency benchmarks severely limits the real-world utility of the work.",
+        "Incomplete and Hand-waving Theoretical Analysis: Theorem F.1 and the lemmas in Appendix F lack rigorous mathematical proofs. Merely referencing PAC-Bayes bounds and RPCA recovery bounds without showing step-by-step derivations or bounding the generalization error specifically for the proposed neural network setting makes the theoretical analysis feel unsubstantiated.",
+        "Confusing Metric Terminology: The paper uses '50% compression ratio' to refer to a 50% parameter reduction on Page 9. However, the subsequent tables (Tables 6, 7) evaluate '75% parameter retention' (which is only 25% parameter reduction). Consistent terminology (such as 'Sparsity' or 'Pruning Ratio') should be used throughout to avoid misleading comparisons."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "The paper addresses an important problem in large language model (LLM) compression, specifically exploring the composite low-rank plus sparse representation which can preserve both global structures and local outliers.",
+        "The integration of Robust PCA (RPCA) solved via ADMM/ALM is a principled way to separate the weight matrices into complementary low-rank and sparse subspaces.",
+        "The compressed models demonstrate competitive perplexity and zero-shot accuracy compared to standard unstructured pruning baselines like WANDA and SparseGPT under a 50% parameter budget."
+      ],
+      "weaknesses": [
+        "The theoretical analysis in Appendix F lacks actual mathematical proofs. Theorem F.1, Lemma F.2, and Corollary F.3 are stated as rigorous theoretical results, but their 'proofs' are merely one-sentence intuitive explanations followed by a QED box (e.g., 'Proof. From RPCA recovery bounds Candes et al. [2009] and PAC-Bayes generalization.'). Stating theorems without formal derivations is mathematically unsound and unacceptable for a peer-reviewed publication.",
+        "The soundness of the reinforcement learning (policy gradient) stage is highly questionable. Optimizing millions of Bernoulli variables (for masks) using a single scalar reward (the global validation loss) suffers from a severe credit assignment problem. Moreover, the authors state they run the policy gradient for only 3 iterations. With such a high-dimensional action space and only 3 update steps, the learned probabilities $s_k$ cannot statistically converge or deviate significantly from their initialization. Consequently, the final sorting is almost entirely dominated by the initial 'contribution' values, suggesting that the REINFORCE stage acts primarily as a placebo rather than a meaningful optimizer.",
+        "Critical terms are left undefined. In Section 5.2.2, the authors state they 'compute a weighted score for all potential parameters as the product of their retention probability $s_k$ and their contribution' to determine which parameters to retain. However, the term 'contribution' is never mathematically defined in the text.",
+        "The paper lacks practical inference latency evaluations. A low-rank plus sparse matrix representation ($U' V'^T + S$) requires executing two dense low-rank matrix multiplications and one sparse matrix multiplication. On actual hardware, this can introduce significant runtime overhead compared to a single dense or unstructured sparse matrix multiplication. Without latency or throughput measurements, the actual speedup of the proposed method remains unverified.",
+        "There is ambiguity in the experimental setup in Table 4. The table displays MNLI, QNLI, and RTE scores for LLaMA-7B. It is unclear whether these are zero-shot results, or if the model was task-specifically fine-tuned. Typically, LLaMA-7B is not evaluated on GLUE tasks in this manner, so the exact evaluation protocol needs to be clarified."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3,
+      "strengths": [
+        "The paper addresses an important and active research area: low-rank plus sparse composite approximation for large language model (LLM) compression.",
+        "The overall conceptual framework of combining Robust Principal Component Analysis (RPCA) with global layer-adaptive parameter selection is intuitive and well-motivated.",
+        "The manuscript is clearly structured, with comprehensive preliminary explanations and a detailed overview of related work."
+      ],
+      "weaknesses": [
+        "Unsound Theoretical Claims and Fake Proofs: Theorem F.1 bounds the Frobenius norm of the weight approximation error ||W_tilde - W||_F with a generalization error term depending on the size of the calibration dataset |D|. This is mathematically incorrect; the algebraic approximation error of a fixed matrix decomposition has no logical dependence on the size of a validation dataset. Furthermore, the proof provided on page 22 is a single hand-wavy sentence ('From RPCA recovery bounds... and PAC-Bayes generalization'). This represents pseudo-theory and undermines the scientific soundness of the paper.",
+        "Impracticable Optimization Setup: In Section 5.2.2, the authors use REINFORCE (policy gradient) to learn individual Bernoulli retention probabilities for all singular values and sparse elements. For a 7B parameter model, this represents an action space of billions of dimensions. The authors claim to optimize this with only 3 iterations of REINFORCE. Mathematically, policy gradient over billions of variables with a single global scalar reward cannot possibly converge in 3 gradient steps. Consequently, the learned probabilities would remain virtually identical to their initialization, meaning the subsequent sorting step is dominated purely by the initial heuristic contribution, and the RL optimization does not actually function as claimed.",
+        "Highly Suspicious Experimental Findings: In Table 2, the authors show that decomposing LLaMA-2 7B via RPCA without any training/fine-tuning actually improves the language modeling perplexity from 5.21 (unpruned baseline in Table 1) to 5.13. RPCA is a purely unsupervised matrix-level mathematical decomposition. Perturbing a pre-trained model's weights using unsupervised decomposition typically degrades performance; it is highly suspect that it consistently improves the model's performance without any data-driven calibration.",
+        "Mislabeled Results and DeBERTa/LLaMA Confusion: Table 4 is titled 'Zero-shot accuracy results on MNLI, QNLI, and RTE for the pruned LLaMA-7B model'. However, the accuracy numbers shown (e.g., MNLI 90.5%) are actually the standard fine-tuned results for DeBERTaV3-base on GLUE, as LLaMA-7B cannot achieve >90% zero-shot accuracy on MNLI. This represents a major labeling error and suggests extremely sloppy preparation of the empirical results.",
+        "Unrealistic Parameter Counting for Sparse Representation: The paper compares its low-rank + sparse representation to unstructured pruning at a '50% compression ratio'. However, storing an unstructured sparse matrix S requires storing both non-zero values and their coordinates (indices). This indexing overhead typically doubles the actual memory footprint of unstructured sparse matrices. The paper does not account for this overhead, making the comparison with standard pruning baselines unfair."
+      ]
+    }
+  }
+}

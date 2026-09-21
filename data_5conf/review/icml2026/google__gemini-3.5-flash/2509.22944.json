@@ -1,0 +1,87 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Simple and elegant methodology: Dual-scaling combined with a modified Sinkhorn-Knopp iteration to balance row and column variances is conceptually clean, mathematically elegant, and highly effective.",
+        "Outstanding performance: SINQ delivers substantial perplexity improvements and lower flip rates across multiple modern LLM families (Qwen3, Llama, DeepSeek) and scales (up to 685B), consistently outperforming strong calibration-free baselines (HQQ, BnB NF4, RTN).",
+        "High efficiency: Standard SINQ is extremely fast, requiring only ~1.1x the time of RTN, making it significantly faster than calibration-based methods (GPTQ, AWQ) and even HQQ.",
+        "Orthogonality and generality: Shows great compatibility with non-uniform quantization (NF4) and activation-aware calibration (AWQ), and generalizes across diverse architectures (dense, MLA, MoE)."
+      ],
+      "weaknesses": [
+        "Lack of actual hardware deployment and latency measurements: Although the authors discuss implementation considerations (e.g., applying the second scale vector to the output activation) and report memory savings, the paper lacks real-world hardware benchmark evaluations (e.g., kernel latency or throughput in vLLM/TensorRT-LLM) to prove that the dual-scale overhead is negligible in practice.",
+        "Missing quantitative comparison to related dual-transformation methods: While the paper discusses DuQuant (Lin et al., 2024a), which also uses dual-axis transformations to address outliers, it does not provide a quantitative performance comparison against it."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "The proposed dual-scaling parameterization is a simple yet elegant way to trade off outlier quantization errors between rows and columns.",
+        "The Sinkhorn-Knopp style algorithm (Alg. 1) for minimizing matrix imbalance is highly efficient, requiring only about 1.1x the time of simple round-to-nearest (RTN) quantization, making it significantly faster than other optimized PTQ methods like AWQ or GPTQ.",
+        "The paper provides an extensive and thorough empirical evaluation on very recent and competitive models, including the Qwen3 family, Llama 3, and large Mixture-of-Experts (MoE) models such as DeepSeek-V2.5 and DeepSeek-V3.",
+        "The approach is shown to be highly versatile, combining successfully with calibration methods (A-SINQ) and non-uniform quantization formats (NF4)."
+      ],
+      "weaknesses": [
+        "The dual-scaling scheme introduces an extra scale vector along the second axis. While the authors propose smart tiling strategies, this still adds a small memory overhead and requires an additional element-wise scaling of activations during inference.",
+        "The evaluation focuses almost entirely on weight-only quantization (W3/W4). The paper does not explore how well the dual-scaling normalization generalizes to joint weight-activation quantization scenarios, which are critical for maximizing compute speedups on hardware."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "Proposes an intuitive dual-axis scaling parameterization to balance the impact of outliers across both rows and columns.",
+        "Adapts the classic Sinkhorn-Knopp algorithm to iteratively normalize standard deviations, providing a fast and calibration-free way to minimize matrix imbalance.",
+        "Evaluates the method across a wide variety of model families (Qwen3, Llama, DeepSeek) and architectures (Dense and MoE), demonstrating broad compatibility.",
+        "Presents fast quantization times compared to traditional optimization-based PTQ methods such as AWQ and GPTQ."
+      ],
+      "weaknesses": [
+        "Hardware deployment feasibility and actual inference latency are not addressed. The dual-scale parameterization requires scaling inputs differently for each output group (when using 1D tiling) or introduces extra arithmetic overhead during weight dequantization in the GPU kernel. Without actual GPU latency or throughput (tokens/sec) measurements, it is unclear if the method is practically viable.",
+        "Marginal improvement on the memory-perplexity Pareto front. The authors acknowledge in Figure 3 that the perplexity gap between the proposed method and the baseline on the Pareto front is extremely small (< 0.01 ppl), making the extra hardware and software complexity of dual scales difficult to justify.",
+        "Lack of theoretical convergence guarantees. The standard Sinkhorn-Knopp algorithm operates on non-negative matrices for row/column sums. The proposed Algorithm 1 applies Sinkhorn-style updates to standard deviations of matrices containing mixed-sign values. No convergence or stability proofs are provided, and the practical implementation relies on heuristic clipping and early-stopping.",
+        "Anomalous baseline performance. For example, in Table 5, GPTQ 3-bit perplexity (32.21) is nearly identical to RTN (32.43), which is atypical as GPTQ usually shows significant improvements over RTN. Similarly, in Table 1, HQQ performs worse than RTN on Qwen3-14B 3-bit, raising concerns about whether the baselines were properly configured."
+      ]
+    }
+  },
+  "v4": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Strong theoretical and empirical motivation: The observation that weight column standard deviations correlate well with activation scales (due to Adam updates) is insightful and well-supported.",
+        "Well-designed algorithm: Using a Sinkhorn-inspired log-space normalization to balance column scaling (activation awareness) with row-wise kurtosis is elegant and mathematically sound.",
+        "Extensive and robust evaluations: Evaluated on multiple modern model families (Qwen3, Llama, Phi, MoE models like DeepSeek-V3) showing consistent, significant perplexity and accuracy improvements.",
+        "Highly practical: The quantization process is extremely fast (~1.1x RTN, far faster than GPTQ or AWQ), and the authors provide a 'no-overhead' version that integrates directly into inference engines like llama.cpp."
+      ],
+      "weaknesses": [
+        "Dual-scale parameterization adds minor inference overhead if not absorbed, though this is mitigated by the 'no-overhead' variant.",
+        "The handling of shared scales in the no-overhead version (such as QKV or Gate/Up projections) is briefly mentioned but could benefit from a more detailed description in the main text."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Compelling scientific insight: The paper uncovers a strong correlation between column-wise weight standard deviations and input activation scales, explaining this via optimizer (Adam) update dynamics. This enables 'pseudo-activation-aware' quantization without needing calibration data.",
+        "Elegant methodology: The use of a log-space Sinkhorn-Knopp-style normalization to balance column-wise activation-awareness against row-wise kurtosis increase (outliers) is mathematically sound and highly effective.",
+        "Comprehensive and strong empirical results: SINQ consistently outperforms prior state-of-the-art calibration-free methods (HQQ, BnB, Hadamard+RTN) in terms of perplexity and task accuracy (flip rates) across various LLM families (Qwen3, Llama, DeepSeek, Phi) and sizes, including large MoE models.",
+        "Efficiency and practicality: The quantization process is extremely fast (only 1.1x the time of RTN), and the inference overhead is negligible or zero (via scale absorption or cheap element-wise activation scaling)."
+      ],
+      "weaknesses": [
+        "Simplified theoretical analysis: The derivation of the relation $s_W \\propto 1/\\sqrt{|s_x|}$ relies on a highly simplified single-layer model with Gaussian inputs and targets under Adam. While the empirical correlation holds well, the theoretical justification is somewhat limited to this simplified scenario.",
+        "Complexity and trade-offs of scale absorption: For the 'no-overhead' variant, absorbing input scales into preceding layers requires sharing scales among layers that share inputs (such as Q, K, V projections). As shown in the appendix, this results in a slight drop in quantization quality. This trade-off and its architectural implications could be analyzed more thoroughly in the main text.",
+        "Slight lack of clarity in tiled dual-scale parameterization: The description of how shifts ($z$) interact with dual scales ($s$, $t$) and tiling in Section 2.1.2 is brief. Explicit equations showing how the tensors are reshaped and broadcasted during tiled dual-scale quantization would improve readability."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Elegant and well-motivated core idea: discovering that column-wise weight standard deviations are predictive of input activation scales, enabling 'pseudo-activation-aware' quantization without any calibration data.",
+        "Well-designed algorithmic solution: using a modified Sinkhorn-Knopp iteration to balance row and column standard deviations, successfully mitigating the row-wise kurtosis increase that typically degrades uniform quantization.",
+        "Extensive empirical validation: the method is evaluated on a wide array of LLM architectures (Qwen3, Llama 2/3, Phi, DeepSeek-V3) of various scales (including massive MoE models), consistently outperforming state-of-the-art calibration-free baselines like HQQ and BnB.",
+        "High practical utility: the paper analyzes hardware execution overheads, details a 'no-overhead' variant that absorbs scales into preceding layers, and demonstrates integration with popular inference engines like llama.cpp and SGLang."
+      ],
+      "weaknesses": [
+        "The explanation of how the 'no-overhead' variant handles shared input scales (such as Q/K/V and Gate/Up projections in Qwen3 models) is brief and could benefit from a more detailed formal or algorithmic description in the main text.",
+        "The theoretical justification for the relationship in Equation 4 (where \\vec{s}_W \\propto 1/\\sqrt{|\\vec{s}_x|} under Adam training) is somewhat brief. A more rigorous mathematical derivation or step-by-step analysis in the appendix would strengthen this foundational claim."
+      ]
+    }
+  }
+}

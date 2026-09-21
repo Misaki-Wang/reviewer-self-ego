@@ -1,0 +1,94 @@
+{
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Principled and elegant theoretical derivation: The paper provides a closed-form, data-dependent blockwise linear transform for joint weight-activation quantization, proving optimality/near-optimality under both floating-point (relative noise) and integer (AbsMax-scaled noise) error models.",
+        "Theoretical insight into existing heuristics: The framework provides a clear explanation for why Hadamard rotations have been effective empirically as data-agnostic transforms, while rigorously establishing why orthogonal transforms alone remain suboptimal in the presence of anisotropic multivariate outliers.",
+        "High-performance kernel implementation: The authors design and evaluate a fused CUTLASS GEMM kernel tailored for per-block distinct transforms, demonstrating that the additional data-dependence introduces negligible overhead (only ~1.3% throughput difference compared to single-transform Hadamard) and achieves up to 6.6x speedup over BF16 on modern hardware (RTX 5090).",
+        "Thorough empirical evaluation: Extensive experiments on modern open LLMs (Llama-3.1/3.2, Qwen-3 models up to 32B) across LM Evaluation Harness and Platinum Benchmarks show consistent and significant accuracy gains in W4A4 settings, especially on MXFP4."
+      ],
+      "weaknesses": [
+        "Marginal benefits on NVFP4: While WUSH delivers substantial improvements on MXFP4 and INT4, its advantages on NVFP4 are considerably smaller and sometimes within run-to-run variation (or comparable to the identity baseline), which the authors note is due to NVFP4's native top-element preservation mechanism.",
+        "Idealized quantization noise assumptions: The theoretical derivation relies on continuous pseudo-quantization noise models (e.g., treating type casting error as multiplicative uniform noise and neglecting deterministic saturation/clipping effects), which only approximate actual deterministic round-to-nearest behavior.",
+        "Lack of full end-to-end model generation benchmarks: Performance evaluations primarily report per-layer GEMM microbenchmarks; measuring end-to-end token generation latency and memory footprint during autoregressive decoding would further strengthen the practical claims."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Principled and elegant theoretical derivation: The paper moves beyond empirical or heuristically learned rotations (e.g., QuaRot, SpinQuant) by deriving closed-form, data-aware linear blockwise transforms (WUSH) that minimize expected quantization error for both floating-point and integer block quantizers.",
+        "Insightful analysis of FP vs. INT quantization noise: The work provides clear mathematical justifications distinguishing how floating-point formats (relative error proportional to magnitude) and integer formats (error proportional to peak absolute value) interact with orthogonal vs. non-orthogonal transformations, explaining why Hadamard rotations alone fail to achieve optimality.",
+        "Hardware-efficient GPU implementation: Unlike many data-aware PTQ schemes that introduce non-trivial runtime overhead, the authors design a fused CUTLASS GEMM kernel exploiting a tailored (G, G, C) layout. This matches the throughput of data-agnostic Hadamard kernels (within 1.3%) while achieving up to 6.6x speedup over BF16 on modern hardware (RTX 5090).",
+        "Comprehensive empirical validation: Experiments span multiple modern LLM families (Llama 3.1/3.2, Qwen 3 up to 32B) across diverse benchmarks (LM Eval Harness, Platinum Benchmarks), demonstrating substantial gains in 4-bit weight-activation quantization—especially for the MXFP4 format, where it effectively closes the performance gap to NVFP4."
+      ],
+      "weaknesses": [
+        "Idealized theoretical assumptions: The derivation relies on several simplifying assumptions—such as an unbiased stochastic quantizer (whereas deterministic round-to-nearest is evaluated), a first-order error approximation neglecting cross-terms, and idealized relative noise models for floating-point arithmetic that gloss over subnormal behavior, limited mantissa bitwidth, and clipping.",
+        "Limited gains on NVFP4: While WUSH yields notable improvements on MXFP4, the performance gains on NVFP4 over unrotated baselines (Identity) or standard GPTQ are often marginal or within statistical variability, as NVFP's top-element preservation already mitigates group outliers.",
+        "Lack of out-of-distribution (OOD) robustness analysis: Because the activation transform depends directly on the empirical second moment of calibration data, the method could be sensitive to distribution shifts between calibration and test domains. A systematic study of calibration set size and cross-domain robustness is missing.",
+        "Absence of end-to-end model generation benchmarks: Evaluation of inference efficiency is restricted to per-layer GEMM microbenchmarks. Reporting full-model decoding latency, TTFT (time-to-first-token), and memory footprint would further reinforce the practical deployment claims."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Principled and closed-form formulation: Unlike existing heuristics (e.g., fixed Hadamard rotations) or computationally expensive optimization procedures (e.g., SpinQuant, FlatQuant), WUSH provides an elegant, closed-form, data-aware transform derived from second-order statistics.",
+        "Rigorous theoretical analysis: The theoretical derivation systematically addresses both floating-point (FP) and integer (INT) block quantizers under multivariate modeling, establishing clear trace and expectation bounds that explain when and why non-orthogonal data-dependent transforms outperform orthogonal ones.",
+        "High-performance GPU implementation: The authors successfully tackle the systems challenge of per-block specialized transforms at inference time by implementing a fused CUTLASS GEMM kernel, achieving up to 6.63× speedup over BF16 on an RTX 5090 with only a negligible (~1.3%) throughput difference compared to shared Hadamard baselines.",
+        "Strong empirical gains on MXFP4: Across diverse LLM families (Llama-3.1/3.2, Qwen-3), WUSH consistently and significantly improves W4A4 MXFP4 quantization performance (e.g., +2.8 average points with RTN and +0.7 with GPTQ on Llama-3.1-8B-Instruct), narrowing the accuracy gap to NVFP4."
+      ],
+      "weaknesses": [
+        "Inconsistent benefits on NVFP4: While WUSH delivers clear gains on MXFP4 and INT4, its advantages on NVFP4 are marginal and in some instances trail behind the unrotated identity baseline (e.g., Table 4 Llama-3.2-3B RTN: Identity 67.69 vs. WUSH 67.34; Figure 9 Llama-3.1-8B Platinum: Identity 81.99% vs. WUSH 80.80%).",
+        "Idealized error modeling assumptions: The theoretical derivation relies on first-order Taylor expansions and stochastic, unbiased pseudo-quantization noise (Eq. 18 and Eq. 23). In reality, low-bit deterministic RTN rounding introduces non-negligible bias, saturation, and subnormal effects that diverge from these continuous statistical approximations.",
+        "Metadata and storage overhead: Assigning a distinct $d \\times d$ transform matrix to every block across all channels introduces extra memory footprint for storing transform parameters (shape $(G, G, C)$) relative to a single globally shared $d \\times d$ Hadamard matrix.",
+        "Limited evaluation scope on bitwidths: The experimental evaluation focuses exclusively on W4A4 settings; evaluating WUSH under ultra-low bitwidths (e.g., 2-bit or 3-bit weights) or purely weight-only / activation-only configurations would strengthen the generality of the conclusions."
+      ]
+    }
+  },
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Principled theoretical derivation: The paper provides a rigorous mathematical formulation that derives closed-form optimal linear blockwise transforms for both floating-point (FP) and integer (INT) formats, offering an explanation for why Hadamard matrices are effective and how data-dependent second-order moments can strictly improve upon them.",
+        "Data-aware without training: Unlike learned rotation approaches (e.g., SpinQuant) that require iterative optimization or fine-tuning, WUSH is computed directly in closed form using calibration statistics (Cholesky and SVD of block covariance matrices).",
+        "Unified analysis across formats: The paper formulates specific error models for both floating-point (log-scale uniform mantissa/exponent modeling) and integer (AbsMax-scaled uniform noise) quantizers, proving bounds on expected quantization loss in both settings.",
+        "Consistent empirical improvements: On multiple LLM architectures (Llama-3.2-3B, Llama-3.1-8B, Qwen3-8B, Qwen3-14B) across LM Eval Harness and Platinum Bench, WUSH demonstrates noticeable accuracy gains over standard RTN and Hadamard transforms, especially under the MXFP4 format."
+      ],
+      "weaknesses": [
+        "Inference computational overhead: Unlike standard Hadamard transforms which can exploit the Fast Walsh-Hadamard Transform (FWHT) requiring only $O(d \\log d)$ additions/subtractions, WUSH produces a dense, distinct non-orthogonal $d \\times d$ matrix per block. Transforming activations online at inference time requires per-block matrix-vector products and extra memory bandwidth, but the paper does not report runtime latency, memory overhead, or end-to-end throughput benchmarks.",
+        "Limited baseline comparisons: The experimental evaluation only compares WUSH against Identity, Random rotation, and Hadamard transforms. Comparisons against other prominent rotation or transformation techniques (e.g., SpinQuant, FlatQuant, QuaRot, or block-rotation methods like Shao et al., 2025) are absent.",
+        "Restricted to RTN quantization: The method and experiments are limited to Round-to-Nearest (RTN) quantization. While mentioned in future work, it remains unverified whether WUSH remains optimal or delivers significant value when combined with second-order weight compensation techniques such as GPTQ or AWQ.",
+        "Simplifying assumptions in the theoretical model: The proof drops cross-terms $\\epsilon(T_W w)^\\top \\epsilon(T_X x)$ via a first-order approximation and assumes uncorrelated, zero-mean quantization noise. In low-bitwidth regimes (e.g., 4-bit) with ill-conditioned covariance matrices, non-orthogonal transformations can potentially lead to noise amplification not fully captured by the simplified noise models."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Principled theoretical derivation: The paper derives closed-form, data-aware linear blockwise transforms (WUSH) for joint weight-activation quantization under both floating-point (FP) and integer (INT) formats, providing a rigorous explanation for why Hadamard matrices are effective as well as how to optimally complement them with data statistics.",
+        "Efficient calibration: Unlike existing learned-rotation methods (e.g., SpinQuant, FlatQuant) that rely on gradient-based optimization loops, WUSH is purely closed-form and requires only second-order moment statistics (similar to GPTQ calibration overhead).",
+        "Consistent empirical gains over Hadamard: Evaluated across multiple model families and sizes (Llama-3.2-3B, Llama-3.1-8B, Qwen3-8B, Qwen3-14B) on LM Eval Harness and PlatinumBench, WUSH consistently outperforms fixed Hadamard and RTN baselines across MXFP4, NVFP4, and INT4 formats.",
+        "Well-structured exposition: The mathematical formulation in Section 2 and Appendix A is self-contained, clearly organized, and easy to follow."
+      ],
+      "weaknesses": [
+        "Inference latency and hardware efficiency: Because the optimal transform matrix $T_X = H S^{-1/2} U^\\top W'^{-\\top}$ is generally dense, non-orthogonal, and distinct per block, computing $T_X X$ online requires explicit matrix multiplications rather than fast structured transforms (e.g., Fast Walsh-Hadamard Transform $O(d \\log d)$ without matrix storage). The paper does not provide kernel-level wall-clock benchmarks or measure inference speedups/overheads.",
+        "Lack of comparison with state-of-the-art transform baselines: The end-to-end LLM evaluations in Table 2 and Figures 1–4 only compare WUSH against Identity and standard Hadamard transforms. Key competing methods that use data-aware transformations (such as SmoothQuant, SpinQuant, or FlatQuant) are omitted from the main evaluation benchmarks.",
+        "Restriction to Round-to-Nearest (RTN): The experimental evaluation is limited to RTN quantization. While the authors discuss extending WUSH to second-order compensation methods like GPTQ in future work, demonstrating synergy or performance against modern PTQ pipelines would significantly strengthen the paper's practical impact.",
+        "Simplifying theoretical assumptions: The derivation relies on first-order approximations, stochastic/unbiased quantization noise models, and block independence. While these are common analytical simplifications, their deviation from actual hardware quantizer dynamics (such as saturation, non-uniform FP spacing, and clipping) is not thoroughly characterized."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Principled and closed-form derivation: The paper provides an elegant mathematical derivation for optimal blockwise linear transforms under joint weight-activation quantization. Deriving a closed-form, calibration-based solution avoids expensive iterative optimization or gradient-based fine-tuning required by methods like SpinQuant or FlatQuant.",
+        "Theoretical explanation of Hadamard's efficacy: The analysis provides clear theoretical insight into why the Hadamard transform is effective, showing that it emerges naturally as an error-equalizing component ($U' = H$) combined with data-aware second-order moment adaptation.",
+        "Consistent empirical gains over Hadamard and Identity: Across multiple open LLMs (Llama-3.2-3B, Llama-3.1-8B, Qwen3-8B, Qwen3-14B) on LM Eval Harness and PlatinumBench, WUSH consistently improves upon RTN and block Hadamard baselines under FP4 formats (MXFP4, NVFP4)."
+      ],
+      "weaknesses": [
+        "Lack of inference runtime and hardware latency evaluation: Unlike pure Hadamard transforms that can leverage the fast Walsh–Hadamard transform (FWHT) or be globally fused, WUSH introduces block-specific, non-orthogonal transforms. The paper does not provide actual inference latency, FLOPs, or memory throughput measurements, leaving unclear whether the accuracy gains outweigh the runtime overhead of online activation transformations.",
+        "Limited baseline comparisons: The empirical evaluation only compares WUSH against Identity and standard block Hadamard rotations. Comparisons against other established data-dependent transform or outlier-suppression methods (such as SmoothQuant, AWQ, SpinQuant, or FlatQuant) are absent.",
+        "Missing INT4 end-to-end benchmark results: Although integer quantization constitutes a major part of the theoretical analysis (Section 2.3) and layer loss evaluation (Table 1), full model evaluations on LM Eval Harness (Table 2) and PlatinumBench (Figures 1–4) report only NVFP4 and MXFP4, omitting INT4 benchmark accuracy.",
+        "Theoretical idealizations: The proofs rely on several simplifying assumptions—such as first-order error splitting (Eq. 7), uncorrelated pseudo-noise modeling, and smooth approximations of mantissa/exponent rounding—which may deviate from actual deterministic rounding behavior at ultra-low bitwidths (e.g., 4-bit)."
+      ]
+    }
+  }
+}

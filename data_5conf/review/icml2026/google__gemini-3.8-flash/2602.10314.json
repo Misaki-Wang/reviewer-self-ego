@@ -1,0 +1,95 @@
+{
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Compelling conceptual motivation: Addressing the train–test mismatch in Masked Diffusion Models (MDMs)—where training uniformly explores exponentially many masking patterns while inference concentrates on high-confidence trajectories—is an important and timely problem.",
+        "Rigorous theoretical foundation: The authors prove that the proposed teacher-forced chain maintains marginal agreement with idealized inference (Proposition 1) and preserves the Bayes-optimal unmasking posterior minimizer (Proposition 2). Furthermore, Proposition 3 provides a clean theoretical separation showing exponential vs. linear sample complexity in a latent-observation setting.",
+        "Clever, zero-forward-pass implementation: Operating PUMA as a streaming batch buffer enables progressive unmasking across training iterations by reusing the forward-pass logits for confidence estimation, avoiding extra compute overhead and maintaining near-identical wall-clock throughput (3.41 it/s vs 3.78 it/s).",
+        "Comprehensive empirical validation: Evaluated across diverse domains and scales—from Sudoku (6.8M) to pretraining from scratch on TinyGSM (125M) and LoRA fine-tuning of Dream-Coder-7B. PUMA consistently delivers notable speedups (2.3x from scratch, 4.0x with autoregressive initialization) and robustly transfers across various inference decoding rules (Top-K, margin, entropy)."
+      ],
+      "weaknesses": [
+        "Scope of pretraining datasets: The pretraining experiments are centered on TinyGSM (structured Python solutions) and Sudoku puzzles, which both exhibit strong structural token-dependency patterns. Demonstrating gains on standard natural language pretraining corpora (e.g., FineWeb or SlimPajama) would further solidify generality.",
+        "Correlation across streaming updates: Because training samples are advanced along teacher-forced chains across consecutive iterations, consecutive gradient updates see incrementally perturbed versions of the same sequences. The potential impact of this autocorrelation on optimizer state dynamics (e.g., Adam second-moment estimates) is not deeply analyzed.",
+        "Multi-pass requirement per document: As acknowledged in the limitations, the method is inherently less suited to strict single-epoch, single-pass regimes since generating the trajectory requires seeing intermediate states of the same sequence over multiple steps."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Principled and elegant core idea: Modifying the forward masking process via a teacher-forced chain directly addresses the exponential train-test mismatch between uniformly random training masks and highly concentrated inference-time unmasking trajectories in Masked Diffusion Models (MDMs).",
+        "Solid theoretical grounding: Propositions 1 and 2 rigorously show that PUMA achieves marginal agreement with idealized inference rollouts while preserving the Bayes-optimal unmasking posterior as the loss minimizer (due to the conditioning structure canceling out in Bayes' rule). Proposition 3 further provides a clean sample-complexity separation in a structured latent-observation setting.",
+        "Efficient and practical design: By maintaining a streaming buffer of chains, PUMA reuses logits from the current forward pass to select the next unmasking positions, incurring virtually no extra forward-pass compute overhead and minimal wall-clock slowdown (3.41 it/s vs. 3.78 it/s).",
+        "Broad empirical validation and orthogonality: Experiments show convincing speedups across diverse regimes, including toy logic puzzles (Sudoku), 125M pretraining on TinyGSM (~2.3× speedup), synergistic combination with autoregressive initialization (~4.0× speedup) and block diffusion, and LoRA post-training on a 7B model (Dream-Coder) on HumanEval/MBPP.",
+        "Thorough ablations: The manuscript comprehensively evaluates the impact of K-scheduling, confidence thresholding, robust evaluation across different inference policies (Top-K, Top-K margin, entropy, temperature), and direct comparisons to loss-reweighting baselines like PAPL."
+      ],
+      "weaknesses": [
+        "Domain and scale limitations in pretraining: Pretraining from scratch is evaluated on TinyGSM (a domain-specific dataset converting GSM8K into structured Python programs) at 125M scale. Evaluating on general open-domain pretraining corpora (e.g., FineWeb, C4) with standard downstream zero-shot / perplexity evaluations would strengthen the generality of the findings.",
+        "Dependence on heuristics: The ablation in Figure 9 demonstrates that the K-schedule is critical to achieving substantial acceleration (without it, the model is ~1.7× slower than with scheduling). Tuning the schedule parameters (initial K, final K, step intervals) and the confidence threshold introduces design hyperparameters that may vary across sequence lengths and model scales.",
+        "Data efficiency in low-epoch regimes: Because each teacher-forced chain sequentially reveals tokens across multiple gradient steps for a single sample $x_0$, the model performs multiple gradient updates on intermediate masks of the same sample. In modern web-scale LLM pretraining where models often operate in a strictly single-epoch (or near single-epoch) regime, the trade-off between sequence diversity and trajectory fidelity warrants further exploration."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Compelling conceptual idea: Modifying the discrete diffusion forward process via a teacher-forced unmasking chain directly addresses the train-test distribution mismatch between uniform random masking and policy-driven inference.",
+        "Solid theoretical grounding: The paper rigorously proves that PUMA matches the marginal distribution of idealized MDM inference (Proposition 1) and preserves the true Bayes-optimal minimizer of the MDM training objective (Proposition 2), alongside a clear sample complexity separation on a structured toy distribution (Proposition 3).",
+        "Compute-efficient practical design: Because the confidence scores used to advance the teacher-forced chain are computed directly from the training forward pass logits, PUMA introduces virtually no extra FLOPs or forward-pass compute overhead, as confirmed by wall-clock throughput measurements (3.41 it/s vs. 3.78 it/s).",
+        "Comprehensive empirical evaluation across diverse setups: The method demonstrates convincing improvements across several regimes—1.7x on Sudoku, 2.3x speedup on 125M pretraining on TinyGSM, 4.0x speedup with autoregressive initialization, compatibility with block diffusion, and consistent gains (+10% on HumanEval, +5% on MBPP) when post-training a 7B Dream-Coder model.",
+        "Thorough ablations and baselines: The paper carefully investigates the sensitivity to the confidence threshold, K-scheduling, robustness across multiple inference-time decoding policies, and includes a direct comparison to PAPL (loss reweighting)."
+      ],
+      "weaknesses": [
+        "Reliance on multi-step sequence persistence / single-epoch limitations: Because PUMA advances each sample through a sequence of teacher-forced unmasking steps across consecutive minibatches, it requires multiple gradient steps per sequence. As acknowledged in the limitations, adapting PUMA to strictly single-epoch pretraining regimes on large-scale web corpora without temporal gradient correlation remains non-trivial.",
+        "Pretraining domains are restricted to highly structured/synthetic data: From-scratch pretraining experiments are demonstrated on Sudoku and TinyGSM (Python code format). Evaluating on standard natural language pretraining corpora (e.g., FineWeb, C4, or SlimPajama) would provide stronger evidence of generality for general open-domain text generation.",
+        "Sensitivity to schedule hyperparameters: Ablation results (Figure 8 and Figure 9) indicate that performance is sensitive to the K-schedule (e.g., removing scheduling causes a 1.7x slowdown relative to scheduled PUMA). While default heuristics are provided, introducing an unmasking schedule requires tuning across new sequence lengths and tasks.",
+        "Validation loss / ELBO misalignment: As shown in Figure 11 (left), PUMA yields a slightly higher negative ELBO on TinyGSM validation data compared to standard MDM training, reflecting the fact that optimizing under an inference-aligned trajectory distribution biases likelihood optimization away from off-trajectory masking states."
+      ]
+    }
+  },
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Compelling and conceptually elegant motivation: Standard Masked Diffusion Models (MDMs) train uniformly over all $2^L$ masking patterns ('train for the worst'), whereas inference decodes adaptively along highly structured, sparse trajectories. PUMA provides a principled way to bridge this train-test mismatch by redesigning the forward masking process via teacher-forced unmasking chains.",
+        "Strong theoretical grounding: The authors formally show that teacher-forced unmasking preserves the true posterior minimizer of the cross-entropy objective (Proposition 2) while matching the marginal distribution of idealized inference (Proposition 1). The sample complexity analysis (Proposition 3) clearly demonstrates the statistical advantage over random masking on structured latent distributions.",
+        "Careful and practical systems design: The streaming minibatch buffer reuses intermediate forward-pass logits to update mask states, introducing virtually zero forward-pass computational overhead. Wall-clock throughput is on par with standard MDM training.",
+        "Convincing empirical speedups and compatibility: At the 125M scale on TinyGSM, PUMA achieves a ~2.5x speedup in iterations-to-target-accuracy, robustly generalizes across varied inference-time policies (Top-K margin, entropy, varying step sizes), and compounds effectively with popular acceleration recipes like autoregressive pretraining initialization and block diffusion."
+      ],
+      "weaknesses": [
+        "Limited dataset diversity and pretraining scale: While a 125M model trained for 900k steps is nontrivial, the pretraining evaluation is restricted to TinyGSM, a synthetic Python-code math dataset with highly structured, predictable answer formats. It remains unverified whether the ~2.5x speedup holds on natural language pretraining corpora (e.g., FineWeb, C4) with looser long-range dependencies.",
+        "High sensitivity to the schedule heuristic: The ablation study (Figure 6) reveals that without K-scheduling (e.g., fixed K=42), PUMA is actually 1.9x slower than vanilla MDM. The practical success of PUMA heavily relies on carefully tuning the K-schedule and confidence-thresholding hyperparameters.",
+        "Gap between theory and practical instantiation: Proposition 1 assumes single-token reveals from the true posterior with a fixed policy, whereas practical training relies on a rapidly shifting, undertrained model policy, multi-token reveals, and confidence-based fast-forwarding. Although the authors provide empirical evidence of early trajectory stabilization in Sudoku, a deeper theoretical characterization of this moving-target dynamic is missing."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Conceptual novelty: The paper introduces a fresh and well-motivated perspective to accelerating Masked Diffusion Models (MDMs) by redesigning the forward masking process (via teacher-forced unmasking chains) rather than merely adjusting architectures or learning-rate/block schedules.",
+        "Theoretical soundness: The authors provide rigorous theoretical guarantees showing that teacher-forced progressive unmasking preserves the true posterior minimizer of the MDM training objective (Proposition 2) and matches the marginal state distribution of idealized inference (Proposition 1), complemented by a clean sample complexity separation proof (Proposition 3).",
+        "Computational efficiency by design: Implementing PUMA via a streaming buffer allows the model to reuse logits computed during the training forward pass for the unmasking policy, incurring negligible wall-clock overhead and zero extra model forward passes.",
+        "Consistent empirical acceleration and orthogonality: Demonstrates solid ~2.0-2.5x speedups in iterations-to-target accuracy on GSM8K (125M parameter scale) and proves complementary when stacked onto existing standard recipes such as autoregressive model initialization and block diffusion."
+      ],
+      "weaknesses": [
+        "Limited pretraining domains and scale: The empirical evaluation is primarily conducted on Sudoku and TinyGSM (a synthetic, structured Python representation of GSM8K) at the 125M model scale. Demonstrating effectiveness on standard open-domain web corpora (e.g., SlimPajama, FineWeb) and scaling towards >1B parameter regimes would significantly strengthen the empirical claims.",
+        "Dependence on schedule heuristics: Ablation results (Figure 6) reveal that omitting K-scheduling (e.g., static K=42) severely degrades efficiency (1.9x slower), indicating that the schedule for K and the confidence threshold require careful task-dependent tuning.",
+        "Distributed infrastructure considerations: Maintaining stateful, asynchronous streaming chains per example within mini-batches across large distributed clusters (e.g., high data-parallel degrees or pipeline parallelism) may introduce non-trivial engineering overheads or state management complexities that are not discussed."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Original and elegant conceptual framing: The paper targets the fundamental 'train for the worst' inefficiency in Masked Diffusion Models (MDMs) by redesigning the forward masking distribution to align with inference-time unmasking trajectories, rather than relying solely on architectural tricks or autoregressive initialization.",
+        "Sound theoretical backing: Proposition 1 rigorously proves marginal distribution agreement between the teacher-forced training chain and idealized inference, Proposition 2 establishes that the Bayes-optimal unmasking posterior is invariant to this forward process modification, and Proposition 3 illustrates an exponential vs. linear sample complexity gap on a stylized observation-latent model.",
+        "Zero forward-pass computational overhead: Implementing PUMA via a streaming buffer allows the policy decisions to directly reuse logits computed during the normal training loss evaluation step, introducing no additional forward passes.",
+        "Solid empirical acceleration and orthogonality: Demonstrates consistent 2.0x–2.9x wall-clock/iteration speedups across diverse sampling policies (Top-K, Top-K margin, entropy) on 125M pretraining, and proves fully complementary to common recipes like autoregressive model initialization (2.3x speedup) and block diffusion (1.7x speedup).",
+        "Thorough ablations and diagnostics: The manuscript provides insightful analyses of trajectory convergence (Figure 3 and Figure 7), confidence threshold sensitivity, and the necessity of K-scheduling."
+      ],
+      "weaknesses": [
+        "Evaluation limited to structured/synthetic domains: Experiments are confined to Sudoku (toy) and TinyGSM (Python programs generated from GSM8K) at 125M scale. While the authors transparently acknowledge this limitation, empirical verification on open-domain natural language text (e.g., C4, FineWeb, SlimPajama) and larger scales would strengthen the generality of the conclusions.",
+        "High sensitivity to K-scheduling: As demonstrated in the ablation (Figure 6, lower left), running PUMA with a fixed K=42 without scheduling results in a 1.9x slowdown compared to standard MDM training. This indicates that the success of the method hinges on tuning the schedule parameters (initial K, increment step, frequency).",
+        "Batch correlation dynamics: Updating streaming chains across consecutive minibatches introduces temporal correlation between training iterations for a given x_0, which could affect optimizer dynamics (e.g., Adam first/second moments) across different batch sizes or learning rate schedules, an aspect that is not extensively characterized.",
+        "Theoretical idealization gap: Proposition 1 assumes single-token unmasking (|S|=1) and exact sampling from the true posterior, whereas the actual algorithm unmasks chunks of tokens (|S|>1) using the imperfect current model checkpoint, leaving a modest gap between the theoretical guarantee and practical behavior."
+      ]
+    }
+  }
+}

@@ -18,6 +18,26 @@
         "The instruction-tuned base models (LLaMA-2-7B-chat, Mistral-7B-Instruct) are used rather than base pretrained versions, which could conflate effects of instruction tuning with the proposed architecture, and this choice isn't ablated."
       ]
     },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a well-motivated and practically important problem: extracting rich embeddings from decoder-only LLMs without altering their pretrained attention mechanism.",
+        "The proposed Contextual-token + concatenation scheme is simple, architecture-agnostic, and yields clear efficiency benefits (up to 85% shorter sequences and 82% faster inference vs. ECHO/bge-en-icl), which is a concrete and verifiable advantage.",
+        "Extensive ablations are provided (number of contextual tokens, token position, freezing vs. fine-tuning the bidirectional encoder, choice of bidirectional encoder, alternative representation strategies), giving a reasonably thorough picture of the design space.",
+        "Experimental setup, data sources, instructions, and hyperparameters are documented in detail (Appendices A–C), supporting reproducibility.",
+        "Results are competitive with or slightly exceed several strong causal-attention and bidirectional-attention baselines under a matched \"public retrieval data only\" training regime, and the paper is transparent about this restricted comparison scope."
+      ],
+      "weaknesses": [
+        "Novelty is incremental: prepending a single learned summary/memory token derived from an auxiliary encoder is conceptually close to established prefix/memory-token and encoder-injection ideas; the specific combination here is new but not conceptually deep.",
+        "The core claimed advantage over bge-en-icl (few-shot) is essentially a tie (66.08 vs 66.10 average), and improvements over the strongest same-backbone baselines (LLM2Vec, ECHO) are small (0.5–1.4 points) with no reported variance, seeds, or significance testing, making the \"state-of-the-art\" claim hard to substantiate rigorously.",
+        "The method is not purely a \"decoder-only\" improvement: it introduces an entire additional pretrained bidirectional encoder (E5-base-v2, itself already strongly optimized for embeddings, scoring 60.97 alone) plus an MLP adapter. Since much of the gain could stem from this already strong auxiliary encoder rather than from better exploitation of the LLM's own causal pretraining, the paper's central narrative (that preserving causal attention lets the LLM \"better extract pretrained semantic knowledge\") is not cleanly isolated or demonstrated.",
+        "The Appendix C.1 L2-norm analysis shows the EOS token dominates the Contextual token in norm across tasks, which arguably undercuts (rather than supports) the claim that the Contextual token meaningfully mitigates recency bias in the final concatenated embedding — this potential contradiction is not discussed.",
+        "Claims about robustness to \"long-text scenarios\" and recency bias are motivated qualitatively but never directly tested on long-document/long-context embedding benchmarks (e.g., long-form retrieval or LongEmbed-style evaluation); the MTEB average chars used in the efficiency plot are still fairly short.",
+        "The comparison is restricted only to methods trained on public retrieval data, which, while stated as a fairness choice, also conveniently excludes stronger competitors (e.g., full NV-Embed, GRITLM with additional data) that might otherwise outperform Causal2Vec, so \"SOTA\" claims are scoped narrowly and could be seen as somewhat selective.",
+        "The ablation with multiple Contextual tokens (Table 5) switches from an MLP-based single-token mechanism to a cross-attention/learnable-query mechanism, confounding the comparison and weakening the conclusion that \"one token is sufficient.\"",
+        "Evaluation is limited to English MTEB and models up to 7B parameters; no evidence is given for multilingual settings or larger/more diverse LLM backbones, limiting generality claims made in the introduction and conclusion."
+      ]
+    },
     "exp3_positive": {
       "oa": 4,
       "strengths": [
@@ -57,6 +77,26 @@
         "No error bars, multiple seeds, or significance testing are reported for any experiment, so small performance differences (often <1 point) that are used to argue superiority over closely competing methods lack statistical support.",
         "The approach's benefits are demonstrated only on English data with LLMs up to 7B parameters; scalability to larger models and multilinguality (both acknowledged as limitations) remain unverified, limiting confidence in generality.",
         "The method still requires training/maintaining an auxiliary bidirectional encoder and an MLP projector, plus doubling embedding dimensionality via concatenation—these are non-trivial architectural and storage additions that somewhat undercut the 'no architecture modification' framing, and the added complexity/parameter count relative to simpler baselines (e.g., plain last-token pooling with noise-robust training) is not fully contextualized in the efficiency comparisons besides inference latency."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Clear, well-motivated design that keeps the LLM's original causal attention intact rather than converting to bidirectional attention; the paper backs this design choice with an empirical study (Fig. 3, Appendix C.6) showing that bidirectional conversion degrades performance for most backbones except Mistral-7B, which is a useful and somewhat under-appreciated observation for the field.",
+        "The proposed mechanism (a single lightweight bidirectional-encoder-derived 'Contextual token' prepended to the sequence, plus Contextual+EOS concatenation for pooling) is simple, architecture-preserving, and computationally cheap compared to alternatives such as input-repetition (ECHO) or in-context-example augmentation (bge-en-icl); the efficiency analysis (Fig. 4, Fig. 6) convincingly demonstrates large reductions in sequence length and inference time.",
+        "Experiments span four LLM backbones from 1.3B to 7B parameters and the full 56-dataset MTEB benchmark, which is a reasonably broad evaluation for an academic-scale study.",
+        "Extensive ablations (component-wise contributions, representation-method variants, number of Contextual tokens, choice/size of bidirectional encoder, token position, encoder freezing, noise robustness, attention-mechanism comparison) provide a fairly thorough empirical characterization of the method's behavior and its sensitivity to design choices.",
+        "Fair and transparent experimental protocol: models are compared only against others trained on public retrieval data, with an explicit and reasonable justification for excluding proprietary-data industrial models from head-to-head comparison."
+      ],
+      "weaknesses": [
+        "Novelty is incremental: prepending a compressed contextual representation to a causal sequence is conceptually close to prior memory/soft-prompt/gisting-style approaches and to the cited TP method (prepending a token from an earlier layer); the core contribution largely amounts to combining an external bidirectional pre-encoder with a specific pooling scheme (Contextual+EOS concatenation), rather than a fundamentally new representational mechanism.",
+        "The reported gains over the strongest existing causal-attention baseline (bge-en-icl) are marginal without the ICL add-on (66.10 vs. 66.08 on MTEB-56), and the headline 'new SOTA' result (66.85) is only achieved by additionally combining Causal2Vec with the ICL technique from a competing paper, which conflates the paper's own contribution with a technique borrowed from prior work, making it hard to isolate how much of the improvement is attributable to the proposed method itself.",
+        "Many reported differences across Tables 1–6 are within roughly 0.2–1.0 points, with no variance estimates, multiple random seeds, or significance testing reported anywhere in the paper, making it difficult to assess whether the improvements are reliable versus noise, especially given the multiple architectural/hyperparameter differences between compared systems (data mixture identical, but seeds/implementation details vary across cited baselines).",
+        "The claim that 'modifying attention mechanisms is suboptimal for most LLMs' is generalized from observations on only four backbones (one of which, Mistral-7B, behaves oppositely), which is a fairly thin empirical basis for the strong causal explanation offered (pre-train/fine-tune attention mismatch) — no mechanistic or diagnostic evidence (e.g., attention pattern analysis) is provided beyond downstream score differences.",
+        "The single-Contextual-token design is presented as sufficient, and increasing the number of tokens actually hurts performance (Table 5); this counterintuitive result is explained only speculatively ('redundancy') without further analysis, leaving open whether the bottleneck reflects a genuine architectural insight or an artifact of the particular cross-attention extraction scheme used for multi-token variants.",
+        "Ablation and analysis experiments rely heavily on the self-curated MTEB-MINI subset (30 of 56 datasets), introducing a risk of selection bias in the datasets used to tune and justify design decisions, even though the final headline numbers use the full benchmark.",
+        "Model scale is capped at 7B parameters; given how fast LLM-based embedding methods scale, it remains unclear whether the reported causal-vs-bidirectional trends and the contextual-token benefit persist at larger scales, and the paper explicitly acknowledges this as an untested limitation.",
+        "The method still requires training and deploying an auxiliary bidirectional encoder (up to 110M parameters) and an MLP adapter alongside the LLM, and doubles the final embedding dimensionality (Contextual+EOS concatenation), which adds storage and system complexity not fully accounted for when the paper frames the approach as introducing 'no significant computational overhead.'"
       ]
     },
     "exp3_positive": {

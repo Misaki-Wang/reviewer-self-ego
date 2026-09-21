@@ -1,0 +1,97 @@
+{
+  "v3": {
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "The proposed Dilated Unmasking Scheduler (DUS) is elegant, simple, training-free, and model-agnostic, providing a drop-in inference acceleration technique for masked diffusion language models.",
+        "The empirical evaluation is comprehensive and compelling across five open-source discrete diffusion models (LLaDA-Base-8B, LLaDA-Instruct-8B, Dream-Instruct-7B, DiffuCoder-Base-7B, DiffuCoder-Instruct-7B) on challenging reasoning and coding benchmarks (GSM8K, MATH500, HumanEval, MBPP, BBH, MMLU-Pro).",
+        "Across various speedup regimes (2.7x to 10.7x), DUS consistently outperforms standard confidence-based parallel unmasking baselines at identical NFE budgets, demonstrating significant recovery of generation quality.",
+        "The paper includes thoughtful ablations (Table 3 and Table 5) isolating the effects of fixed vs. incremental unmasking schedules and block sizes under fixed evaluation budgets."
+      ],
+      "weaknesses": [
+        "The theoretical justification relies heavily on a first-order Markov chain assumption with fast mixing, which significantly oversimplifies the syntactic and semantic long-range structure of natural language and code.",
+        "Comparison to other recent advanced parallel/adaptive schedulers (such as EB-Sampler by Ben-Hamu et al., 2025) is missing in the experimental section, leaving comparisons limited primarily to standard top-k confidence and random baselines.",
+        "The paper mentions a 'Skip Mechanism' (Section 3.6) to handle uncertainty, but does not detail how hyperparameters/thresholds for skipping were chosen, nor whether this mechanism was enabled during the main benchmarks in Tables 1 and 2.",
+        "Speedups are measured strictly via reduction in Number of Function Evaluations (NFE) rather than actual measured wall-clock latency or throughput (e.g., tokens per second) on GPUs."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Simple, elegant, and model-agnostic approach: The Dilated Unmasking Scheduler (DUS) requires no retraining, no auxiliary models, and can be applied directly to existing masked diffusion language models (MDLMs).",
+        "Comprehensive empirical evaluation: The method is validated across multiple 7B–8B parameter diffusion models (LLaDA-Base/Instruct, Dream-Instruct, DiffuCoder-Base/Instruct) and a broad set of benchmarks spanning mathematics (GSM8K, MATH500), coding (HumanEval, MBPP), and general reasoning (BBH, MMLU-Pro).",
+        "Substantial empirical gains: DUS dramatically outperforms standard confidence-based parallel unmasking at identical NFE budgets, recovering a large portion of the performance drop typically suffered at high parallelization factors.",
+        "Insightful ablation study: Table 3 effectively isolates the benefits of spatial dilation versus incremental group sizing, illustrating why unguided/random selection benefits from spatial spacing while confidence-based selection suffers from spatial clustering."
+      ],
+      "weaknesses": [
+        "Conceptual inconsistency in theoretical motivation: The paper motivates DUS as minimizing the joint entropy gain $H(X_{i_1}, \\dots, X_{i_k} | S_t)$, but by the chain rule and non-negativity of mutual information, $H(X_{i_1}, \\dots, X_{i_k} | S_t) \\le \\sum_{j=1}^k H(X_{i_j} | S_t)$. Minimizing mutual information between selected tokens actually *maximizes* the joint entropy toward the sum of marginals, rather than minimizing it. The genuine rationale for spatial separation is that the denoiser generates tokens conditionally independent of each other (factorized prediction), so minimizing mutual information ensures the true joint distribution matches the model's factorized generation assumption. The mathematical framing in Sections 3.3–3.6 should be corrected.",
+        "Lack of wall-clock latency measurements: Speedups are reported purely in terms of theoretical NFE reduction ($B / \\log_2 B$). Measuring actual wall-clock inference latency and throughput on GPU hardware is important to establish the real-world efficiency gains, especially given memory access and batching dynamics.",
+        "Missing comparisons with competitive inference-time schedulers: While compared against the standard top-$k$ confidence/entropy baseline, the paper does not empirically compare against recent inference-time schedulers mentioned in the related work, such as EB-Sampler (Ben-Hamu et al., 2025).",
+        "Unclear deployment of the Skip Mechanism: Section 3.6 introduces a threshold-based 'Skip Mechanism' as a core feature, but the experimental section does not clarify whether this mechanism was enabled during benchmark evaluations, what threshold values were used, or its individual ablation."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Simple, inference-only scheduling approach: DUS introduces a deterministic, coarse-to-fine dilated unmasking pattern within semi-autoregressive blocks that requires no retraining or auxiliary models.",
+        "Broad empirical evaluation across multiple discrete diffusion architectures (LLaDA-Base/Instruct, Dream-Instruct, DiffuCoder-Base/Instruct) and multiple benchmarks spanning math (GSM8K, MATH500), coding (HumanEval, MBPP), and reasoning (BBH, MMLU-Pro).",
+        "Consistently outperforms naive confidence-based parallel unmasking across various block sizes (B in {8, 16, 32, 64}), showing that spatially dispersing simultaneously unmasked tokens mitigates parallel prediction degradation."
+      ],
+      "weaknesses": [
+        "Fundamental theoretical confusion in Section 3: The theoretical motivation states that the objective is to 'minimize joint entropy' (Eq. 2-3) and claims in Eq. (5) that 'self-planner by confidence has a lower bound on the entropy gain, which is the joint entropy, while there is no guarantee for the bound equality.' By Subadditivity of Entropy, the joint entropy H(X_1, ..., X_k | S) is bounded from ABOVE by the sum of marginal entropies \\sum H(X_j | S), not from below. For fixed marginals, spatially separating tokens to make them approximately independent MAXIMIZES the joint entropy towards the sum of marginals (by minimizing mutual information I(X_i; X_j)). The goal of parallel generation is to minimize conditional dependence / factorization error (i.e., multi-token clash under factorial prediction), not to minimize joint entropy. Claiming that DUS 'minimizes independent conditional entropy and achieves the joint entropy bound, whereas other planners are unbounded from below' is mathematically incorrect.",
+        "Flawed application of Markov bounds in Lemma 1 & 2: Equation (12) applies the unconditional mixing bound from Lemma 2 (Asoodeh et al., 2016) directly to conditional mutual information I(X_i; X_j | S_t). In semi-AR diffusion, S_t contains previously revealed conditioning tokens, meaning the remaining masked variables form a conditional Markov random field / bridge where conditioning can alter or introduce dependencies, rendering the direct application of Lemma 2 mathematically ungrounded.",
+        "Absence of wall-clock runtime and latency measurements: All reported 'speedups' (2.7x, 4.0x, 6.4x, 10.7x) are purely theoretical NFE reduction ratios (B / log_2 B). The manuscript does not report actual latency, throughput (tokens/second), or wall-clock speedup on GPUs, leaving unclear the real-world efficiency gains after accounting for memory bandwidth and parallel kernel overhead.",
+        "Lack of comparisons with modern MDLM acceleration baselines: The paper only compares against naive top-k self-confidence unmasking. Prior MDLM acceleration methods cited in the related work—such as Jump Your Steps (Park et al., 2024), Entropy-Bounded Sampling (Ben-Hamu et al., 2025), and Path Planning (Peng et al., 2025)—are not evaluated or compared against empirically.",
+        "Ambiguities in experimental details and ablations: The paper introduces a 'Skip Mechanism' in Section 3.6 (deferring low-confidence tokens to subsequent iterations), but never clarifies whether this mechanism was active during the experiments in Tables 1-2, what threshold was used, or how much it contributed. Furthermore, in Table 3, 'Random inc' mysteriously outperforms 'Conf fixed' by a wide margin (e.g., 53.67% vs 39.67% on LLaDA-Instruct B=32), which is counter-intuitive and inadequately explained given that random selection does not enforce dilated spacing.",
+        "Frequent grammatical errors and presentation issues throughout the text (e.g., 'instroduced', 'variate speedup factors', 'general knoeledge', 'uncurtained tokens', '1–5,%', 'LLada')."
+      ]
+    }
+  },
+  "v4": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Clear, intuitive, and theoretically principled motivation: The paper identifies a fundamental flaw in standard parallel unmasking for discrete diffusion LMs (spatial clustering of co-unmasked tokens causing severe conditional dependence) and addresses it by bounding the joint conditional entropy gap via dilated spacing.",
+        "Completely training-free and model-agnostic: Dilated Unmasking Scheduling (DUS) requires zero architectural modifications, retraining, or external guiding networks, and introduces virtually zero runtime overhead during sampling compared to denoiser forward passes.",
+        "Comprehensive empirical validation: The method is evaluated across 5 modern MDLM variants (LLaDA Base/Instruct, Dream-Instruct, and DiffuCoder Base/Instruct) across 7 diverse benchmarks covering math reasoning (GSM8K, MATH500), code generation (HumanEval, MBPP), general knowledge (BBH, MMLU-Pro), and instruction following (IFEval).",
+        "Effective hybrid post-filter extension: Demonstrating that dilated spacing can act as a drop-in filter for adaptive schedulers (EB-Sampler and CB-Sampler) shows the generality and complementary nature of the core idea.",
+        "Solid empirical diagnostics: The token distance analysis, runtime profiling, and qualitative visualizations convincingly substantiate why dilated scheduling avoids the failure modes of confidence-based planners."
+      ],
+      "weaknesses": [
+        "Theoretical guarantees rely on restrictive assumptions: The formal bound relies on stationary, ergodic Variable-Length Markov Chains (VLMCs) with geometric mixing, which does not fully capture non-local syntactic and semantic dependencies characteristic of code and multi-step reasoning.",
+        "Substantial quality degradation at aggressive speedups: While DUS reliably outperforms confidence-based baselines at matched budgets, scaling to larger block sizes (e.g., B=64) still incurs steep accuracy drops on difficult benchmarks (e.g., HumanEval pass@1 dropping below 12%), restricting the practical high-fidelity operating range to moderate block sizes (B=16 to 32).",
+        "Trade-offs against adaptive samplers: As shown in Figure 5 and Appendix B.9, while DUS occupies the lowest-NFE operating points, adaptive samplers (EB/CB) often achieve higher top-end accuracy when more NFE budget is available, meaning DUS alone is primarily advantageous in aggressively latency-constrained scenarios."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Simple, elegant, and practical method: The Dilated Unmasking Scheduler (DUS) is an inference-only, model-agnostic, and training-free method that replaces heuristic, clustered token unmasking with a deterministic coarse-to-fine dilated schedule, achieving $O(\\log B)$ iterations per block.",
+        "Solid theoretical motivation: The paper provides clear information-theoretic framing connecting parallel sampling quality to the entropy gap $\\Delta(I_t; S_t)$ and mutual information decay between separated positions, providing sound justification for strided/dilated reveals.",
+        "Comprehensive experimental evaluation: The authors validate the method across five model variants (LLaDA-Base/Instruct, Dream-Instruct, DiffuCoder-Base/Instruct) and multiple standard benchmarks spanning math (GSM8K, MATH500), coding (HumanEval, MBPP), reasoning (BBH, MMLU-Pro), and instruction-following (IFEval).",
+        "Substantial speedup and performance recovery: DUS significantly outperforms confidence-based parallel planners across varying block sizes and speedup regimes (up to $5.8\\times$ wall-clock speedup and $10.7\\times$ NFE reduction), effectively mitigating the quality degradation typical of parallel unmasking.",
+        "Generalizability via the post-filter extension: Section 4.4 demonstrates that the dilated spacing principle is complementary to existing adaptive samplers (EB-Sampler and CB-Sampler), consistently improving their accuracy when used as a drop-in spatial filter."
+      ],
+      "weaknesses": [
+        "Gap between theoretical assumptions and language modeling reality: The theoretical guarantees rely on stationary, ergodic finite-order VLMCs with fast geometric mixing (Assumption C.1). While the authors acknowledge this limitation in Section 3.6, natural language—especially code and multi-step reasoning—features strong non-Markovian long-range syntactic and semantic dependencies.",
+        "Trade-offs at larger block sizes: Performance degrades noticeably when block sizes become large ($B=64$ or full-sequence single-block $B=G$), indicating that dilated scheduling cannot completely overcome the challenge of predicting tokens from very sparse initial contexts.",
+        "Incomplete repository link in text: In the Abstract (page 1) and Appendix A.3 (page 12), the text contains placeholder phrasing ('Code is available at' / 'publicly available at for reproducibility') without an anonymous URL or repository tag."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Principled and simple formulation: The paper effectively frames parallel unmasking in masked diffusion language models through the lens of minimizing the entropy gap between the joint conditional entropy and the product-of-marginals surrogate. Grounding the coarse-to-fine dilated schedule in conditional mutual information decay provides clear conceptual motivation.",
+        "Completely training-free and model-agnostic: DUS requires no retraining, architectural changes, or auxiliary guiding networks (unlike learned planners or draft models), making it lightweight and immediately applicable as an inference-time schedule.",
+        "Comprehensive empirical evaluation: Experiments span three distinct 7B/8B diffusion model families (LLaDA, Dream, DiffuCoder) across a diverse set of tasks (GSM8K, MATH500, HumanEval, MBPP, BBH, MMLU-Pro, IFEval), consistently showing significant gains over traditional confidence-based parallel decoding at matched NFE budgets.",
+        "Thorough ablations and profiling: The manuscript provides insightful analyses, including wall-clock speedup verification, per-step overhead profiling, empirical spatial token distance measurements confirming reduced clustering, and ablations on block sizes and schedule parameters.",
+        "Useful extension to adaptive schedulers: Demonstrating that dilated spacing can function as a post-filter for entropy-bounded (EB) and confidence-bounded (CB) samplers substantially broadens the practical utility of the proposed spacing principle."
+      ],
+      "weaknesses": [
+        "Idealized theoretical assumptions: The theoretical guarantees (Lemmas 3.5 and 3.6) rely on stationary, ergodic variable-length Markov chain (VLMC) assumptions with geometric mixing. While the authors acknowledge this as an analytical motivation, natural language and code exhibit rich, non-Markovian, long-range dependencies.",
+        "Agnostic to subword/semantic token boundaries: Because DUS enforces a rigid geometric dilation pattern independently of token semantics, it can split multi-token words, identifiers, or tightly coupled syntactic pairs across different reverse steps, occasionally forcing the model to predict intermediate subwords without immediate local context in early iterations.",
+        "Comparison with adaptive methods in the low-NFE regime: In standalone form, DUS primarily populates the aggressive low-NFE / high-speedup operating regime (as illustrated in Figure 5), whereas adaptive methods like EB-Sampler and CB-Sampler achieve higher peak accuracy at higher NFE budgets. While the hybrid post-filter in Section 4.4 bridges this, standalone DUS can underperform adaptive baselines when higher compute budgets are permissible."
+      ]
+    }
+  }
+}

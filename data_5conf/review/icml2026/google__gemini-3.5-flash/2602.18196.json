@@ -1,0 +1,92 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Identifies a critical and practical limitation of inference-time sparsification: standard dense attention fails to generalize to structured dilated patterns because it lacks an explicit mechanism to maintain a complete receptive field.",
+        "Proposes an elegant solution, RAT+, which integrates full-sequence recurrence and active recurrence learning (ARL) during pretraining, forcing the model to acquire robust recurrence capacity.",
+        "Enables flexible inference-time efficiency by allowing a single dense model to adapt to various sparse patterns (dilated attention, hybrid compositions, top-k block attention) with a very lightweight adaptation stage (1B tokens).",
+        "Provides a thorough empirical validation spanning short-context commonsense reasoning, LongBench, and RULER benchmarks, demonstrating strong performance retention alongside substantial end-to-end decoding throughput gains (up to 40-60x).",
+        "Presents solid scaling results up to a 2.6B parameter model trained on 200B tokens, showing that the performance gap between dense and dilated attention further shrinks at larger model scales."
+      ],
+      "weaknesses": [
+        "The recurrence mechanism introduces some parameter and compute overhead during pretraining, requiring an extra linear projection which is left as future work to optimize.",
+        "While 1B tokens is much cheaper than training separate sparse models from scratch, adapting to a specific target dilation still requires a non-zero adaptation process rather than being dynamically switchable completely training-free at runtime."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "The paper addresses a highly practical and significant challenge: enabling flexible inference-time sparsification (specifically dilated attention) of large language models without retraining separate sparse models from scratch.",
+        "The proposed RAT+ architecture is well-motivated and technically sound, elegantly addressing covariate shifts and 'lazy' recurrence learning via full-sequence recurrence and Active Recurrence Learning (ARL).",
+        "The evaluation is exceptionally thorough, demonstrating strong performance across language modeling perplexity, short-context commonsense reasoning, long-context understanding (LongBench), and retrieval-heavy benchmarks (RULER NIAH).",
+        "The paper shows great scaling potential, scaling up to 2.6B parameters and 200B tokens, where the performance gap between dense and sparse configurations becomes even smaller.",
+        "Excellent throughput and latency analyses are provided with real wall-clock measurements, proving the practical utility of the proposed method."
+      ],
+      "weaknesses": [
+        "While the method avoids expensive training from scratch, it still requires a lightweight 'resolution adaptation' phase of 1B tokens to switch to a sparse pattern, which is not completely training-free or plug-and-play compared to some training-free sparsification methods (e.g., SnapKV, H2O).",
+        "The recurrence module introduces additional parameter and computational overhead (e.g., extra linear projections and associative scans during prefilling), which slightly offsets the FLOP reductions at shorter sequence lengths.",
+        "Optimal speedup depends on specialized kernels (such as FlexAttention and associative scans), which may limit immediate portability to diverse hardware backends."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper addresses a very practical and important problem: enabling a single pretrained dense model to flexibly adapt to various structured sparse attention configurations at inference time without training separate sparse models from scratch.",
+        "The empirical evaluation is extensive, spanning multiple model scales (up to 2.6B parameters), large token counts (up to 200B), and diverse tasks including common-sense reasoning, LongBench, and retrieval-heavy RULER benchmarks.",
+        "The hardware benchmarking (throughput and latency analysis) is thorough, showing concrete wall-clock speedups for both prefilling and decoding steps."
+      ],
+      "weaknesses": [
+        "The claim of \"flexibly switched at inference time\" is compromised by the requirement of a 1B-token 'resolution adaptation' phase for each configuration. If a user wants to dynamically change the dilation size $D$ based on hardware resources or sequence lengths at runtime, having to run a 1B-token fine-tuning stage for each target $D$ (as shown in Figure 7) is a notable limitation compared to truly training-free sparse attention techniques.",
+        "The proposed Active Recurrence Learning (ARL) joint-training strategy requires processing both a sparse configuration ($D=64$) and a dense configuration ($D=1$) per batch. This dual-path optimization inevitably increases pretraining FLOPs, memory footprint, and wall-clock training time, which is not thoroughly quantified or compared against standard single-pass pretraining.",
+        "The architecture introduces parameter and FLOP overhead due to the extra projection layers required for the recurrence mechanism. The authors state that they 'leave saving parameters for future work', which makes direct comparisons with standard attention models of the same parameter scale somewhat unequal.",
+        "The clarity of notation in Section 4 is challenging. The distinction between chunk size $L$, actively enforced recurrence length $L^*$, and dilation size $D$ is dense and difficult to parse, particularly regarding how the full-sequence recurrence ($L=T$) enforces the $L^*=64$ limit during joint training."
+      ]
+    }
+  },
+  "v3": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "The paper introduces a novel and highly practical paradigm, 'Train Dense, Infer Sparse' (RAT+), which allows a single pretrained model to be flexibly adapted to various dilated attention configurations at inference time.",
+        "The proposed techniques, full-sequence recurrence and active recurrence learning (ARL), are well-motivated by thorough analytical and empirical investigations into why standard attention models fail to sparsify into dilated patterns.",
+        "Comprehensive and strong experimental results across different scales (from 1.5B to 7.6B parameters) demonstrate minimal performance degradation at high dilation factors (e.g., D=64), while yielding massive throughput and memory savings.",
+        "The paper is very well-written, with clear figures, comprehensive ablation studies, and valuable positioning relative to other efficiency methods like SSMs, GQA, and top-k block attention."
+      ],
+      "weaknesses": [
+        "The approach is not entirely zero-shot at inference time, as it still requires a short resolution adaptation stage (using 1B tokens) to transition from continuous dense attention to dilated connections.",
+        "The joint training strategy (updating both dense and sparse configurations per batch) increases the pretraining FLOPs and complexity compared to standard dense training.",
+        "The implementation currently relies on PyTorch's default associative scan and FlexAttention without custom CUDA kernels, meaning the actual wall-clock speedups in prefilling could be further optimized with dedicated engineering effort."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Compelling and highly practical motivation: enabling a single pretrained dense model to flexibly support various dilated attention configurations at inference time without training from scratch.",
+        "Well-grounded analysis of why standard attention and RAT fail under the 'train dense, infer sparse' paradigm, leading directly to the two novel solutions: full-sequence recurrence and active recurrence learning.",
+        "Extensive and high-quality evaluation scaling up to 7.6B parameters, demonstrating minimal accuracy degradation (only ~1 point drop) at large dilation sizes (e.g., D=64) on diverse benchmarks (CSR, LongBench, RULER).",
+        "Comprehensive hardware-efficiency profiling with measured wall-clock speedups and throughput improvements (up to 40x-60x higher throughput at D=64), backed by detailed analyses of prefilling and decoding latencies."
+      ],
+      "weaknesses": [
+        "The model still requires a short resolution adaptation (1B tokens) when switching to a sparse configuration at inference time. While 1B tokens is small, it is not strictly 'zero-shot' compared to some dynamic sparsity methods like StreamingLLM.",
+        "The training pipeline is slightly more complex than standard Transformers due to the joint dense-sparse training batches (ARL) needed to prevent lazy recurrence learning.",
+        "Although the paper showcases impressive wall-clock speedups using PyTorch's FlexAttention and associative scan, the full efficiency potential of RAT+ is yet to be realized without dedicated custom CUDA kernels."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Proposes a highly practical and elegant 'Train Dense, Infer Sparse' paradigm, allowing a single pretrained dense model to flexibly adapt to various inference-time sparsification patterns instead of training multiple sparse models from scratch.",
+        "Provides deep, insightful technical analyses on why standard attention fails at dilated sparsification, successfully identifying the critical role of lightweight recurrence in constructing a complete receptive field to bridge disconnected attention patterns.",
+        "Formulates effective architectural and training solutions, such as full-sequence recurrence to eliminate covariate/distribution shifts, and Active Recurrence Learning (ARL) via joint sparse/dense training to prevent 'lazy' recurrence optimization.",
+        "Demonstrates exceptional empirical validation and scaling, evaluating models up to 7.6B parameters trained on up to 200B tokens, which clearly showcases that the gap between dense and dilated attention narrows at larger scales.",
+        "Shows significant decoding throughput gains (up to 40x–60x maximum throughput) and KV cache size reductions on real hardware (GH200), validated across diverse benchmarks (LongBench, commonsense reasoning, RULER)."
+      ],
+      "weaknesses": [
+        "Although the resolution adaptation phase is very lightweight (1B tokens) compared to full pretraining, it still requires a short optimization step and prevents fully zero-shot, training-free inference-time sparsification.",
+        "To fully unlock the potential of these models in production deployments, specialized and highly optimized CUDA kernels for the combined recurrence and dilated attention are necessary (though the authors' profiling with FlexAttention is a strong step forward).",
+        "The joint training strategy (processing both dense and sparse configurations per batch) adds minor complexity and computational overhead to the pretraining pipeline."
+      ]
+    }
+  }
+}

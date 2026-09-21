@@ -1,0 +1,119 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 6,
+      "strengths": [
+        "Clear and well-motivated problem identification: reasoning models are decode-dominated, so prompt-only calibration causes a train/test distribution mismatch during pruning; the observation that pruning can *slow down* inference via longer, rambling CoT traces is interesting and practically important.",
+        "The proposed method (RAC) is simple, principled, and truly a drop-in modification: augmenting the calibration matrix with on-policy decode-phase activations requires no retraining or distillation and integrates with existing pipelines like SparseGPT.",
+        "Comprehensive empirical evaluation across four model scales (1.5B–32B), two tasks (MATH500, LiveCodeBench), and multiple sparsity levels, with standard errors and runtime reported; gains are largest exactly where baselines fail (high sparsity), e.g., 66.4% vs 35.6% at 50% sparsity on 1.5B.",
+        "Good ablation studies: on-policy vs. off-policy (cross-model) calibration, structured 2:4 pruning with FP8 quantization and measured throughput on A100, and a max-decode-budget analysis showing runtime penalties vanish at practical token budgets.",
+        "A mechanistic analysis (tokenwise reconstruction error heatmap on held-out problems) directly supports the central claim that RAC reduces decoding-time reconstruction error, not just calibration-set error.",
+        "Related work is well positioned, including concurrent benchmarking work (Zhang et al., 2025b), and the paper is clearly written with code promised for reproducibility."
+      ],
+      "weaknesses": [
+        "Limited methodological novelty: the core idea is 'use better-matched calibration data,' and prior work (Bandari et al. 2024 on calibration data choice; PPC-GPT's CoT-based compression) already established that calibration distribution matters for reasoning models; the contribution is a natural, incremental extension rather than a new technique.",
+        "Narrow experimental scope: only the DeepSeek-R1-Distill-Qwen family is evaluated, and the pruning algorithm is essentially SparseGPT only—WANDA is mentioned as compatible but never actually evaluated, nor are other pipelines (ALPS, GPTQ-based pruning), so generality of the claim is under-supported.",
+        "No comparison against alternative remedies, e.g., mixed calibration sets, distillation-based approaches (PPC-GPT), or simply mixing prompt+CoT data without on-policy generation, making it hard to isolate how much benefit comes from on-policy-ness vs. merely having in-domain text.",
+        "Calibration cost is non-trivial: generating up to 8192 on-policy decode tokens per prompt is expensive (the paper's own runtime tables show long generation times), yet the added calibration overhead is only qualitatively acknowledged in Limitations and not quantified.",
+        "Some results are anomalous or incomplete: in Table 4, RAC and RAC+FP8 report identical accuracy (0.950) and the Prompt-only baseline is missing in several cells ('—'); the extremely small SE (±0.001) for RAC 'first third' looks suspicious and suggests possible reporting issues.",
+        "Only task-specific calibration prompts from MATH-220K/Codeforces are tested; the sensitivity of RAC to the choice/size of calibration prompts and whether it transfers to out-of-domain reasoning tasks (e.g., general knowledge) is unexplored.",
+        "The abstract's claim that pruned models can be 'slower' is supported but the mechanism (longer traces) is only examined at one sparsity/model configuration; a broader trace-length analysis would strengthen the narrative."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper identifies a real and timely problem: standard prompt-only calibration is mismatched to reasoning models where decode tokens dominate the token budget, and the motivation (pruning hurting both accuracy AND runtime via longer, ramblier CoTs) is well documented and counter-intuitive.",
+        "The proposed fix (RAC) is simple, well-motivated, and genuinely drop-in: appending on-policy decode activations to the calibration matrix requires no retraining and integrates with existing layer-wise pruning objectives, which is attractive from a practical standpoint.",
+        "The experimental grid is reasonably broad in one dimension: four model scales (1.5B-32B), two sparsity families (unstructured and 2:4), sparsity sweeps, a token-wise reconstruction-error analysis on held-out problems (Fig. 2), an on-policy vs. off-policy calibration ablation, and a useful analysis showing runtime penalties vanish at practical decode budgets (Table 5).",
+        "The paper is clearly written, with the background on GRPO/layer-wise reconstruction making the method accessible, and the limitations section is honest about not directly addressing inference runtime and about increased calibration cost."
+      ],
+      "weaknesses": [
+        "Limited novelty beyond 'change the calibration data.' The core insight-that pruning quality is highly sensitive to the calibration distribution-is already established by Bandari et al. (2024), and using CoT data for reasoning-model compression is already explored in PPC-GPT (Fan et al., 2025) and Zhang et al. (2025b). RAC is essentially an on-policy variant of known calibration-data selection; the delta over this prior work is small and the paper does not empirically compare against either, instead relying on qualitative distinctions.",
+        "Missing key baselines. The abstract claims RAC 'integrates seamlessly into existing pruning workflows such as SparseGPT' (and WANDA is named in Algorithm 1), yet experiments use only SparseGPT-unstructured pruning; no WANDA, ALPS, or GPTQ-based results are reported. No distillation-based baseline (e.g., PPC-GPT-style synthetic CoT distillation) is included despite being the most direct competitor, so it is impossible to judge whether on-policy activation injection is actually better or cheaper than existing alternatives.",
+        "The calibration-data comparison is incomplete: only C4, task prompts, and task prompts + CoT are compared. A natural, cheap baseline-mixing generic C4 with a fraction of CoT data, or varying the prompt/decode token ratio-is never explored, leaving the design space unexamined and raising the question of whether full on-policy rollouts (the expensive part) are even necessary.",
+        "Evaluation is narrow: only MATH-500 and LiveCodeBench, both heavily contaminated-adjacent math/code suites; no perplexity or general-capability regression check to verify RAC does not trade reasoning accuracy for broader degradation. The 32B/50% C4 cell is missing entirely, and the code link promised in the abstract is literally absent (sentence trails off with 'can be found at:'), undermining reproducibility claims.",
+        "Several reported gains are within or near one standard error (e.g., Table 1 at 20-30% sparsity, Table 3 at 20-40% where off-policy even wins at 40%), yet the narrative claims 'RAC consistently outperforms.' The consistent-win story is weaker than presented, and no significance testing is provided.",
+        "Some analyses raise unaddressed questions: Table 4 shows Prompt calibration matching or beating RAC in accuracy under structured pruning in several cells, which contradicts the central claim but is not discussed; and the mechanism by which better activation reconstruction reduces CoT length (Fig. 1's runtime blow-up) is hypothesized but never directly analyzed.",
+        "The technical contribution (a data-augmentation trick appended to an existing objective) is too thin on its own for a top-tier venue; there is no new theory, no analysis of when the mismatch matters (e.g., dependence on |c|/|x| ratio, temperature, or RL-vs-distilled models), and no guidance on how many decode tokens are needed for the benefit to saturate."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Clear and well-motivated insight: reasoning models are decode-dominated (|c|+|y| >> |x|), so calibrating pruning only on prompt activations incurs a distribution shift; the paper articulates this mismatch precisely and connects it to on-policy distillation.",
+        "Simple, practical, drop-in contribution: RAC requires no retraining or distillation and plugs directly into existing one-shot pruning pipelines (SparseGPT/WANDA), which makes the method immediately usable by practitioners.",
+        "Comprehensive empirical evaluation: four model scales (1.5B/7B/14B/32B) across two benchmarks (MATH500, LiveCodeBench), multiple sparsity levels, structured 2:4 pruning with FP8 quantization, and on-policy vs. off-policy calibration ablations.",
+        "Convincing mechanistic analysis: the token-wise reconstruction error heatmap (Figure 2) on held-out test problems directly supports the central hypothesis, showing RAC reduces error specifically on decode tokens, and the decode-budget experiment (Table 5) explains the earlier 'pruning slows inference' finding.",
+        "Honest limitations section and the empirical observations (e.g., pruned models rambling more and getting worse) are interesting and practically relevant in their own right."
+      ],
+      "weaknesses": [
+        "Methodological novelty is limited: the core idea is calibration data augmentation (collecting activations on self-generated CoT traces). Given prior work showing calibration data choice strongly affects pruning (Bandari et al. 2024; PPC-GPT), the contribution is an incremental, intuitive fix rather than a new algorithmic advance.",
+        "Results are demonstrated primarily with SparseGPT; breadth over other pruning/quantization pipelines (e.g., WANDA results are mentioned only as a possibility, not shown) would strengthen the generality claims.",
+        "Evaluation is confined to two benchmarks (MATH500, LiveCodeBench) and DeepSeek-R1-Distill Qwen models; no general-LLM or non-reasoning baselines to test whether RAC hurts or helps outside the reasoning setting.",
+        "Several rough edges: a missing C4 result cell at 50% for the 32B model in Table 1, the on-policy vs. off-policy ablation is inconsistent at 40% sparsity (off-policy wins), and the code link in the abstract is incomplete ('found at:' with no URL), which weakens reproducibility at submission time.",
+        "Key ablation tables (3-5) are relegated to the appendix and discussed briefly; the calibration overhead (generating up to 8192-token rollouts per prompt) is claimed to be modest but is not quantified.",
+        "The runtime improvement claim is indirect; RAC does not explicitly optimize for decode length, and the paper acknowledges this remains open."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 6,
+      "strengths": [
+        "The paper identifies and clearly documents a practically important and counter-intuitive phenomenon: one-shot pruning of reasoning LLMs can simultaneously degrade accuracy and increase inference time (longer, rambling CoT), which undermines the entire purpose of compression. This motivating analysis (Figure 1) is valuable on its own.",
+        "The proposed fix (RAC) is well-motivated and principled: aligning the pruning-time reconstruction distribution with the decode-dominated inference-time activation distribution of reasoning models. The insight that reasoning is a decode-dominated task (|c|+|y| >> |x|) and therefore prompt-only calibration induces a distribution shift is a clean, useful framing.",
+        "RAC is a genuinely drop-in modification compatible with existing pruning algorithms (SparseGPT, WANDA, ALPS), and the paper demonstrates this algorithm-agnosticism empirically rather than only claiming it.",
+        "The evaluation is extensive and above average for this area: two model families (DeepSeek-R1 distills, Qwen3), model sizes from 1.5B to 70B, four sparsity levels, three calibration regimes, multiple benchmarks (MATH500, AIME-25, LiveCodeBench), structured 2:4 pruning with actual measured throughput, on-policy vs off-policy calibration ablation, decode-budget analysis, and standard errors reported throughout.",
+        "The mechanistic analysis (Figure 2, tokenwise reconstruction error ratio on held-out problems) goes beyond end-task metrics and directly supports the central claim that RAC reduces reconstruction error specifically in the decode phase, on test problems not seen during calibration.",
+        "Honest limitations section, and the runtime analysis under constrained decode budgets (Table 8) adds nuance rather than overselling the method."
+      ],
+      "weaknesses": [
+        "Novelty is moderate. The core method is essentially 'use calibration data that matches the inference distribution,' and the paper itself situates the work near Bandari et al. (2024) on calibration data choice for pruning and Williams et al. (2025) on self-calibration. The delta over self-calibration (conditioning on task prompts + pruning on reasoning traces) is real but incremental; the paper is stronger as a careful empirical study than as a novel technique.",
+        "Potential data contamination between calibration prompts and evaluation benchmarks is not addressed. Calibration prompts come from OpenR1-MATH-220k / Codeforces, and MATH500 is drawn from the MATH distribution; if any calibration problems overlap with (or are near-duplicates of) MATH500 test problems, part of the reported gains could reflect memorization rather than better calibration. This needs an explicit overlap check or decontamination.",
+        "Ablations on key hyperparameters are thin: the effect of the prompt/CoT activation mixing ratio (NP vs ND weighting in the concatenated calibration matrix), Tmax sensitivity, and number of calibration prompts M are not studied, though the concatenate-without-reweighting choice is a design decision that could matter.",
+        "Several tables contain inconsistencies/typos that reduce confidence: Table 6 reports an implausible SE of 0.001 for RAC and has missing entries; Table 7 has a formatting error, a duplicated row (20% and 30% with identical values), and identical values across several cells; some runtime numbers (e.g., Qwen3-8B 50%: 17.1 min vs 258.8 min) are surprising and deserve verification or explanation.",
+        "The paper does not directly address inference runtime (acknowledged in limitations); at practical deployment settings with tight decode budgets the accuracy advantage of RAC over prompt-only calibration narrows, and the latency win partly evaporates, so the practical significance claim should be tempered.",
+        "Only unstructured and 2:4 sparsity are explored for actual speedups; results at very high sparsity (>50%) where the method would matter most are largely absent, and the 32B/70B results have gaps (missing entries)."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "The paper identifies a genuinely interesting and practically relevant phenomenon: pruning reasoning models with standard (C4-calibrated) pipelines can degrade both accuracy and runtime, because pruned models produce longer, degenerate chain-of-thought traces. The motivation in Figure 1 is compelling and the runtime blow-up finding is valuable in itself.",
+        "The proposed fix (RAC) is simple, well-motivated, and genuinely drop-in: it aligns the layer-wise pruning objective with the decode-dominated activation distribution by injecting on-policy CoT activations. It requires no retraining or distillation and integrates with existing algorithms (SparseGPT, WANDA, ALPS).",
+        "The empirical evaluation is broad: 8+ models across DeepSeek-R1-distill (Qwen/Llama) and Qwen3 families, three benchmarks (MATH500, AIME-25, LiveCodeBench), four sparsity levels, and multiple pruning algorithms. The inclusion of a 'prompt-only' calibration control is important and strengthens the causal claim that CoT activations specifically (not just domain data) drive the gains.",
+        "The tokenwise reconstruction-error analysis (Figure 2) on held-out problems provides a nice mechanistic check that RAC reduces error specifically in the decode phase, directly supporting the stated hypothesis.",
+        "Useful additional ablations: on-policy vs. off-policy calibration (Table 7), 2:4 structured pruning with FP8 (Table 6), max-decode-budget sensitivity (Table 8), and a candid limitations section."
+      ],
+      "weaknesses": [
+        "Limited conceptual novelty. The core insight reduces to 'calibrate on the data distribution the model actually sees at inference,' which is arguably an expected consequence of known results (Bandari et al., 2024 show calibration data choice matters substantially; Williams et al., 2025 use model-generated text for calibration; PPC-GPT uses CoT). The contribution is more of an empirical adaptation than a new technique, and the delta over prior work is not sharply delineated.",
+        "Key ablations are missing. The mixing ratio between prompt and CoT activations (NP vs ND) is never studied, the number of calibration prompts M and sensitivity to Tmax are not varied, and there is no analysis of how RAC interacts with layer-wise error accumulation (activations are collected under the dense model, but pruning is applied layer by layer). These gaps make the method hard to reason about or extend.",
+        "Practical significance of the speedup story is unclear. The headline runtime improvements come from shortened CoT generation, but unstructured 50% sparsity does not yield wall-clock gains without specialized kernels. Table 6 shows RAC is sometimes slower than Prompt+FP8 at equal throughput, which muddies the throughput claims. The paper does not clearly quantify the memory/latency benefit a practitioner would actually realize.",
+        "Some results are statistically weak or inconsistent. AIME-25 has very few problems (SE ~0.09), so several RAC-vs-prompt-only differences fall within error; there are minor table inconsistencies (e.g., Table 7 typo, missing C4 cells at 32B/50%, anomalous identical SE values for dense rows), and Figure 2's problem labels are unreadable. A win-rate analysis across conditions would be more convincing than cherry-picked examples.",
+        "Comparison fairness: RAC's calibration cost includes generating up to 8192 tokens per prompt on-policy, which is nontrivial; the paper asserts this overhead is 'very modest' but provides no numbers. Also, no empirical comparison against the closest related methods (self-calibration, PPC-GPT) is reported.",
+        "Evaluation focuses on unstructured pruning; the gap between reported accuracy retention and deployable hardware acceleration leaves the practical end-to-end value of the contribution somewhat underdemonstrated."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "The core insight is well-motivated and clearly articulated: reasoning LLMs are decode-dominated workloads (|c|+|y| >> |x|), so prompt-only calibration creates a train/inference distribution mismatch; this is supported by a diagnostic experiment (Figure 2) showing tokenwise reconstruction error is reduced precisely in the decode region on held-out problems.",
+        "The proposed method (RAC) is simple, practical, and a genuine drop-in fix: it requires no retraining or distillation, runs on a single H100, and integrates with existing pruning algorithms (SparseGPT, WANDA, ALPS).",
+        "The empirical evaluation is unusually broad: two model families (DeepSeek-R1 distills including a 70B, Qwen3), seven model sizes, three pruning algorithms, three benchmarks (MATH500, AIME-25, LiveCodeBench), sparsity levels 20-70%, plus structured 2:4 pruning and FP8 quantization combinations.",
+        "The reported gains are large and consistent where they matter most: at 40-50% sparsity RAC often preserves near-dense accuracy while baselines collapse (e.g., Qwen3-8B at 50%: 0.862 vs 0.564/0.470), and RAC substantially reduces evaluation runtime by avoiding degenerate rambling CoT traces.",
+        "Useful ablations: on-policy vs. off-policy calibration traces, decode-budget sensitivity (Table 8 shows the runtime blow-up is largely an artifact of excessive token budgets), and pruning-scope analysis for structured sparsity.",
+        "Honest limitations section and clear positioning against concurrent benchmarking work (Zhang et al., 2025b) and related calibration-data studies (Bandari et al., Williams et al., PPC-GPT)."
+      ],
+      "weaknesses": [
+        "Conceptual novelty is modest: the paper essentially shows that calibration data should match the inference-time activation distribution. That calibration data choice matters greatly for pruning is already established (Bandari et al., 2024), and using model-generated text for calibration exists (self-calibration, Williams et al. 2025); the contribution is the specific application to on-policy CoT traces rather than a new technique. No head-to-head empirical comparison against PPC-GPT or self-calibration is provided.",
+        "The C4 baseline partially conflates two factors: calibration-domain match (math/code prompts vs. generic web text) and prompt-vs-decode token coverage. The strongest fair comparison is the prompt-only domain baseline, and RAC's margin over it, while real, is smaller than the headline margin over C4. A baseline using generic model-generated continuations as calibration would help isolate the CoT effect.",
+        "Several inconsistencies and apparent errors in the tables undermine confidence: Table 7 repeats identical numbers for 20% and 30% sparsity and has a formatting error; Table 6 reports a SE of (0.001) that is inconsistent with all other rows and inconsistent SE formatting ((0.0132), (0.8920)); several C4 cells are missing without explanation (e.g., 32B at 50%, Qwen3-1.7B at 50%); some runtimes are surprising (Qwen3-8B at 50% RAC runs in 17.1 min vs. 41.3 min dense; Qwen3-1.7B C4 runtime jumps from 58.6 to 262.6 min between 30% and 40%) and are not explained.",
+        "On AIME-25 the sample size is small (~30 problems), so the large apparent differences carry high variance; the paper does not discuss statistical power for this benchmark.",
+        "The mechanism analysis (Figure 2) uses the dense model's greedy rollout as the shared evaluation prefix, which biases the comparison toward the method calibrated on dense-model rollouts; a comparison against pruned-model rollouts would be more conclusive.",
+        "The method inherits a chicken-and-egg assumption: calibration activations come from dense-model rollouts, and it is not analyzed how the mismatch grows for the layer-wise (iteratively pruned) activations, or how sensitive RAC is to the sampling temperature/number of calibration prompts M and decode length Tmax used during collection.",
+        "While runtime is a central motivation, the paper does not report actual wall-clock latency or throughput for the unstructured pruning setting (only total evaluation time, which is dominated by CoT length), and unstructured sparsity alone does not yield hardware speedups without specialized kernels."
+      ]
+    }
+  }
+}

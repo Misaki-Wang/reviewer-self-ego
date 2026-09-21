@@ -1,0 +1,95 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Addresses an important and practical problem: serving large MoE models on edge/mobile devices without relying on lossy quantization, preserving exact model behaviors and safety characteristics.",
+        "Well-motivated system-hardware co-design: exploits the unified memory architecture (UMA) of edge SoCs and the underutilized multi-core CPU to overlap parallel decompression with storage I/O.",
+        "Novel compression-aware hierarchical caching and bit-field decomposition (separating compressible exponent bits from incompressible sign-mantissa bits) which enables flexible latency-memory trade-offs.",
+        "Solid theoretical foundations, including a provable approximation ratio of (3 - 1/L) for the cache-affinity scheduling policy and a maximum-entropy dynamic programming formulation for cache pool planning.",
+        "Comprehensive end-to-end implementation and evaluation on real edge testbeds (NVIDIA Jetson AGX Orin 64GB/32GB) across multiple modern MoE models, demonstrating significant latency reductions (up to 72.8%) and throughput gains over competitive baselines like MoE-Infinity and DeepSpeed."
+      ],
+      "weaknesses": [
+        "While the paper clearly justifies the need for lossless serving from a model-integrity perspective, the practical compression ratio achievable losslessly on BF16 is bounded to ~32% reduction (~68% compressed size). Evaluating or discussing the trade-offs against widely-used 4-bit/8-bit quantized MoE baselines would give readers clearer context on the runtime overhead incurred to achieve exactness.",
+        "The hierarchical cache pool planning assumes that the rank-based marginal activation distribution is stationary across prompts. The manuscript lacks an empirical evaluation of sensitivity or robustness when the workload exhibits domain shifts away from the profiling distribution.",
+        "The scheduling proof in Appendix B relies on idealized abstractions of I/O and compute overlapping; in practice, memory bus contention between multiple CPU decompression threads and NVMe DMA transfers could introduce variance not captured by the theoretical model."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Compelling problem formulation: Addresses the critical storage I/O bottleneck in on-device MoE inference without resorting to lossy quantization, thereby preserving full model behavior, numerical accuracy, and robustness against quantization-induced vulnerabilities.",
+        "Clever domain-specific insight: Capitalizes on the low-entropy nature of BF16 exponent bits (compressible down to ~2.6 bits) and the asymmetric architecture of mobile SoCs (underutilized multi-core CPUs alongside shared UMA memory) to shift I/O stalls into parallel CPU decompression pipelines.",
+        "Comprehensive co-design with theoretical guarantees: Integrates bit-field sharding, hierarchical multi-state caching (F, C, S, and E pools), and cache-affinity DAG scheduling. The work provides formal theoretical foundations, including a provable (3 - 1/L)-approximation ratio on schedule makespan (Theorem 3.1) and a maximum-entropy justification for the cache hit probability modeling (Theorem 3.2).",
+        "Thorough real-hardware evaluation: Validated on physical NVIDIA Jetson AGX Orin testbeds (32GB and 64GB) across modern MoE models (DeepSeekV2-Lite, Qwen1.5-MoE, SwitchTransformers-Large-128). Demonstrates significant speedups in TTFT, TPOT (up to 97.97% reduction), and throughput over established offloading engines like MoE-Infinity, DeepSpeed ZeRO-3, and Accelerate."
+      ],
+      "weaknesses": [
+        "Evaluation missing direct comparison with specialized edge-MoE baselines: While standard general offloading frameworks (DeepSpeed, Accelerate) and MoE-Infinity are evaluated, recent edge/mobile-focused MoE systems cited in the related work (e.g., EdgeMoE, Fiddler, or D2MoE) are not empirically compared against.",
+        "Platform diversity: Despite motivating the problem for mobile phones and general edge platforms (e.g., Raspberry Pi, Apple Silicon), the implementation and evaluation are confined strictly to NVIDIA Jetson AGX Orin relying on CUDA and host-pinned UMA memory extensions. The portability to non-CUDA mobile SoCs (e.g., Apple Metal, Qualcomm Adreno/Hexagon) remains unvalidated.",
+        "Limited compression factor ceiling: Because lossless compression only compresses the 8-bit exponent field down to ~2.6 bits while leaving sign/mantissa mostly intact, the theoretical compression ratio is bounded around ~68% (a 1.47x compression factor). The paper could better clarify the practical trade-off between the 1.47x lossless reduction vs. 4x-8x lossy quantization methods when offloading is under severe memory constraints.",
+        "Runtime overhead of cache planning: In Algorithm 4, the nested grid search over cache hit combinations (hF, hC, hS, hE) scales with pool capacities. While the offline profiling makespan estimation is described, an explicit empirical breakdown of the offline planning cost and its sensitivity to the step size delta would strengthen the system analysis."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Well-motivated system-hardware co-design: The paper identifies a crucial and overlooked reality of edge MoE serving—namely, that mobile SoCs utilize unified memory architectures (UMA) where storage I/O from SSD/flash is the primary bottleneck while multi-core CPUs sit largely idle during GPU execution.",
+        "Sound theoretical grounding: The cache-affinity scheduling algorithm is supported by a rigorous approximation ratio guarantee (Theorem 3.1, proving an approximation bound of (3 - 1/L) * OPT), and the hierarchical cache hit modeling is theoretically justified via maximum entropy formulation (Theorem 3.2).",
+        "Comprehensive system implementation: The pipeline combines bit-field decomposition, multi-state caching (full, compressed, sign-mantissa only, exponent only), parallel CPU decompression, and a memory-coalesced register-level GPU reconstruction kernel to eliminate redundant memory copies.",
+        "Thorough evaluation on real edge hardware: Tested on NVIDIA Jetson AGX Orin (64GB and 32GB) across multiple MoE architectures (DeepSeekV2-Lite, Qwen1.5-MoE, SwitchTransformers-Large), demonstrating marked latency and throughput improvements over prominent offloading baselines (MoE-Infinity, DeepSpeed ZeRO-3, Accelerate)."
+      ],
+      "weaknesses": [
+        "Inherent compression ratio ceiling: Because the system strictly targets lossless compression, the overall model footprint reduction is constrained by the Shannon entropy lower bound of BF16 exponent bits (achieving ~68%–74% of the original size, or ~1.35×–1.47× reduction). For edge devices with severe memory deficits relative to large models, the practical capacity headroom provided by lossless compression remains relatively modest compared to lossy quantization.",
+        "Absence of lossy/quantized baselines for context: While the authors reasonably argue that quantization can alter model behavior and induce security vulnerabilities, low-bit quantization (e.g., 4-bit AWQ/GPTQ) remains the dominant industry standard for edge deployment. Including empirical comparisons or context against quantized MoE serving systems (even with disclaimers regarding output fidelity) would provide a clearer operational trade-off for practitioners.",
+        "Hardware and storage diversity: All evaluations are conducted on NVIDIA Jetson AGX Orin connected to an NVMe SSD (PCIe). The paper claims broad applicability to mobile and edge SoCs (e.g., Apple Silicon, mobile phones with UFS storage), but lacks experiments on platforms with different memory bandwidth hierarchies or slower mobile flash storage.",
+        "Omission of energy and thermal profiling: On battery-powered or passively cooled edge systems, continuously utilizing 6–12 CPU cores for parallel decompression while the GPU is active can induce significant power draw and potential thermal throttling. An evaluation of energy efficiency (tokens/Joule) and sustained thermal performance is absent."
+      ]
+    }
+  },
+  "v2": {
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Compelling and well-motivated premise: addresses the critical I/O bottleneck of serving Mixture-of-Experts (MoE) models on edge devices without relying on lossy quantization, thereby preserving full numerical fidelity and model behavior.",
+        "Clever hardware-algorithm synergy: effectively exploits the unified memory architecture (UMA) and idle multi-core CPU capacity on modern edge SoCs to shift expert loading from an SSD I/O-bound bottleneck to a CPU-parallel decompression pipeline.",
+        "Strong theoretical grounding: provides rigorous algorithmic formulations with provable guarantees, including a (3 - 1/L)-approximation makespan bound for the cache-affinity scheduler and a maximum-entropy dynamic programming model for cache pool sizing.",
+        "Comprehensive empirical evaluation: validated on real edge hardware (NVIDIA Jetson AGX Orin 32GB and 64GB) across diverse MoE architectures (DeepSeekV2-Lite, Qwen1.5-MoE, SwitchTransformers) against established baselines (MoE-Infinity, DeepSpeed ZeRO-3, Accelerate, FineMoE), demonstrating significant latency reductions (up to 97.9%) and throughput gains (up to 42.5x).",
+        "Thorough ablations and stress testing: carefully dissects system components, investigates compressor tradeoffs, evaluates sensitivity to workload distribution shifts, and explicitly isolates the performance contribution of the OS page cache."
+      ],
+      "weaknesses": [
+        "Lack of energy and power profiling: Running multi-threaded CPU decompression concurrently with GPU execution and SSD I/O on edge/mobile devices may substantially impact battery life, thermal throttling, and sustained performance. The paper does not report power draw, energy per token, or temperature measurements.",
+        "Absence of quantitative comparison against quantized MoE baselines: While the authors clearly justify the need for semantically lossless serving (citing security and alignment vulnerabilities of quantization), 3-bit/4-bit quantization (e.g., AWQ, GPTQ, MxMoE) represents the primary real-world competing paradigm for edge LLM serving. Showing the performance and memory footprint gap between ZipMoE and lossy quantized serving would better contextualize the practical tradeoff of choosing lossless fidelity.",
+        "Limited hardware diversity: Although the principles are conceptually applicable to shared-memory architectures, the evaluation is conducted exclusively on NVIDIA Jetson AGX Orin. Generalizability to other major edge platforms (such as Apple Silicon or mobile chipsets like Qualcomm Snapdragon) remains unverified empirically."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Compelling problem formulation: Serving large Mixture-of-Experts (MoE) models on edge devices without lossy quantization is critical for preserving output fidelity and security, yet it is severely bottlenecked by storage I/O.",
+        "Insightful system-hardware co-design: Cleverly exploits the idle multi-core CPU capacity in unified memory architecture (UMA) SoCs to offload and parallelize the decompression of low-entropy exponent bits, effectively hiding decompression latency behind incompressible data reads.",
+        "Sound theoretical grounding: The paper provides rigorous theoretical support, including a constant-factor approximation guarantee (Theorem 3.1) for the cache-affinity scheduler and a maximum-entropy dynamic programming formulation (Theorem 3.2) for cache pool right-sizing.",
+        "Thorough evaluation and ablations: Experiments on real edge testbeds (NVIDIA Jetson AGX Orin 64GB and 32GB) show impressive speedups over strong baselines (MoE-Infinity, DeepSpeed, Accelerate). The ablation studies are comprehensive, explicitly isolating the impact of the OS page cache, cache planning algorithms, and robustness to distribution shifts."
+      ],
+      "weaknesses": [
+        "Limited hardware diversity: Although the system principles target general UMA-based edge SoCs (such as Apple Silicon or Raspberry Pi), all physical experiments are conducted on NVIDIA Jetson AGX Orin devices.",
+        "Inherent limits of lossless compression: Lossless bit-field compression yields modest footprint reductions (down to ~68-74% of original size) compared to lossy quantization. While the authors clearly justify why lossless serving is desirable, contextualizing the trade-offs against mixed-precision or quantized offloading baselines in terms of speed and memory would provide a more complete perspective.",
+        "Scheduling overhead quantification: While end-to-end latency and TPOT show large gains, the paper lacks a fine-grained microbenchmark quantifying the CPU overhead of running Algorithm 1 and constructing DAGs dynamically per layer at batch size 1."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Compelling problem formulation and motivation: The paper targets a critical and practical bottleneck in on-device MoE inference—the massive I/O stall incurred when loading offloaded expert weights from SSDs on unified memory architecture (UMA) edge platforms, while multi-core CPUs sit largely underutilized.",
+        "Well-grounded co-design: The core technical contribution smartly exploits the low-entropy characteristic of BF16 exponent bits versus the incompressible sign-mantissa bits, coupling bit-field decomposition with fine-grained caching states (full, compressed, SM-chunks, E-chunks) and asynchronous CPU-parallel decompression.",
+        "Rigorous theoretical analysis: The authors provide formal guarantees for both key algorithmic modules: Theorem 3.1 establishes a provable (3 - 1/L)-approximation ratio for the cache-affinity scheduler makespan, and Theorem 3.2 proves that the dynamic programming-based cache pool planning achieves maximum entropy under marginal inclusion constraints.",
+        "Thorough empirical evaluation on real edge hardware: Experiments conducted on physical Jetson AGX Orin platforms (64GB and 32GB) across three diverse open-source MoE models (DeepSeekV2-Lite, Qwen1.5-MoE, and SwitchTransformers) demonstrate significant latency reductions (up to 72.8%) and throughput gains over state-of-the-art baselines like MoE-Infinity, DeepSpeed ZeRO-3, and Accelerate.",
+        "Insightful diagnostic and ablation studies: The paper thoughtfully dissects performance sources, quantifying the contribution of the core decompression engine versus cache planning, evaluating sensitivity to expert distribution shifts, and isolating opportunistic OS page cache benefits under synthetic background memory pressure."
+      ],
+      "weaknesses": [
+        "Hardware evaluation is confined to a single platform family: While the authors claim the system is hardware-agnostic for UMA architectures, all experimental evaluations are conducted strictly on NVIDIA Jetson AGX Orin. Empirical validation on other common edge/mobile SoC ecosystems mentioned in the text (such as Apple Silicon or Snapdragon/AArch64 mobile devices) is lacking.",
+        "Missing direct runtime comparison with existing lossless LLM compression baselines: Although Section 2.2 qualitative discusses GPU-based lossless compression methods (e.g., DFloat11) and Huff-LLM, the evaluation only benchmarks against standard uncompressed serving systems (MoE-Infinity, DeepSpeed, Accelerate, FineMoE). An empirical runtime comparison against an on-device port of DFloat11 or nvCOMP would better substantiate the claim regarding GPU decompression overheads under batch size 1.",
+        "Lack of discussion on compatibility with low-bit quantization: While preserving exact BF16 behavior is well-motivated for safety-critical and security-sensitive deployments, many realistic edge deployments utilize 4-bit or 8-bit post-training quantization. The paper does not investigate or discuss whether lossless exponent compression can be applied to quantized representations (e.g., FP8/FP4) or whether quantization eliminates the entropy skewness exploited by ZipMoE."
+      ]
+    }
+  }
+}

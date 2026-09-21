@@ -1,0 +1,95 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 8,
+      "strengths": [
+        "Addresses a timely and critical bottleneck in large reasoning models (LRMs): the memory explosion and throughput degradation caused by key-value (KV) cache accumulation during long chain-of-thought (CoT) generation.",
+        "Proposes a novel, thought-adaptive perspective on KV cache compression, supported by insightful empirical analyses showing that attention sparsity correlates strongly with semantic thought phases (Reasoning, Execution, Transition) and that these phases have differing degrees of importance.",
+        "Well-executed algorithm–system co-design: the proposed Continuous Thinking (CT) extension to PagedAttention cleverly eliminates memory fragmentation and avoids costly gather/compaction operations via slot reuse with bitmasks, which is a major pain point in decode-time eviction.",
+        "Extensive empirical validation across multiple open-weight reasoning model families (DeepSeek-R1-Distill-Llama/Qwen, GPT-OSS, QwQ, AceReason) and demanding benchmarks (AIME, LiveCodeBench, MATH-500), demonstrating competitive accuracy with <5% memory footprint and up to 5.8× end-to-end throughput improvements on A100 and GH200 hardware.",
+        "Detailed ablations and qualitative analysis, notably showing how aggressive quantization leads to output length inflation and demonstrating the necessity of retaining a minimum token budget to prevent degenerative infinite reasoning loops."
+      ],
+      "weaknesses": [
+        "The thought categorization relies on an offline calibration phase (using KDE over a calibration dataset) to identify the optimal layer subset and sparsity thresholds; it remains slightly unclear how robust these calibrated thresholds are across highly out-of-distribution prompts or emerging non-math/non-code reasoning domains.",
+        "The assumption of a fixed tri-modal attention sparsity distribution does not hold uniformly across all layers, as acknowledged by the authors in Appendix E.4 where some layers exhibit ambiguous boundaries, necessitating selective subsetting of layers (|L*| = 4).",
+        "While the implementation extends PagedAttention in Triton, full end-to-end integration into production serving engines (such as vLLM or TensorRT-LLM) with continuous batching and multi-GPU tensor parallelism is left as future work."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Timely and well-motivated problem: Addressing the rapid KV cache growth during long-output chain-of-thought (CoT) generation in large reasoning models (LRMs), where decoding is heavily memory-bound.",
+        "Insightful thought decomposition: Grounding semantic thought types (Reasoning, Execution, Transition) in empirical tri-modal attention sparsity distributions, moving beyond brittle keyword heuristics and purely token-level eviction/quantization policies.",
+        "Sound algorithm-system co-design: The paper correctly identifies memory gather contention as the primary bottleneck in non-contiguous eviction methods, effectively solving it via Continuous Thinking (CT), an elegant in-place slot reuse extension to PagedAttention.",
+        "Strong empirical performance: Demonstrates near-lossless accuracy under aggressive compression (<5% of original KV cache) across multiple model architectures (DeepSeek-R1-Distill, GPT-OSS, QwQ, AceReason) and delivers up to 5.8x throughput speedups over competitive baselines.",
+        "Extensive analysis and ablations: Thoroughly validates design choices including refresh interval, layer selection, thought importance ordering, Top-k recall, and quantization length inflation."
+      ],
+      "weaknesses": [
+        "Robustness of offline calibration: The thought decomposition thresholds rely on an offline KDE calibration on a small prompt set (s1K) and optimal layer subset L*; further analysis on threshold sensitivity across vastly out-of-distribution reasoning domains would strengthen the work.",
+        "K-means clustering computation: Although key clustering is performed only within 128-token segments and accelerated on GPU, the computational overhead of K-means during decoding under very large concurrent batch sizes warrants more detailed profiling.",
+        "Evaluation environment: System throughput results are reported on a custom Triton-modified HuggingFace implementation rather than an end-to-end production serving engine like vLLM or SGLang, which may affect the absolute magnitude of gather contention vs. memory reuse."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 6,
+      "strengths": [
+        "Timely and well-motivated problem: Addressing the KV cache explosion specifically caused by long-output chain-of-thought (CoT) generation in Large Reasoning Models (LRMs) is an important and high-impact challenge.",
+        "Comprehensive algorithm-system co-design: Rather than proposing an algorithmic heuristic in isolation, the authors identify the significant memory bandwidth overhead of gather-based compactions in non-contiguous eviction and design 'Continuous Thinking' (CT) on top of PagedAttention to achieve in-place slot reuse.",
+        "Principled hybrid compression: The combination of thought-adaptive quantization (TBQ) and progressive eviction (TBE) based on attention sparsity and inter-thought dependencies is well-reasoned and supported by empirical observations (e.g., counterfactual thought importance and pairwise associations).",
+        "Extensive empirical evaluation: The method is validated across a wide range of model scales and families (DeepSeek-R1-Distill-Llama 8B/70B, Qwen-14B, QwQ-32B, etc.) and benchmarks (AIME, LiveCodeBench, MATH-500), demonstrating competitive accuracy at less than 5% KV cache memory and notable throughput improvements."
+      ],
+      "weaknesses": [
+        "Sensitivity and generalizability of thought categorization: The tri-modal sparsity assumption relies on an offline calibration phase (KDE) to select an optimal subset of layers and static thresholds. As shown in Figure 13, many layers exhibit ambiguous or noisy sparsity distributions, raising questions about how reliably this thresholding generalizes across distinct reasoning domains and prompt styles without per-model tuning.",
+        "Coarse refresh granularity: Categorization updates strictly at fixed intervals (tau = 128 tokens). If reasoning trajectory shifts or critical transitions occur within this window, the model risks misclassifying or prematurely evicting essential context before the next update.",
+        "Small sample size on select benchmarks: The AIME evaluation relies on a benchmark subset of only 30 prompts (15 from AIME 2024 and 15 from AIME 2025). Given the known variance of pass@1 metrics on complex reasoning tasks, a larger evaluation suite would provide stronger statistical confidence in the reported accuracy deltas.",
+        "Serving engine integration complexity: ThinKV introduces substantial system complexity—mixed-precision packing (FP8, NVFP4, ternary), dynamic GPU-accelerated K-means clustering on keys, thought-aware block allocation, and custom bitmask tracking. While promising in isolated benchmarks, validating the orchestration overhead under production serving dynamics (e.g., dynamic continuous batching, variable prefix caching, and speculative decoding) remains open."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 8,
+      "strengths": [
+        "Compelling Algorithm-System Co-Design: The paper tackles both algorithmic quality retention and physical GPU execution bottlenecks, pairing a thought-adaptive hybrid compression policy (TBQ + TBE) with Continuous Thinking (CT)—an extension of PagedAttention that avoids costly gather-based compaction via in-place slot reclamation.",
+        "Novel Conceptual Framing of LRM Reasoning Dynamics: Grounding compression in the tri-modal attention sparsity structure (Reasoning, Execution, and Transition) provides a principled, non-heuristic basis for token categorization and explains why pure token-level eviction or uniform quantization harms reasoning models.",
+        "Comprehensive and Rigorous Evaluation: The authors evaluate multiple model families (DeepSeek-R1-Distill, GPT-OSS, QwQ, AceReason) across challenging reasoning benchmarks (AIME, LiveCodeBench, MATH-500) and demonstrate clear Pareto-frontier improvements over recent baselines (R-KV, LazyEviction, RaaS, PM-KVQ).",
+        "Thorough Systems Analysis: The manuscript includes detailed profiling of sequential vs. overlapped gather overheads, real GPU throughput scaling across batch sizes on A100 and GH200 hardware, and verification within vLLM."
+      ],
+      "weaknesses": [
+        "Sensitivity to Calibration: Sparsity thresholds and optimal layer subsets are identified offline using KDE on a small calibration set (100 prompts from s1K). It is unclear how robust these thresholds are across domains differing sharply from the calibration distribution.",
+        "Heuristic Selection of Layer Subset: The choice of restricting calibration to a small layer subset (|L*| = 4) where tri-modal modes are cleanest is empirically driven, but lacks a deeper architectural explanation for why only specific intermediate layers exhibit distinct thought regimes.",
+        "Kernel Complexity of K-Means Eviction: Although TBE evicts at segment boundaries rather than per token, running GPU-accelerated K-means clustering during autoregressive decoding could introduce tail-latency jitter under highly concurrent serving workloads.",
+        "Hardware Format Practicalities: Utilizing custom combinations of ternary and NVFP4 formats introduces engineering complexity and relies on specific microarchitectures to realize optimal hardware acceleration."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 8,
+      "strengths": [
+        "Timely and impactful problem formulation: Addresses the critical decode-stage KV cache bottleneck specifically tailored to the long-output context generation dynamics of Large Reasoning Models (LRMs).",
+        "Principled and insightful motivation: Discovers a tri-modal attention sparsity distribution corresponding to distinct reasoning phases (Reasoning, Execution, Transition) and demonstrates their counterfactual importance and inter-thought associations.",
+        "Well-crafted algorithm–system co-design: Effectively couples thought-aware mixed-precision quantization (TBQ) and proactive eviction (TBE) with an in-place memory reuse mechanism (Continuous Thinking) extending PagedAttention, avoiding the severe gather/compaction latency overheads observed in prior eviction baselines.",
+        "Comprehensive empirical validation: Thoroughly evaluated across diverse model architectures (DeepSeek-R1-Distill, GPT-OSS, QwQ, AceReason, MobileLLM) and benchmarks (AIME, LiveCodeBench, MATH-500, GSM8K), outperforming strong state-of-the-art baselines in both compression ratio and accuracy preservation.",
+        "Strong system-level results and rigorous ablations: Demonstrates meaningful end-to-end throughput improvements (up to 5.8×) and latency reductions on A100 and GH200 GPUs, including vLLM integration, supported by detailed ablations on length inflation, refresh rates, layer selection, and memory profiling."
+      ],
+      "weaknesses": [
+        "Coarse-grained segmentation and fixed refresh window: Relying on a fixed refresh period (tau = 128 tokens) and offline KDE threshold calibration may artificially bisect reasoning thoughts or fail to adapt to tasks with rapidly shifting or irregular thought segment lengths.",
+        "Hardware dependence of low-bit formats: The approach relies on NVFP4 and custom ternary packing formats, which may have variable performance characteristics and hardware support across different GPU architectures or non-NVIDIA hardware.",
+        "Algorithmic complexity of online clustering: Performing GPU-accelerated K-means clustering on post-RoPE key embeddings introduces runtime complexity compared to simple token-level score thresholds, and its sensitivity across varying embedding dimensions and head configurations could be further characterized."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Timely and high-impact focus: Targets the decode-time KV cache explosion specific to large reasoning models (LRMs) undergoing long chain-of-thought (CoT) generation.",
+        "Insightful empirical motivation: Provides compelling analysis linking attention sparsity to distinct semantic stages in reasoning (Reasoning, Execution, Transition), supported by counterfactual importance and pairwise thought-influence experiments.",
+        " principled algorithm-system co-design: Combines thought-adaptive quantization (TBQ) and progressive eviction (TBE) with a custom system implementation ('Continuous Thinking' kernel) extending PagedAttention to reuse evicted slots in place, effectively solving the gather-based compaction bottleneck.",
+        "Comprehensive evaluation and ablations: Validates the method across diverse model families (DeepSeek-R1-Distill, GPT-OSS, QwQ, AceReason) and benchmarks (AIME, LiveCodeBench, MATH-500), demonstrating near-lossless accuracy with <5% KV cache footprint and up to 5.8× higher serving throughput."
+      ],
+      "weaknesses": [
+        "Threshold calibration generalization: The mapping of attention sparsity to thought categories relies on offline KDE calibration on a subset of layers and prompts; the paper would benefit from deeper analysis of whether these thresholds transfer robustly across wildly different prompt formats or system prompts.",
+        "Clustering post-RoPE keys: TBE performs K-means clustering on post-RoPE key embeddings under the assumption that RoPE drift is negligible within a 128-token segment; while intuitive, a quantitative verification of embedding drift versus position within the segment would make the argument stronger.",
+        "Limited test sample size on AIME: The AIME evaluation uses a subset of 30 problems, which is somewhat small for high-variance reasoning tasks, though partly mitigated by evaluating 8 rollouts per problem and validating across multiple other benchmarks."
+      ]
+    }
+  }
+}

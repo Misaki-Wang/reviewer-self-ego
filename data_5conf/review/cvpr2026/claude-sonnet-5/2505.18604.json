@@ -1,0 +1,61 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Novel theoretical framing: leverages system-theoretic concepts (extended observability subspace, P-equivalence, Grassmannian geometry) to design a CL regularizer for SSMs, which is well-motivated and mathematically grounded with proofs (invariance under P-equivalence, Sylvester equation formulation).",
+        "Efficient algorithmic contribution: exploits the diagonal structure of practical SSMs (S4D/Mamba/Vim) to reduce the Sylvester equation solution from O(n^3) to O(n^2), with a concrete FLOPs reduction (~100x for n=16) that is empirically validated (Table 8).",
+        "Extensive empirical evaluation across multiple datasets (ImageNet-R, CIFAR-100, Caltech-256, CUB-200-2011), multiple task splits (5/10 tasks), and integration with diverse CL paradigms (regularization baselines, replay-based ER/LUCIR/X-DER, and prompt-based L2P), showing consistent improvements.",
+        "Thoughtful additional analyses: Centered Kernel Disparity (CKD) study motivating why B should also be regularized, ablation on number of Vim blocks regularized, and a set of proofs showing different Grassmannian distance metrics converge to the chordal distance in the limit, lending some theoretical support to the approximations used.",
+        "Minimalist method design (only 1-2 extra hyperparameters) compared to CL baselines requiring many more, which is a practical advantage for deployment.",
+        "The extended appendix provides good transparency: full derivations, hyperparameters, and additional ablations, aiding reproducibility."
+      ],
+      "weaknesses": [
+        "The core theory (P-equivalence, extended observability invariance) is proven rigorously only for time-invariant LDS systems, but the paper's target architecture (S6/Mamba/Vim) is a time-varying, input-dependent selective SSM. The extension in §3.4/§D.3 (averaging over the outer dimension and treating each time step as an independent LTI system) is a strong, largely heuristic approximation without formal justification of how well it preserves the proven geometric properties.",
+        "The practical distance computation (§D.5) further approximates the observability Gram matrices as rank-1, which is validated only via a Monte Carlo correlation study (Pearson r ≈ -0.90, not near -1), meaning the loss actually optimized during training deviates non-trivially from the theoretically motivated chordal distance; the impact of this approximation error on final performance is not directly quantified.",
+        "Despite an entire Related Work subsection describing SSM-specific CL methods (Mamba-CL, MambaCL, Mamba-FSCIL) as the most directly relevant prior work, none of these are empirically compared against Inf-SSM in the experiments; comparisons are restricted to generic CL baselines (EwC, SI, MAS, LwF) and generic replay methods, which weakens the empirical case that Inf-SSM improves specifically over the state of the art in SSM continual learning.",
+        "Inf-SSM+ (handling B/controllability) is acknowledged as not being invariant to P-equivalence and is addressed only via an ad hoc Frobenius norm term, undermining the paper's central geometric argument; results also show Inf-SSM+ does not consistently outperform plain Inf-SSM, raising questions about the practical value of this extension.",
+        "All experiments use a single backbone (Vim-small); no results are provided on other SSM variants (e.g., Mamba, Mamba-2) or larger model scales, limiting evidence of generality despite the paper's broader claims about SSMs.",
+        "The paper does not report wall-clock training-time or memory overhead of the full Inf-SSM pipeline (despite acknowledging in the limitations that it is \"scan-breaking\" and increases VRAM/training time), so the practical efficiency benefit beyond the isolated Sylvester-equation FLOPs comparison is not empirically substantiated.",
+        "Presentation could be tightened: substantial results text is duplicated nearly verbatim between the main paper and appendix, and the extensive appendix (40 pages) suggests the submission may be better suited to a more complete restructuring for a page-limited venue."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Novel and well-motivated theoretical framework: the paper identifies that naive parameter-space regularization for SSMs ignores P-equivalence (the fact that similarity transforms of (A,B,C) yield identical input-output behavior), and proposes regularizing the extended observability subspace instead, which is provably invariant to this equivalence (Theorem 3, with proof in appendix).",
+        "Solid technical contribution in reducing computational complexity: the derivation that the required Sylvester equation reduces from O(n^3) (Bartels-Stewart) to O(n^2) by exploiting the diagonal structure of A in mainstream SSMs (S4D, Mamba, Vim) is clean, correctly derived (Lemma 4/5, App. D.4), and empirically validated with FLOPs and latency comparisons (Table 3, Table 8).",
+        "Extensive and broad empirical validation: integration with 5 diverse CL paradigms (replay, hybrid, prompt-based, frequency-based), comparison against foundational EFCIL baselines under both fair and deliberately disadvantaged settings, three datasets, 5-/10-task splits, plus numerous ablations (block-count sensitivity, simplified distance, Inf-SSM+, Vim-tiny, additional UCL baseline, CKD analysis of state drift). This breadth strengthens confidence in the generality of the gains.",
+        "Minimalist, practical design: the method introduces only a single extra hyperparameter (λ), making it easy to integrate as a plug-in regularizer without heavy architectural changes, and requires no exemplar storage.",
+        "Good supplementary rigor: appendix includes proofs of P-equivalence invariance and local equivalence between the chordal distance and other common Grassmannian metrics (Binet-Cauchy, Fubini-Study, Martin), lending mathematical credibility to the design choices."
+      ],
+      "weaknesses": [
+        "The practically used 'simplified distance' (Eq. 33), which approximates the extended observability matrices as rank-1, is justified only by an empirical Monte Carlo correlation study (Pearson correlation ~ -0.90) rather than a rigorous bound or proof; this is the actual distance used in most experiments, so its fidelity to the theoretically motivated chordal distance on Gr(n,∞) is not firmly established.",
+        "All experiments are restricted to a single backbone family (Vim-small/tiny) on image classification benchmarks, despite the paper's broad framing around 'State-Space Models' generally; no validation on Mamba/Mamba-2 in NLP, audio, or other domains where SSMs are commonly used, which limits the generality of the claims.",
+        "The averaging of A and C over the outer/channel dimension (Eq. 31) to make computation tractable is a substantial approximation that discards per-channel selective dynamics central to Mamba-style SSMs; the justification (variance-preservation in Table 5) is fairly thin and does not directly assess impact on the regularization's fidelity.",
+        "No direct empirical comparison against existing Mamba-specific CL methods (Mamba-CL, MambaCL, Mamba-FSCIL) that are discussed in related work; the paper only argues qualitatively that they are not directly comparable, leaving the empirical positioning against the most closely related prior work incomplete.",
+        "The magnitude of reported improvements (often >10-40% relative gains) combined with the explicit disclaimer that baseline results are not directly comparable across methods due to differing batch sizes/epochs (Table 1 note) raises some concern about the fairness/consistency of the experimental protocol and hyperparameter tuning across methods.",
+        "The proposed numerical-stability patch (defining cosθ=1 when ∥A-A'∥≤ε and ∥C-C'∥≤ε) introduces a non-smooth branch into the loss that is not deeply analyzed for its effect on optimization or gradient behavior."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Strong theoretical grounding: the paper carefully develops the notion of P-equivalence for SSMs and proves (Theorem 3, with full proof in the appendix) that the extended observability subspace is invariant under this equivalence, which cleanly motivates why naive parameter-space regularization (e.g., simple Frobenius-norm penalties on A,B,C) is geometrically inappropriate for SSM continual learning.",
+        "The reduction of the Sylvester equation solve from O(n^3) to O(n^2) by exploiting the diagonal structure of A in modern SSMs (S4D, Mamba, Vim) is a genuine, well-justified algorithmic contribution, with a clear derivation (Lemma 4/5) and concrete FLOPs comparison (Table 3, 8) showing large empirical speedups.",
+        "Extensive and fairly systematic empirical validation: Inf-SSM is integrated with five different CL paradigms (replay, hybrid, prompt-based, frequency-based) across three datasets and two task splits (Table 1), and separately compared against foundational EFCIL baselines under both fair (A,C) and disadvantaged (A,B,C vs. A,C) regularization settings (Tables 2 and 6), consistently showing improvements.",
+        "Thorough ablation and robustness studies in the appendix (CKD layer-wise analysis, number-of-blocks ablation, Inf-SSM+ variant including B, Vim-tiny backbone, additional UCL baseline, and distance-metric equivalence proofs), which substantially strengthens confidence in the core claims beyond the main text results.",
+        "The related work section clearly differentiates Inf-SSM from concurrent Mamba-specific CL methods (Mamba-CL, MambaCL, Mamba-FSCIL), correctly noting these rely on stored embeddings or different problem scenarios, positioning the contribution as a more fundamental, architecture-faithful regularizer."
+      ],
+      "weaknesses": [
+        "The extension to selective/input-varying S6 models (§3.3) relies on a heuristic approximation—averaging A and C over the outer (channel) dimension—justified only by a single variance-preservation experiment (Table 5). This approximation is a practical necessity but is in tension with the paper's claimed geometric faithfulness, since it discards per-channel dynamics that the theory (built for LTI SSMs) does not directly address.",
+        "The chordal distance computation in practice relies on a further rank-1 approximation of the observability matrix (Appendix D.5/Eq. 33) to avoid numerical instability from the near-singular Gram matrices at small n (e.g., n=16). While empirically validated via Monte Carlo correlation, this is a significant simplification whose impact on the theoretical exactness of the regularizer is not deeply analyzed in the main text.",
+        "Table 1 explicitly notes that baseline results are not directly comparable across methods due to differing batch sizes/epochs, which limits how strongly cross-method conclusions (e.g., which baseline benefits most) can be drawn, even though within-method (baseline vs. +Inf-SSM) comparisons remain valid.",
+        "Evaluation is restricted to a single backbone family (Vim-small/tiny) and image classification CIL benchmarks; there is no evaluation on genuinely sequential/long-horizon tasks (e.g., NLP or time-series) where the paper's core motivation—capturing long-range/infinite-horizon SSM dynamics—would be more directly tested.",
+        "Recent competitive EFCIL methods with more complex architectures (SSRE, LDC, EFC) are discussed but excluded from direct comparison, so it remains unclear how Inf-SSM would fare against the strongest exemplar-free baselines in absolute terms, even though the exclusion rationale (architectural incompatibility) is reasonable."
+      ]
+    }
+  }
+}

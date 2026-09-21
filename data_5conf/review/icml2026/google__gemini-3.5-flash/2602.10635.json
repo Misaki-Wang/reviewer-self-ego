@@ -1,0 +1,92 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Well-motivated approach addressing a critical challenge in multitask RL for heterogeneous behavioral data, where uneven learning dynamics can lead to suboptimal performance.",
+        "Sound and elegant formulation of HARPO, which modulates advantages at both sample and task levels using a geometrically centered reference to prevent arbitrary shifts in global step size.",
+        "Excellent empirical results, demonstrating consistent improvements over strong baseline RL algorithms (such as GRPO, RLOO, GPG) and established foundation models on the Human Behavior Atlas benchmark.",
+        "Thorough ablation studies and detailed analysis of advantage distributions, modulation factors, and qualitative reasoning traces that provide clear insights into how the method works."
+      ],
+      "weaknesses": [
+        "The evaluation is highly specialized to the domain of social behavior processing. While the proposed HARPO algorithm is theoretically general-purpose, its performance on more mainstream, non-behavioral multitask reasoning benchmarks remains untested.",
+        "While HARPO balances the scale of advantages across different tasks and samples, the final reward function still relies on several manually tuned hyperparameters (such as format weight and length scale) whose sensitivity is not fully explored.",
+        "The paper lacks a discussion on the computational and memory overhead associated with tracking and updating the hierarchical EMAs and multiplicative states during training."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper addresses a highly important problem in socially-intelligent AI: learning unified models across highly heterogeneous multi-task behavioral datasets (e.g., emotion classification, social reasoning, psychiatric assessment).",
+        "OmniSapiens-7B 2.0 shows strong empirical performance on the Human Behavior Atlas benchmark, outperforming existing behavioral foundation models and standard reinforcement learning baselines in terms of average task ranking.",
+        "The authors conduct zero-shot evaluation on out-of-distribution datasets (AV-ASD for autism detection and IEMOCAP for speech emotion recognition) to demonstrate the model's generalization capabilities.",
+        "Comprehensive ablation studies are provided to isolate the impacts of the task-level vs. sample-level modulation, geometric centering, and inertial control mechanisms."
+      ],
+      "weaknesses": [
+        "Lack of a Supervised Fine-Tuning (SFT) baseline: Because the reward functions are based entirely on ground-truth labels (exact matches for classification and cosine similarity to ground-truth answers for QA), these tasks can be formulated and solved directly via standard multi-task SFT. Given the stability, simplicity, and widespread use of SFT, it is a critical omission not to compare the proposed RL-based approach against a multi-task SFT baseline on the same base model.",
+        "Highly heuristic design and complexity: The HARPO algorithm introduces several layers of heuristic normalization—computing sample-level and task-level absolute advantage means, referencing them to geometric means, smoothing contributions with EMAs, and smoothing scaling factors with multiplicative inertial controls. This high degree of complexity makes the method difficult to analyze theoretically and likely hyperparameter-sensitive, yet a sensitivity analysis on parameters like $\\beta_\\rho$ and $\\beta_s$ is not provided.",
+        "Potential baseline suboptimality or instability: In Table 1, GRPO exhibits extremely low performance on certain tasks like humor detection (HUM, 27.56%) compared to other RL baselines like GPG (69.28%) or RLOO (67.86%). It is unclear whether this is due to suboptimal hyperparameters for the baselines or inherent instability. Moreover, GPG actually outperforms HARPO on several tasks (EMO and INT), which slightly weakens the claim of HARPO's absolute superiority.",
+        "Incomplete discussion of multimodal RL overhead and implementation details: Since the benchmark includes audio and video modalities and uses Qwen 2.5 Omni, generating 5 rollouts per prompt with multimodal inputs during on-policy training is extremely computationally expensive. The manuscript lacks a detailed discussion of the computational overhead, wall-clock time comparisons, and exact mechanisms for handling vision/audio features within the RL objective."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3,
+      "strengths": [
+        "Addressing a highly important and timely challenge: training a unified foundation model (OmniSapiens) for diverse and heterogeneous social behavior processing tasks using reasoning-based reinforcement learning.",
+        "The proposed HARPO framework introduces a novel concept of geometric centering and inertial smoothing for advantage modulation in critic-free, group-relative RL.",
+        "Comprehensive empirical evaluation across 10 diverse tasks on the Human Behavior Atlas benchmark, demonstrating superior multitask performance and promising zero-shot generalization capabilities on held-out datasets (AUT and SER).",
+        "Thorough ablation studies and qualitative analyses of reasoning traces that help explain the behavioral differences between HARPO and GRPO (e.g., reducing shortcut reasoning)."
+      ],
+      "weaknesses": [
+        "**Fundamental Mathematical Contradiction with Group Normalization**: HARPO's core premise is to use advantage magnitudes ($p_m^{(t)}$) as a proxy for task contribution/difficulty to scale the learning signal. However, in GRPO, advantages are group-normalized (Eq. 1). For any rollout group with non-zero reward variance, the standardized advantages $\\hat{A}$ always have a mean of 0 and standard deviation of 1. Consequently, the average absolute advantage $p_{(m,q)}^{(t)}$ is mathematically constrained to a narrow constant range (typically $\\sim 0.6 - 0.8$ for group size $|G|=5$), completely independent of the original reward scales. The task contribution $p_m^{(t)}$ thus only reflects the proportion of groups with exactly zero variance (i.e., where all rollouts got the identical reward). This leads to a highly counter-intuitive behavior: nearly mastered tasks with low variance will have $p_m^{(t)} \\approx 0$, causing their modulation factors $s_m^{(t)}$ to explode and heavily upscaling the gradients of their few remaining error samples. Meanwhile, active, high-variance tasks where the model is actively learning will have high $p_m^{(t)}$ and thus have their learning signals suppressed.",
+        "**Infeasibility and Mathematical Ineffectiveness of Sample-Level Tracking**: The method proposes tracking and smoothing contribution signals and modulation factors at the individual sample level $q \\in D_m$. This introduces severe issues: (1) Tracking running states for over 100k samples is highly memory-intensive and extremely difficult to integrate into standard distributed RL packages like VERL; the authors do not explain how this state is stored or synchronized. (2) Since on-policy training is run for only 5 epochs, each individual sample is updated at most 5 times. With an exponential moving average (EMA) smoothing factor of $\\beta_{\\rho} = 0.95$ and $\\beta_s = 0.95$, the final states after 5 steps are still heavily dominated by their initialization (e.g., $0.95^5 \\approx 77\\%$ of the initial value remains). This makes the sample-level EMA mathematically ineffective and highly sensitive to arbitrary initialization.",
+        "**Lack of Safeguards Against Division by Zero**: In Eq. (9), the modulation factors are computed as $s_m^{(t)} = \\bar{p}_{ref,M}^{(t)} / p_m^{(t)}$. If a task has zero reward variance across all samples in a batch (a common occurrence for small batches or mastered tasks), $p_m^{(t)}$ becomes exactly 0. This results in division by zero, which is not addressed or regularized in the formulation.",
+        "**Evaluation Concerns and Non-standard LLM Judge**: The evaluation of the generative tasks (SOC, INT, NVC) relies on an LLM judge specified as 'GPT-5 nano' (App. B.2). GPT-5 nano is not a publicly documented or standard model, and evaluating social reasoning with proprietary black-box APIs limits the reproducibility and transparency of the benchmark results."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Well-motivated and mathematically elegant method (HARPO) that addresses a critical and practical issue in multi-task reasoning RL (the imbalance of advantage scales in GRPO). The geometric mean normalization ensures that the global update scale remains stable (the geometric mean of modulation factors is exactly 1).",
+        "Comprehensive and convincing empirical evaluation on 10 diverse behavioral tasks, comparing against both strong multi-modal foundation models and a wide range of state-of-the-art critic-free RL methods (RLOO, RE++, GPG, GRPO, EMAGRPO).",
+        "Strong zero-shot generalization performance on 5 held-out benchmarks, demonstrating that the balanced optimization prevents overfitting to dominant tasks and helps extract highly transferable behavioral features.",
+        "Detailed interpretability and qualitative analysis of reasoning traces, incorporating both automated metrics (consistency, length) and multi-dimensional pairwise human evaluations (specificity, coherence, concision).",
+        "Excellent presentation and writing, with clear pseudo-code (Algorithm 1), detailed proofs of properties, and exhaustive experimental configurations in the appendix."
+      ],
+      "weaknesses": [
+        "Lacks an explicit discussion or quantification of the computational and memory overhead introduced by calculating the geometric-mean references and updating the running EMAs compared to standard GRPO.",
+        "The sensitivity of the key hyperparameters in HARPO, particularly the inertial smoothing factors (beta_rho and beta_s), is not fully explored or discussed.",
+        "The evaluation is restricted to a single model scale (7B). It remains an open question if the optimization imbalance and performance collapse of GRPO also manifest to the same extent in larger models (e.g., 14B or 32B)."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Methodological Novelty: The proposed HARPO algorithm elegantly extends GRPO to heterogeneous multi-task settings by introducing geometrically centered, inertially smoothed advantage modulation. The proof that the geometric mean of the scaling factors is 1 ensures training stability without affecting the global step size.",
+        "Comprehensive and Robust Evaluation: The evaluation spans 10 distinct behavioral tasks in a multitask learning framework, compared against multiple state-of-the-art reasoning RL methods (such as RLOO, RE++, GRPO, EMAGRPO) and general-purpose LLMs.",
+        "Strong Generalization: The zero-shot evaluation on 5 held-out datasets (e.g., autism detection, speech emotion recognition) demonstrates the outstanding generalization capacity of OmniSapiens-7B 2.0.",
+        "Interpretability & Human Study: The paper provides a thorough evaluation of reasoning traces, combining both automated metrics (consistency, paraphrase robustness, token efficiency) and a well-designed human evaluation verifying specificity, coherence, and concision.",
+        "Insightful Analysis and Ablation Studies: Highly detailed ablation studies and analysis (empirical tracking of advantage distributions, modulation factor dynamics) clearly demonstrate the necessity of each component in HARPO (sample-level vs. task-level modulation, inertial control, and structured modulation)."
+      ],
+      "weaknesses": [
+        "Sample-Level Tracking Details: The formulation requires tracking and updating inertial estimates of contribution signals and modulation factors for each specific sample of a task. It would be helpful to explicitly clarify the storage/memory cost of maintaining these sample-specific states across the 100k training samples and how this scales for even larger datasets.",
+        "Discussion on Supervised Multitask Baselines: While the paper compares with EMAGRPO and mentions multitask learning optimization (e.g., GradNorm), it would benefit from a more explicit conceptual discussion comparing HARPO (which modulates advantages in RL) with classic multitask gradient-matching or loss-weight balancing methods applied in supervised settings."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 1,
+      "strengths": [
+        "The paper addresses a highly relevant and challenging problem: learning from heterogeneous multi-task behavioral data where gradient updates can easily be dominated by certain tasks or samples.",
+        "The manuscript is well-structured and clearly written, presenting a cohesive narrative around advantage modulation in on-policy reinforcement learning."
+      ],
+      "weaknesses": [
+        "Fabricated and Hallucinated Experimental Setup: The paper evaluates and compares its method against non-existent models such as 'Gemma 4-E4B (8B)', 'Qwen 3-VL-8B-Instruct', and evaluates using 'GPT-5 nano (OpenAI, 2025)' as an LLM judge. These models do not exist in the public domain or scientific literature. This raises severe concerns regarding the authenticity, integrity, and reproducibility of the entire empirical evaluation.",
+        "Catastrophic Collapse of Geometric Mean Reference: In GRPO, if all sampled rollouts for a given query $q$ receive the same reward (which is extremely common when a model is either fully correct or fully incorrect on a task), the group standard deviation is zero, resulting in group-normalized advantages of 0. In this case, the sample contribution signal $p_{m,q}^{(t)} = 0$. Because HARPO uses a geometric mean to compute the reference $\\bar{p}_{ref,m}^{(t)} = (\\prod_{q} p_{m,q}^{(t)})^{1/|Q|}$, a single sample in the batch with zero advantages will cause the entire geometric mean reference to collapse to exactly 0. This leads to division by zero or a complete zeroing-out of all advantages in Equation (9), making the optimization highly unstable or mathematically invalid.",
+        "Conceptually Unsound Sample-Level Inertial Smoothing: In Equation (11), the authors define an exponential moving average of the contribution signals and modulation factors at the individual sample level ($p_{m,q}$ and $s_{m,q}$). In any standard large-scale training setup (such as the Human Behavior Atlas with >100k samples), a specific sample $q$ is only visited once per epoch. Performing inertial smoothing with $\\beta_{\\rho} = 0.95$ across epochs is conceptually flawed because the policy $\\pi_{\\theta}$ updates thousands of times between consecutive visits to sample $q$. The historical advantage from the previous epoch has no relevance to the current policy's advantage distribution, violating the core assumptions of on-policy RL.",
+        "Mathematical Misunderstanding of Group-Normalized Advantage Scales: The authors motivate their sample-level modulation by claiming that sample-level contribution signals $p_{m,q}^{(t)}$ vary by 'orders of magnitude.' However, because GRPO advantages are group-normalized to have a mean of 0 and a standard deviation of 1, the average absolute value of these advantages, $\\frac{1}{|G|}\\sum_{i} |\\hat{A}_i|$, is mathematically highly constrained. For a fixed group size (such as $|G|=5$ used in this paper), this value is strictly bounded by Cauchy-Schwarz and typically fluctuates within a very narrow range (roughly 0.4 to 1.0). It cannot vary by orders of magnitude unless the group advantages are all zero, which further contradicts the utility of the ratio-based scaling."
+      ]
+    }
+  }
+}

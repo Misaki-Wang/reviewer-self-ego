@@ -1,0 +1,45 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Clean and well-posed problem: exact (approximation-free) auto-regressive generation from convolutional sequence models, with a crisp distinction between generation-from-scratch and generation-with-prompt, and an explicit comparison table against standard convolution and attention baselines.",
+        "The core idea of FutureFill—precomputing, with one FFT, the contribution of the fixed prefill context to the next K outputs and storing those K values as a cache, then completing each prediction with a short sum over the tokens generated so far—is simple, exact, and yields a genuine asymptotic gain: amortized O(sqrt(L log L)) per token (O(sqrt(L)) for online spectral filtering) with cache size O(sqrt(L)) instead of O(L).",
+        "The analysis (Lemmas 1 and 2, Corollary 3) is rigorous, short, and easy to verify: the cost decomposition, the balancing of L log L / K against K to pick the optimal cache size, and the amortized arguments are all correct as stated.",
+        "Nice connection to the online-learning literature: the technique applies directly to spectral filtering / STU, improving the amortized per-iteration time from O(L) to O(sqrt(L)) while preserving the regret guarantee, which strengthens the relevance of the result beyond pure systems speedups.",
+        "The paper correctly identifies why the summarization trick cannot be applied to attention (the dependence of an output token on the context cannot be resolved until that token is generated), and the related-work discussion of SSMs, Hyena, LongConv/SGConv and STU is adequate and well positioned."
+      ],
+      "weaknesses": [
+        "Empirical validation is far too thin for a top-tier AI venue: a single synthetic generation task, a single-layer convolutional model, CPU-only timing curves (Figures 3-4), and no language modeling or perplexity experiments. There is no wall-clock or FLOP comparison against the 'previous best' method the paper claims to improve, no comparison to any other exact efficient-generation strategy (e.g., chunked/overlap-save FFT convolution adapted to the AR setting, or SSM-style recurrence), and no detail on the experimental setup, seeds, hardware, or error bars. The authors themselves concede that timing results under a properly optimized setup 'would be difficult to present.'",
+        "Practical significance is unclear and the abstract overstates the gain. In the paper's own favorable synthetic setting the crossover with naive decoding occurs only around T ~ 2.5e5 and the observed gains are modest; for realistic context lengths (a few thousand) FFT constant factors likely dominate. Moreover, many of the targeted architectures are precisely those that admit fast recurrent generation (SSMs are O(1) per token; Hyena/LongConv can be unrolled as a fixed-size recurrence), so it is not clear where the method is actually needed in practice.",
+        "The improvement regime is narrow and no lower bound is given. In the prefill setting the total time is O(L log L + K^2), i.e., quadratic in the number of generated tokens, so the claimed speedup only materializes for K = O(sqrt(L log L)) and only in the amortized per-token sense; the abstract's claim of reducing generation 'from linear to square root relative to the context length' glosses over this. The within-block residual sum is computed naively, contributing the K^2 term, and no argument is given that Omega(sqrt(L)) is necessary (a block-recursive divide-and-conquer schedule might plausibly do better).",
+        "Novelty is only partially established. Precomputing convolution contributions with the FFT is essentially standard overlap-add/overlap-save signal processing; the genuinely new element is exploiting the AR feedback structure to summarize the context. The paper does not discuss conceptually close techniques such as chunked/blocked decoding or chunkwise parallel forms used in linear attention and SSM implementations, so the boundary of the contribution is not sharp.",
+        "Several technical/notational issues and missing details: the filter is declared to be in R^{L+K} although the model context length is L (inconsistent); Algorithm 3 line 10 appears to write 'M <- grad l(M)' rather than a gradient step with a learning rate; the relation between Table (a) ('generating K tokens from scratch with context length L', runtime K sqrt(L log L)) and Lemma 2 (amortized O(sqrt(T log T)) with T the growing sequence length) is never reconciled; the claim of applicability to 'any' convolutional model needs justification for multi-channel/multi-filter (MIMO) cases and for data-dependent filters; and numerical stability of the cache at large L is not discussed.",
+        "The claim about cache size ('smaller than the cache requirements for standard convolutional and attention-based models') is only favorable at the tuned K = sqrt(L log L); for a practitioner wishing to generate K = O(L) tokens there is no asymptotic benefit, and the comparison also omits the storage of the length-L filter itself. Combined with the absence of any memory measurement in the experiments, the headline cache claim is not empirically supported.",
+        "Reproducibility is limited: no code, no released artifacts, no description of the synthetic task, model size, filter type/length, or timing protocol beyond 'one layer on CPU', which makes the empirical section essentially unverifiable."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper addresses a relevant and practical problem: exact autoregressive generation from convolutional sequence models, aiming to reduce the linear-in-context decoding cost.",
+        "The high-level idea is clear: precompute prompt-to-future-token contributions with FFT and use a smaller cache during decoding, with asymptotic analysis in Lemmas 1-2 and Corollary 3.",
+        "The method is architecture-agnostic for convolutional sequence models and is illustrated on the Spectral Transform Unit, with a claimed regret-preserving online extension.",
+        "The theoretical target is plausible: block/FFT-based convolution can reduce the naive O(KL) generation cost to sublinear in context length, and the derived O(√L log L) amortized rate matches the intended trade-off.",
+        "The paper discusses positioning relative to SSMs, attention, and spectral filtering, and claims exact generation without approximation."
+      ],
+      "weaknesses": [
+        "Evaluation is far below the standard for a top-tier AI conference: only a synthetic single-layer CPU timing experiment is reported, with no real language modeling, audio, or long-range benchmark and no accuracy, loss, or correctness comparison against naive decoding.",
+        "No relevant baselines are compared: attention with KV cache, Hyena, STU, LongConv/SGC, Massaroli et al. distillation, and standard FFT-based block convolution are not experimentally or theoretically contrasted, so practical significance is unsupported.",
+        "Novelty is limited: the core method appears to be an application of standard block FFT/overlap-save convolution, and the paper does not convincingly distinguish itself from known exact convolution acceleration techniques.",
+        "There are technical inconsistencies in the setup: the filter length is defined as L (or L+K in Algorithm 1), yet sums run to t or L+τ; Algorithm 2 uses φ_{1:t+j} where t+j can exceed the filter length, raising soundness concerns.",
+        "The cache-size comparison is incomplete: the O(K) cache ignores storage for generated tokens and workspace, while the standard convolutional baseline O(L) assumes K << L; behavior for large K or arbitrary-length generation is not addressed.",
+        "FFT numerical precision is ignored: the paper claims exact generation but does not analyze or empirically verify floating-point error accumulation, which can matter in autoregressive decoding.",
+        "The online/STU claim in Corollary 3 is asserted without proof details or online experiments; no regret bound or STU-specific results are empirically demonstrated.",
+        "Reproducibility is poor: there is no code, data, model specification, hyperparameter, hardware detail, or numerical output, so the timing experiments cannot be reproduced.",
+        "Significance is unclear: there are no GPU/optimized-kernel measurements, no memory measurements in realistic settings, and no evidence that the method improves downstream model quality in practice.",
+        "Presentation and notation are sometimes ambiguous, including convolution indexing, cache definitions, and filter-length assumptions, which makes the technical contribution harder to verify."
+      ]
+    }
+  }
+}

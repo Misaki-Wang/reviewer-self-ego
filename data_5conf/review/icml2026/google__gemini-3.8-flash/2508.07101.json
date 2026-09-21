@@ -1,0 +1,99 @@
+{
+  "v1": {
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Compelling and timely motivation: Investigating the unique decode-heavy dynamics of large reasoning models (LRMs) under sparse attention is highly relevant given the test-time scaling paradigm.",
+        "Insightful analysis of attention locality in reasoning: The paper provides clear empirical evidence revealing strong spatial locality across attention heads (particularly in GQA) and persistent recency locality throughout long reasoning traces.",
+        "Effective mitigation of reasoning length explosion: The paper clearly identifies and addresses the phenomenon where selection errors in sparse attention cause reasoning traces to lengthen drastically (e.g., 34% to 103% longer in baselines), demonstrating that LessIsMore preserves normal reasoning length alongside accuracy.",
+        "Strong empirical accuracy: Across challenging reasoning benchmarks (AIME-24/25, MATH500, GPQA-Diamond) on Qwen3-4B and Qwen3-8B, LessIsMore consistently matches full-attention accuracy even under stringent token budgets (1K–2K tokens), outperforming both training-free baselines (TidalDecode, Quest) and the training-based method (SeerAttention-r)."
+      ],
+      "weaknesses": [
+        "Incremental algorithmic novelty: The proposed framework is largely an adaptation of TidalDecode, augmenting it primarily with global head index pooling and a fixed-proportion sliding recency window (a concept already common in streaming/windowed attention).",
+        "Modest wall-clock speedups: The practical end-to-end acceleration is relatively small (~1.10x decoding speedup over full attention and 1.13x over TidalDecode on an RTX A5000), partly because the method still maintains the full KV cache in GPU memory and selection relies on PyTorch primitives.",
+        "Discrepancy in efficiency evaluation: The accuracy evaluation is conducted on Qwen3-8B and Qwen3-4B, but the efficiency/latency benchmarks in Section 4.3 and Figure 7 are measured using Llama-3.1-8B. Directly reporting wall-clock latency and memory throughput on the evaluated reasoning models would make the empirical validation more cohesive.",
+        "Limited architectural scope: The method is specifically tailored to Grouped Query Attention (GQA). Leading open-weights reasoning models like DeepSeek-R1 rely on Multi-head Latent Attention (MLA), where the assumptions and aggregation mechanisms would require non-trivial modifications."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Addresses an important and timely problem: sparse attention methods often suffer severe accuracy degradation and runaway token generation on long step-by-step reasoning sequences.",
+        "Insightful empirical observations demonstrating cross-head spatial locality and the critical role of a stable recency window during reasoning decoding.",
+        "Training-free and easy to integrate, consistently matching or closely tracking full-attention accuracy at small token budgets (e.g., 2K tokens on AIME-24) where existing baselines degrade significantly.",
+        "Comprehensive empirical evaluation across challenging reasoning benchmarks (AIME-24/25, GPQA-Diamond, MATH500) and informative ablation studies investigating head aggregation and the recency ratio."
+      ],
+      "weaknesses": [
+        "Modest practical wall-clock speedup: the paper reports only a 1.10x decoding speedup over full attention and a 1.13x end-to-end speedup compared to TidalDecode.",
+        "Discrepancy in latency profiling: accuracy results are reported on Qwen3-4B/8B, but decoding speed benchmarks in Section 4.3 are measured on LLaMA-3.1-8B without clear justification for why end-to-end latency was not measured directly on the evaluated reasoning models.",
+        "Algorithmic novelty is somewhat incremental, as the framework directly builds on the TidalDecode pipeline by modifying the head aggregation step and adding a proportional recency window.",
+        "Memory savings are limited: because it is a selection-based method that preserves the full KV cache in GPU memory, it addresses computational/bandwidth latency but does not alleviate KV cache capacity constraints."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Addresses an important and timely problem: the computational and latency overhead of long-trace generation in reasoning models, where autoregressive decoding often spans tens of thousands of tokens.",
+        "Provides insightful empirical analysis highlighting two key patterns in reasoning models: high spatial overlap in token importance across attention heads (particularly in GQA) and strong recency locality across decoding steps.",
+        "Identifies and systematically evaluates the problem of generation length explosion caused by accumulated selection errors in prior sparse attention methods (e.g., Quest, TidalDecode).",
+        "Demonstrates strong empirical task performance across challenging mathematical and reasoning benchmarks (AIME-24/25, MATH500, GPQA), maintaining near-lossless accuracy at strict token budgets (e.g., 2K tokens) where existing baselines degrade significantly."
+      ],
+      "weaknesses": [
+        "Algorithmic novelty is relatively incremental: the method largely builds on the TidalDecode framework by combining a fixed recent sliding window with cross-head union/ranking of top-k indices, both of which are variations of well-known sparse attention paradigms.",
+        "Modest practical efficiency gains: the reported decoding speedup over full attention is around 1.10x and end-to-end speedup over TidalDecode is 1.13x, which represents only a modest acceleration given the added engineering complexity.",
+        "The description of the aggregation mechanism lacks mathematical precision: Section 3.2 and Algorithm 1 describe sorting unified indices according to 'the tokens' rank within its attention head' and Figure 5 mentions flattening and unioning, but does not formally specify how rank conflicts across multiple heads are resolved (e.g., whether by mean score, max score, or head order).",
+        "Does not reduce KV cache memory consumption: as a selection-based approach, it retains the complete KV cache in memory throughout generation, meaning memory capacity bottlenecks for very long contexts remain unaddressed.",
+        "Evaluation is narrow in model diversity: experiments focus predominantly on one model family (Qwen), while latency measurements switch to Llama-3.1-8B; testing on native open-weight reasoning models like DeepSeek-R1-Distill-Llama would have strengthened empirical claims."
+      ]
+    }
+  },
+  "v2": {
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Addresses a timely and critical bottleneck: accelerating autoregressive decoding for large reasoning models (LRMs) where long intermediate reasoning chains cause severe computational and KV-cache overhead.",
+        "Insightful empirical analysis showing that reasoning workloads display cross-head spatial agreement and consistent temporal recency locality, contrasting with standard long-context retrieval assumptions.",
+        "Identification and mitigation of the 'reasoning length inflation' failure mode in existing sparse attention baselines (e.g., TidalDecode, Quest), where accumulation of selection errors causes the model to generate excessively long, redundant reasoning traces.",
+        "Compelling and thorough empirical results across multiple model scales (Qwen3-4B/8B/14B, DeepSeek-R1-Distill-Llama-8B) and challenging math/STEM benchmarks (AIME-24/25, MATH500, GPQA-Diamond), consistently matching full-attention accuracy under restrictive token budgets (e.g., 2K/4K tokens).",
+        "Practical systems implementation and profiling with FlashInfer and SGLang, demonstrating tangible end-to-end decoding speedups (up to 1.6x) and reduced global-to-shared memory data transfers for GQA models."
+      ],
+      "weaknesses": [
+        "The core algorithmic framework is built heavily on TidalDecode (Yang et al., 2024). The main modifications—unifying candidate sets across heads and allocating a static recency window fraction—represent valuable and practical refinements, but are conceptually somewhat incremental.",
+        "The aggregation and ranking mechanism in Section 3.2 and Algorithm 1 (specifically lines 11–13: UnionFlatten and global ranking) is slightly underspecified. The paper does not explicitly detail the exact ranking criterion used to sort the aggregated candidate tokens (e.g., whether by mean/max attention score across heads, or token occurrence frequency).",
+        "Sensitivity to re-selection layer placement: as shown in Appendix A.5 (Table 11), performance varies substantially depending on which layer is chosen for token selection (e.g., L12 vs L5/L30). While the needle-in-a-haystack heuristic appears functional, requiring pre-deployment layer profiling introduces a hyperparameter tuning overhead across new model architectures.",
+        "Evaluations are primarily conducted at batch size 1 (single-request decoding latency and TBT). Examining how cross-head unified selection interacts with batched serving workloads (variable sequence lengths per batch in paged KV-cache settings) would strengthen the practical systems claims."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Addresses a crucial and timely bottleneck: long-horizon autoregressive decoding overhead in test-time scaling and chain-of-thought reasoning models.",
+        "Insightful empirical analysis identifying two prominent properties in reasoning attention: cross-head spatial locality (high overlap of token importance across attention heads) and temporal recency locality.",
+        "Strong and comprehensive empirical evaluation across multiple model families (DeepSeek-R1-Distill-Llama-8B, Qwen3-4B/8B/14B) and rigorous reasoning benchmarks (AIME-24/25, MATH500, GPQA-Diamond), consistently matching or exceeding full-attention accuracy at high sparsity.",
+        "Directly identifies and mitigates generation length inflation, a known failure mode where sparse decoding degrades reasoning traces and causes models to ramble.",
+        "Solid systems-level implementation and evaluation, deploying custom kernels in FlashInfer and benchmarking within SGLang on NVIDIA A100/A5000 GPUs to report realistic wall-clock and time-between-token speedups."
+      ],
+      "weaknesses": [
+        "Algorithmic novelty is relatively incremental, as the method is primarily an extension of TidalDecode (Yang et al., 2024) combining cross-head candidate aggregation with a proportional recency window.",
+        "Key algorithmic details in Section 3.2 and Algorithm 1 lack precise definition: the exact ranking metric used after `UnionFlatten(ρ_head)` to obtain the top $K \\cdot (1-r)$ tokens (e.g., whether by head vote count, maximum query-key logit, or mean attention probability) is not clearly formalized.",
+        "Efficiency evaluations appear to focus primarily on batch size = 1 decoding; the impact of cross-head unified selection under larger serving batch sizes (where memory bandwidth bounds and kernel indexing dynamics shift) is not explored."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Timely and practically relevant focus on long-horizon reasoning decoding: The paper targets decoding-heavy inference workloads characteristic of large reasoning models (LRMs), identifying that error accumulation and sequence length inflation are critical failure modes of prior sparse attention methods.",
+        "Hardware-conscious design for GQA: By unifying token selection across attention heads within a layer, LessIsMore naturally aligns with Grouped-Query Attention (GQA), reducing redundant global-to-shared (G2S) memory transfers as documented in the kernel profiling.",
+        "Comprehensive empirical evaluation: The method is evaluated across multiple models (DeepSeek-R1-Distill-Llama-8B, Qwen variants) and rigorous reasoning benchmarks (AIME-24/25, GPQA-Diamond, MATH500) using 64 samples per problem on AIME to control for evaluation variance.",
+        "Thorough systems-level validation: The authors evaluate real end-to-end decoding speedup in SGLang with FlashInfer, alongside kernel-level FLOPs, memory transfer, and per-token decoding latency."
+      ],
+      "weaknesses": [
+        "Algorithmic novelty is relatively incremental over TidalDecode: The core framework relies heavily on TidalDecode's paradigm of sparse layer reuse via early-layer re-selection. The primary technical delta consists of pooling head proposals and adding a fixed proportional recency window.",
+        "Underspecified ranking details in Algorithm 1: Line 12 mentions `UnionFlatten(rho_head)` and sorting to select the top entries, but the exact mechanism for aggregating and ranking candidate tokens across heads (e.g., voting frequency, maximum logit, or sum of attention probabilities) is not formally defined in Section 3.2.",
+        "Heavy reliance on the recency window: As shown in Figure 8, setting the recency ratio r to 0% causes task failure on AIME-24, indicating that the proportional recency window contributes substantially to the reported robustness, rather than unified cross-head selection alone.",
+        "Evaluation is restricted to single-request decoding (batch size = 1): Real-world serving systems typically run batched inference. Sparse attention kernel speedups often shift or diminish under high batch concurrency due to fragmented memory indexing across batch instances; serving throughput across varying concurrency levels is missing.",
+        "Use of non-standard or placeholder citations: The paper references unreleased or speculative artifacts (e.g., Qwen3 technical report, GPT-5, Claude 4), which detracts from the professional presentation of the manuscript."
+      ]
+    }
+  }
+}

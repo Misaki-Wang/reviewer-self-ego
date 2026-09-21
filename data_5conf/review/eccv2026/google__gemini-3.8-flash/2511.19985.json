@@ -1,0 +1,96 @@
+{
+  "v1": {
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Insightful and well-motivated premise: The paper convincingly demonstrates that the initial seed noise plays a decisive role in layout and structure consistency for diffusion/flow-based inpainting, addressing a key root cause overlooked by many prior training-free methods.",
+        "Efficient and practical optimization framework: By exploiting the linear trajectory of flow matching and employing a stop-gradient linear approximation, the method avoids backpropagating through unrolled denoising steps, enabling optimization on large-scale models (e.g., Stable Diffusion 3.5 Medium) where unrolled backprop is intractable.",
+        "Effective stabilization via spectral optimization and gradient masking: Optimizing Fourier coefficients combined with masking gradient updates inside unobserved regions provides a clean, principled solution to prevent noise divergence and distribution drift, thoroughly justified in Figures 3, 5, 6, and Table 4.",
+        "Strong empirical performance: The method consistently outperforms competing training-free solvers (FLAIR, FlowDPS, FlowChef, BLD) across multiple benchmarks (FFHQ, DIV2K, BrushBench) in key perceptual quality and fidelity metrics (LPIPS, SSIM, FID)."
+      ],
+      "weaknesses": [
+        "Inference latency: Although avoiding backpropagation through the denoiser reduces memory requirements, the method still requires multiple forward passes/iterations (taking roughly ~1 minute per image on an RTX 5090). A more detailed discussion on inference time tradeoffs and iteration scaling would strengthen the practical evaluation.",
+        "Discrepancy in baseline model capacity: BrushNet is evaluated using Stable Diffusion 1.5 (due to available pretrained weights), whereas the proposed method and training-free baselines use SD 3.5 Medium (2.5B parameters at 1024x1024). This backbone capacity difference should be more explicitly discussed when comparing against trained methods.",
+        "Limited verification on general inverse problems: The paper claims potential applicability to other linear inverse problems (e.g., super-resolution, deblurring), but the formulation and gradient masking design (nearest-neighbor fill and spatial binary mask) are tailored specifically to inpainting. Validating or elaborating on how gradient masking extends to non-diagonal degradation operators would broaden the scope."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Well-motivated problem formulation: Targeting the initial seed noise directly addresses a fundamental structural limitation in existing training-free inpainting methods, connecting nicely with recent findings on diffusion/flow seed geometry.",
+        "Efficient and practical linearization strategy: Bypassing backpropagation through multi-step unrolled denoisers avoids severe memory and compute bottlenecks, making optimization feasible on modern flow-based architectures like SD 3.5.",
+        "Insightful spectral domain optimization: The paper clearly identifies and addresses the instability and frequency imbalance of spatial-domain noise optimization, demonstrating that optimizing in the Fourier domain alongside unobserved gradient masking is crucial for stable convergence.",
+        "Strong and thorough empirical validation: Extensive quantitative and qualitative evaluations across diverse datasets (FFHQ, DIV2K, BrushBench) show consistent gains in key perceptual metrics (LPIPS, SSIM, FID) over both training-free baselines (FLAIR, FlowChef, FlowDPS, BLD) and specialized models.",
+        "Clear ablation studies: The ablations convincingly justify the necessity of both spectral domain updates and gradient masking, as well as validating the nearest-pixel fill strategy in latent space."
+      ],
+      "weaknesses": [
+        "Deeper mathematical discussion of the update rule would strengthen the work: Eq. (3) combined with stop-gradient implies that the gradient with respect to $x_T$ is simply the residual error on the observed region, $2 A^\\top (A D_T(x_T) - y)$. Formulating this explicitly as a fixed-point or Picard-like residual update would demystify the linearization and clarify the connection to concurrent gradient-free inversion methods.",
+        "Computational cost remains non-negligible: Although backpropagation through the denoiser is eliminated, running 20 optimization iterations with a $T=20$ step denoiser still requires 400 forward evaluation passes (NFEs) plus the final generation. A more detailed study on the trade-off between iteration count, NFE, and output quality would be beneficial.",
+        "Dependence on VLM prompting: For datasets like FFHQ and DIV2K, the pipeline relies on Claude to infer and hallucinate prompts from masked images. The sensitivity of the seed optimization to prompt ambiguity, empty prompts, or mismatched captions is not explored."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Clear Problem Identification: The paper targets an important and often overlooked challenge in training-free inpainting with diffusion and flow models—namely, the decisive role of the initial noise seed in determining global layout and structural consistency.",
+        "Solid Quantitative Performance: On three established benchmarks (FFHQ, DIV2K, and BrushBench), the proposed method shows notable improvements in perceptual distance metrics (LPIPS) and distribution metrics (FID) over both training-free baselines (BLD-SD3.5, FLAIR, FlowChef, FlowDPS) and the trained BrushNet baseline.",
+        "Comprehensive Qualitative Evidence: The authors provide extensive qualitative examples in the main paper and supplementary material across 15 random samples per dataset, clearly illustrating improved compositional alignment compared to blending or posterior-sampling baselines.",
+        "Informative Ablation Study: The ablation table (Table 4) and visual comparisons (Figures 3, 5, 6) clearly justify the necessity of optimizing in the Fourier/spectral domain and masking out gradient updates in the unobserved regions to avoid latent manifold divergence."
+      ],
+      "weaknesses": [
+        "Flawed Theoretical Justification for Trajectory Linearization: The justification in Section 3.2 connecting 'straight flow trajectories' to Eq. (2) and Eq. (3) is mathematically loose. In Eq. (2), evaluating $x(t)$ at $t=0$ trivially yields $x(0) = D_T(x_T)$ regardless of whether the intermediate trajectory is linear or curved. Eq. (3) is essentially dropping the denoiser Jacobian $\\nabla_{x_T} D_T(x_T) \\approx 0$ by inserting a stop-gradient operator $[D_T(x_T) - x_T]_{sg}$, effectively treating the denoiser update as a quasi-static displacement. Attributing this heuristic stop-gradient strictly to the linearity of flow models obscures the actual approximation being made (akin to concurrent work FlowOpt [35]).",
+        "High Computational Latency and Resource Demands: The method requires roughly 20 optimization iterations, each evaluating the full denoiser ($T=20$), totaling 400 NFEs. Running for approximately one minute per image on a top-tier NVIDIA RTX 5090 GPU poses a severe practical limitation for interactive or standard inpainting workflows, which typically run in a few seconds.",
+        "Reliance on Detailed VLM-Generated Prompts: For FFHQ and DIV2K, prompts were generated using Claude to infer the complete scene and describe it in 2-3 sentences. In real-world inpainting scenarios, users rarely provide exhaustive descriptions of occluded regions. This raises concerns regarding how dependent the method's layout alignment is on semantic cues leaked through the VLM captions versus the initial noise optimization itself.",
+        "Backbone Mismatch in Comparisons: The trained baseline BrushNet is evaluated using the older Stable Diffusion 1.5 architecture, whereas the proposed method and training-free baselines utilize Stable Diffusion 3.5 Medium (a 2.5B parameter DiT). While comparing against SD 1.5-based BrushNet reflects standard available checkpoints, the inherent capacity gap weakens the fairness of claims regarding outperforming specialized trained models.",
+        "Heuristic Latent-Space Handling: Using nearest-neighbor pixel filling followed by VAE encoding is simple, but its validity on complex non-textured boundaries or heavy occlusions remains weakly investigated beyond the ablation on FFHQ."
+      ]
+    }
+  },
+  "v3": {
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Clear motivation and insightful diagnosis of training-free inpainting limitations, showing that finding a suitable initial noise seed is essential for structural consistency.",
+        "Clever and theoretically justified combination of linear denoising trajectory approximation (avoiding prohibitive denoiser unrolling/backpropagation) with spectral Adam preconditioning. The mathematical analysis in Appendix F rigorously establishes why coordinate-wise non-linear updates in the Fourier domain cannot be replicated by spatial scaling.",
+        "Comprehensive and rigorous experimental validation across multiple benchmark datasets (FFHQ, DIV2K, BrushBench) using diverse perceptual and quality metrics (SSIM, LPIPS, FID, IR, HPS v2), outperforming both training-free solvers (FLAIR, FlowChef, FlowDPS) and specialized models.",
+        "Extensive ablation studies isolating each architectural choice (spectral domain vs. spatial domain Adam, spatial gradient constraining, VAE latent infill strategies, number of optimization steps) and thorough comparisons with related initial-noise methods (InitNo, GoldenNoise, FreeInpaint).",
+        "Statistically rigorous 2AFC user study (37 raters, 1,665 pairwise comparisons) with high preference rates (90.0% overall) corroborating the quantitative findings."
+      ],
+      "weaknesses": [
+        "Inference latency remains significant compared to feed-forward models: requiring 20 optimization steps (~400 NFEs total) translates to approximately 67 seconds per image on an RTX 5090 GPU, compared to 5 seconds for models like BrushNet.",
+        "Dependency on external Vision-Language Models (Claude) to synthesize detailed descriptive prompts for unmasked context; the impact of noisy, mismatched, or absent captions on the noise optimization trajectory is not fully explored.",
+        "Jacobian-free / straight-through approximations have been investigated in related literature (e.g., FlowChef, DiNG, FlowOpt); while the spectral preconditioning is novel and well-justified, the linear approximation component has existing precedents in diffusion inverse problem literature.",
+        "Visual presentation in the supplementary random-sample sheets (Figs. 16–18) uses very small thumbnails, which limits easy visual inspection of fine-grained artifacts without extreme zoom."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Clear motivation and elegant formulation: The paper identifies a crucial limitation in training-free inverse problem solvers—namely, the inability to efficiently optimize initial noise latents without prohibitive backpropagation through unrolled denoising steps. Approximating the trajectory via rectified flow linearity and dropping the denoiser Jacobian provides an efficient and practical formulation.",
+        "Sound theoretical and algorithmic insight: The introduction of spectral optimization via Adam is well justified. As analyzed in Sec. 3.3 and Supplementary Sec. F, coordinate-wise adaptive moment scaling in the Fourier domain does not commute with spatial updates, providing an effective per-frequency preconditioning that stabilizes convergence across different spatial scales and avoids divergence.",
+        "Comprehensive and rigorous evaluation: The method is validated across three standard and diverse benchmarks (FFHQ, DIV2K, BrushBench) against competitive training-free solvers (FLAIR, FlowChef, FlowDPS, BLD) and trained baselines (BrushNet, SD3 ControlNet). SONIC demonstrates clear advantages in structural consistency and perceptual metrics (SSIM, LPIPS, FID).",
+        "Thorough supplementary material: The authors provide an extensive set of ablations, runtime comparisons, extensions to non-flow diffusion models (SD 1.5, SDXL) and video models, comparisons against other initial noise optimization techniques (InitNo, GoldenNoise, FreeInpaint), and a 2AFC human evaluation study (N=37 raters) with statistically significant preference."
+      ],
+      "weaknesses": [
+        "Inference latency: While the method completely avoids memory-heavy denoiser backpropagation, it still requires multiple full forward denoising passes (e.g., 20 optimization iterations with T=20 steps = 400 NFEs, taking ~67s per image on an RTX 5090). Although comparable to or faster than other training-free optimization solvers, it remains significantly slower than feed-forward trained inpainters such as BrushNet (~5s).",
+        "Dependence on VLM prompt quality: For datasets without text captions (FFHQ, DIV2K), the pipeline relies on captions generated by Claude Sonnet 4.5. It is unclear how sensitive the optimization is to prompt ambiguity, hallucination, or errors in the VLM captions.",
+        "Generalizability of spatial constraining: The spatial constraint strategy (freezing latent gradient updates in unobserved regions) is essential to avoid manifold drift, but it relies on pixel-aligned masking. This makes direct generalization to linear inverse problems with global degradation operators (e.g., motion deblurring, super-resolution) non-trivial without additional formulation."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Compelling motivation: The paper convincingly demonstrates that the initial noise sample heavily governs the layout and structural coherence of generations in diffusion/flow models, making seed optimization a high-leverage component for training-free inverse problems.",
+        "Technical soundness and novelty: The combination of a linear trajectory approximation (bypassing expensive backpropagation/unrolling through the denoiser chain) with spectral-domain optimization using Adam is technically sound, elegant, and well-justified both theoretically (non-equivalence proof and frequency preconditioning in Appendix F) and empirically.",
+        "Comprehensive experimental evaluation: The authors evaluate on three standard benchmarks (FFHQ, DIV2K, and BrushBench) against a diverse suite of baselines, including training-free posterior solvers (FLAIR, FlowDPS, FlowChef, BLD), trained models (BrushNet, SD3 ControlNet), and initial noise optimization baselines (InitNo, GoldenNoise, FreeInpaint).",
+        "Strong perceptual results: The proposed method achieves consistently lower LPIPS and FID across benchmarks, supported by an extensive 2AFC user study (N=37 raters, 1,665 pairwise comparisons) with a 90% preference rate.",
+        "Thorough ablations: The paper cleanly isolates the benefits of spectral optimization over spatial Adam/SGD, spatial gradient masking, number of optimization steps, and latent infilling strategies."
+      ],
+      "weaknesses": [
+        "Inference latency: Although avoiding backpropagation through the denoiser saves memory and VJP computation, running 20 optimization iterations where each evaluates a 20-step denoiser requires 400 forward NFEs (~67 seconds per image on an NVIDIA RTX 5090). This limits its real-time or interactive deployment compared to feedforward or few-step inpainters.",
+        "Prompt dependency: The pipeline relies on an external VLM (Claude) to generate detailed, plausible captions for the masked inputs on FFHQ and DIV2K. The manuscript lacks an analysis of sensitivity to prompt variations or degradation under brief/imprecise captions.",
+        "Mathematical clarity in Section 3.4: While Section 3.4 discusses masking gradient updates to freeze unobserved latents, the mathematical formulation in Eq. (4) presents a global Fourier objective without explicitly defining the projection/masking operator applied in the frequency/spatial loop."
+      ]
+    }
+  }
+}

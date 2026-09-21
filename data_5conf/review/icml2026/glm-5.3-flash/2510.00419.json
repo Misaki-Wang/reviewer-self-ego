@@ -1,0 +1,115 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Novel and well-motivated direction: extending learning-to-learn (L2L) to zeroth-order LLM fine-tuning, with a compelling 'train once per base LLM, reuse across tasks and derivative checkpoints' framing supported by the LLM supply-chain observation.",
+        "Memory-efficient design is well justified: the per-block PertNN parameterization is motivated by the approximately block-diagonal Hessian of LLMs, and the empirical ablation (Table 4) confirms block-wise sharing beats layer-wise sharing. Overhead is minimal (62 vs 61 GB for OPT-30B; <3.4% time overhead).",
+        "Broad empirical evaluation: 4 LLMs (1B to 30B), 7 datasets, 28 task-model pairs, with convergence curves, accuracy/F1 tables, learning-rate sensitivity analysis across all models, and memory/time breakdowns in the appendix.",
+        "Useful practical analyses: normalization to decouple learned variance from effective learning rate, periodic reset during meta-training, and an honest accounting of the one-time meta-training cost (Table 8) and the gradient-truncation approximation used to make meta-training feasible.",
+        "Limitations and future work are discussed candidly, and hyperparameter grids for all baselines are provided, supporting fair comparison and reproducibility."
+      ],
+      "weaknesses": [
+        "Potential train/test leakage: the ZO Fine-tuner is meta-trained on the COPA dataset and then also evaluated on COPA as a downstream task. COPA results (where ZO Fine-tuner is often the best) may be inflated; the paper does not address or ablate this concern.",
+        "The headline claims need nuance: 'outperforms in 82.1% of combinations' is measured on converged training loss; accuracy wins are only 75.0% with a modest 2.5% average improvement over MeZO, and some settings show ZO Fine-tuner losing clearly (e.g., Qwen-14B WSC 0.76 vs 0.79; OPT-30B SST-2 accuracy below several baselines). No statistical significance testing is provided despite noisy small datasets (COPA, WSC).",
+        "Theoretical support is informal and not rigorous: Theorem 1 is explicitly informal, Theorem 3 holds only in an 'ideal situation', and the appendix proof contains hand-wavy steps (e.g., exchanging expectations and invoking block-diagonality to turn a sum of conditional bounds into a joint bound) without full justification.",
+        "Internal inconsistencies undermine confidence: the appendix states a 2-layer MLP with 64 hidden units (B.3) but the runtime analysis says 32 hidden units (C.2); the text claims auxiliary-network storage under 2MB for OPT-30B, yet measured memory shows a ~1GB gap (62 vs 61 GB); the code availability URL appears truncated/missing.",
+        "The 'memory-efficient' premise is partially undercut: meta-training requires full backpropagation through the LLM (332GB for OPT-30B, Table 8), i.e., as expensive as first-order Adam training, and gradient flow through the finite-difference estimator is cut off, making the meta-objective an approximation whose bias is not analyzed.",
+        "Baselines could be stronger: several methods cited in the introduction (MeZO-SVRG, ZO-DAP) are not compared; there is no comparison to simply tuning a per-block static variance scale, which would isolate how much the learned, adaptive variance actually contributes beyond the normalization trick."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper addresses a genuinely underexplored direction: applying learning-to-learn (L2L) to zeroth-order optimization at LLM scale. The framing of 'train once per base model, reuse across tasks and derivative checkpoints' is compelling and well-motivated by the observation that most HuggingFace checkpoints are derivatives of a few base models.",
+        "The per-block variance design is well-motivated by the block-diagonal Hessian structure of LLMs and achieves extreme compactness (e.g., <2MB auxiliary networks for OPT-30B), making the L2L approach feasible where coordinate-wise designs would be prohibitive.",
+        "The evaluation is broad in scope: 4 LLMs (up to OPT-30B) × 7 datasets, comparisons against multiple recent ZO baselines (MeZO, MeZO-AdamU, LOZO, HiZOO), learning-rate sensitivity studies, ablations on normalization/periodic reset/sharing granularity, and thorough memory and runtime breakdown analyses (Tables 6-8).",
+        "The normalization trick decoupling the learned variance from the effective learning rate is a sensible and clearly explained design choice, supported by an ablation (Table 2) showing it matters substantially.",
+        "Reproducibility is reasonably supported: hyperparameter grids for all methods are reported (Table 5), meta-training costs are disclosed (Table 8), and code is stated to be released."
+      ],
+      "weaknesses": [
+        "Potential task leakage / selection bias in the headline results: the ZO Fine-tuner is meta-trained on COPA, and COPA is also one of the seven evaluation datasets. The strongest gains are reported exactly on the training distribution, and 'training on a single dataset can outperform multi-dataset training' (Appendix C.5) raises the question of whether the learned optimizer overfits to COPA-like signals rather than learning a generally useful perturbation strategy. Results on COPA should be separated from the transfer claim.",
+        "The cross-model generalization claim is overreached. The finetuner is meta-trained per base model (Table 8 reports per-model meta-training), and cross-architecture transfer is never tested; the only derivative-model experiment is LLaMA-3.1-8B → LLaMA-3.1-8B-Instruct (same family, same size). The abstract's 'train once, reuse widely' framing is thus supported only in a narrow sense.",
+        "The theory is weak and partially mismatched with the method. Theorem 3 is explicitly in an 'ideal situation,' informal, and essentially reduces to plugging block-wise σ_j into the existing MeZO bound; the 'strictly tighter upper bound' claim is loose and not quantified. Moreover, the proof analyzes block-by-block sequential perturbation while Algorithm 1 perturbs all blocks simultaneously with a shared Σt, so the theoretical guarantee does not directly cover the actual algorithm.",
+        "Empirical gains are modest and inconsistent. The average accuracy improvement over MeZO is 2.5%, and several cells in Table 1 show the proposed method worse in loss or accuracy (e.g., Qwen-14B SST-2 loss 0.24 vs MeZO 0.21; Qwen-14B WSC accuracy 0.76 vs baselines 0.79). No statistical significance testing or seed-level variance reporting on the final Table 1 metrics is provided.",
+        "Several important methodological details are under-specified or inconsistent: the auxiliary network hidden size is stated as 64 in B.2/B.3 but 32 in C.2; the periodic-reset interval (a critical hyperparameter for meta-training) is not included in Table 5; and the one-step, myopic meta-objective with gradient cut through the finite-difference term is an approximation whose consequences are not analyzed beyond a passing remark.",
+        "Baseline coverage has gaps: MeZO-SVRG and ZO-DAP are cited as relevant improved MeZO variants but not compared; no LoRA/first-order accuracy reference points are included in the main table, making it hard to judge where ZO methods stand on the accuracy-memory Pareto frontier.",
+        "The '82.1% win rate' headline conflates training-loss wins with deployment-relevant outcomes; since the method's main selling point is downstream performance, accuracy/F1 wins (75.0%) and their magnitude deserve equal billing, and the loss-based claim is vulnerable given the optimizer is trained to minimize loss."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Novel and sensible application of learning-to-learn (L2L) to zeroth-order LLM fine-tuning; the per-block shared variance design, motivated by the approximately block-diagonal Hessian structure, makes L2L feasible at LLM scale with negligible overhead (<2MB auxiliary parameters for OPT-30B).",
+        "Comprehensive empirical evaluation: 4 LLMs (1B–30B) × 7 datasets (28 task-model pairs), four ZO baselines, learning-rate grid search for all methods, learning-rate sensitivity analysis, memory/time profiling, and ablations for normalization, periodic reset, and sharing granularity.",
+        "The 'train once, reuse widely' framing is well-motivated by the LLM supply-chain observation, and the demonstrated transfer from LLaMA-3.1-8B to LLaMA-3.1-8B-Instruct supports the practical value of the approach.",
+        "Good reproducibility: hyperparameter grids for all methods are provided (Table 5), implementation details are thorough (including the gradient cut-off approximation in meta-training), and code is released.",
+        "Clear and largely honest discussion of limitations (diagonal variance structure, meta-training overhead quantified in Table 8)."
+      ],
+      "weaknesses": [
+        "Theoretical contribution is weak. Theorem 3 is stated only for an 'ideal situation' and its proof contains questionable steps: the block-wise bound derivation loosely interchanges E[Σ_MB,j(θ_t,j)] with Σ_MB(θ_t), and the equality justifying summation relies on an idealized block-diagonal Hessian that holds only approximately in practice. Moreover, the proof analyzes block-by-block sequential perturbation, whereas Algorithm 1 perturbs all blocks simultaneously with distinct variances, creating a gap between theory and the actual method.",
+        "Gains over the strongest baselines are modest and inconsistently supported: the headline 2.5% accuracy improvement is over MeZO, while improvements over LOZO and HIZOO are often small, and in several cells ZO Fine-tuner loses (e.g., WSC accuracy on LLaMA-1B is 0.56 vs MeZO's 0.62 despite much lower loss; CB accuracy on LLaMA-8B). No statistical significance tests or cross-seed error bars are reported; the shaded regions in Figure 2 reflect std of smoothed loss, not run-to-run variance.",
+        "Potential evaluation contamination: the ZO Fine-tuner is meta-trained on COPA, which is also one of the seven evaluation datasets, and COPA is among the tasks where the method's advantage is most pronounced. A held-out protocol (or explicit exclusion) would strengthen the generalization claims.",
+        "The claim of reduced hyperparameter burden is undermined in practice: the method still undergoes the same learning-rate grid search as baselines, and the meta-training itself introduces additional hyperparameters (η1, η2, reset period) tuned empirically.",
+        "Several important design approximations are unablated, e.g., cutting the gradient through the finite-difference term during meta-training, and the sensitivity of the learned optimizer to the choice of meta-training dataset is only partially explored (Appendix C.5 shows single- vs multi-dataset results are comparable, but the robustness of this conclusion is unclear).",
+        "Presentation issues: redundant and inconsistent theorem numbering (Theorem 1 in the main text vs Theorems 2–3 in the appendix), grammatical errors (e.g., 'due to COPA's ... yield fast cycles'), and accuracy context is missing—reporting first-order fine-tuning reference numbers would help readers judge how much of the gap to Adam is closed."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Well-motivated extension of learning-to-learn (L2L) to zeroth-order LLM fine-tuning. The block-wise perturbation parameterization is a sensible, memory-efficient way to scale learned optimizers (e.g., <2MB auxiliary parameters for OPT-30B), grounded in known block-diagonal structure of Transformer Hessians.",
+        "Broad empirical evaluation: 4 LLMs (1B–30B) and 7 datasets (28 task-model pairs), with per-task/model learning-rate grid search for all methods, plus strong recent baselines (HIZOO, LOZO, MeZO-AdamU, MeZO).",
+        "Thorough transfer analysis beyond the headline claim: transfer to a derived checkpoint (LLaMA-3.1-8B → 8B-Instruct), transfer to a substantially different task suite (MetaMathQA with GSM8K/MATH-500 evaluation), and robustness to the choice of meta-training dataset (SQuAD, SST-2).",
+        "Useful ablations (normalization, periodic reset, block- vs. layer-wise sharing, SGD vs. Adam trajectory) and honest efficiency accounting (runtime breakdown, peak memory, meta-training cost of ~2.4x first-order fine-tuning, explicitly one-time).",
+        "Reproducibility: hyperparameter grids, L2L details (including the gradient-truncation approximation), and released finetuner checkpoints/fixed-seed scripts are provided; limitations are candidly discussed in Appendix A.1."
+      ],
+      "weaknesses": [
+        "Theory–algorithm mismatch: Theorem D.5 (and the proof) analyzes a setting where perturbations are sampled block-by-block, whereas the actual algorithm perturbs all blocks simultaneously with u_t ~ N(0, Σ_t Σ_t^T). The claim that block-wise variances 'yield a tighter upper bound' is stated under an 'ideal situation' and does not directly cover the deployed method, weakening the theoretical justification for the central design.",
+        "Evidence quality on the headline claim: the 82.1% figure is for training loss; the accuracy win rate is 75.0% with an average gain of only 2.5%, often on small datasets (COPA, WSC) where differences are likely within noise. No confidence intervals, significance tests, or stated number of seeds for the accuracy numbers in Table 1; several entries show the method losing to MeZO (e.g., WSC on LLaMA-8B, HIZOO/MeZO anomalies on Qwen-14B).",
+        "The 'train once, reuse widely' claim is overstated relative to the evidence: a separate ZO Fine-tuner is meta-trained for each of the four base models (cross-architecture transfer, e.g., LLaMA→Qwen, is never tested), and derivative-model transfer is shown for only one model and two datasets.",
+        "Meta-training relies on nontrivial approximations (gradient flow cut through the finite-difference term; one-step lookahead only; empirically fixed L2L hyperparameters with reset schedules 'tuned based on the first-order trajectory behavior'), so the learned optimizer's robustness to these choices is not fully characterized.",
+        "Some presentation gaps: informal theorem statements in the main text with only the formal version deferred; loss/accuracy inconsistencies in Table 1 (e.g., very low losses with mediocre accuracy for some baselines) are not explained; Figure 1 is hard to read."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The core idea—scaling learning-to-learn to LLM-scale zeroth-order optimization via compact per-block perturbation variance networks—is sensible and well-motivated by block-diagonal Hessian structure, and the memory overhead (<2MB auxiliary networks for OPT-30B) is convincingly demonstrated (Table 9).",
+        "The experimental scope is substantial: 4 LLMs (1B–30B), 7 datasets, 28 task-model pairs, with learning-rate sensitivity studies (Figures 3–5), ablations on normalization/reset/sharing granularity (Tables 2–3), derivative-checkpoint transfer (Table 4), an out-of-distribution math task (Table 5), and meta-training dataset robustness (Table 6).",
+        "The paper is transparent about computational shortcuts (gradient cutoff through the finite-difference term in Appendix B.3), replaces MeZO-Adam with MeZO-AdamU on larger models explicitly, and provides runtime/memory breakdowns (Tables 8–10), which supports reproducibility of the evaluation protocol.",
+        "Honest limitations discussion (Appendix A.1) acknowledging the diagonal-variance restriction and non-trivial L2L training cost (~2.4x FO fine-tuning time)."
+      ],
+      "weaknesses": [
+        "The headline claim (82.1% of combinations) is based on final training loss, not test accuracy; training loss is a weak proxy for fine-tuning quality, and on accuracy the win rate drops to 75% with small, inconsistent gains (avg 2.5%, and sometimes worse than MeZO, e.g., WSC on LLaMA-8B and SST-2 on OPT-30B in Table 1). The significance of the contribution rests on modest improvements.",
+        "The theoretical support (Theorem 3.1 / D.5) is thin and only loosely connected to the method: it assumes an exactly block-diagonal Hessian, operates in an 'ideal situation,' proves only that some block-wise variance assignment can yield a tighter upper bound, and provides no link between the learned PertNN variances and the variance choice that provably tightens the bound. The step from 'tighter upper bound under exact block-diagonality' to 'learned variances improve convergence' is not established.",
+        "Cross-model transfer claims are ambiguous: the main text says a single finetuner trained on COPA is 'reused as is across all other tasks and models,' yet Table 10 shows separate meta-training per model and the architecture is defined per parameter block of a specific model. Whether the 1B-trained finetuner is literally applied to OPT-30B (and how blocks are matched) is unclear and central to the 'train once, reuse widely' claim.",
+        "The L2L training itself introduces hyperparameters (meta learning rates, reset schedule, trajectory optimizer) that are hand-tuned per model (Appendix C.8) and not searched in the comparison grid given to baselines, which partially undercuts the robustness narrative; the baseline grid also contains only three learning rates.",
+        "Reproducibility is undermined by a placeholder code URL ('https://github.com/.') and internal inconsistencies: hidden units reported as 64 in Appendix B.2/B.3 but 32 in Appendix C.2; the Figure 4 caption mislabels the bottom panel (Qwen-14B vs. LLaMA-8B); a stray quotation mark in the Impact Statement.",
+        "Key baselines cited as motivation (MeZO-SVRG, ZO-DAP) are not compared, and the FO upper bound in Appendix C.7 confirms a non-trivial gap remains to first-order methods, limiting the practical appeal of further improving within the MeZO regime."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Clear and well-motivated problem: extending learning-to-learn (L2L) to zeroth-order LLM fine-tuning is a natural but underexplored direction, and the 'train once per base model, reuse across tasks/derivatives' framing is practical and well argued (e.g., the supply-chain motivation in Sec. 2 and the transfer to LLaMA-3.1-8B-Instruct in Table 4).",
+        "Comprehensive empirical evaluation: 4 LLMs (1B–30B) x 7 datasets, with consistent baselines (MeZO, MeZO-AdamU, HIZOO, LOZO), matched prompt templates and LR grid searches, plus strong ablations (normalization, periodic reset, block- vs layer-wise sharing, meta-training dataset choice, SGD vs Adam trajectories).",
+        "Memory and time overhead are carefully quantified (Tables 8-10): the learned component adds <3.5% runtime and ~1GB memory over MeZO at OPT-30B scale, and the L2L meta-training cost is reported and argued to be a one-time per-model expense.",
+        "The block-wise variance parameterization is theory-motivated via an extension of the MeZO analysis (App. D) and empirically validated against a layer-wise baseline (Table 3); the normalization trick decoupling learned variance from effective learning rate is a sensible and well-explained design choice.",
+        "Transfer is tested in genuinely out-of-distribution settings: the COPA-trained finetuner transfers to GLUE/SuperGLUE tasks, span QA, derivative checkpoints, and even a math task (MetaMathQA -> GSM8K/MATH-500, Table 5), with an ablation showing COPA is not uniquely favorable (Table 6).",
+        "Honest limitations discussion (App. A.1) covering diagonal-covariance restrictions, exploitable gradient structure, and the lack of combination with LoRA/quantization/offloading."
+      ],
+      "weaknesses": [
+        "The headline 82.1% claim is based on training loss, not the downstream metric; accuracy improvements are more modest (75% of combinations, average +2.5% over MeZO), and some accuracy results are mixed or regress (e.g., LLaMA-8B WSC 0.62 vs MeZO 0.63; OPT-30B OPT results are within noise of MeZO). The paper would benefit from statistical significance testing and multiple seeds; only smoothed-loss standard deviations are shown.",
+        "One of the 7 evaluation datasets (COPA) is also the meta-training dataset, so the 28-combination evaluation is partially in-distribution; this is acknowledged but inflates the transfer percentage slightly.",
+        "The learned information content is under-analyzed. PertNN inputs (block mean/var of parameters, previous variance, last losses) are nearly constant per block, so the method may effectively reduce to a learned static per-block variance schedule rather than truly adaptive control. No analysis of the learned variance profiles or what signals PertNN actually uses is provided.",
+        "The theoretical contribution is weak: Theorem D.5 is stated only 'in ideal situation' under exact block-diagonal Hessians, and the proof largely re-derives MeZO's analysis with block-wise substitutions; the gap between the assumed and actual Hessian structure is not quantified.",
+        "Gradient flow through the finite-difference term is cut off during L2L training (App. B.3), a nontrivial approximation to the stated meta-objective; the meta-objective actually optimized differs from Eq. 5 and this is not reflected in the main method description.",
+        "Minor but concerning inconsistencies suggest insufficient polish: hidden units reported as 64 (App. B.2) vs 32 (App. C.2) for the same PertNN; the code URL in the abstract is incomplete ('https://github.com/.'); MeZO-Adam is silently replaced by MeZO-AdamU on 3 of 4 models, changing the comparison set across models.",
+        "There appear to be per-model differences in training steps (20k vs 10k) and batch sizes (16 vs 4 for OPT-30B) that make cross-model comparisons of convergence speed less controlled, and the gain of the learned optimizer over simpler alternatives (e.g., a hand-tuned static per-block variance schedule, or block-wise adaptation of HIZOO-style approaches) is not isolated."
+      ]
+    }
+  }
+}

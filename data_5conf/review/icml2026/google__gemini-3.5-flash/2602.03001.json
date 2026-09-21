@@ -1,0 +1,93 @@
+{
+  "v1": {
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Principled and novel derivation of non-Euclidean Gradient Noise Scales (GNS) tailored to the geometry of stochastic sign descent ($l_1$ GNS) and spectral descent (Nuclear $S_1$ GNS).",
+        "Addresses a highly relevant and timely problem given the recent popularity of non-Euclidean optimizers like Muon and Signum in training large models.",
+        "Proposes a practical, low-overhead distributed variance estimation method using local mini-batch gradients across ranks, which easily integrates with standard DDP and FSDP setups.",
+        "Strong empirical validation demonstrating up to 66% training step reduction while maintaining or improving final validation performance on LLM (Llama 3 160M/1B) and vision workloads.",
+        "Excellent ablation study (e.g., Table 9) demonstrating that aligning the GNS metric with the optimizer's geometry ($l_1$ vs. $l_2$) leads to superior performance."
+      ],
+      "weaknesses": [
+        "The theoretical critical batch size (CBS) scaling relies on lower bounds that can be loose in practice, requiring the scaling coefficient $\\theta$ to be treated as a tunable hyperparameter.",
+        "While the method is highly effective for Signum and Muon, the paper notes that extending these GNS principles to highly stateful, preconditioned optimizers like AdamW remains an open challenge (as seen in the 1B parameter Llama 3 experiments)."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Strong theoretical foundation: The paper addresses a key mismatch in prior work by deriving geometry-aware gradient noise scales (GNS) for non-Euclidean optimizers using dual norms (the l1 norm for signSGD/Signum and the S1 nuclear norm for specSGD/Muon).",
+        "Practical and scalable implementation: The proposed estimation procedure elegantly leverages local mini-batch gradients across distributed data-parallel (DDP/FSDP) ranks, bypassing the need for memory-intensive per-sample gradient computations.",
+        "Highly relevant to modern deep learning: The work focuses on optimizers of high current interest, particularly Muon and Signum, which have shown promising results in scaling modern foundation models.",
+        "Convincing empirical results: Demonstrates significant training step reductions (up to 66%) on Llama-3 models and Vision Transformers while matching the final validation performance of constant-batch baselines.",
+        "Excellent presentation and reproducibility: The manuscript is exceptionally clear, logical, and accompanied by rigorous proofs and comprehensive hyperparameter details in the appendix."
+      ],
+      "weaknesses": [
+        "Theoretical gap with stateful optimizers: While the theory is strictly derived for basic signSGD and specSGD, the empirical workloads use momentum-based variants (Signum and Muon). Although the heuristics work well, the impact of momentum on the GNS bounds is not fully resolved mathematically.",
+        "Lack of clarity on AdamW adaptation: In Table 2 and Table 3, adaptive results are presented for AdamW. It is not completely clear in the main text which GNS metric (e.g., standard Euclidean GNS) was used for the AdamW baseline.",
+        "Absence of wall-clock time overhead measurements: Computing the S1 GNS for spectral descent requires an AllGather operation to reconstruct the covariance matrix. Although the authors state the overhead is low, providing concrete wall-clock overhead percentages would strengthen the practical claims."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Well-motivated and highly timely: Addressing the geometric mismatch in GNS for modern, popular optimizers (sign-based like Signum, and spectral-based like Muon) is an important and highly relevant topic in current deep learning training.",
+        "Strong theoretical foundation: Generalizing the descent lemma and GNS to arbitrary dual norms, and instantiating them for the $\\ell_1$ and nuclear norms, is elegant, clear, and mathematically sound.",
+        "Practical and scalable implementation: The proposed distributed estimation method leveraging data-parallel ranks (accessing unsharded gradients before ReduceScatter) is computationally efficient and avoids expensive auxiliary passes or excessive memory overhead.",
+        "Promising empirical results: The authors demonstrate significant step reductions (up to 66%) on Llama-160M and vision models while maintaining final validation perplexity/accuracy."
+      ],
+      "weaknesses": [
+        "Limited generalizability to AdamW: As shown in Table 3, the proposed adaptive strategy fails to match the baseline validation loss for AdamW on the 1B Llama model. Since AdamW remains the de facto standard for most LLM training, this is a notable limitation.",
+        "Hyperparameter sensitivity: The adaptive strategy introduces several new hyperparameters (the EMAs $\\beta^N, \\beta^M$, the tolerance $\\theta$, the update frequency $F$, and the warmup period $I$). The tolerance $\\theta$ is particularly sensitive and requires sweeps, which slightly undercuts the goal of avoiding manual tuning.",
+        "Loose theoretical bounds: The theoretical derivations rely on upper bounds (e.g., Bernstein's bound on expected $\\ell_1$ error) which can be quite loose in high dimensions, meaning the GNS is only proportional to the true optimal batch size up to a loose multiplicative constant.",
+        "Diminishing returns at scale: The 1B parameter model shows a much smaller steps reduction (12.11% for Signum) compared to the 160M model (66.61%). It is unclear whether the benefits of this approach persist as model and dataset sizes scale to standard LLM regimes."
+      ]
+    }
+  },
+  "v2": {
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Strong Theoretical Foundation: The paper provides a rigorous and elegant generalization of the Gradient Noise Scale (GNS) and Critical Batch Size (CBS) to non-Euclidean geometries, specifically deriving the Manhattan (l1) GNS for signSGD/Signum and the Nuclear (S1) GNS for specSGD/Muon.",
+        "Highly Timely and Relevant: Modern large-scale training increasingly relies on non-Euclidean optimizers like Muon. Generalizing GNS to these geometries fills a major conceptual gap in the adaptive batch size literature.",
+        "Clever, Scalable Implementation: Instead of memory-heavy per-sample gradient computations, the authors propose a highly practical distributed variance estimation scheme that treats local mini-batch gradients on different ranks as independent samples, demonstrating seamless integration with DDP and FSDP.",
+        "Strong Empirical Validation: The proposed adaptive batch size strategies demonstrate substantial step reductions (up to 66%) on Llama-3 models and vision models, successfully matching or exceeding the validation performance of optimal constant-batch baselines."
+      ],
+      "weaknesses": [
+        "Computational Overhead of S1 GNS: As shown in Table 12, the S1 GNS estimation introduces a non-trivial wall-clock overhead (~40% for the 1B Llama model, even when amortized over F=100 steps). This overhead arises from the need to compute Gram matrices and perform eigendecompositions, which may partially offset the wall-clock gains from step reduction.",
+        "Incompatibility with AdamW / Stateful Optimizers: Although the authors apply l1 GNS to AdamW, the results on the 1B Llama model (Table 3) show that AdamW with the adaptive schedule fails to reach the baseline validation loss. The theoretical derivation assumes memoryless/stateless generalized steepest descent, and extending this rigorously to stateful/preconditioned optimizers (like AdamW or Shampoo) remains an unresolved challenge.",
+        "Sensitivity to Hyperparameter θ: The adaptive batch size relies on the tolerance parameter θ. While Table 10 shows low sensitivity to θ for signSGD, finding the optimal θ in practice across different scales and architectures still requires some heuristic tuning."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Elegant and mathematically rigorous extension of the Gradient Noise Scale (GNS) and Critical Batch Size (CBS) frameworks to non-Euclidean geometries (specifically $\\ell_1$ norm for sign-based methods and nuclear norm $S_1$ for spectral methods).",
+        "Establishes a solid connection between the geometry of the optimizer's dual norm and the naturally emerging gradient noise metrics.",
+        "Proposes a practical, communication-efficient variance estimation method designed for distributed training (DDP/FSDP) that avoids the need for expensive auxiliary passes.",
+        "Demonstrates substantial step reductions (up to 66%) for modern optimizers like Muon and Signum on Llama-style transformer architectures."
+      ],
+      "weaknesses": [
+        "Significant computational and latency overhead for the $S_1$ GNS estimator (used for spectral descent / Muon). As shown in Table 12, even when amortized by running estimation only once every $F=100$ steps, it introduces a +39.9% wall-clock overhead at the 1B parameter scale. A single GNS calculation step is roughly 40 times slower than a normal training step, which could cause potential issues like distributed collective timeouts or hardware underutilization.",
+        "The proposed method does not yield positive results for AdamW, which is the most widely used optimizer in modern LLM training. As shown in Table 3, the adaptive strategy for AdamW is unable to reach the baseline validation loss, indicating a limitation of the current geometry-aware GNS formulation for preconditioned, stateful optimizers.",
+        "The experimental evaluation is limited to relatively small-scale training configurations (maximum 1B parameters and 22B tokens) and small batch sizes (up to 512 sequences, compared to the millions of tokens per batch typical in industrial LLM training). It remains unclear if the derived GNS metrics scale robustly to massive, commercial-scale LLM training pipelines.",
+        "The batch size schedule relies on several heuristics and hyperparameter choices (such as $\\beta^N, \\beta^M, \\theta, F, I$). This increases the tuning complexity compared to simple, predetermined batch size ramp-up schedules."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Excellent conceptual contribution: Generalizing the theory of critical batch size (CBS) and gradient noise scale (GNS) from Euclidean to non-Euclidean geometries ($l_1$ and $S_1$ norms) is a highly principled, elegant, and timely idea.",
+        "Strong theoretical foundation: The derivations for the optimal batch sizes for signSGD and specSGD/Muon are mathematically sound, using a generalized steepest descent framework.",
+        "Practical distributed estimation: The proposed variance estimation framework leveraging data-parallel ranks (DDP/FSDP) makes GNS computation feasible during large-scale training without requiring expensive auxiliary passes.",
+        "Impressive empirical validation: The experiments cover both language (Llama-3 up to 1B parameters) and vision (SimpleViT, ResNet-18) workloads, demonstrating substantial step savings (up to 66% for Signum and Muon) while maintaining validation performance."
+      ],
+      "weaknesses": [
+        "Computational overhead of $S_1$ GNS: Calculating the Schatten-1 GNS for spectral optimizers (like specSGD/Muon) incurs a substantial wall-clock overhead (up to ~40% for the 1B Llama model, as shown in Table 12), primarily due to Gram matrix computation, eigendecompositions, and AllGather collectives. Although amortized by measuring every $F=100$ steps, this remains a significant practical bottleneck that should be discussed in the main text.",
+        "Difficulty with stateful/preconditioned optimizers: While the method works well for signSGD and Muon, it is less effective for AdamW (e.g., as shown in Table 3, where AdamW does not reach the baseline validation loss under the adaptive schedule). Since AdamW is the most common optimizer in practice, a deeper analysis or discussion on how to reconcile stateful/diagonal-preconditioned optimizers with the proposed non-Euclidean GNS would enhance the paper.",
+        "Heuristic complexity: The adaptive strategy relies on several hyperparameter heuristics (such as exponential moving averages $\\beta^N$, $\\beta^M$, update frequency $F$, and the tolerance parameter $\\theta$). Although the authors show some robustness, tuning these parameters across different setups could limit the plug-and-play nature of the method."
+      ]
+    }
+  }
+}

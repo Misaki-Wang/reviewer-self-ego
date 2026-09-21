@@ -1,0 +1,97 @@
+{
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Compelling minimalist philosophy: The paper systematically deconstructs adaptive optimizers and identifies a very simple, practical combination—column-wise gradient normalization across matrix layers plus first-order momentum applied exclusively to the final language model head.",
+        "Outstanding memory and computational efficiency: By avoiding second-order moments entirely and restricting first-order momentum to the final layer, SCALE requires almost the same memory footprint as vanilla SGD (e.g., only 2% to 10% extra memory over SGD on 1B and 7B models) and achieves higher throughput than SVD- or Newton-Schulz-based alternatives (such as Muon).",
+        "Extensive empirical benchmarking: Experiments span LLaMA models from 60M up to 7B parameters on C4, additional model families (Qwen2, GPT-2, Gemma-2B), extended token budgets (up to 4x Chinchilla), throughput analysis, and learning rate sensitivity tests.",
+        "Insightful diagnostic analysis: The empirical findings regarding high gradient variance in the LM head (Figure 4) and the discussion connecting column-wise normalization to vocabulary frequency imbalance (Appendix A.9, Figure 7) provide valuable intuitive backing for the design."
+      ],
+      "weaknesses": [
+        "Gap between theory and the proposed method: Theorem 2.1 analyzes un-normalized SGD with layer-wise momentum, explicitly omitting column-wise normalization. Since column-wise normalization is one of the two foundational pillars of SCALE, the theorem does not analyze the actual proposed algorithm.",
+        "Lack of downstream zero-shot/few-shot evaluation: The pretraining evaluations solely report validation perplexity on C4. Evaluating downstream task benchmarks (e.g., ARC, HellaSwag, MMLU) for the 1B or 7B checkpoints would strengthen the empirical verification that pretraining perplexity gains translate to downstream capabilities.",
+        "Omission of vector parameter handling in the main text: Appendix A.2 mentions that Adam is used for 1D vector parameters (e.g., biases, norms). While standard in the literature (e.g., Muon) and negligible for total memory, this detail is omitted from Algorithm 1 and the main methodology section.",
+        "Heuristics in scaling: For the 1B model, the method adopts the learning rate scaling technique from Muon, which indicates some architectural/scale tuning heuristics are required in practice."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Compelling minimalist design: The paper proposes SCALE, which drastically simplifies memory-efficient optimization by using only column-wise gradient normalization for all matrix weights and first-order momentum restricted strictly to the final language modeling head.",
+        "Substantial memory and compute efficiency: Because hidden layers require zero optimizer states (no first- or second-order moments), the optimizer state footprint is virtually identical to plain SGD (e.g., adding only ~0.26 GB for a 7B model). Unlike Muon/Newton-Schulz iterations or low-rank projection methods (GaLore/Fira), column-wise normalization requires no iterative SVD approximations, leading to superior GPU throughput.",
+        "Strong and comprehensive empirical evaluation: The authors validate the method across a wide spectrum of scales (60M, 130M, 350M, 1B, and 7B LLaMA models) and architectures (GPT-2, Qwen2, Gemma-2B), consistently matching or outperforming AdamW, Muon, GaLore, and APOLLO under comparable budgets.",
+        "Insightful analysis of normalization mechanisms: The ablation and discussion in Section 2 and Appendix A.9 provide intuitive justification for column-wise normalization on the LM head (where columns correspond to vocabulary tokens), explaining how it counters frequency-induced gradient disparities across tokens."
+      ],
+      "weaknesses": [
+        "Theoretical mismatch with the proposed method: Theorem 2.1 analyzes layer-wise momentum for standard SGD without gradient normalization. As demonstrated by the authors, unnormalized SGD completely fails to train transformers; thus, the theoretical analysis does not model the core mechanism (column-wise normalization) driving SCALE's success.",
+        "Missing implementation details in the main text: The main text presents Algorithm 1 as a pure column-normalized update, but Appendix A.2 reveals that all 1D/vector parameters are updated using standard Adam, and that the 1B model utilizes Muon's layer-wise learning rate scaling technique. These details should be explicitly discussed in the main paper as they impact reproducibility and the true complexity of the optimizer.",
+        "Lack of discussion on weight decay: Standard LLM pretraining heavily depends on decoupled weight decay (AdamW). Algorithm 1 and the methodology omit how weight decay is integrated with column normalization, which is known to interact delicately with scale-invariant updates.",
+        "Evaluation scale is undertrained relative to industry standards: While pretraining a 7B model to ~20B tokens is understandable given academic compute constraints, modern open models are trained on trillions of tokens. It remains unverified whether the lack of momentum in hidden layers causes instability or performance degradation in long-horizon pretraining."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Compelling minimalist approach: The paper tackles an important practical problem—reducing optimizer state memory in LLM pretraining—from a principled bottom-up perspective, demonstrating that simple column-wise gradient normalization combined with first-order momentum solely on the LM-head closes the gap to Adam and Muon.",
+        "Comprehensive empirical benchmarking: The authors evaluate SCALE across multiple model sizes (LLaMA 60M, 130M, 350M, 1B, and 7B) as well as diverse architectures (Qwen2, GPT-2, Gemma-2B), showing competitive or superior perplexity with substantially reduced memory overhead (e.g., 13.74 GB vs. 40.43 GB for Adam on 7B).",
+        "Insightful empirical diagnostics: The manuscript provides clear explanations and empirical evidence for its architectural choices, showing that the LM-head exhibits the highest gradient variance (Figure 4) and that column-wise normalization aligns with token vocabulary frequencies to prevent destabilizing gradient spikes (Figures 3 and 7, Appendix A.9).",
+        "Throughput advantages: By avoiding expensive SVD or iterative Newton-Schulz matrix orthogonalization steps across intermediate layers, SCALE achieves an ~18.5% throughput improvement over Muon/SWAN-style methods (Table 7)."
+      ],
+      "weaknesses": [
+        "Theoretical disconnect from the proposed algorithm: Theorem 2.1 analyzes multi-layer SGD with layer-dependent momentum, but explicitly omits column-wise gradient normalization ('Note that here we did not consider column-wise normalization for ease of theoretical analysis'). Given that column normalization is the key ingredient making momentum-free SGD viable on hidden layers, the theoretical guarantee does not describe Algorithm 1.",
+        "Evaluation restricted to validation perplexity: Pretraining quality is evaluated entirely using validation perplexity on C4. Standard downstream few-shot/zero-shot evaluations (e.g., ARC, HellaSwag, MMLU, PIQA) are missing for the pretrained models, leaving open whether the optimizer maintains downstream task transfer parity.",
+        "Under-trained 7B evaluation: While running a 7B model is computationally demanding, evaluating on only 19.7B tokens (~150k steps with batch size 512, sequence length 256) is severely undertrained relative to modern standard pretraining schedules, which limits the conclusiveness of the 7B comparison.",
+        "Nuances in parameter handling and tuning: Similar to Muon and related methods, SCALE uses Adam for vector parameters (biases, layer norm gains) and requires specific learning rate scaling rules on larger models (such as Muon's scaling on the 1B model, Appendix A.2). A more detailed ablation regarding the sensitivity to these auxiliary choices would improve reproducibility and practical usability."
+      ]
+    }
+  },
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "The paper adopts a well-motivated and principled 'bottom-up' minimalist perspective, systematically investigating which optimizer states and normalization schemes are truly essential for effective LLM pretraining.",
+        "The central empirical observation—that stochastic gradient variance is heavily concentrated in the final prediction head (`lm_head`) and that column-wise gradient normalization suffices for intermediate layers—is insightful, clear, and provides a compelling explanation for the optimizer design.",
+        "The resulting optimizer (SCALE) achieves extreme memory efficiency, requiring essentially the same memory footprint as vanilla SGD (only ~2% overhead for 7B models due to storing momentum solely for the lm_head) while eliminating second-moment optimizer states entirely.",
+        "The experimental evaluation covers a broad set of model scales (LLaMA 60M, 130M, 350M, 1B, and 7B) on C4, consistently demonstrating a superior perplexity-to-memory Pareto frontier compared to prior low-memory optimizers like GaLore, Fira, SWAN, and APOLLO."
+      ],
+      "weaknesses": [
+        "There is a gap between the theoretical analysis and the proposed algorithm: Theorem 2.1 analyzes layer-wise SGD with momentum without gradient normalization, explicitly leaving out the column-wise normalization that constitutes one of SCALE's two main pillars.",
+        "The evaluation relies exclusively on validation perplexity on the pretraining corpus (C4). Including standard downstream zero-shot or few-shot benchmark evaluations (e.g., ARC, HellaSwag, MMLU) would provide stronger verification that downstream task performance is fully preserved.",
+        "While Table 1 compares the isolated per-step normalization computational cost, the manuscript lacks end-to-end wall-clock training throughput metrics (e.g., tokens/sec or TFLOPs utilization in distributed training) comparing SCALE directly against AdamW and Muon."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Compelling bottom-up philosophy: The paper systematically deconstructs the components of modern adaptive optimizers to find the minimal state requirements for LLM pretraining, providing clear intuition on the role of column normalization and layer-wise variance.",
+        "Remarkable memory and compute efficiency: SCALE requires virtually the same memory as vanilla SGD (only adding a first-order momentum buffer for the final output layer), eliminating second moments and avoiding expensive SVD / Newton-Schulz iterations required by Muon and SWAN.",
+        "Strong empirical results across model scales: SCALE achieves competitive or superior pretraining perplexity compared to Adam, APOLLO, and GaLore across LLaMA models ranging from 60M up to 7B parameters.",
+        "Simplicity and ease of adoption: Algorithm 1 is elegant, straightforward to implement in standard deep learning frameworks with minimal code modifications, and introduces minimal hyperparameter tuning overhead."
+      ],
+      "weaknesses": [
+        "Theoretical gap and singularity at beta=0: Theorem 2.1 analyzes SGD-M without column-wise normalization, creating a clear gap between the analyzed algorithm and the proposed SCALE. Furthermore, the bound in (2.10) contains a term proportional to (1 - beta_l) / (beta_l^3), which blows up as beta_l approaches 0. Therefore, the theory cannot formally justify setting beta_l = 0 for the intermediate layers.",
+        "Absence of downstream evaluation: Evaluation is exclusively reported in terms of pretraining perplexity on the C4 dataset. Evaluating zero-shot or few-shot accuracy on standard downstream benchmarks (e.g., ARC, HellaSwag, MMLU, PIQA) is necessary to ensure that representations learned without optimizer states in hidden layers generalize reliably.",
+        "Incomplete ablations regarding layer-wise momentum: Figure 3 indicates that the embedding layer (first layer) also exhibits visibly elevated gradient variance compared to intermediate layers. The paper does not provide an ablation comparing momentum on [last layer only] vs. [first + last layers] vs. [all layers] vs. [no momentum at all] under column normalization.",
+        "Heterogeneous baseline reporting and under-training: The 7B model is trained on only 19.7B tokens (heavily undertrained relative to standard Chinchilla-scaling regimes). Moreover, results in Table 5 and Table 6 combine experimental numbers copied from multiple different publications (Ma et al., 2024; Glentis et al., 2025; Zhu et al., 2025) alongside newly run experiments, where slight discrepancies in tokenization or implementation details could confound comparisons.",
+        "LR scaling confounder: Appendix A.2 mentions that for the 1B model, SCALE applies an extra learning rate scaling trick borrowed from Liu et al. (2025) (which yields a drop from 14.34 to 14.25). It is unclear whether all baselines were granted equivalent tuning or architectural enhancements."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Compelling minimalist design: The paper investigates an important and practical question—identifying the minimal necessary optimizer state for pretraining LLMs—and arrives at an exceptionally simple algorithm (SCALE) combining column-wise gradient normalization with first-order momentum applied exclusively to the final language model head.",
+        "Computational and state efficiency: Compared to methods utilizing matrix orthogonalization or SVD approximations (e.g., Muon, SWAN), column-wise normalization incurs negligible computational overhead (Table 1) while requiring nearly the same theoretical state memory as vanilla SGD.",
+        "Systematic bottom-up empirical motivation: The preliminary experiments in Section 2—decoupling gradient normalization norms and identifying that the output projection layer exhibits the highest stochastic gradient variance (Figure 3)—provide an intuitive and transparent justification for the proposed method.",
+        "Pretraining perplexity results across scales: The empirical results demonstrate that SCALE achieves competitive pretraining perplexity compared to Adam and low-rank state compression methods (such as GaLore and APOLLO) across LLaMA models ranging from 60M up to 7B parameters."
+      ],
+      "weaknesses": [
+        "Significant disconnect between theoretical analysis and proposed algorithm: Theorem 2.1 analyzes unnormalized SGD with layer-wise momentum and explicitly excludes gradient normalization, which is the foundational mechanism of SCALE. Furthermore, the bound in (2.10) includes terms with beta_l^3 in the denominator, meaning the bound diverges or becomes vacuous as beta_l approaches 0; thus, the theory does not rigorously justify setting beta_l = 0 for intermediate layers. In Section 3, the authors explicitly defer from proving convergence for Algorithm 1 itself.",
+        "Absence of downstream task evaluation: The empirical evaluation is restricted entirely to pretraining perplexity on the C4 dataset. Modern LLM optimizer benchmarks (e.g., GaLore, Adam-mini, Muon, APOLLO) standardly report zero-shot/few-shot downstream benchmarks (such as ARC, HellaSwag, MMLU, PIQA, Winogrande) to verify that perplexity gains transfer to actual linguistic and reasoning capabilities rather than reflecting training peculiarities.",
+        "Inconsistent benchmarking and copied baseline numbers: In Tables 5 and 6, multiple baseline numbers are directly copied from different prior publications (Glentis et al., 2025; Ma et al., 2024; Zhu et al., 2025) rather than evaluated within an identical, controlled environment. For the 7B model, key competitive baselines such as standard AdamW and Muon are omitted entirely, comparing only against APOLLO variants from external literature.",
+        "Lack of measured empirical peak memory and wall-clock throughput: The memory savings reported throughout the paper (Figure 1, Table 4, Table 5) are theoretical calculations based solely on parameter and optimizer state counts in BF16. The paper does not measure actual peak GPU memory usage (which includes activations, gradient buffers, Adam optimizer states for vector parameters, and temporary allocations) or end-to-end wall-clock training throughput on real hardware.",
+        "Limited architectural diversity: The experimental validation is conducted strictly on causal decoder-only LLaMA models. It remains unverified whether column-wise normalization with last-layer momentum generalizes effectively to other architectures (e.g., encoder-decoder models, vision transformers, or mixture-of-experts)."
+      ]
+    }
+  }
+}

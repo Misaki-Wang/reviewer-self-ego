@@ -1,0 +1,99 @@
+{
+  "v1": {
+    "exp3_negative": {
+      "oa": 8,
+      "strengths": [
+        "Principled and novel formulation: Introducing an intrinsic token retention score with exponential temporal decay (β^{t-i}) offers an elegant continuous relaxation of the discrete KV cache eviction problem, effectively avoiding the myopic, query-dependent biases of standard attention-based eviction heuristics.",
+        "Efficient and lightweight training: The method only trains lightweight retention gates (a single-hidden-layer MLP per layer/head) via distillation and a hinge capacity loss while keeping the underlying LLM weights frozen, making it practical to retrofit existing pretrained models without expensive full-model retraining.",
+        "Comprehensive and rigorous evaluation: The authors evaluate TRIM-KV across a wide spectrum of tasks and benchmarks, including long-horizon mathematical reasoning (GSM8K, MATH-500, AIME24), procedural generation (LongProc), conversational memory (LongMemEval), and long-context retrieval (SCBench, LongBench-V2), showing consistent and substantial gains over strong heuristic (SnapKV, R-KV) and learnable baselines (SeerAttn-R, LocRet).",
+        "Real hardware efficiency validation: Unlike many theoretical or simulated eviction papers, the authors report actual throughput and decoding latency benchmarks on modern GPU hardware (H200), demonstrating roughly 2× decoding throughput improvements over full-cache decoding.",
+        "Insightful mechanistic and qualitative analysis: The paper provides extensive visualizations demonstrating how distinct layer- and head-specific functional roles naturally emerge (e.g., sink tokens, sliding windows, gist tokens, operator vs. variable preservation) without being explicitly hard-coded."
+      ],
+      "weaknesses": [
+        "Train-inference discrepancy: During training, retention scores continuously modulate the attention weights via β^{t-i} in the softmax computation, whereas during inference, β^{t-i} is solely used as an eviction ranking criterion while the retained tokens attend with standard unscaled attention. Although this continuous relaxation is practically effective, a formal discussion or ablation analyzing the impact of this mismatch is missing.",
+        "Domain transfer sensitivity: As shown in Figure 8, retention gates trained on general long-context data experience steeper degradation under tighter KV budgets on math reasoning compared to domain-specific training. This suggests that the learned intrinsic token importance is somewhat domain-dependent, which may require fine-tuning separate gate checkpoints for distinct downstream domains.",
+        "Inability to fully exploit per-head sparsity in practice: While the analysis reveals heterogeneous sparsity demands across different heads and layers (Figure 5c), the inference deployment must maintain uniform cache slot allocations per layer due to current FlashAttention kernel constraints, limiting the full practical realization of per-head budget allocation.",
+        "Minor typographical errors: 'Patero frontiers' in the captions of Figure 3 and Figure 6 should be 'Pareto frontiers'."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 8,
+      "strengths": [
+        "Principled and novel formulation: Shifting from query-dependent, transient attention heuristics to learning an intrinsic token retention score at creation time with an exponential decay mechanism (drawing inspiration from Ebbinghaus's forgetting curve) is both intuitive and elegant.",
+        "Computational efficiency: The retention score is computed once at token generation via a lightweight MLP gate and cached, making eviction an efficient O(M) operation per step without requiring dynamic attention tracking, query caching, or offloading overhead.",
+        "Hardware-aware training implementation: Leveraging FlexAttention and a custom Triton kernel for the capacity loss allows efficient training on long sequences (up to 128k tokens) with modest parameter overhead.",
+        "Extensive empirical validation: The paper demonstrates consistent and substantial gains over strong heuristic (SnapKV, R-KV, H2O, StreamingLLM) and learned/retrieval (SeerAttn-R, LocRet) baselines across diverse benchmarks, including math reasoning (GSM8K, MATH-500, AIME24), procedural generation (LongProc), long-term chat memory (LongMemEval), and long-context benchmarks (SCBench, LongBench/V2).",
+        "Insightful mechanistic interpretability analysis: The visualizations clearly show how established heuristics—such as attention sinks, sliding windows, and sentence-level gist tokens—emerge naturally and adaptively across specific layers and heads without explicit hardcoding."
+      ],
+      "weaknesses": [
+        "Train-inference discrepancy: During training, retention-gated attention applies a soft multiplicative discount to past attention logits across the sequence, whereas at inference, it switches to hard top-M token eviction with standard attention. While empirically effective, a deeper discussion or ablation on the gap between soft exponential weighting and hard eviction would strengthen the methodology.",
+        "Uniform allocation constraint: While the empirical analysis reveals that different layers and heads exhibit drastically different retention profiles, the inference implementation still adheres to uniform per-head memory budgets due to kernel limitations. Demonstrating how much performance is left on the table compared to true heterogeneous budget allocation would be valuable.",
+        "Architecture-dependent variance: On DeepSeek-R1-Distill-Llama-8B (Figure 6), the performance margin over baselines is notably narrower than on Qwen3 models. A more detailed examination of why certain architectures exhibit different retention sparsity dynamics would improve generality.",
+        "Minor presentation polish: Minor typos are present, such as 'Patero frontiers' instead of 'Pareto frontiers' in the captions of Figure 3 and Figure 6."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Principled and novel formulation: Unlike existing heuristic or query-dependent eviction policies (e.g., SnapKV, H2O, R-KV) which are often myopic during extended generation, TRIM-KV learns an intrinsic token importance score at creation time coupled with an exponential decay inspired by Ebbinghaus's forgetting curve.",
+        "Parameter- and compute-efficient design: By training only lightweight retention gates with LLM weights frozen, the method preserves the base model's capabilities while adding virtually no runtime overhead at inference (retention scores are predicted once per token, cached, and tested via simple score comparisons).",
+        "Comprehensive empirical evaluation: The approach is evaluated across a broad spectrum of challenging benchmarks (AIME24, GSM8K, MATH-500, LongProc, LongMemEval, SCBench, and LongBench-V2) across multiple model families (Qwen, DeepSeek-R1 Distill, Phi-3). It consistently outperforms both heuristic eviction and learnable retrieval baselines, occasionally even matching or outperforming full KV cache.",
+        "Rich qualitative analysis and interpretability: The paper provides in-depth visualizations showing that well-known heuristics (attention sinks, sliding windows, gist tokens) emerge organically per layer and head without manual design.",
+        "Hardware-aware execution: Uses FlexAttention and custom Triton kernels to enable efficient long-context distillation training without full attention matrix materialization."
+      ],
+      "weaknesses": [
+        "Potential interaction with negative attention logits: In Equation (3), the formulation applies $\\beta_i^{t-i}$ directly to the dot product $q_t^\\top k_i$ inside the exponential, i.e., $\\exp(\\beta_i^{t-i} q_t^\\top k_i)$. If a dot product is negative, decaying toward zero increases the attention logit rather than decreasing the token's influence. A clarification or ablation regarding this formulation versus modulating pre-softmax logits by an additive penalty (or modulating post-softmax weights) would strengthen the theoretical framing.",
+        "Practical limitations of per-head variable length cache: While the retention framework naturally implies head- and layer-wise heterogeneous sparsity, the authors note that current serving systems and FlashAttention assume uniform cache lengths per layer, leaving the full realization of per-head dynamic cache allocation to future work.",
+        "Domain transfer sensitivity under tight budgets: As shown in Figure 8, gates trained on general long-context corpora exhibit noticeable degradation on math reasoning under tighter budgets compared to domain-specific training, indicating that retention policies may require domain-aligned tuning data.",
+        "Minor presentation typos: 'Patero frontiers' appears in the captions of both Figure 3 and Figure 6 instead of 'Pareto frontiers'."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 8,
+      "strengths": [
+        "Principled and novel formulation: Moving away from myopic, query-dependent attention heuristics to learning intrinsic token utility at creation time with exponential temporal decay (inspired by Ebbinghaus's forgetting curve) is well-motivated and elegant.",
+        "Comprehensive empirical validation: The method is rigorously evaluated across diverse setups, including long-horizon mathematical reasoning (GSM8K, MATH-500, AIME24), procedural generation (LongProc), conversational long-context memory (LongMemEval), and chunk prefilling (LongBench-V2). It consistently outperforms strong heuristic baselines (SnapKV, R-KV, StreamingLLM) and retrieval-based approaches (SeerAttn-R), especially in strict memory-budget regimes.",
+        "Negligible inference overhead and hardware-conscious implementation: Retention scores are computed once at token generation and can be fused into projection layers, requiring only a lightweight scalar comparison for eviction. The throughput and latency benchmarks (Table 6) confirm practical speedups over full-cache decoding.",
+        "Rich qualitative analysis and interpretability: The paper provides compelling visualizations demonstrating how common human-engineered heuristics (attention sinks, sliding windows, syntactic/semantic gist tokens) emerge naturally across distinct heads and layers without being explicitly hardcoded."
+      ],
+      "weaknesses": [
+        "Training requirement compared to training-free baselines: While heuristic methods like SnapKV, H2O, and R-KV are entirely training-free, TRIM-KV requires fine-tuning gates with long-context distillation (up to 16k–128k sequence lengths on H100 GPUs). Although the gate parameters are lightweight, the distillation training pipeline requires non-trivial compute resources.",
+        "Discrepancy between training proxy and inference execution: During training, retention gates smoothly downscale attention logits via continuous exponential decay, whereas at inference time, hard truncation/eviction is performed while retaining vanilla attention on the surviving tokens. Although empirically effective, a deeper analysis or ablation of this training-inference gap would strengthen the theoretical grounding.",
+        "Cross-domain transferability under strict budgets: As shown in Appendix B.4, when retention gates are trained on general long-context corpora and tested on math reasoning under tighter budgets (e.g., 512–1024), performance drops noticeably compared to domain-specific training, indicating that intrinsic token importance can be somewhat domain-dependent."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Principled and elegant formulation: Framing KV cache management through learned intrinsic token retention with exponential decay (inspired by Ebbinghaus's forgetting curve) neatly circumvents the myopic, query-dependent attention heuristics of existing eviction methods.",
+        "Efficient and lightweight training: Freezing the underlying LLM backbone and training only lightweight per-head MLP retention gates with distillation and capacity regularization allows parameter-efficient adaptation without expensive model retraining.",
+        "Thorough and extensive empirical evaluation: The paper evaluates across diverse benchmarks and setups, including math reasoning (AIME24, GSM8K, MATH-500), procedural generation (LongProc), multi-turn conversational memory (LongMemEval), and chunked-prefill long-context understanding (LongBench-V2, SCBench), consistently outperforming strong heuristic (SnapKV, R-KV) and learned baselines.",
+        "Demonstrated hardware efficiency: Leveraging FlexAttention and custom Triton kernels enables training up to 128K context, while inference benchmarking (Table 6) shows tangible speedups (~2x decoding throughput over full-cache decoding at 32K context) without KV offloading overheads.",
+        "Compelling qualitative and mechanistic insights: Detailed visualizations demonstrate that well-known heuristics (attention sinks, sliding windows, gist tokens) naturally emerge as layer- and head-specific specializations from end-to-end training rather than manual engineering."
+      ],
+      "weaknesses": [
+        "Discrepancy between training and inference dynamics: During training, the retention scores act as continuous soft logit biases modulating attention across all historical tokens (Eq. 3), whereas at inference, retention scores are used strictly as a hard eviction criterion to maintain top-M tokens with standard unweighted attention. The paper lacks formal analysis or bounds on the approximation error introduced by this soft-to-hard discrepancy.",
+        "Domain-specific gate fine-tuning: In the experiments, different retention gates are trained for different domains (e.g., OpenR1-Math for reasoning, SynthLong/BookSum/Buddhi for long-context, LongAlpaca for prefill). The ablation in Figure 8 shows noticeable degradation under tight KV budgets when general-data-trained gates are evaluated on reasoning tasks, indicating that the learned retention policies exhibit domain sensitivity rather than universal generality.",
+        "Severe performance drops on needle/retrieval-heavy tasks: As shown in Table 2 on SCBench, TRIM-KV collapses to 0.00% accuracy on Retr.KV (compared to 66.00% for Full KV). While the authors attribute this to the inherent incompressibility of retrieval tasks, a more in-depth discussion or hybrid mechanism addressing dense factual retrieval failure modes would strengthen the work."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 6,
+      "strengths": [
+        "Principled and novel formulation: Introducing an intrinsic token-level retention gate parameterized by exponential decay (mimicking forgetting curves) provides a differentiable surrogate during training and an intuitive criterion for inference-time KV eviction.",
+        "Efficient end-to-end training scheme: The retention gates are trained via knowledge distillation and a hinge capacity loss while keeping the underlying LLM backbone frozen, keeping training overhead low and avoiding expensive full fine-tuning.",
+        "Comprehensive empirical evaluation: The method is validated across diverse benchmarks, including long-horizon mathematical reasoning (GSM8K, MATH-500, AIME24), procedural generation (LongProc), conversational memory (LongMemEval), and long-context comprehension (SCBench, LongBench-V2).",
+        "Hardware-aware implementation and decoding speedup: Integrating the formulation with FlexAttention and Triton kernels results in practical inference efficiency, demonstrating up to ~2x higher decoding throughput over full-cache decoding at 32k context.",
+        "Thorough qualitative analysis: The paper provides rich visualizations (Figures 4, 5, and Appendix C) demonstrating how emergent head specializations (such as attention sinks, sliding windows, and sentence-level gist markers) arise naturally from the learned gates."
+      ],
+      "weaknesses": [
+        "Training–inference discrepancy: During training, attention weights are smoothly modulated by the continuous exponential decay factor beta_i^(t-i) across all tokens. At inference, however, standard unmodulated attention is performed over the top-M surviving tokens, and non-surviving tokens are abruptly zeroed out. The impact of this objective mismatch is not theoretically or empirically isolated.",
+        "Eviction order dynamics and per-step sorting overhead: Because each token has a distinct decay factor beta_i, the effective retention scores beta_i^(t-i) can invert order as t increases. Computing the minimum over M cached tokens requires updating or recomputing scores at each step. While O(M) is computationally modest, the implementation details and latency impact of tracking this dynamically on GPUs in batched settings warrant clearer elaboration.",
+        "Puzzling performance gains over full-cache baselines: In several configurations (e.g., Table 1 on LongProc, Table 4/10 on LongBench-V2, and AIME24 in Figure 3), TRIM-KV significantly outperforms full-context attention. While the authors hypothesize noise reduction / regularization, such large margins can sometimes indicate baseline configuration mismatches (such as prompt formatting or template differences acknowledged in Appendix B.3).",
+        "Sensitivity to training capacity hyperparameter M: As shown in the ablation (Figure 10), performance depends substantially on the capacity parameter M used during training. It is somewhat unclear how robust a single trained model is across widely varied inference budgets without retraining."
+      ]
+    }
+  }
+}

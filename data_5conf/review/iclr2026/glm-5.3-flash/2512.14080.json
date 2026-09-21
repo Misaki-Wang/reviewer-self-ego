@@ -1,0 +1,115 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 8,
+      "strengths": [
+        "Strong, well-motivated problem: the paper correctly identifies that fine-grained/sparse MoEs push training into a memory-IO-bound regime, and provides a quantitative analysis (Eq. 4, Fig. 3) linking granularity G and activation ratio ρ to arithmetic intensity. This analysis is simple but convincing and frames all design decisions coherently.",
+        "The activation-memory optimization is a genuinely useful contribution: the alternative computation path for dS and dH (Eq. 10-12, Appendix C) is mathematically clean, avoids caching Y and dY, and yields activation memory (2Td + 4TKn) that is provably granularity-independent and matches the dense-model lower bound. The 45% memory reduction at 7B and 3+ GiB/layer savings at 120B are significant.",
+        "Extensive and careful kernel-level engineering: gather fusion in backward (where ScatterMoE/MoMoE do not fuse), Ping-Pong scheduling for heavy epilogues, asynchronous TMA stores, and a non-trivial Blackwell 2-CTA relay-warp solution for cross-CTA cp.async completion. The paper supports both Hopper and Blackwell, which few MoE kernels do at time of writing.",
+        "Very comprehensive evaluation: kernel-level profiling with runtime breakdowns (Fig. 6), upper-bound baselines (cuBLAS BMM), per-feature ablations (Figs. 19-23), end-to-end FSDP-2 training throughput on a real 7B model (213B tokens/day on 64 H100s vs 225B on 96 H100s for ScatterMoE), and configurations matching real frontier models (Qwen3-Next, DeepSeek-V3.2, Kimi). Baselines run where other systems literally fail (DeepSeek-V3.2 config OOMs/overflows for all baselines).",
+        "Token rounding (TR) is validated beyond just speed: multi-seed LM pretraining at 0.5B-1.8B scale with 11 downstream tasks, ablations over rounding subroutines, microbatch size, and tile size, plus baselines covering token dropping, EC with aux router, and EC with finetuned TC router. The T̄e/Mtile ≥ 2 robustness boundary is a useful practical finding.",
+        "Strong reproducibility: kernels released in CuTe-DSL with permissive license, exact benchmark configurations tabulated, and hyperparameters for all LM training runs provided."
+      ],
+      "weaknesses": [
+        "Novelty of individual components is incremental: Ping-Pong scheduling is adapted from FlashAttention-3/CUTLASS, gather fusion exists in prior kernels (forward at least), and the top-K kernel is a bitonic sort with mantissa bit-packing (similar to Triton's official kernel). The paper's claim of 'novel application' of Ping-Pong to MoE is fair but the conceptual novelty is limited; the main novelty is careful co-design and composition.",
+        "Model-quality evidence for token rounding is at small scale only (0.5B-1.8B, ≤100B tokens). The claim that TR 'maintains similar downstream performance' is supported, but accuracy differences between TR and TC are within run-to-run noise in most subtables (e.g., 50.4 vs 49.8 in 3a; 52.0 vs 52.0 in 3e), and no variance estimates or multiple seeds are reported, so 'TR achieves slightly lower perplexity' claims are statistically weak.",
+        "TR introduces a train/test routing mismatch: models are trained with EC-style padding/dropping but evaluated with TC top-K. Although the paper measures this gap (≤0.3 PPL), it relies on the router adapting to the altered expert-frequency distribution, and behavior under load imbalance (skewed routing, e.g., with aux-loss-free balancing) is not tested—uniform routing is implicitly assumed in several analyses.",
+        "Kernel-level speedup headline numbers are somewhat favorable-framed: the 1.86x is against ScatterMoE's BF16 kernel specifically, while against the strongest baseline (DeepGEMM++/their own optimized path) the forward gain is smaller (43% claim counts fused gather+epilogue). The end-to-end 50% figure is for one 7B config with a specific FSDP-2 setup; more end-to-end configurations (expert parallelism, larger models) are untested, and the paper itself notes expert-parallel communication overlap is future work.",
+        "All experiments are BF16; no FP8 evaluation despite FP8 being the dominant frontier training regime (and DeepGEMM's focus), which limits immediate practical applicability to the largest models.",
+        "Some presentation issues: dense figures with many subplots are hard to parse; a few typos ('Firgure', 'perserves', 'slower slower'); the trade-off between materializing Y per layer vs. atomic-add alternatives is argued in footnotes rather than measured."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Comprehensive and well-executed engineering: the paper combines a memory-efficient backward-pass derivation (dS computed as ⟨dA′, A⟩ instead of ⟨dO, Y⟩, eliminating Y caching), gather/epilogue fusion, Ping-Pong scheduling, and an optimized top-K kernel into a coherent system with strong kernel-level results (1.86x over ScatterMoE, activation memory independent of granularity)",
+        "Extensive evaluation against many relevant baselines (ScatterMoE, MoMoE, MegaBlocks, Megatron GroupedMLP, DeepGEMM/DeepGEMM++) across 1.4B–120B configurations, with careful kernel-level profiling (Figures 6, 19-23) and upper-bound references (cuBLAS BMM, triton aggregation)",
+        "Token rounding is validated beyond throughput: downstream task evaluations (Table 3), ablations on rounding subroutines, microbatch size, and tile size (Tables 6-8) support the claim that TR preserves model quality",
+        "Reproducibility is good: code is open-sourced, benchmark configurations are documented (Table 9), and training hyperparameters are provided (Appendix H)"
+      ],
+      "weaknesses": [
+        "Limited novelty of individual techniques: gather fusion, epilogue fusion, Ping-Pong scheduling, TMA store, and bitonic-sort top-K are all established ideas (several acknowledged in the paper); the contribution is largely their assembly into an MoE kernel, which reads more as a strong engineering report than an algorithmic advance",
+        "BF16-only evaluation: all throughput and memory results are for BF16 kernels on Hopper; FP8 (the regime in which DeepGEMM and modern production training actually operate) is deferred to future work, which weakens the practical significance of the reported speedups and makes the baseline comparison arguably favorable",
+        "End-to-end training evidence is thin: the FSDP-2 result covers only a single 7B model, and even then SonicMoE's 64-H100 throughput (213B tokens/day) is merely comparable to (slightly below) ScatterMoE's 96-H100 throughput (225B tokens/day) rather than a demonstrated end-to-end win",
+        "Quality claims for token rounding rest on small-scale training (0.5B–1.8B models, ≤100B tokens); no evidence the train-with-TR / eval-with-TC mismatch holds at larger scale or on instruction-tuned/agentic workloads",
+        "Token rounding's benefit is configuration-dependent: TR is not a drop-in improvement for all settings (gains concentrated in very sparse regimes, and quality degrades when T̄e/Mtile = 1), limiting its general applicability",
+        "No end-to-end validation on Blackwell despite the claimed Blackwell kernel support and relay-warp mechanism; all main results are H100-only",
+        "The memory-savings analysis assumes idealized conditions (routing metadata 'negligible', transient Y amortized only when layers > K), and the '45%' headline number is specific to one 7B configuration"
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Comprehensive and practical contribution: the paper co-designs a memory-efficient MoE backward algorithm, IO-aware GPU kernels, and a tile-aware routing method, targeting a timely problem (fine-grained/sparse MoE training inefficiency) that is clearly relevant to frontier model training.",
+        "Strong evaluation breadth: kernel-level microbenchmarks (Figures 6, 19–23), per-layer activation memory across 1.4B–120B scales (Figure 13), end-to-end FSDP-2 training throughput on 64 H100s, and configs from real open-source MoEs (OLMoE, gpt-oss, Qwen3-Next, DeepSeek-V3.2). DeepGEMM++ is a well-constructed strong baseline, and the paper is transparent about what it adds beyond DeepGEMM (gather fusion, Ping-Pong scheduling).",
+        "Solid ablations: gather-on-M/K fusion, TMA store vs. scatter-store, expert aggregation strategies, top-K kernel vs. PyTorch/Triton/TileLang/RTop-K, and multiple rounding subroutines with microbatch/tile-size sensitivity for token rounding.",
+        "Meaningful quality validation for the routing change: TR is compared against TC, token-dropping, EC with aux router, and EC with finetuned TC router across multiple model sizes and sparsity regimes, including the train-test mismatch switch to TC for inference.",
+        "Good scientific hygiene: derivations for the dS/dH computational path (Appendix C), explicit modeling of IO cost vs. granularity, open-sourced kernels, and honest discussion of trade-offs (e.g., atomic-add nondeterminism, synchronous st.global limitations)."
+      ],
+      "weaknesses": [
+        "Incremental novelty in places: Ping-Pong scheduling and MMA/epilogue overlap are adapted from FlashAttention-3/CUTLASS, and gather fusion exists in ScatterMoE/MoMoE; the novelty rests mainly on the combination and application to fine-grained MoEs rather than fundamentally new techniques.",
+        "Token rounding is a simple padding/dropping heuristic; its benefit is bounded by tile quantization waste, and it is validated only at 0.5B–1.8B scale — far below the sparse regimes (e.g., DeepSeek-V3.2, Qwen3-Next) where it is claimed to help most. No larger-scale training confirms quality retention.",
+        "No low-precision (FP8) evaluation despite FP8 being standard for frontier MoE training (e.g., DeepGEMM FP8 kernels); BF16-only comparisons limit claims of SOTA throughput in practice.",
+        "Blackwell support is described qualitatively (relay warp for 2-CTA clusters, TMEM two-stage pipeline) but supporting results appear limited compared to the extensive Hopper benchmarks.",
+        "End-to-end training comparison (213 vs. 225 B tokens/day on 64 vs. 96 H100s) is a single configuration and 'comparable' rather than a decisive advantage; no wall-clock results including expert parallelism/communication overlap.",
+        "Quality deltas in Table 3 are often within noise across tasks (differences of <1 point in Avg), so claims like 'TR achieves slightly better quality' should be stated more cautiously with variance/significance analysis."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 8,
+      "strengths": [
+        "Strong and well-motivated problem: the paper identifies a concrete trend (increasing expert granularity and sparsity) and shows analytically (Eq. 4) and empirically how it pushes MoE training toward the memory-bandwidth-bound regime, making the design choices well-grounded rather than ad hoc.",
+        "Three complementary and clearly delineated contributions: (1) a restructured backward computation that avoids caching Y and dY, achieving granularity-independent activation memory (45% reduction, matching a dense model with the same activated parameters), (2) IO-aware kernels with gather fusion, epilogue fusion, Ping-Pong scheduling (Hopper) and TMEM-based MMA/epilogue overlap (Blackwell), and (3) tile-aware token rounding routing that provably bounds deviation from top-K routing by one tile.",
+        "Extensive and convincing evaluation: benchmarks across 4 model scales (1.4B–120B) on both H100 and B300, comparisons against five baselines (ScatterMoE, MoMoE, MegaBlocks, Megatron, DeepGEMM variants), kernel-level ablations for every design decision (gather fusion, aggregation strategy, top-K kernel, scatter strategy), and configuration-matched comparisons with recent open-source MoE architectures including DeepSeek-V3.2-Exp and Qwen3-Next.",
+        "Model quality is validated by actual training, not just kernel benchmarks: pretraining at up to 1.8B/100B tokens with 11 downstream tasks, ablations over rounding subroutines, microbatch size, and tile size, showing token rounding is robust and even slightly improves over TC top-K.",
+        "Practical impact and reproducibility: end-to-end FSDP2 measurement (213B tokens/day on 64 H100s for a 7B MoE), open-sourced kernels, and clear documentation of limitations (e.g., footnote 7 on scatter store constraints, determinism issues with atomic adds)."
+      ],
+      "weaknesses": [
+        "End-to-end training throughput is only demonstrated for one configuration (7B MoE, FSDP2); the bulk of speedup claims rest on single-layer forward/backward microbenchmarks, leaving uncertainty about gains in full training with attention, communication, and pipeline overlap.",
+        "All kernel benchmarks are BF16 only; the increasingly relevant low-precision regime (FP8 training) is not evaluated, though the authors list it as future work.",
+        "On Blackwell the comparison set is thinner (essentially DeepGEMM++ and a Triton example), so the 25%/15% B300 claims have fewer independent baselines than the H100 results.",
+        "Token rounding requires switching back to TC top-K at inference, introducing a train-test mismatch; while the 0.5–1.8B experiments suggest this is benign, the gap is not validated at larger scale, and the method's benefit is confined to sparse settings (T_e/M_tile >= 2).",
+        "Some reported gains (e.g., 16% over DeepGEMM under high sparsity via token rounding) depend on the joint kernel+routing system; isolating how much comes from routing vs. kernel scheduling could be clearer, though Figure 13/14 and the ablations partially address this."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 6,
+      "strengths": [
+        "Well-motivated problem: the paper identifies a real and increasingly important trend (finer-grained, sparser MoEs pushing training into the memory-bandwidth-bound regime) and grounds it in a clean arithmetic-intensity analysis (Eq. 4).",
+        "The memory-efficient backward formulation is a genuinely useful contribution: avoiding caching Y/dY and computing dS via the alternative algebraic path (Eq. 10, Appendix C) yields a 45% activation-memory reduction that is provably independent of expert granularity, with the minimality argument given.",
+        "Comprehensive kernel engineering across two GPU generations (Hopper and Blackwell), including a concrete workaround for the cp.async / 2-CTA cluster gather-fusion limitation on Blackwell and TMEM-based epilogue overlap, which will be valuable to practitioners.",
+        "Extensive evaluation: kernel-level benchmarks against ScatterMoE, MoMoE, MegaBlocks, Megatron, DeepGEMM, and cuBLAS upper bounds; configurations drawn from real frontier models (DeepSeek-V3.2, Qwen3-Next, Kimi, gpt-oss); ablations of nearly every design choice (gather fusion, aggregation strategy, top-K kernel, rounding subroutine, tile size, microbatch size).",
+        "Token rounding routing is a simple but novel drop-in idea that provably bounds deviation from top-K to one tile and is validated with actual pretraining runs (0.5B-1.8B, up to 100B tokens) against TC, TC-with-dropping, EC, and MoD-style baselines, plus robustness ablations (Tables 6-8).",
+        "Kernels are open-sourced with a permissive license, aiding reproducibility and adoption."
+      ],
+      "weaknesses": [
+        "All throughput results are BF16-only. DeepGEMM's primary specialization is FP8 grouped GEMM, which is what frontier MoE training actually uses; the claimed 25% Blackwell speedup is against the BF16 DeepGEMM baseline, so the headline claims may not transfer to the FP8 regime the field cares about most. FP8 is deferred to future work.",
+        "Some benchmark figures exclude router kernels or use PyTorch fallbacks for baselines' router/aggregation components (e.g., Figure 5 notes), which complicates fair end-to-end attribution of the reported gains; the strongest numbers are kernel-level rather than end-to-end.",
+        "End-to-end training validation is thin relative to the claims: the FSDP-2 experiment is a single shared node (8 H100s), and model-quality experiments for token rounding cap at 1.8B parameters / 50B tokens, while the efficiency claims are motivated by 30B-685B frontier models. No multi-node expert-parallel results, despite EP being the standard deployment setting and the paper's own future-work mention.",
+        "Novelty is partly compositional: ping-pong scheduling is adapted from FlashAttention-3/CUTLASS practice, gather fusion exists in ScatterMoE/MoMoE for varlen-M, and the contribution is extending/fusing these into a coherent system plus the new routing method. The paper is transparent about this, but the algorithmic novelty beyond token rounding is incremental.",
+        "Token rounding changes the training-time routing distribution (EC-flavored padding/discarding at tile granularity); the train-test switch back to TC is validated empirically but the paper offers limited theoretical or mechanistic explanation for why quality is preserved, and robustness degrades at T_e/M_tile = 1.",
+        "Statistical rigor of the quality comparisons is unclear: Table 2 differences between TR and TC are often within noise (~0.1-0.3 PPL, ~0.5% avg accuracy) with no seeds/variance reported, so 'maintaining similar downstream performance' is asserted from single runs."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Clear and well-motivated problem: the paper identifies that increasing MoE granularity/sparsity pushes training into a memory-bandwidth-bound regime, and derives this analytically via arithmetic intensity (Eq. 4), which is convincing.",
+        "The memory-efficient backward computation is a genuine contribution: by avoiding caching Y/dY and using the alternative dS = <dA', A> formulation (Appendix C), activation memory becomes independent of expert granularity, reaching the theoretical minimum (d + dTK) bytes per layer. The 45% reduction and 3+ GB/layer savings at 120B scale are substantiated by measurements.",
+        "Extensive kernel engineering across two GPU generations (Hopper and Blackwell), including a novel solution to the 2-CTA cluster gather-fusion problem on Blackwell and TMEM-based MMA/epilogue overlap. The paper is well-positioned against ScatterMoE, MoMoE, MegaBlocks, Megatron, and DeepGEMM with detailed technical differentiation (Table 1, Appendix B).",
+        "Token rounding routing is a simple but practically valuable idea: it provably bounds deviation from top-K routing to one tile, eliminates padding-wasted FLOPs, and is validated with actual LM pretraining runs (0.5B–1.8B) across 11 downstream tasks plus thorough ablations over rounding subroutines, microbatch size, and tile size.",
+        "Evaluation is broad: multiple model scales (1.4B–120B), multiple real open-source MoE configurations (DeepSeek-V3.2-Exp, Qwen3, gpt-oss), kernel-level runtime breakdowns, memory bandwidth profiling, and an end-to-end FSDP-2 training throughput measurement (213B tokens/day on 64 H100s).",
+        "The kernels are open-sourced, improving reproducibility and practical impact for the community."
+      ],
+      "weaknesses": [
+        "End-to-end validation of the system is limited: the FSDP-2 training throughput experiment is a single configuration, and token rounding quality is only validated at 0.5B–1.8B scale; it is unclear whether the train-test gap properties hold at production scale (e.g., 100B+ parameter MoEs).",
+        "Some components build on known techniques (Ping-Pong scheduling from FlashAttention-3/CUTLASS, gather fusion partially present in ScatterMoE/MoMoE); the novelty is in the combination and Blackwell-specific adaptation rather than fundamentally new mechanisms.",
+        "Token rounding changes token-expert assignments during training (drop/pad up to one tile per expert); while downstream evaluations show parity, the interaction with expert parallelism, load balancing, and distributed communication (where token counts must be synchronized across devices) is not addressed.",
+        "Benchmarks are BF16-only; low-precision formats (FP8/MXFP4) are relegated to future work, despite being the dominant trend in frontier MoE training, which limits the generality of the tile-size analysis.",
+        "The routed-token-count assumptions (e.g., T_e/M_tile >= 2 for quality robustness) mean the method's benefit degrades or requires care in extreme sparsity regimes with small microbatches, and this practical constraint is only partially explored."
+      ]
+    }
+  }
+}

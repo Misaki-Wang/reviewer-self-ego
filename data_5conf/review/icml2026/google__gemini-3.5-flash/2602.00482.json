@@ -1,0 +1,95 @@
+{
+  "v1": {
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Highly relevant and timely topic: RL post-training of reasoning LLMs (e.g., via MCTS or multi-generation) is incredibly compute-intensive, and exploiting prefix sharing is a crucial direction for optimization.",
+        "Well-conceived design: The dynamic DFS traversal elegantly avoids the quadratic memory complexity of traditional tree attention masks by maintaining only one active path's activations at any given time.",
+        "Thorough system-level optimizations: Incorporating chunked backpropagation, omitting KV-cache for leaf nodes, and greedy DFS ordering shows a comprehensive understanding of GPU hardware constraints and bottlenecks.",
+        "Effective multi-GPU load balancing: The DFS-ordered lexicographical partitioning technique is clever, successfully balancing workloads across GPUs with minimal loss of prefix-sharing benefits.",
+        "Strong empirical evaluation: Demonstrates impressive throughput gains (up to 8.31x) and over 50% reduction in peak GPU memory usage across multiple Qwen3 model scales (up to 14B)."
+      ],
+      "weaknesses": [
+        "Lack of clarity on the performance threshold: The paper does not explicitly analyze how the speedup varies with the number of rollouts per prompt (group size). A sensitivity analysis showing at what group size or prefix-length ratio the overhead of DFS traversal outweighs the benefits would strengthen the paper.",
+        "Detail on gradient accumulation: While the paper mentions that gradients are accumulated correctly during the DFS traversal, a formal algorithmic pseudocode outlining the forward/backward state management and weight gradient updates would greatly improve clarity and reproducibility.",
+        "Integration complexity: The implementation is heavily tied to the AReaL framework. It remains somewhat unclear how easily these dynamic tree-attention mechanisms can be integrated into other widely-used training frameworks (e.g., Megatron-LM, DeepSpeed-Chat, or TRL)."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Highly relevant and timely topic: optimizing RL post-training workflows (e.g., PPO/GRPO for reasoning and agent models) where multiple rollouts naturally share long prefixes (prompts, multi-turn contexts, or chain-of-thought steps).",
+        "Elegant DFS-based traversal mechanism that avoids the quadratic memory explosion of fully materialized tree attention masks. By keeping only a single root-to-leaf path's activations in memory and interleaving forward and backward passes, the system dramatically reduces peak memory usage.",
+        "Well-designed load-balanced partitioning algorithm that minimizes the duplication of prefix computations across multiple GPUs while maintaining balanced workloads via a DFS-ordered contiguous chunking approach.",
+        "Impressive empirical results, demonstrating up to 8.31x throughput speedup on the training worker and over 50% peak memory savings, which prevents out-of-memory (OOM) issues on large models without requiring expensive activation checkpointing."
+      ],
+      "weaknesses": [
+        "Lack of a detailed end-to-end execution time breakdown: while the training worker gets up to an 8.31x speedup, the end-to-end training pipeline speedup ranges from 1.28x to 2.28x. A breakdown of time spent in rollout generation, reward estimation, and policy training would help clarify the remaining system bottlenecks.",
+        "No head-to-head empirical comparison with the closest related work, Tree Training (Wang et al., 2025). Although the paper qualitatively discusses the limitations of Tree Training, including it in the baseline experiments would strengthen the evaluation.",
+        "Minor notation confusion in the text: on page 9, the abbreviation 'LB' is used to denote 'increasing the backward chunk size' in Figure 4, which is confusing as 'LB' is commonly used for 'Load Balancing' in other sections.",
+        "Limited discussion on the low-level implementation details regarding how PyTorch's autograd engine is manipulated to support dynamic gradient accumulation and immediate activation freeing during the DFS stack pops."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Addresses a highly timely and important topic: post-training reinforcement learning (RL) for large language models (LLMs) is computationally expensive, and reusing prefix computation across multiple rollouts is a very promising optimization direction.",
+        "The proposed DFS-based dynamic tree attention is an elegant way to avoid the quadratic memory scaling and large attention masks of traditional tree-attention approaches by interleaving forward and backward passes and maintaining only a single root-to-leaf path in memory.",
+        "Includes practical and necessary system optimizations such as chunked backpropagation for very long rollouts, avoiding unnecessary KV cache allocation for leaf nodes, and a greedy algorithm to optimize the DFS traversal order.",
+        "Addresses distributed execution with a load-balanced partitioning scheme that clusters sequences using the DFS order of the prefix tree, thereby minimizing the duplication of prefix computations across multiple GPUs.",
+        "Demonstrates impressive throughput gains (up to 8.31x speedup) and significant peak GPU memory savings (often over 50%) across various Qwen3 model sizes (1.7B to 14B)."
+      ],
+      "weaknesses": [
+        "Technical ambiguity in the backward pass / gradient accumulation: The text is contradictory regarding how backpropagation is performed on shared prefix nodes. Section 3.1 states that 'shared prefix nodes will receive gradient contributions multiple times ... and we sum those contributions as we conduct the DFS traversal', suggesting multiple backward passes are run through the shared prefix. However, Section 3.2 states that 'once we pop back the intermediate node ... [it] can therefore be backpropagated and released immediately.' If the backward pass is executed once per child branch, then the backward computation for the prefix is duplicated, undermining the computation savings. If it is executed only once after all children are processed, then the intermediate activations of the prefix must be retained in memory until all children are traversed, which could lead to high peak memory usage. This core mechanism needs clear explanation.",
+        "Lack of comparison or integration details with standard prefix-caching mechanisms: It is unclear whether the baseline AREAL framework utilizes any basic prefix caching (like those in vLLM or SGLang) for the generation and training phases. If the baseline does not use prefix caching, the reported speedup might be inflated.",
+        "Missing experimental details: Important workload characteristics of the $\\tau^2$-bench benchmark, such as average prompt lengths, average rollout lengths, and the number of rollouts per prompt, are not detailed in the paper.",
+        "Terminology and presentation issues: Several terms like 'FFD' in Figures 6, 7, and 8 are not defined in the text. There are also numerous typos throughout the draft (e.g., 'navie' instead of 'naive', 'poping' instead of 'popping', 'optimial' instead of 'optimal', 'throuhgput' instead of 'throughput', 'evalutaions' instead of 'evaluations', and 'cacluate' instead of 'calculate')."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Highly timely and important topic: Post-training LLMs using Reinforcement Learning (RL) has become central to recent reasoning and agent models, and mitigating its massive computational and memory cost is crucial.",
+        "Novel and elegant system design: By organizing trajectories into a prefix tree and employing a DFS-based traversal with interleaving forward/backward passes, AREAL-DTA solves the memory expansion bottleneck of standard 'packed tree-mask' training, keeping peak memory proportional to a single sequence length.",
+        "Effective system optimizations: The inclusion of optimized DFS traversal order, chunked backpropagation for long suffixes, and a load-balanced distributed batching strategy shows high technical quality.",
+        "Strong empirical gains: The system demonstrates up to 8.31x throughput speedup on a single worker and reduces peak memory by over 50%, with clear end-to-end training speedups.",
+        "Honest and valuable discussion of boundaries: The authors include a thorough discussion of workloads with low compression (low prefix sharing) in the appendix, showing where the method is not suitable."
+      ],
+      "weaknesses": [
+        "Performance is highly workload-dependent: The throughput benefits drop significantly or even degrade compared to dense training on tasks with low prefix sharing (e.g., GSM8K, AIME as analyzed in Appendix B.2).",
+        "Limited diversity in the main high-sharing benchmark: While the tool-use-agent benchmark τ²-bench is a great fit, evaluating on only one major high-sharing benchmark leaves some questions about generalization across different types of RL environments (e.g., code search trees or complex mathematical reasoning with high rollouts).",
+        "Implementation complexity: Implementing custom DFS stack traversal with dynamic KV cache management and custom backpropagation order can be complex to integrate into other standard distributed RL pipelines."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Proposes a novel and elegant DFS-based dynamic tree traversal strategy for LLM RL training that sidesteps the memory and MFU issues of standard packed tree-masked approaches by utilizing highly optimized dense causal attention.",
+        "Provides a comprehensive and practical system design that includes crucial optimizations such as chunked backpropagation for long suffixes, greedy DFS traversal ordering, and a load-balanced partitioning algorithm for distributed training.",
+        "Demonstrates outstanding empirical performance on the prefix-sharing-heavy $\\tau^2$-bench dataset, achieving up to 8.31× single-GPU throughput improvement and over 50% peak memory reduction compared to the dense baseline.",
+        "Includes thorough ablation studies that isolate the gains of each component, evaluate performance across various model sizes (from 1.7B to 14B), and transparently analyze the performance boundary on low-compression workloads."
+      ],
+      "weaknesses": [
+        "The system's performance is highly dependent on the prefix compression rate; on workloads with minimal prefix-sharing (like GSM8K or AIME), the traversal and graph reconstruction overheads can cause AREAL-DTA to run slower than standard dense training (especially for smaller models).",
+        "The implementation complexity of manually maintaining the activation stack, interleaving FWD/BWD passes, and handling chunked backpropagation might make the system difficult to integrate into other major open-source RL training frameworks (e.g., TRL, Alignment-Handbook, or Megatron-LM)."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Highly relevant and timely topic: optimizing RL post-training of LLMs, which is currently a major computational bottleneck for training modern reasoning models.",
+        "Novel and practical system design: employing DFS-based traversal instead of packed-mask tree attention to bound the peak memory overhead to the longest path, while maintaining the high model FLOPs utilization (MFU) of dense attention.",
+        "Comprehensive and technically deep optimizations, including leaf-ordered execution to minimize forward/backward transitions, chunked backpropagation for long suffixes, and DFS-contiguous load-balanced partitioning for multi-GPU setups.",
+        "Solid empirical results with significant speedups (up to 8.31× single-GPU and 2.28× end-to-end) and over 50% peak memory reduction on the evaluated workloads.",
+        "Honest and transparent evaluation of boundary conditions, explicitly reporting performance under low-compression rates."
+      ],
+      "weaknesses": [
+        "The evaluation of high-sharing scenarios is heavily focused on a single agent benchmark (τ²-bench). The paper would be stronger if it demonstrated performance on standard reasoning tasks (e.g., MATH or GSM8K) using high group sizes (e.g., GRPO with 8-16 rollouts per prompt) where prefix-sharing is also highly prominent.",
+        "Overhead in low-compression scenarios: training throughput can drop significantly (up to ~42% slower on Qwen3-1.7B) when prefix-sharing is low, indicating that the system lacks an automatic fallback or adaptive bypass mechanism to handle arbitrary workloads robustly.",
+        "Increased system complexity: the dynamic graph manipulation, custom stack management, and chunked backpropagation increase the implementation complexity, which might hinder easy integration into other popular LLM training frameworks (e.g., TRL, Ray, vLLM)."
+      ]
+    }
+  }
+}

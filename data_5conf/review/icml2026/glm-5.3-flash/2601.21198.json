@@ -1,0 +1,45 @@
+{
+  "v1": {
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "The problem is well motivated and the observed hardware mismatch is genuine: the motivating benchmarks (Fig. 1, Sec. 2.1) convincingly show that server-oriented offloading pipelines degrade badly on UMA-based edge SoCs, where I/O stalls reach 80%.",
+        "The core insight is sound and actionable: decomposing BF16 tensors into low-entropy exponent bits and incompressible sign–mantissa bits yields ~68–74% lossless size reduction (Figs. 2–3), and the empirical analysis (Fig. 4) demonstrates that parallel decompression can hide behind SSD I/O with negligible memory-controller interference.",
+        "The systems design is coherent and non-trivial: the compression-state abstraction, DAG-based task representation, and cache-affinity scheduler form a sensible co-design, and the paper goes beyond a purely empirical system by providing a (3 − 1/L)-approximation guarantee for the scheduler (Theorem 3.1, Appendix B) and a maximum-entropy justification for the cache-planning DP (Theorem 3.2, Appendix D).",
+        "The evaluation is reasonably broad along several axes: two testbeds (Jetson AGX Orin 64GB/32GB), three MoE models including an encoder-decoder, three baselines (MoE-Infinity, DeepSpeed ZeRO-3, Accelerate), multiple metrics (TPOT, TTFT, throughput, end-to-end latency), and an ablation of cache-management strategies (Fig. 10).",
+        "The prototype is substantial (~10.6K lines across Python and C++/CUDA), and the paper is candid about implementation-level choices such as consolidating E-chunk reads with decompression to exploit the page cache."
+      ],
+      "weaknesses": [
+        "The evaluation scope does not fully support the 'on-device/mobile' framing. Both testbeds are Jetson AGX Orin (32/64GB) with a 3.5 GB/s NVMe SSD — high-end edge accelerators with GPU-class memory. No actual mobile SoC (phone, Raspberry Pi), no battery/power measurements, and no PCIe/thermal variability analysis are provided, even though the motivation centers on mobile SoCs.",
+        "Attribution of gains is unclear. The lossless compression ratio is only ~26–32%, yet reported speedups reach 42× and 72.77% latency reduction. The paper itself notes that page-cache exploitation improves fixed-memory results, and baselines are configured in 'default SSD offloading modes'; it is hard to disentangle how much of the win comes from compression vs. superior caching/implementation, and no end-to-end gain decomposition (compression only, scheduling only, planning only beyond Fig. 10) is given.",
+        "Missing comparisons with directly relevant on-device MoE baselines that the paper itself cites: EdgeMoE (Yi et al., 2025), D2MoE (Wang et al., 2025), SwapMoE, and CPU-GPU hybrid systems like Fiddler (Kamahori et al., 2024) are discussed in related work as motivated competitors but not evaluated. Baseline recency is also a concern (MoE-Infinity is an arXiv preprint).",
+        "The theoretical guarantees rest on idealized assumptions: deterministic I/O and decompression costs (u, c), a single I/O thread model, and fixed compression ratio ρ. Real NVMe timing variability, page-cache effects, and OS scheduling are acknowledged anecdotally but not incorporated into the analysis, so the practical meaning of the (3−1/L) bound and the planner's expected-makespan objective is uncertain.",
+        "The cache planner assumes stationary rank-based expert activation (Bernoulli trials with marginal inclusion probabilities). No experiment evaluates robustness under workload shift, domain change, or cold-start conditions, which are common in interactive on-device use.",
+        "Several important configuration details are unspecified or hard to recover: values of K (shard count), L (threads), δ (tolerance margin), and the planning grid size; offline initialization (compression) time and storage overhead; scheduler overhead at batch size 1. There is also no statement about releasing code or artifacts, which limits reproducibility for a systems paper.",
+        "The security/motivation argument for losslessness is asserted via citation (quantization-induced vulnerabilities) rather than demonstrated: the paper never verifies that ZipMoE's outputs are bitwise identical to the uncompressed model on its testbeds, which would be a cheap and compelling validation of the 'semantically lossless' claim.",
+        "No comparison against quantized serving (e.g., 4-bit weights, the de facto practice on edge), so a reader cannot judge the latency cost of the losslessness requirement relative to the practical alternative.",
+        "Presentation has avoidable defects: typos ('transfering', 'eponent', 'achieves the same zero latency'), incomplete citations (Duanmu et al., Zhou et al. lack venues/years), and dense scheduling description in Sec. 3.3 that is difficult to follow without the appendix pseudocode."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Well-motivated problem: the paper convincingly demonstrates (Fig. 1) that existing server-grade MoE offloading systems mismatch UMA-based edge hardware, quantifying I/O stalls growing from 38.5% to 80.1% when moving from server to edge settings.",
+        "Technically solid co-design: the bit-field decomposition exploits the observed low entropy of BF16 exponent bits (Fig. 2) to build a lossless compression pipeline whose decompression is overlappable with I/O on multi-core CPUs, supported by careful microbenchmarks (Fig. 4, resource-interference analysis in §2.3).",
+        "Unusual theoretical rigor for a systems paper: a (3−1/L)·OPT makespan approximation guarantee for the cache-affinity scheduler (Appendix B) and a maximum-entropy justification (Theorem 3.2, Appendix D, via weighted finite population sampling) for the probabilistic cache planning.",
+        "Extensive and honest evaluation: TPOT/TTFT/throughput/end-to-end latency on two Jetson devices and three MoE models; ablations isolating cache-pool vs. planning contributions (Tab. 1); an informative experiment isolating OS page-cache effects under injected memory pressure (Tab. 2/Fig. 11); sensitivity analysis to workload distribution shifts (Tab. 4); and an additional recent baseline (FineMoE, Tabs. 5-6).",
+        "Reproducibility is addressed: code release, stated implementation size, offline initialization costs (Tab. 3), and open compressor APIs."
+      ],
+      "weaknesses": [
+        "Limited originality of the core ingredients: lossless compression of low-entropy model bit-fields is already established (ZipNN, DFloat11, Huff-LLM, NeuZip), and expert caching/scheduling for MoE is well explored (MoE-Infinity, FineMoE, SwapMoE, EdgeMoE, D2MoE). The novelty rests mainly on the UMA-aware combination, the hierarchical compression-state caching, and the theory, which is a meaningful but incremental synthesis.",
+        "Platform coverage does not match the claimed scope: despite motivating with mobile phones, Raspberry Pi, and Apple Silicon, all evaluation is on two variants of a single platform family (Jetson AGX Orin 64GB/32GB) with the same SSD and OS. Generalization to true mobile SoCs (no NVMe, weaker CPU cores, different OS page-cache behavior) is asserted but untested.",
+        "The theoretical guarantees are not empirically validated: there is no experiment comparing the achieved makespan against the (3−1/L)·OPT bound or against the block-construction heuristics' assumptions (e.g., the deterministic offline-profiled I/O and decompression times u, c, ρ), leaving a gap between theory and the system as deployed.",
+        "Some theoretical exposition is sloppy or questionable: Lemma B.6's proof contains a typo ('eponent chunks') and hand-waving; Eq. (14) asserts the charged compute sum equals OPT (which appears incorrect as stated and needed for the Case II argument); the case analysis in Lemma B.5 (M=1 vs. M>1) glosses over intermediate configurations.",
+        "Only generically strong baselines (DeepSpeed, Accelerate, MoE-Infinity) are compared in the main results; specialized edge/on-device MoE systems cited in the motivation (EdgeMoE, D2MoE, FloE) are not evaluated, weakening the 'state-of-the-art' comparison claim.",
+        "Venue fit is marginal for the ICML main track: the contribution is a systems/scheduling artifact; the ML content is limited to statistical redundancy analysis and probabilistic workload modeling, with no learning or model-quality contribution (the losslessness claim is asserted rather than verified bit-for-bit in the paper)."
+      ]
+    }
+  }
+}

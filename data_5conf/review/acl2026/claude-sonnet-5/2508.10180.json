@@ -1,0 +1,63 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a genuinely important practical problem: existing influence-estimation methods (influence functions, TracIn, DataInf, HyperINF) require gradients, Hessian approximations, or fine-tuning, which is prohibitively expensive at the scale of modern LLMs/VLMs (7B-72B). A forward-only alternative is a valuable contribution if sound.",
+        "The derivation connecting the log-likelihood change of a validation example under an SGD update to an inner product of last-layer hidden representations weighted by a token-level prediction-error term is presented clearly and yields a simple, interpretable closed-form score.",
+        "Broad empirical coverage: multiple LLM families/sizes (Qwen2.5 1.5B-72B, Llama-2-13B) and VLMs (Qwen2.5-VL-3B, Llama-3.2-11B-Vision), several task types (sentence transformation, math with/without reasoning, style/subject captioning, mislabeled-data detection), plus efficiency/runtime and ablation analyses (effect of the prediction-error term α).",
+        "Efficiency claims are convincingly demonstrated: wall-clock comparisons show orders-of-magnitude speedups over HyperINF/DataInf/Hessian-free, and the method scales to 72B parameters where baselines become impractical.",
+        "The ablation isolating α (reducing to an embedding-similarity-only baseline, 'Emb') is a useful sanity check that supports the claimed importance of the prediction-error alignment term.",
+        "Qualitative examples (Fig. 3) provide intuitive, human-interpretable evidence that top-ranked influential samples are semantically/task-relevant."
+      ],
+      "weaknesses": [
+        "The theoretical novelty is more limited than presented: under the 'unconstrained features' assumption, the derivation essentially reduces to computing the gradient of the cross-entropy loss with respect to the final (unembedding) layer only, i.e., (prediction error) x (last hidden state) — a well-known last-layer approximation closely related to TracIn's last-checkpoint variant (the paper's own 'Hessian-free' baseline) and representer-point selection methods. The paper does not discuss or compare against representer-point methods, and the framing as a new 'theoretical foundation' somewhat overstates the contribution relative to prior last-layer gradient/representer approaches.",
+        "Assumption 1 implicitly assumes that the influence of all upstream parameters on the validation log-likelihood is fully captured by sensitivity at the last hidden layer, ignoring gradient flow through earlier layers. This is a strong simplification that is asserted rather than empirically validated (e.g., no comparison of full-gradient TracIn scores vs. last-layer-only scores to justify the approximation's fidelity for large models).",
+        "Evaluation relies on proxy metrics (AUC/Recall for same-class membership) rather than any causal validation of influence (e.g., leave-one-out retraining, linear datamodeling score). These proxies largely measure topical/semantic similarity between training and validation examples, which does not necessarily equate to true training influence; the near-perfect scores across most tasks for essentially all methods raise concerns about ceiling effects and limited discriminative power of the benchmark.",
+        "Benchmark tasks are synthetic and templated (10-class sentence transformations, formulaic math word problems, stylized image captions), which may not reflect the complexity, noise, and diversity of real-world fine-tuning/pretraining corpora; no evaluation on realistic large-scale instruction-tuning or noisy real-world datasets is provided.",
+        "For baseline methods, the paper selects 'the checkpoint with the highest AUC' during fine-tuning for reporting results, which uses the test metric itself for model/checkpoint selection — a methodologically questionable practice that complicates fair comparison and reproducibility, since in practice no such oracle checkpoint-selection signal would be available.",
+        "The comparison between For-Value (applied directly to the pretrained/frozen model) and gradient-based baselines (which require fine-tuning to convergence first) may not be entirely apples-to-apples, since the underlying task setups (forward-only vs. after-fine-tuning attribution) differ; this difference is not sufficiently discussed as a potential confound.",
+        "Some results are difficult to interpret at face value, e.g., baseline AUCs near 0.5 (chance level) on the style-generation VLM task, suggesting either an unusually hard setting or potential issues in baseline implementation/tuning for that setting, which is not diagnosed.",
+        "The complexity analysis (Table 3) is derived for a generic MLP abstraction and may not precisely reflect actual transformer architectures, limiting the rigor of the asymptotic comparison though the empirical wall-clock results partially compensate for this."
+      ]
+    }
+  },
+  "v3": {
+    "exp1_quality": {
+      "oa": 3.5,
+      "strengths": [
+        "Provides a clear theoretical derivation (Theorem 1, with full proof in the appendix) showing that under an unconstrained-feature assumption, per-sample influence in LLM/VLM fine-tuning can be approximated purely from last-layer hidden representations and token-level prediction errors, eliminating backpropagation.",
+        "The forward-only formulation is turned into a genuinely scalable algorithm (sparse matrix similarity over an in-batch/sample vocabulary), with a complexity analysis (Table 6) showing substantially lower compute/memory costs than Hessian-based baselines.",
+        "Extensive empirical evaluation spanning multiple LLMs (1.5B–72B) and VLMs, multiple task families (influential data identification, mislabeled data detection, and data selection for fine-tuning in math and medical domains), consistently showing For-Value matches or exceeds gradient-based baselines (DataInf, HyperINF, Hessian-free) while being several times to orders of magnitude faster.",
+        "Useful ablations isolating the role of the prediction-error term α (showing it is not just an embedding-similarity trick) and demonstrating stable performance across model scales, plus qualitative examples and a noisy-data high-quality detection analysis (Table 8) that strengthen the case for practical utility.",
+        "Reasonably transparent about assumptions and limitations (unconstrained features, distinct-input assumption, restriction to fine-tuning stage rather than pretraining)."
+      ],
+      "weaknesses": [
+        "The core theory is derived at initialization (t=0) under the unconstrained-feature assumption, yet the method is applied throughout training and across diverse downstream tasks; the paper does not rigorously validate how well this assumption holds during actual fine-tuning dynamics or how errors from the approximation accumulate over training, leaving a gap between the stated theoretical scope and the empirical usage.",
+        "Assumption 2 (no training input identical to a valuation input) is invoked to eliminate the token-unembedding term, but its practical impact/violation in real datasets is not empirically quantified beyond a brief qualitative argument.",
+        "Some baseline results appear unusually weak or high-variance (e.g., Hessian-free AUC near 0.5 for VLM style generation, large stds throughout), raising questions about baseline tuning/calibration and whether comparisons are fully fair; the paper does not discuss why some baselines underperform so drastically on certain tasks.",
+        "Performance advantages are not uniform: in several settings (e.g., PMC-Reasoning 20% data, VLM subject-generation recall) For-Value is second to HyperINF, which somewhat tempers the “matches or outperforms” framing.",
+        "Efficiency claims for large (32B/72B) baseline comparisons rely on subsampling 10% of valuation data and linear scaling extrapolation rather than full runs, which may not accurately reflect real-world runtime and could bias the efficiency comparison in the paper's favor.",
+        "The method is explicitly restricted to the fine-tuning regime, limiting applicability; combined with reliance on a fairly strong theoretical assumption, the generality of the contribution beyond the tested setups (mostly moderate-scale supervised fine-tuning tasks) is not fully established."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Clear and well-motivated theoretical contribution: under the unconstrained-feature assumption, the paper derives a closed-form, forward-only approximation to gradient-based training-data influence (alignment of last-layer hidden states weighted by token-level prediction-error similarity), providing a principled justification (Theorem 1, with detailed proof in the appendix) for why backpropagation can be avoided.",
+        "Strong practical payoff: the method eliminates per-sample backpropagation and enables large-batch, GPU-parallel computation, yielding order-of-magnitude wall-clock savings (e.g., minutes vs. hours) and scaling to 72B-parameter models that are infeasible for gradient-based baselines (DataInf, HyperINF, Hessian-free) under the same hardware budget.",
+        "Broad and fairly rigorous empirical evaluation spanning both LLMs (Llama-2-13B, Qwen2.5 1.5B-72B) and VLMs (Qwen2.5-VL, Llama-3.2-Vision), across influential-data identification, mislabeled-data detection, and downstream fine-tuning data selection (math, medical QA, medical VQA), with consistent trends across model scales.",
+        "Useful ablations that isolate the contribution of the prediction-error term (α) by comparing to a pure embedding-similarity baseline (Emb), supporting the claim that the theoretically motivated weighting, not just representation similarity, drives performance.",
+        "Good reproducibility practices: complexity analysis (Table 6), detailed hyperparameters/training settings in the appendix, dataset statistics, qualitative examples, and a stated intention to release code."
+      ],
+      "weaknesses": [
+        "The theoretical derivation effectively reduces to a last-layer/embedding-gradient approximation of influence; while grounded in prior unconstrained-features literature, the leap from 'gradient flow over free embedding parameters' to 'approximates the actual influence of full-network fine-tuning (with weight sharing across positions and layers, or LoRA)' is asserted rather than empirically or theoretically bounded, and the paper does not analyze approximation error versus true full-gradient influence.",
+        "Several benchmark settings show near-ceiling performance for multiple methods (e.g., Table 1 AUC/Recall at or very near 1.000 for For-Value, DataInf, and HyperINF), which limits the discriminative power of these tasks and makes some reported 'improvements' of limited practical significance despite being numerically stated as gains.",
+        "The VLM style-generation results show baselines performing near chance (AUC ≈ 0.5) while For-Value achieves much higher scores (Table 2); this unusually large gap is not explained and raises a question of whether the gradient-based baselines are well-tuned/implemented for this particular task, which could bias the comparison.",
+        "In some fine-tuning-for-selection experiments (e.g., PMC-Reasoning, Table 5 at 20% data), For-Value is only second-best, and gains over the strongest baselines in several settings are modest (roughly 0.5-3%), so the accuracy advantage is not uniformly established even though the efficiency advantage is large and consistent.",
+        "The paper's related-work discussion does not clearly position the method against other 'last-layer-only' or reduced-gradient influence approximations that exist in the broader influence-function literature, making it harder to assess how much of the novelty is the forward-only reformulation versus the underlying (previously explored) idea of restricting to last-layer signals.",
+        "Data Value Definition (Definition 1) is tied to the model's zero-shot/pretrained state (t=0) for tractability, and the discussion of how well this static approximation holds as training proceeds (especially for multi-epoch fine-tuning) is fairly brief, resting mainly in the limitations section."
+      ]
+    }
+  }
+}

@@ -1,0 +1,92 @@
+{
+  "v1": {
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Addresses an important, highly practical, and often overlooked problem in deep-learning-driven lossless compression: prediction mismatch caused by hardware and software non-determinism.",
+        "The proposed PMATIC algorithm is mathematically elegant, model-agnostic, and acts as a drop-in replacement for traditional arithmetic coding.",
+        "Provides a rigorous theoretical analysis, proving decoding correctness under bounded mismatch and deriving optimal parameters (bin radius $r$) to minimize compression overhead.",
+        "Demonstrates strong empirical performance using a modern large language model (Llama 3.1 8B) on standard benchmarks, showing significant compression gains over standard tools (gzip) even in the presence of mismatch."
+      ],
+      "weaknesses": [
+        "The evaluation relies on synthetically generated logit mismatch (uniform noise). Testing on real-world hardware/software non-determinism (e.g., comparing GPU vs. CPU execution, or different CUDA versions) would significantly strengthen the practical claims.",
+        "The algorithm requires converting multi-class token distributions into a sequence of binary choices (via a 17-bit mapping for Llama). The impact of this randomized token-to-bit mapping on the model's native prediction entropy is not fully explored.",
+        "Lacks a comparison against simpler heuristic baselines, such as straightforward rounding of logits or probabilities. Although simple rounding is theoretically prone to boundary failures, showing these failures empirically would better justify the complexity and overhead of PMATIC's helper bits."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 6,
+      "strengths": [
+        "Addresses a highly practical and overlooked bottleneck in model-driven lossless compression: prediction mismatch due to the non-deterministic nature of deep learning model inference across different hardware/software environments.",
+        "Proposes a simple, elegant, and model-agnostic solution (PMATIC) that quantizes probabilities using helper bits, acting as a direct replacement for standard arithmetic coding.",
+        "Provides solid theoretical guarantees, proving correctness under bounded prediction mismatch and deriving clean bounds on the asymptotic compression overhead.",
+        "The paper is exceptionally well-written, with clear explanations, rigorous definitions, and solid mathematical proofs."
+      ],
+      "weaknesses": [
+        "The evaluation relies entirely on synthetic logit noise (adding uniform noise to logits) to simulate prediction mismatch. To truly demonstrate the practical utility of PMATIC, it is crucial to validate it against real-world mismatches (e.g., encoding on an NVIDIA GPU and decoding on an AMD GPU, or a CPU, or with different PyTorch/CUDA versions).",
+        "To apply PMATIC, the token vocabulary must be serialized into a bitstring (using a random 17-bit representation for the 128k Llama 3.1 vocabulary). This flat serialization ignores the structure of the vocabulary and requires the model to make 17 sequential binary predictions per token. It is unclear if the 'No mismatch' baseline also uses this bit-level serialization, and how much compression efficiency is lost compared to standard token-level arithmetic coding on the full distribution.",
+        "The algorithm relies on knowing a hard upper bound $\\epsilon$ on the logit mismatch. In practice, estimating $\\epsilon$ for black-box environments is very difficult. If $\\epsilon$ is underestimated, decoding will fail catastrophically; if it is overestimated, the helper bit overhead will unnecessarily degrade the compression performance. The paper does not provide a practical method for finding or adapting to this bound."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 6,
+      "strengths": [
+        "Important and Practical Problem: Addressing prediction mismatch due to LLM non-determinism (floating-point ordering, GPU architectures, library versions) is highly relevant. Arithmetic coding is extremely sensitive to numerical precision, making this non-determinism a major blocker for deploying neural-network-driven lossless compression.",
+        "Elegant and Novel Solution: PMATIC elegantly solves the boundary synchronization problem using a \"helper bit\" mechanism. It dynamically decides whether to snap to a bin center or a bin boundary, ensuring perfect alignment between encoder and decoder predictions under bounded mismatch.",
+        "Sound Theoretical Analysis: The paper provides a formal proof of correctness (Theorem 1) and derives mathematical bounds on the compression overhead (helper bit entropy and quantization loss), showing the optimal trade-off parameter $r$.",
+        "Strong Empirical Results: Despite the added overhead of helper bits and quantization, PMATIC combined with Llama 3.1 achieves exceptional compression ratios (e.g., ~8.5% on enwik8), vastly outperforming standard tools like gzip (~46%) while guaranteeing robustness to logit mismatch."
+      ],
+      "weaknesses": [
+        "Evaluation on Synthetic Mismatch Only: The mismatch is simulated by adding IID uniform noise to the logits. While this serves as a good proof-of-concept, it would be much more convincing to demonstrate PMATIC on actual hardware-induced mismatches (e.g., encoding on an NVIDIA GPU and decoding on an Intel CPU or a different GPU architecture/CUDA version) to measure the real-world logit variations.",
+        "Binarization Overhead and Complexity: PMATIC requires converting the vocabulary into a binary representation (e.g., 17-bit for Llama's 128k vocabulary) and compressing bit-by-bit. This binarization requires conditional marginalizations for each bit position. The paper does not discuss the computational overhead (latency/throughput) of this marginalization process, which could be a bottleneck during inference.",
+        "Lack of Alternative Baselines / Discussion on Naive Quantization: The paper would benefit from a more explicit discussion of why simpler approaches fail. For example, why can't we just round the logits to a grid? A brief explanation of the edge/boundary cases where $u$ and $v$ round to different values would help motivate the helper bit. Additionally, comparing against a baseline that uses error-correcting codes (ECC) on the output bitstream to correct decoding errors could be valuable.",
+        "Odd Temporal and Model References: In the Appendix (Page 13), the authors state they used \"specifically GPT-5\" as an assistant, and in Section 5.1 (Page 8), the text mentions Wikipedia articles \"pulled in September 2025\". These anomalies suggest either a lack of careful proofreading or a reliance on hallucinated/generative text that went unchecked."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 8,
+      "strengths": [
+        "Addresses a critical and highly practical problem in model-driven lossless compression: prediction mismatch due to deep learning hardware non-determinism (e.g., floating-point execution order variation on different GPUs).",
+        "Proposes an elegant and technically sound coding-theoretic solution (PMATIC) that uses interval quantization combined with sparse, highly-compressible 'helper bits' to resolve boundary alignment issues between encoder and decoder.",
+        "Provides rigorous theoretical guarantees, including a proof of correctness under bounded conditional TV distance and an analysis of the optimal quantization bin radius that balances quantization loss and helper-bit overhead.",
+        "Includes a realistic empirical evaluation using modern LLMs (LLaMA-3.1, Mistral, Qwen-2.5) on multiple datasets, showing successful decoding under real hardware non-determinism (Apple M2 Pro vs. Apple M4 Max GPUs) while still outperforming classical tools like gzip and zstd."
+      ],
+      "weaknesses": [
+        "The bit-level decomposition of tokens (mapping tokens to a fixed-length longform) can be suboptimal. Specifically, using random bitstring assignments (as mentioned in Appendix A.3) ignores the vocabulary's natural probability structure and might inflate the entropy of later bits.",
+        "Computing next-bit conditional probabilities sequentially via prefix-summing (Eq. 11) introduces non-trivial computational overhead for large vocabularies (e.g., Qwen's 151,643 tokens requiring 18 bits), which is not quantitatively profiled in terms of encoding/decoding latency.",
+        "The helper bit coding relies on a static 'uniformity' probability assumption of $\\delta/r$. As shown in Table 2, the actual fraction of helper bits being 1 is much lower in practice. The authors miss an opportunity to dynamically estimate the helper-bit probabilities since the exact probability is known to the encoder, which could significantly reduce the robustness overhead."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 8,
+      "strengths": [
+        "The paper addresses a highly important and practical problem in model-driven (especially LLM-driven) lossless compression: prediction mismatch due to non-determinism across different hardware, software, or computation orders.",
+        "The proposed PMATIC algorithm is elegant, simple, and model-agnostic, serving as a drop-in replacement for arithmetic coding.",
+        "The paper provides rigorous theoretical guarantees, proving correct decoding under a bounded mismatch setting and deriving an optimal balance between helper-bit overhead and quantization loss.",
+        "The empirical evaluation is solid, demonstrating robust decoding under both synthetic noise and real-world hardware non-determinism (e.g., Apple M2 Pro vs. M4 Max), while still achieving compression rates that outperform standard modern compression tools.",
+        "The manuscript is exceptionally well-written, with clear explanations, illustrative figures, and a detailed appendix."
+      ],
+      "weaknesses": [
+        "The probability estimation for the helper bits is currently basic, relying on a static uniformity assumption (p' = delta/r). As the authors' own analysis in Table 2 shows, the actual fraction of helper bits set to 1 in practice is much lower, meaning there is unused potential for further optimizing compression efficiency.",
+        "The token-to-bit string (longform) mapping is assigned randomly. A more structured mapping that considers token probabilities or relationships could potentially reduce helper-bit frequency or quantization loss.",
+        "Although the computational bottleneck of LLM-based compression is dominated by LLM inference, the paper would benefit from a brief discussion or empirical measurement of the extra CPU overhead introduced by PMATIC's bit-level interval coding compared to standard token-level arithmetic coding."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "High Practical Importance: Solves the critical problem of non-determinism in neural network-driven lossless compression, which previously made deployment of such systems on different hardware configurations impossible.",
+        "Elegant Algorithm Design: PMATIC is a simple, model-agnostic, and clever modification of arithmetic coding using quantized intervals and low-entropy helper bits.",
+        "Rigorous Theoretical Analysis: The paper provides formal proofs of correctness under bounded prediction mismatch, establishes a clean link between logit L_inf distance and conditional TV distance, and derives tight theoretical bounds on the compression overhead.",
+        "Convincing Real-World Validation: Demonstrates successful cross-device lossless compression/decoding between different physical hardware architectures (Apple M2 Pro vs M4 Max chipsets), proving the method's effectiveness in resolving real non-determinism."
+      ],
+      "weaknesses": [
+        "Assumption of Strict Bounded Mismatch: The deterministic bound ||u - v||_inf <= epsilon may occasionally be violated in very long sequences due to rare stochastic outliers in floating-point non-determinism. A stochastic error model or discussion on handling rare decoding failures would be a valuable addition.",
+        "Suboptimal Longform Mapping: The current implementation uses a random fixed-length bitstring representation for tokens. The performance could likely be improved by optimizing this mapping, though this does not detract from the correctness of the proposed method.",
+        "Lack of Detailed Baseline Comparisons: While the authors compare PMATIC to standard arithmetic coding (to isolate the overhead) and traditional tools, a direct empirical comparison with concurrent approaches (such as the Huffman-like approach mentioned) is missing."
+      ]
+    }
+  }
+}

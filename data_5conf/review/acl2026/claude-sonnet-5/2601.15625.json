@@ -1,0 +1,46 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a well-motivated and practically important problem: brittle multi-turn error recovery in smaller tool-using LLMs, illustrated concretely with a compelling failure-mode example (Figure 1a).",
+        "The core idea—dynamically 'fissioning' failed on-policy rollouts into corrective training instances augmented with simulated diagnostic feedback—is a reasonably novel mechanism that directly targets the sparse-reward/vanishing-gradient problem in GRPO-style training, going beyond prior static synthetic error-correction datasets.",
+        "Consistent improvements over GRPO, DAPO, and Dr.GRPO baselines across three model scales (1.7B/4B/8B) on BFCL v4 Multi-Turn, with decomposition analysis (Figure 3) showing gains are attributable specifically to error-recovery rate rather than a tradeoff with one-shot success.",
+        "Useful ablations that isolate the contribution of the structural fission mechanism from the informativeness of the simulated feedback (Static vs Dynamic), and a sensitivity study on correction-trigger frequency, both of which support the mechanistic story rather than merely reporting end results.",
+        "Qualitative case study (Section 4.6, Figure 6, Appendix C) gives a concrete, interpretable illustration of the claimed behavioral shift from collapse/hallucination to active diagnosis (e.g., invoking `find` to resolve state uncertainty), reinforcing the quantitative claims with mechanistic insight.",
+        "Reasonably detailed methodological description (reward design, algorithm pseudocode, prompt templates) supports partial reproducibility for readers wanting to implement the pipeline."
+      ],
+      "weaknesses": [
+        "Evaluation is confined to a single benchmark (BFCL v4 Multi-Turn) and a single model family (Qwen3), which the authors acknowledge; this substantially limits the strength of generality claims ('may generalize to other iterative refinement domains') and the 'state-of-the-art' framing.",
+        "The training set is very small (630 instances after filtering) and results are reported as single-run point estimates with no variance, multiple seeds, or significance testing, despite the reported gains (e.g., 4% overall accuracy) being of a magnitude that could plausibly be affected by run-to-run noise, especially for the smallest model (1.7B) where absolute accuracies are low.",
+        "The full data/feedback pipeline (schema curation, trajectory synthesis, quality filtering, Error Simulator training-label generation) depends heavily on a closed, proprietary model (Claude-4-Sonnet) for both data construction and diagnostic feedback quality, which limits exact reproducibility and makes it hard to disentangle gains due to the fission mechanism from gains due to high-quality proprietary-model-curated data.",
+        "Comparisons with 'specialized 8B-scale tool agents' (ToolACE-2-8B, BitAgent-8B) are not well-controlled: these models differ in base architecture, training data, and objectives, so attributing the performance gap purely to the proposed method's efficacy is questionable; this framing risks overstating relative superiority.",
+        "The composite reward function includes several hand-tuned, time-dependent hyperparameters (decaying/increasing weights, α, Gaussian length penalty parameters, δcorr threshold) whose sensitivity is not explored, raising concerns about how much of the reported performance depends on this particular tuning versus the core fission idea.",
+        "The paper reports the computational overhead of fission-based resampling as a limitation but provides no quantitative comparison (e.g., wall-clock time, GPU-hours, total rollouts) of FISSION-GRPO vs. baselines, making it hard to judge whether reported gains are a fair comparison at equal compute budgets.",
+        "The claim that the Error Simulator avoids 'target leakage' is only qualitatively asserted (via prompt design) rather than empirically verified, and it is unclear how much implicit information about the ground-truth call leaks through the diagnostic message, especially since the simulator is conditioned on the ground truth call during generation."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 3.5,
+      "strengths": [
+        "Clear and well-motivated problem framing: multi-turn tool-use agents' failure to recover from execution errors is illustrated concretely (Fig. 1) and tied to a specific mechanistic explanation (sparse reward collapse, stale offline error corpora).",
+        "The proposed FISSION-GRPO mechanism (intercepting failed rollouts, augmenting with simulated diagnostic feedback, and resampling a 'fission group' of recovery attempts) is a reasonably novel combination of on-policy exploration with targeted corrective resampling, addressing the vanishing-gradient issue in homogeneous-failure GRPO groups.",
+        "Reasonably thorough empirical validation: results across three Qwen3 scales (1.7B/4B/8B) and three benchmarks (BFCL v4, TAU-Bench, TAU2-Bench), comparison against multiple recent RL baselines (DAPO, Dr.GRPO, AWPO) and specialized 8B tool agents.",
+        "Useful diagnostic analyses beyond the main table: decomposition into one-shot success vs. error-recovery rate (Fig. 3), ablation isolating the value of dynamic vs. static feedback (Table 2), a compute-matched comparison controlling for the extra resampling cost (Table 4), and a sweep over the correction trigger interval (Fig. 4).",
+        "The Error Simulator is validated beyond simple accuracy: cross-domain generalization tests and human evaluation with inter-annotator agreement (Cohen's κ = 0.71) targeting the important risk of ground-truth leakage.",
+        "Qualitative case study (Fig. 7) illustrates a plausible, interpretable mechanistic difference (active diagnosis via tool calls like `find` vs. hallucinated retries), aiding intuition about why the method helps."
+      ],
+      "weaknesses": [
+        "No variance/seed information is reported for the main results (Table 1) despite RL training being notoriously noisy; single-run point estimates make it difficult to assess whether reported gains (e.g., a few points on TAU-Bench/TAU2-Bench) are reliable versus run-to-run noise.",
+        "The claim of 'leading results across most settings' on TAU-Bench/TAU2-Bench is only partially supported: for Qwen3-8B, Dr.GRPO outperforms FISSION-GRPO on TAU2 Retail (39.5 vs 36.8) and Airline (34.0 vs 32.0), and DAPO/AWPO are competitive in several individual columns elsewhere in the table, which is understated in the text.",
+        "Training data is very small (630 curated instances) and is generated almost entirely by Claude Sonnet 4 (schema generation, trajectory synthesis, and coherence filtering), with Claude Sonnet 4 also used as the LLM judge for evaluating the Error Simulator's quality (Table 3) and as the diagnostic-feedback teacher — this creates potential circularity/self-evaluation bias that is not discussed or mitigated (e.g., via a different judge model or human-only evaluation at scale).",
+        "The reward function (Eq. 2-3) contains multiple heuristic time-varying weighting schedules and thresholds (δcorr, α=0.5, annealing schedules) without ablation showing sensitivity or justification of these specific choices, raising reproducibility concerns for readers wanting to replicate exact settings.",
+        "The qualitative case study in §4.7/Appendix D is a single illustrative example, which is useful for intuition but provides essentially no statistical evidence about how representative this behavior is across the broader test set.",
+        "Method novelty relative to closely related prior work (e.g., Kumar et al. 2024 RL self-correction, LoopTool's closed-loop data-training loop, NTHR/negative-gradient mitigation methods) is somewhat incremental — the core idea of resampling recovery attempts conditioned on injected error feedback is a natural extension of these existing threads, and the paper's differentiation rests mainly on the on-policy/dynamic simulator angle rather than a fundamentally new algorithmic idea.",
+        "Evaluation scope remains confined to tool-calling/agentic benchmarks with simulated user/environment feedback; no evidence is provided that findings transfer to real API environments or other error-recovery domains claimed in the conclusion (e.g., code debugging, math reasoning)."
+      ]
+    }
+  }
+}

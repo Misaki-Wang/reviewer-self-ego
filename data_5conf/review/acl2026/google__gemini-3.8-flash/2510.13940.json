@@ -1,0 +1,95 @@
+{
+  "v2": {
+    "exp1_quality": {
+      "oa": 3.5,
+      "strengths": [
+        "Intuitive and well-motivated premise: The observation that uncertainty and reasoning failures in LLMs are concentrated in a small fraction of high-entropy tokens provides a compelling motivation for localized, selective test-time intervention.",
+        "Clever and practical design for CFG in LLMs: Traditional CFG requires maintaining dual KV caches or doubling inference prefill costs. Appending a short negative prompt ('OUTPUT ERROR') directly to the reused conditional KV cache only at high-entropy tokens dramatically cuts memory and computational overhead.",
+        "Comprehensive empirical evaluation: The authors evaluate across a diverse suite of benchmarks (AIME2024, GPQA-Diamond, MATH500, HumanEval, HumanEvalPlus, LiveCodeBench, MMLU-Pro), multiple recent model families (DeepSeek-R1-7B, Qwen3 variants, Ling-mini-2.0), and even VLMs, demonstrating consistent improvements over direct inference.",
+        "Insightful ablations and analyses: The paper provides informative analyses on entropy thresholds, CFG guidance weight, choice of negative prompt phrasing, and the relationship between token entropy and CFG modification success rate."
+      ],
+      "weaknesses": [
+        "Conceptual imprecision regarding CFG and 'unconditional' distributions: In standard classifier-free guidance, the unconditional branch removes or nulls the conditioning context $c$. In MTI, appending 'OUTPUT ERROR' to the existing prefix $[c, x_{<t}]$ produces $P(l_t \\mid c, x_{<t}, \text{'OUTPUT ERROR'})$. This is not an unconditional distribution, but rather an error-prompted negative conditional branch. Framing this as an approximation of the unconditional branch lacks formal mathematical grounding and should be clarified.",
+        "Sensitivity and transferability of the entropy threshold $\\tau$: As shown in Tables 1 and 2, performance can fluctuate significantly across different values of $\\tau$ (e.g., GPQA-D on DeepSeek-R1-7B drops from 51.52% at $\\tau=0.5$ to 38.89% at $\\tau=2.0$). While the authors suggest tuning $\\tau$ on held-out data, the paper does not evaluate how well an optimal threshold selected on one dataset transfers to unseen tasks or benchmarks.",
+        "Practical throughput and batching considerations: The inference cost analysis in Section 4.4 is conducted sequentially on single instances. In real-world batched serving (e.g., via vLLM), dynamically triggering extra forward steps for an unpredictable subset of sequences within a batch causes control-flow divergence and scheduling bubbles. The practical serving overhead under batched settings is neither measured nor discussed.",
+        "Limited evaluation under standard stochastic decoding: Most benchmark results (Table 1) use greedy decoding, whereas long-form reasoning models (such as DeepSeek-R1) are typically evaluated with non-zero temperature and top-$p$ sampling. While AIME2024 is tested under sampling in Table 2, broader verification of MTI under sampling across coding and general QA benchmarks would strengthen the empirical claims."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3.5,
+      "strengths": [
+        "Compelling core motivation: the paper empirically verifies that reasoning errors and uncertainty are strongly localized in a small fraction of high-entropy tokens, providing a clear justification for selective intervention rather than uniform test-time guidance.",
+        "Significant efficiency improvement over standard CFG: by triggering intervention only when token entropy exceeds a threshold and reusing the KV cache via suffix injection, the method circumvents maintaining a parallel unconditional KV cache and dramatically cuts computational overhead.",
+        "Extensive empirical evaluation: the framework is tested across multiple foundation and reasoning models (DeepSeek-R1-7B, Ling-mini-2.0, Qwen series) and diverse domains (mathematics, STEM, code generation, and general knowledge), demonstrating consistent improvements over direct inference and vanilla CFG.",
+        "Insightful mechanism analysis: the distribution analysis in Figure 4 provides convincing evidence that low-entropy tokens are practically immune to CFG steering, validating the intuition that uniform guidance wasted computation on stable tokens."
+      ],
+      "weaknesses": [
+        "Conceptual conflation between CFG and contrastive negative steering: Classifier-Free Guidance traditionally interpolates between a conditional distribution $P(x|c)$ and an unconditional distribution $P(x|\\emptyset)$. Appending 'OUTPUT ERROR' directly to the ongoing generation trajectory ($c \\circ x_{<t}$) forms a locally corrupted conditional branch rather than an unconditional branch. Framing this as an 'approximation of unconditional decoding' is theoretically loose; it is more accurately characterized as contrastive decoding against an error-primed prefix.",
+        "Incomplete explanation for latency claims: Table 3 shows that MTI occasionally achieves lower latency than Direct Inference, which the authors attribute to generating shorter, less repetitive reasoning trajectories. However, no output length statistics (e.g., average token count per response) are reported to substantiate this claim.",
+        "Missing operational details on KV cache management: The paper lacks specific implementation details on how the conditional KV cache is rolled back or sliced after evaluating the auxiliary tokens ('OUTPUT ERROR'). Clarifying how this interacts with optimized serving engines (e.g., PagedAttention in vLLM) during batched decoding is essential for reproducibility.",
+        "Incomplete text and editorial errors: The abstract ends with an incomplete sentence ('The code can be found'), and several bibliographic entries are duplicated (e.g., Guo et al., 2025a and 2025b)."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3.5,
+      "strengths": [
+        "Pragmatic and lightweight test-time intervention: Combining entropy-based selective intervention with KV-cache reuse via a temporary negative prompt ('OUTPUT ERROR') provides a very practical decoding mechanism that eliminates the dual-KV-cache memory and compute overhead associated with standard LLM-CFG.",
+        "Comprehensive empirical evaluation: The approach is evaluated across a broad set of benchmarks (MMLU-Pro, GPQA-Diamond, MATH500, HumanEval, HumanEvalPlus, LiveCodeBench, AIME2024) and multiple modern open-weight LLMs (DeepSeek-R1-7B, Ling-mini-2.0, Qwen3 family), demonstrating consistent performance gains.",
+        "Thorough ablations and extensions: The paper provides meaningful analyses on hyperparameter sensitivity (entropy threshold tau, guidance weight omega), negative prompt wording, comparisons with contrastive decoding and test-time scaling baselines, and an extension to vision-language models (VLMs)."
+      ],
+      "weaknesses": [
+        "Conflation of trajectory length with uncertainty: Equation (3) defines answer-level entropy as the unnormalized sum of token entropies along the trajectory ($A_n = \\sum_{t=1}^{T_n} H_t$). Because failed reasoning trajectories in reasoning models are systematically longer due to looping and extended deliberation, the reported difference in Figure 1 is substantially confounded by sequence length. The authors should report and analyze length-normalized per-token entropy ($\\frac{1}{T_n}\\sum H_t$) to substantiate the claim that incorrect answers inherently exhibit higher entropy.",
+        "Imprecise theoretical framing of the unconditional distribution: The method is repeatedly described as approximating the 'unconditional branch' of Classifier-Free Guidance (CFG). In reality, appending 'OUTPUT ERROR' to the existing prefix KV cache $[c, x_{<t}]$ yields a negatively conditioned distribution $P(x_t \\mid c, x_{<t}, \\text{'OUTPUT ERROR'})$, not an unconditional prior $P(x_t)$. This is contrastive negative prompt steering rather than unconditional CFG, and framing it as an 'unconditional distribution' is conceptually inaccurate.",
+        "Greedy decoding artifacts in main comparisons: The large baseline drops in Table 1 (e.g., DeepSeek-R1-7B scoring only 29.29% on GPQA-Diamond under Direct Inference) are well-known degeneration and repetition failure modes of reasoning models under greedy decoding. While Table 2 evaluates stochastic sampling on AIME2024, the paper lacks comprehensive evaluation under recommended sampling settings (e.g., temperature 0.6) across the full benchmark suite.",
+        "Missing generation length and efficiency metrics: The authors attribute reduced latency in Table 3 to MTI generating shorter, more concise reasoning chains, but no generated token length statistics or token generation speeds (tokens/sec) are reported to support this claim."
+      ]
+    }
+  },
+  "v1": {
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The core insight—that reasoning uncertainty is concentrated in a small fraction of high-entropy tokens, and that test-time guidance should be applied selectively rather than uniformly—is intuitive, well-motivated, and supported by empirical analysis (Figures 1 and 5).",
+        "The proposed method (MTI) cleverly addresses the primary efficiency bottlenecks of Classifier-Free Guidance (CFG) in autoregressive LLMs by restricting intervention to high-entropy tokens and avoiding dual full KV caches through lightweight negative-prompt injection via cache reuse.",
+        "Comprehensive experimental evaluation across multiple model scales (8B, 14B, and 32B) and diverse domains (general reasoning, mathematics, coding) demonstrating consistent improvements over direct inference and vanilla CFG.",
+        "Helpful ablation studies and analysis illustrating the sensitivity of the entropy threshold, guidance strength, choice of negative prompt, and the linguistic shift in reasoning trajectories."
+      ],
+      "weaknesses": [
+        "The paper lacks wall-clock latency, throughput (tokens/second), and actual memory footprint measurements. Given that efficiency and minimal inference overhead are central claims of the work, empirical verification of real-world decoding speed—especially considering how cache slicing/rollback affects inference engines like vLLM—is critical.",
+        "Implementation and procedural details regarding KV-cache reuse are insufficiently formalized. It is unclear how the KV cache is managed when appending auxiliary negative prompt tokens (e.g., whether the cache is branched, rolled back, or temporarily extended) and how this interacts with batched generation.",
+        "The optimal entropy threshold $\\tau$ appears sensitive across tasks and model configurations (e.g., $\\tau=0.5$ vs. $\\tau=1.5$ yielding different optima across models in Table 1 and Table 2), yet no adaptive or heuristic selection mechanism is proposed, requiring empirical tuning across domains.",
+        "The conceptual formulation of using 'OUTPUT ERROR' as an unconditional negative branch lacks formal grounding; unlike diffusion models where unconditional distributions are trained, prompting an autoregressive model with an error cue may unpredictably shift the local token distribution rather than acting strictly as an inverted task guide."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 2.5,
+      "strengths": [
+        "Intuitive motivation: Targeting intervention specifically at high-entropy decision points is well-motivated, addressing both the computational inefficiency and over-regularization pitfalls of uniform test-time guidance.",
+        "Lightweight KV-cache reuse mechanism: Proposing to construct the negative guidance branch by appending a brief negative suffix to the existing conditional KV cache avoids the prohibitive memory overhead of maintaining two full KV caches.",
+        "Broad evaluation across benchmarks: The method is tested across multiple reasoning, coding, and general knowledge benchmarks (GPQA, MATH500, AIME2024, HumanEval, LiveCodeBench, MMLU-Pro), demonstrating consistent performance gains over direct inference."
+      ],
+      "weaknesses": [
+        "Missing actual wall-clock efficiency benchmarks: Although computational and memory efficiency is the central claim of the paper, no empirical wall-clock time, latency, throughput (tokens/sec), or GPU memory usage measurements are reported. Even if CFG is invoked on only 5–25% of tokens, pipeline interruptions and temporary KV extension can introduce non-trivial systems overhead in optimized serving engines.",
+        "Conceptual and alignment concerns with negative prompt injection: Appending 'OUTPUT ERROR' to the end of the context $[c, x_{<t}]$ changes the prefix condition such that the model is predicting the token following the phrase 'OUTPUT ERROR', rather than an alternative, erroneous candidate for token position $t$. The paper does not provide theoretical or empirical justification for why the output distribution of this offset continuation aligns in vocabulary space with the target distribution at step $t$.",
+        "Mathematical typo in foundational formula: In Equation 2, the definition of Shannon entropy is missing the negative sign ($H_t = \\sum_{i=1}^V p_i \\log p_i$ instead of $-\\sum_{i=1}^V p_i \\log p_i$), which yields non-positive values unless corrected.",
+        "Sensitivity to threshold hyperparameter $\\tau$: The optimal entropy threshold varies considerably across model sizes and tasks (e.g., $\\tau=1.5$ for 8B, $\\tau=1.0$ for 14B, and $\\tau=0.5$ for 32B on AIME2024 in Table 1). The paper lacks an analysis or validation strategy for selecting $\\tau$ a priori without tuning on test sets.",
+        "Limited architectural diversity: All experiments are conducted exclusively on the Qwen3 model family. Validating the approach on other prominent open model families (such as LLaMA or Mistral) is necessary to substantiate claims of generalizability."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 2.5,
+      "strengths": [
+        "Compelling core intuition: The paper builds on an insightful observation that reasoning uncertainty is heavily concentrated at a small subset of high-entropy tokens, which is well-motivated and nicely illustrated.",
+        "Practical motivation for efficient test-time guidance: Addressing the high compute and memory overhead of classifier-free guidance (CFG) in autoregressive language models—specifically avoiding duplicate KV caches—is a timely and relevant research problem.",
+        "Broad empirical evaluation: The proposed method is evaluated across a wide range of tasks and benchmarks, including general reasoning (WinoGrande, MMLU-Pro), mathematics (AIME2024, MATH500, GPQA-Diamond), and code generation (HumanEval, HumanEval+, LiveCodeBench) across multiple model sizes."
+      ],
+      "weaknesses": [
+        "Conceptual and positional misalignment in the negative branch: Appending the suffix 'OUTPUT ERROR' to the conditional prefix $[c, x_{<t}]$ shifts the sequence position forward by several tokens. The resulting distribution predicts tokens conditioned on following the phrase 'OUTPUT ERROR' (e.g., punctuation or words like 'occurred'), rather than predicting an alternative candidate for the token position $t$. Subtracting these logits from position $t$ lacks theoretical justification, and the authors provide no logit-level evidence showing that this auxiliary distribution actually captures task-specific errors.",
+        "Unclear mechanism of improvement: In the negative prompt ablation (Figure 3c), injecting 'OUTPUT TRUE' also outperforms direct inference by a noticeable margin (59.09 vs. 57.07 on GPQA-Diamond). This suggests that the performance improvement may stem from general logit perturbation, smoothing, or entropy-conditioned regularisation rather than semantic negative guidance as claimed.",
+        "Missing baseline comparisons: Because the intervention is triggered strictly at high-entropy steps, the paper should compare against simpler, established entropy-adaptive decoding methods (e.g., entropy-guided temperature scaling, dynamic top-p truncation, or contrastive decoding against an earlier layer/weaker baseline) to isolate the true contribution of the pseudo-CFG operation.",
+        "Lack of actual wall-clock latency and throughput measurements: While the paper claims 'almost no extra inference cost', dynamic conditional branching—where select tokens trigger an extra forward pass with three appended tokens—can induce substantial pipeline bubbles and kernel synchronization overhead in modern batched serving engines (such as vLLM). Real wall-clock latency (tokens per second or time-to-first-token) should be reported.",
+        "Hyperparameter sensitivity: The optimal threshold $\\tau$ fluctuates considerably across models and domains (e.g., $\\tau=1.0$ vs. $\\tau=2.0$), and suboptimal choices can lead to performance drops below direct inference. The manuscript does not specify how these thresholds can be tuned or chosen a priori without access to the test set."
+      ]
+    }
+  }
+}

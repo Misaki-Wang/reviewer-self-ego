@@ -1,0 +1,97 @@
+{
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Compelling motivation and empirical analysis: The authors clearly identify the key challenges in KV cache eviction for reasoning models—specifically, the prevalence of semantic-dependent block-wise attention patterns and the vulnerability of low-entropy (deterministic/factual) tokens to context eviction.",
+        "Well-motivated two-stage methodology: Combining the offline 'Golden Eviction' algorithm (which uses future attention as an upper-bound surrogate on error drift) with supervised pairwise ranking, followed by GRPO reinforcement learning targeting large loss shifts on low-entropy tokens, is technically sound and principled.",
+        "Comprehensive experimental evaluation: The proposed method is thoroughly tested across multiple model families and sizes (Qwen3-1.7B/4B/14B, DeepSeek-R1-Distill-Qwen-7B, MiniCPM-4.1-8B) and multiple demanding benchmarks (AIME2024/2025, GPQA, LiveCodeBench, LongBench), demonstrating consistent and significant gains over strong baselines like R-KV, SnapKV, H2O, G-KV, and DuoAttention.",
+        "Solid efficiency analysis and ablations: The paper provides concrete throughput and runtime profiling, showing that eviction scoring overhead represents only ~2.7% of total generation time while unlocking substantial memory savings and throughput gains. Ablation studies comprehensively validate the reward formulation, input features, and sampling mechanics."
+      ],
+      "weaknesses": [
+        "Relative contribution of the RL stage: In several experimental settings (e.g., Figure 3 and Table 6), the supervised stage (ForesightKV w/o RL) provides the vast majority of the performance recovery over baselines, while the subsequent GRPO RL stage yields only incremental gains (typically ~0.5–2% absolute on AIME). A deeper discussion on when RL is strictly necessary versus when supervised golden eviction suffices would strengthen the paper.",
+        "Model specificity and training overhead: Because the lightweight scorer π_θ consumes layer/head-specific key-value representations and group-query attention features, separate scoring models must be trained for each LLM backbone. Although LLM weights remain frozen, the data generation and two-stage training pipeline (including GRPO sampling over long contexts) still require non-trivial compute (e.g., ~64 H800 GPU hours for 7B).",
+        "Scope of generation lengths: While tested up to 32K context lengths, modern long-thought reasoning models frequently push towards 64K–128K context windows where cache eviction frequency and cumulative error drift become even more severe."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Compelling motivation based on empirical observations: the paper nicely illustrates that reasoning traces contain complex, block-wise semantic attention patterns and that low-entropy tokens (e.g., intermediate numbers, symbols, and entities) suffer severe loss spikes when critical KV entries are evicted.",
+        "Well-designed two-stage training paradigm: introducing 'Golden Eviction' (future-aware pooling and pairwise ranking loss) effectively distills long-term KV importance into lightweight MLP scorers without updating the backbone LLM, while the subsequent GRPO-based RL phase effectively counteracts decoding-time distribution shift.",
+        "Comprehensive and impressive empirical performance: on challenging reasoning benchmarks (AIME2024, AIME2025), ForesightKV achieves comparable or superior results to prior methods using only half the KV cache budget, and scales well across model sizes (1.7B to 14B) and domains (GPQA, LiveCodeBench, LongBench).",
+        "Detailed analysis and ablation studies: the paper systematically validates key components, including the input feature design, the Top-K multinomial sampling mechanism, sensitivity to entropy thresholds, length transfer, and the formulation of the MSE-based reward on low-entropy tokens."
+      ],
+      "weaknesses": [
+        "Additional training cost compared to training-free baselines: unlike heuristic methods (e.g., SnapKV, H2O, R-KV) that can be applied off-the-shelf to any model without prior preparation, ForesightKV requires curating reasoning traces, computing oracle future attention, and running an RL phase (e.g., requiring multi-GPU training on H800s for each model architecture).",
+        "Marginal incremental gains from the RL stage on certain evaluations: on benchmarks such as LiveCodeBench (Table 6) and Qwen3-14B (Table 14), the supervised model ('w/o RL') accounts for almost all of the performance gain, leaving the RL fine-tuning step with marginal impact relative to its substantial computational expense.",
+        "Real-world serving integration considerations: while the paper provides wall-clock timing and concurrent batch size measurements, integrating dynamic MLP scoring over concatenated key, value, and multi-scale attention history into optimized inference runtimes (e.g., vLLM PagedAttention or FlashDecoding) may introduce nontrivial engineering complexity."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Focuses on the critical and timely bottleneck of KV cache footprint during long-chain-of-thought reasoning generation, moving beyond traditional prefill-compression paradigms.",
+        "Provides insightful empirical observations regarding the impact of KV eviction on reasoning: specifically showing that semantic-dependent attention patterns are poorly captured by heuristic windows and that low-entropy tokens (e.g., numbers, symbols) experience catastrophic loss spikes upon eviction.",
+        "Theoretical grounding in Appendix A derives an upper bound on attention perturbation and justifies the maximum-over-future-blocks heuristic in the Golden Eviction algorithm.",
+        "Comprehensive experimental evaluation across multiple reasoning and long-text benchmarks (AIME 2024/2025, GPQA, LiveCodeBench, LongBench) and diverse backbones (Qwen3-1.7B/4B/14B, DeepSeek-R1-Distill-Qwen-7B, MiniCPM-4.1-8B), consistently outperforming prior training-free baselines under constrained memory budgets.",
+        "Detailed system profiling and efficiency analyses demonstrate realistic batch throughput gains and negligible inference overhead from the lightweight scoring MLPs."
+      ],
+      "weaknesses": [
+        "Marginal empirical gains from the reinforcement learning stage relative to its substantial computational overhead: across many benchmarks (e.g., GPQA in Table 6, LiveCodeBench in Table 6, and Qwen3-14B in Table 14), the RL stage yields minimal improvement or even slight degradation compared to the supervised baseline (ForesightKV w/o RL), calling into question whether the complex RL pipeline is practically justified.",
+        "Lack of cross-model transferability: because the scorer takes concatenated hidden representations (kn, vn) and head-specific features, separate scoring models must be trained from scratch for each LLM architecture and size, making deployment considerably less flexible than training-free baselines.",
+        "Credit assignment and coarse advantage estimation in the RL setup: advantage scores are computed at the sequence level and broadcast uniformly to all eviction decisions across all layers and attention heads, which may lead to high variance and suboptimal attribution across different layers.",
+        "Primary comparisons are against training-free heuristic baselines (H2O, SnapKV, R-KV); comparisons against other learned eviction or token pruning frameworks in the main text are limited, somewhat overstating the advantage gained purely from training an eviction policy."
+      ]
+    }
+  },
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Well-motivated approach addressing the unique KV cache dynamics of long reasoning traces, specifically identifying the vulnerability of low-entropy deterministic tokens to eviction.",
+        "The two-stage framework is sound and practical: using offline future attention ('Golden Eviction') for supervised pretraining of an MLP scorer, followed by GRPO reinforcement learning to adapt to inference-time distribution shifts.",
+        "Focusing the RL reward specifically on penalized loss spikes of low-entropy tokens is conceptually intuitive and empirically validated via clear ablation studies against alternative reward functions.",
+        "Comprehensive empirical evaluation across multiple model architectures (Qwen3-1.7B/4B, DeepSeek-R1-Distill-Qwen-7B, MiniCPM-4.1-8B) and benchmarks (AIME2024/2025, GPQA, LiveCodeBench), consistently outperforming prior eviction heuristics at lower cache budgets.",
+        "Practical throughput and latency analysis demonstrating that the lightweight scoring MLP adds negligible runtime overhead (approx. 2.7% of total decoding time) while substantially increasing maximum concurrent batch size."
+      ],
+      "weaknesses": [
+        "The RL training stage evaluates eviction actions on fixed, pre-generated reasoning trajectories (teacher-forcing mode) rather than fully autoregressive free-form rollouts, which means the policy does not encounter compounding generation shifts caused by altered tokens during decoding.",
+        "The scoring model is architecture- and size-dependent, requiring separate training for each base LLM, which introduces a training pipeline overhead compared to purely training-free heuristics.",
+        "While the attention feature engineering (multi-scale window attention + decayed cumulative attention) is effective, the specific hyperparameter choices (decay factor 0.9, window sizes 8/16/32) are largely heuristic and their sensitivity is not extensively analyzed."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Clear motivation addressing a critical bottleneck: long-context reasoning models suffer from linearly expanding KV caches, and existing heuristic-based eviction strategies (e.g., SnapKV, H2O) often discard tokens that become semantically relevant in later reasoning steps.",
+        "The two-stage framework is conceptually interesting: using an attention-matrix oracle ('Golden Eviction') to distill future importance into a lightweight MLP scoring model via pairwise ranking loss provides an intuitive supervision signal without updating base LLM weights.",
+        "Focusing on low-entropy tokens for eviction loss/reward design is well-motivated by the empirical observation that factual tokens (numbers, entities) suffer sharp probability drops when critical past context is evicted.",
+        "Comprehensive evaluation across multiple models (Qwen-series, DeepSeek-R1-Distill-7B, MiniCPM) and tasks (AIME, GPQA, LiveCodeBench), demonstrating substantial KV cache reduction and throughput gains over heuristic baselines."
+      ],
+      "weaknesses": [
+        "Under-specified RL formulation: Modeling cache eviction as an MDP optimized with GRPO requires defining the log-likelihood of actions under policy $\\pi_\\theta$. The action $a_t$ is a discrete subset of size $L$ chosen via Top-$K$ multinomial sampling from scalar MLP scores, yet the paper does not specify how $\\pi_\\theta(a_t|s_t)$ and the importance sampling ratios $r_t(\\theta)$ are computed over subsets. Broadcasting a sequence-level advantage score to token-level MLPs lacks formal derivation.",
+        "Marginal gain from the RL stage: Across several benchmarks in Figure 3 (e.g., Qwen3-4B on AIME2025, DeepSeek-R1 on AIME2025) and Table 6 (GPQA and LiveCodeBench), the performance of 'ForesightKV w.o. RL' is nearly indistinguishable from full ForesightKV. Given the high computational overhead and rollout costs of running RL across full reasoning trajectories, the practical justification for the RL stage is weak.",
+        "Oversold theoretical contribution: Proposition A.1 in Appendix A is a elementary triangle inequality bound on bounded vector sums under softmax renormalization at a single step. It does not account for multi-layer compounding errors or autoregressive generation dynamics, providing minimal formal insight beyond the intuitive notion that dropping small-weight tokens yields small single-step output shifts.",
+        "Lack of statistical reporting: While the text states evaluations are conducted across 32 independent runs, Figure 3 and the tables report only mean pass@1 numbers without error bars, confidence intervals, or variance statistics, making it difficult to assess whether differences (especially between RL and non-RL variants) are statistically significant.",
+        "Model and architecture specificity: A separate bank of MLP scoring models must be trained for each LLM architecture, layer, and attention group, adding non-trivial training and hyperparameter-tuning overhead whenever adopting a new foundation model."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Well-motivated empirical analysis: The authors provide clear empirical evidence that attention in long-reasoning models exhibits dynamic semantic-dependent shifts, and that post-eviction degradation primarily manifests as catastrophic loss spikes on low-entropy tokens (which encode key symbols and arithmetic facts).",
+        "Principled two-stage training pipeline: Constructing an oracle 'Golden Eviction' policy via future attention aggregation and distilling it via pairwise ranking loss, followed by RL fine-tuning with GRPO to overcome eviction-induced distribution shift, is conceptually elegant and effective.",
+        "Targeted reward formulation: Framing the RL reward around minimizing mean squared loss increases on vulnerable low-entropy tokens directly addresses the empirical failure mode of reasoning models, supported by clear ablation results (Table 4).",
+        "Strong empirical results across benchmarks and models: ForesightKV substantially outperforms established KV eviction baselines (SnapKV, H2O, R-KV, DuoAttention, G-KV) across diverse models (Qwen3-1.7B/4B, DeepSeek-R1-Distill-Qwen-7B, MiniCPM-4.1-8B), often retaining near-lossless reasoning performance with only half the cache budget.",
+        "Comprehensive efficiency and cross-domain evaluation: The paper reports realistic throughput gains, maximum concurrent batch sizes, wall-clock eviction overheads (only ~2.7% of total runtime), and confirms out-of-domain transfer to coding (LiveCodeBench) and science (GPQA)."
+      ],
+      "weaknesses": [
+        "Training overhead and compute costs: Unlike training-free heuristics (e.g., SnapKV, H2O, R-KV), ForesightKV introduces an offline pipeline requiring full-sequence attention extraction, pairwise supervised training, and multi-trajectory RL rollouts. The paper does not report the total training compute/wall-clock time required to train the scoring models.",
+        "Scorer portability across architectures: The scoring MLPs take raw key and value projections ($k_n, v_n$) concatenated with attention features, meaning the scorers are coupled to specific model architectures and latent dimensions. Each new LLM family requires training separate scoring heads from scratch.",
+        "Inference sampling determinism: Section 3.1 and Appendix B.2 describe using Top-$K$ multinomial sampling over candidates during eviction. It is not entirely clear whether stochastic eviction is retained during evaluation/deployment inference or if greedy selection is used, which could introduce run-to-run variability.",
+        "Elementary theoretical analysis: Proposition A.1 provides a straightforward triangle inequality bound on attention output error under probability mass truncation. While technically sound, it represents a standard derivation rather than a deep theoretical contribution."
+      ]
+    }
+  }
+}

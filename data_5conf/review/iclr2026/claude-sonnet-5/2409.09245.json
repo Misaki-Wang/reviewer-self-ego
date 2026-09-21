@@ -22,6 +22,25 @@
         "Some derivations and propositions (e.g., Proposition 1's proof) are somewhat informal/hand-wavy rather than rigorous, and notation is occasionally inconsistent (e.g., overline vs. plain variables for means)."
       ]
     },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a practically important problem (stable training under extreme quantization/sparsity) and provides a simple, interpretable formulation (per-block affine reconstruction via ridge regression) with accompanying reference code, aiding potential reproducibility.",
+        "The method is architecture-agnostic and requires no clipping, custom optimizers, or extra normalization layers, which is appealing relative to many prior low-bit training recipes.",
+        "Reasonably broad set of experiments covering weight-only and activation+weight quantization, sparsity, and combinations thereof, plus an ablation on block size and lambda.",
+        "The 'fail-safe' backbone argument (graceful degradation to mean value as lambda -> infinity) is a nice qualitative property, even if mathematically elementary."
+      ],
+      "weaknesses": [
+        "The core technical contribution is quite thin: the 'denoising affine transform' reduces to standard block-wise mean/variance-based scale-and-bias (i.e., a shrinkage-regularized least-squares fit), which is closely related to existing per-block/per-vector quantization scaling schemes (e.g., VS-Quant, block quantization) already cited by the authors; the added 'novelty' is largely a small ridge penalty on the scale term. Propositions 1 and 2 are essentially trivial properties of ridge regression and are presented as major theoretical results.",
+        "The comparisons used to support 'state-of-the-art' claims (Tables 2 and 4) are not apples-to-apples: the FP32 baselines differ substantially across methods (e.g., 27.5 BLEU for compared methods vs. 29.49 for the authors' own baseline in Table 4; 76.65/76.16/76.15 vs. 76.41 in Table 2). Because training setups, frameworks, and baseline strengths differ, claiming superiority based on the delta from each paper's own (weaker) baseline is misleading and does not constitute a controlled comparison.",
+        "Despite an introduction heavily motivated by LLMs and generative AI efficiency, no LLM-scale experiments are shown; the only evaluations are ResNet-50/ImageNet and a base Transformer on WMT, which is a substantial gap in relevance and significance given the framing.",
+        "The claim of eliminating hyperparameter tuning is overstated: lambda must be adjusted per precision regime (0.01 vs. 0.0001), and block size B is shown to matter a great deal (Table 7), so at least two sensitive hyperparameters remain and are tuned somewhat heuristically ('our preference set on the safer side').",
+        "Section 2.2 on biophysical plausibility and the framing around spiking neural networks/temporal binary networks feels speculative and loosely connected to the actual technical contribution; the binary-Transformer results, while better than one baseline, do not substantively establish the claimed bridge to biological neural computation.",
+        "Experimental rigor is limited: single-run numbers with no variance/error bars or multiple seeds are reported throughout; ablations for lambda (Table 8) and block size (Table 7) are only shown for a single configuration each rather than systematically across precision/sparsity settings.",
+        "No code release or detailed hyperparameter/training logs are provided beyond high-level descriptions, limiting reproducibility despite the paper's claims of simplicity and universality.",
+        "The 'GE/PT/Clip' comparison columns in Tables 2 and 4 present the method as requiring none of these, but the min-max-based affine transform itself is a form of implicit clipping/calibration to the batch statistics, so the framing may understate the method's own dependence on per-block statistics."
+      ]
+    },
     "exp3_positive": {
       "oa": 6,
       "strengths": [
@@ -62,6 +81,26 @@
         "Many reported differences between configurations (e.g., 0.4056 vs 0.4066 accuracy) are very small and reported from single runs without error bars or repeated seeds, making it hard to assess statistical significance, particularly given the small-scale/short training regimes used throughout.",
         "The novelty of the core mechanism (a regression/statistics-based adaptive scale and offset for dequantization) is incrementally related to existing learned-step-size and calibration-based quantization techniques (e.g., LSQ, VS-Quant), and the paper's framing overstates the conceptual leap versus prior adaptive/statistical dequantization approaches.",
         "The writing relies heavily on rhetorical flourishes (e.g., repeated biological-intelligence analogies, philosophical references) that add length without strengthening the technical argument, and some claims (e.g., 'renders empirical hacks obsolete') are stronger than what the evidence supports."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper identifies a real and well-known limitation of STE (gradient blindness to quantization error) and proposes a mathematically clean closed-form ridge-regression-based dequantization as an alternative, unifying quantization and sparsification under one framework.",
+        "The affine matmul shortcut (Theorem 1) is an elegant algebraic simplification that reduces a 4-term expansion to a linear term plus two rank-1 corrections, with a reasonable asymptotic complexity analysis.",
+        "Breadth of empirical coverage is commendable on paper: nanoGPT, GPT-2, Gemma 1B/4B pretraining, ResNet-50/ImageNet, and WMT translation, plus extensive ablations (block size, lambda, FP4, Hadamard centering) in the appendix.",
+        "The connection between the proposed transform and normalization layers (LayerNorm/RMSNorm analogy) is a nice conceptual framing that aids interpretability."
+      ],
+      "weaknesses": [
+        "Potential fundamental soundness issue: the dequantization transform g(q) explicitly depends on statistics of the original high-precision tensor x (e.g., Cov_xq, x̄, and the x̄·w̄ᵀ term in the matmul shortcut). For activation quantization at inference, x is exactly what is not available (computing it would require the full-precision forward pass the quantization is meant to avoid). The paper never clarifies how these x-dependent statistics are obtained at deployment time for activations, which undermines the practicality/efficiency claims central to the paper's motivation (Section A.3 glosses over this by only discussing 'fake quantization' vs. 'native' flows without addressing where x-statistics come from at inference).",
+        "The 'state-of-the-art' framing is not substantiated by direct, matched-condition comparisons with the most relevant recent concurrent methods (ParetoQ, QuEST, STBLLM); QuEST in particular is only discussed narratively in related work with no experimental head-to-head, despite directly targeting the same STE-blind-spot problem.",
+        "Baseline comparisons (BitNet, ParetoQ) are run only via their 'publicly available symmetric implementations' because they 'lack native affine support,' which is an apples-to-oranges comparison that could explain the reported instability/divergence rather than a genuine limitation of those methods.",
+        "All LLM pretraining experiments are extremely short (25k steps / 6.5–26B tokens) relative to real LLM pretraining, yielding low absolute accuracy (~0.34–0.46 'C4 accuracy'), which limits the significance of claims about scaling behavior, Pareto frontiers, and the 'larger quantized model beats smaller model' hypothesis.",
+        "The energy-efficiency metric is a crude bit-width×operation proxy that explicitly ignores data movement and quantization overhead (acknowledged by the authors), yet strong qualitative conclusions (e.g., sparsity + quantization synergy, larger-model-is-better) are drawn from it without any real hardware validation.",
+        "No wall-clock or hardware benchmarks are provided for the proposed affine shortcut matmul; only an asymptotic complexity argument is given, so the practical efficiency claim ('nearly as fast as standard linear quantization') is unverified.",
+        "No error bars, multiple seeds, or statistical significance testing are reported anywhere; all comparisons rely on single-run point estimates, which is concerning given how close many of the reported accuracy differences are (e.g., 0.0003–0.002 in several ablations).",
+        "The writing veers into unsupported rhetorical claims (repeated allusions to biological intelligence/spiking neurons, dramatic language like 'ghosts of departed quantities') that inflate the perceived significance without corresponding empirical or theoretical support for these analogies.",
+        "The core idea of using data statistics to compute learned scale/offset (as opposed to STE's fixed surrogate) has strong conceptual overlap with existing learned-step-size and statistics-based quantization methods (e.g., LSQ, VS-Quant, AWQ); the paper's differentiation from this line of work, beyond a ridge-regression framing, is not rigorously argued."
       ]
     },
     "exp3_positive": {

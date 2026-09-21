@@ -1,0 +1,99 @@
+{
+  "v2": {
+    "exp1_quality": {
+      "oa": 8,
+      "strengths": [
+        "Compelling and elegant problem formulation: reframing 2:4 semi-structured pruning via block-diagonal matrix wrappers ($A(W' \\odot M)B$) provides a flexible transformation that alleviates the rigidity of the 2:4 constraint while preserving hardware friendliness.",
+        "Sound and principled optimization: the alternating optimization between continuous wrapper/weight updates and discrete greedy core updates leverages the small combinatorial space of 2:4 patterns ($\\binom{4}{2}=6$) via closed-form weighted least-squares solutions, accompanied by solid convergence proofs.",
+        "Extensive empirical evaluation: experiments cover modern, large-scale architectures (Llama-2, Llama-3, Qwen-2.5, Qwen-3 up to 72B and MoE variants) across perplexity metrics and a comprehensive suite of downstream zero/few-shot tasks.",
+        "Significant accuracy recovery: ARMOR consistently and substantially outperforms state-of-the-art post-training pruning methods (SparseGPT, Wanda, NoWag-P, RotPruner) across almost all benchmarks, closing a notable portion of the 2:4 accuracy gap.",
+        "Hardware and practical efficiency analysis: the paper includes actual inference benchmarks (batched matvec, generation tokens/s, memory footprint) verifying that the block-diagonal wrapper overhead ($2\\%\\text{--}5\\%$) does not negate the speedups of 2:4 hardware acceleration."
+      ],
+      "weaknesses": [
+        "Pruning time / computational cost during compression: ARMOR runs 20,000 iterations of Adam optimization per layer, which is likely substantially slower than fast one-shot heuristics like Wanda or SparseGPT. Providing exact wall-clock calibration/compression runtimes for models (e.g., 7B and 70B) would clarify the trade-off.",
+        "Lack of custom CUDA kernel integration: the inference benchmarks are implemented via a PyTorch proof-of-concept rather than an end-to-end fused CUDA/CUTLASS kernel integrating the block-diagonal matmul with the sparse core gemm, leaving room for uncertainty regarding optimal deployment speedup.",
+        "Strict iso-parameter fairness: since ARMOR introduces a small parameter and FLOP overhead ($+2.4\\%$ to $+5.0\\%$), it would be informative to contrast ARMOR against baselines augmented with equal rank/parameter budgets (e.g., Wanda/SparseGPT plus low-rank compensation of equivalent parameter size)."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Well-motivated approach: Semi-structured (2:4) pruning is natively supported by modern GPU hardware (e.g., NVIDIA Ampere and Hopper) but often suffers severe accuracy degradation. Reframing the problem as matrix factorization with lightweight block-diagonal wrapper matrices (A and B) around a 2:4 sparse core is an elegant and effective formulation.",
+        "Clever and tractable optimization scheme: The block coordinate descent strategy nicely decomposes the layerwise proxy loss across blocks, allowing parallelized closed-form least-squares evaluation across the (4 choose 2) = 6 mask permutations while jointly updating continuous wrapper parameters.",
+        "Comprehensive empirical evaluation: The method is validated across a wide variety of state-of-the-art open-source LLMs (Llama-2, Llama-3, Qwen 2.5, and Qwen 3) spanning model sizes from 7B up to 72B parameters, on both standard language modeling perplexity (Wikitext-2, C4) and diverse downstream reasoning benchmarks (MMLU, GSM8K, BBH, GPQA, etc.).",
+        "Substantial empirical gains: ARMOR consistently and significantly outperforms existing one-shot semi-structured pruning baselines (SparseGPT, Wanda, NoWag-P, RotPruner), cutting the perplexity gap to the dense baseline by up to ~50% and showing marked improvements on difficult reasoning tasks.",
+        "Hardware and practical efficiency validation: The authors evaluate actual generation throughput (tokens/s), memory usage, and batched matrix-vector multiplication latencies, demonstrating that ARMOR realizes practical speedups and memory reductions close to native 2:4 pruning."
+      ],
+      "weaknesses": [
+        "Compression time and computational cost: The optimization runs for 20,000 iterations per layer. The paper lacks a concrete discussion of the total end-to-end compression wall-clock time and compute budget across model scales (especially for 70B/72B models) compared to rapid one-shot baselines like Wanda or SparseGPT.",
+        "Comparison fairness regarding parameter/FLOP overhead: The block-diagonal wrappers introduce an overhead of ~2.4% to 5.0% in non-zero parameters and FLOPs. While modest, the compared baselines are evaluated strictly at native 2:4 sparsity. Providing comparisons against baselines calibrated to match the exact same effective parameter/FLOP count (e.g., hybrid pruning or slightly lower sparsity) would make the evaluation even more convincing.",
+        "Modest theoretical depth: Theorem 3.1 merely establishes that the proxy loss decreases monotonically and converges, which directly follows from standard properties of coordinate descent with coordinate-wise minimizing/non-increasing steps on a loss bounded below by zero. Claiming this as a significant theoretical contribution somewhat overstates the result.",
+        "Lack of custom fused GPU kernel: The inference benchmarks rely on a PyTorch proof-of-concept with batched matrix multiplications rather than an optimized, fused CUDA/Triton kernel combining the block-diagonal multiplication with 2:4 sparse GEMM. Demonstrating deployment within production inference frameworks (e.g., vLLM or TensorRT-LLM) remains an open engineering step."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The formulation of wrapping a 2:4 sparse core with learned block-diagonal matrices provides a flexible structural middle ground between unconstrained low-rank factorization and rigid elementwise masking.",
+        "The discrete sparse-core update cleverly exploits the element-wise/block-wise separability of the proxy loss and the small combinatorial search space of 2:4 sparsity (6 combinations per 4-element group) to derive closed-form least-squares updates.",
+        "The empirical evaluation is comprehensive in scope, covering multiple model architectures, model sizes (from 7B up to 72B), perplexity metrics, and various downstream reasoning benchmarks (MMLU, GSM8K, BBH, GPQA)."
+      ],
+      "weaknesses": [
+        "Significant questions regarding experimental validity and verifiability: The paper evaluates and cites models and preprints that appear non-existent or fabricated (e.g., 'Qwen 3 (8B/14B)' cited as 'arXiv:2505.09388, 2025' and 'Gemini 2.5 pro capable of winning gold at imo 2025' as 'arXiv:2507.15855, 2025'). This casts serious doubt on the authenticity of the empirical results.",
+        "Negligible practical inference acceleration: A central motivation of 2:4 pruning is achieving practical hardware acceleration on Tensor Cores. However, Table 4 demonstrates that ARMOR provides minimal real-world speedup during autoregressive generation (e.g., only 1.041x speedup over the dense baseline for Qwen 2.5 14B, down from 1.071x for native 2:4). Introducing two additional block-diagonal matrix multiplications disrupts kernel fusion and adds memory traffic.",
+        "Unreported and potentially prohibitive pruning runtime: Unlike true one-shot pruning methods (e.g., Wanda, SparseGPT) that execute in minutes, ARMOR optimizes each layer for 20,000 iterations using Adam alongside coordinate descent over 128 long calibration sequences (4k-8k context length). Pruning an entire 70B parameter model with ~80 layers under this schedule represents a massive computational cost, yet the paper fails to report wall-clock calibration/pruning time.",
+        "Unfair baseline comparison regarding parameter budget: ARMOR retains 2.4% to 5.03% additional dense parameters in the block-diagonal wrappers, whereas baselines (SparseGPT, Wanda, NoWag-P) are constrained to strict 50% sparsity. The paper lacks baselines equipped with an equivalent parameter budget (such as SparseGPT combined with a matched low-rank residual or slightly reduced sparsity).",
+        "Disconnect between theoretical convergence and practical algorithm: Theorem 3.1 guarantees monotonic convergence strictly for sequential gradient descent with local Lipschitz smoothness step sizes. In practice, the authors employ joint Adam optimization, for which the stated convergence and monotonicity guarantees do not hold."
+      ]
+    }
+  },
+  "v1": {
+    "exp1_quality": {
+      "oa": 6,
+      "strengths": [
+        "Compelling and well-motivated formulation: Re-framing 2:4 semi-structured pruning by introducing lightweight pre- and post-multiplication block-diagonal matrices ($A$ and $B$) is an elegant middle ground between pure 2:4 pruning (which suffers from severe accuracy loss) and unstructured/hybrid methods (which lack hardware acceleration).",
+        "Principled optimization framework: The proposed alternating block coordinate descent scheme neatly exploits the $\\binom{4}{2} = 6$ combinatorial structure of 2:4 sparsity via closed-form weighted least-squares updates per block, complemented by continuous parameter optimization.",
+        "Comprehensive empirical gains: The method demonstrates substantial and consistent improvements over standard 2:4 pruning baselines (Wanda, SparseGPT, NoWag-P) across multiple model families (Llama-2, Llama-3, Qwen) on both language modeling perplexity (Wikitext-2, C4) and demanding reasoning benchmarks (GSM8K, BBH, MMLU).",
+        "Hardware and efficiency evaluation: The inclusion of actual generation throughput (tokens/s), VRAM usage, and batched matrix-vector kernel latency benchmarks demonstrates that the block-diagonal overhead ($O((d_{in}+d_{out})d_{block})$) remains small enough to preserve practical runtime speedups."
+      ],
+      "weaknesses": [
+        "Pruning runtime and computational overhead: Running 20,000 iterations of alternating optimization per layer using 128 sequences of 4k/8k tokens appears computationally demanding. The paper does not report total wall-clock compression time across layers and how it scales compared to one-shot baselines like Wanda or SparseGPT, which typically finish in minutes to an hour.",
+        "Parameter fairness in comparisons: ARMOR retains 2.4% to 5.0% additional parameters via the block-diagonal matrices. While practically modest, the baselines are constrained strictly to 2:4 sparsity (50% density). Comparisons against baselines adjusted to equivalent parameter budgets (or combined with small low-rank corrections) would provide a strictly parameter-normalized baseline.",
+        "Evaluation in low-batch/latency-critical regimes: The inference benchmarks in Table 4 are conducted at large batch sizes (e.g., batch size 2048 and 512 for generation, 8192 for batched MatVec), which are compute-bound GEMM regimes. In many real-world LLM deployments, latency-critical inference operates at batch size 1 to 8 (memory-bandwidth bound GEMV), where chaining two block-diagonal transformations with a 2:4 sparse kernel could incur additional kernel launch overhead unless custom operator fusion is used.",
+        "Theoretical contribution is relatively standard: Theorem 3.1 guarantees that the objective decreases monotonically and converges, which is a standard property of block coordinate descent and greedy coordinate descent with convex subproblems and exact/gradient descent steps."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Innovative formulation: Framing semi-structured 2:4 pruning as an adaptive matrix factorization problem by sandwiching a 2:4 sparse core between two lightweight block-diagonal transformation matrices is a clever and practical way to alleviate the rigidity of 2:4 sparsity.",
+        "Sound optimization framework: The alternating block coordinate descent scheme alternates smoothly between continuous updates of the wrappers/dense weights and closed-form discrete updates over the 6 possible 2:4 mask configurations per 4-element group.",
+        "Extensive empirical evaluation: The paper conducts thorough evaluations on contemporary open-weight LLMs (Llama-2, Llama-3, Qwen 2.5, Qwen 3) across both downstream reasoning benchmarks and perplexity, demonstrating consistent and substantial gains over Wanda, SparseGPT, and NoWag-P.",
+        "Hardware and efficiency validation: In addition to theoretical parameter counts, the authors include real hardware generation benchmarks and batched matrix-vector multiplication timings, showing that the block-diagonal wrappers add only minor overhead."
+      ],
+      "weaknesses": [
+        "High calibration / optimization overhead: The algorithm requires running 20,000 iterations per layer. The paper lacks a wall-clock runtime analysis for the compression procedure, especially on large models (e.g., 70B/72B). Compared to fast one-shot heuristics like Wanda or SparseGPT, running 20,000 optimization iterations per layer may be orders of magnitude slower.",
+        "Missing comparisons with hybrid / residual sparse baselines: ARMOR introduces additional non-sparse parameters (+2.4% to +5.0% dense overhead via block-diagonal matrices). While it significantly outperforms standard 50% 2:4 pruning, the evaluation does not compare against other methods that retain a small dense residual or lightweight adapter (e.g., 2:4 sparsity + low-rank adapter / WRP / Domino).",
+        "Modest end-to-end inference speedups and kernel details: The end-to-end token generation speedup over dense models is modest (e.g., 1.04x on Qwen 2.5-14B vs 1.07x for pure 2:4), and ARMOR eats into the 2:4 throughput advantage. More technical details regarding kernel fusion (e.g., whether the block-diagonal multiplications and 2:4 sparse gemv are fused or launched as sequential CUDA kernels) are needed.",
+        "Theoretical scope: Theorem 3.1 simply asserts the monotone convergence of a sequence of objective values bounded below by zero. While correct, it is a basic property of monotone bounded sequences rather than a guarantee of convergence to a stationary point or global optimum.",
+        "Minor writing and typographical issues: A few typos are present (e.g., 'Consdier' on pages 18 and 19; 'retrain the speedup' on page 8; 'an theoretically grounded' on page 2)."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Compelling Motivation: 2:4 semi-structured sparsity offers native hardware acceleration on modern GPU tensor cores, but typically suffers from significant performance degradation. Formulating the problem via learned pre- and post-transformation block-diagonal matrices to ease the 2:4 constraint is an interesting conceptual direction.",
+        "Tractable Discrete Update: The paper cleverly leverages the block-diagonal structure and the small combinatorial space of 2:4 sparsity (6 combinations per 4-element group) to derive an analytical closed-form least-squares solution for updating the sparse core.",
+        "Detailed Technical Derivations: The paper provides clear, step-by-step derivations for block-level proxy loss decomposition and beta-smoothness constants for gradient-based updates in the appendix."
+      ],
+      "weaknesses": [
+        "Severe Soundness and Reproducibility Issues in Experiments: The empirical evaluation presents several alarming anomalies that undermine the credibility of the reported results. Most notably, the paper reports evaluations on nonexistent/unreleased models such as 'Qwen-3 8B' and 'Qwen-3 14B' (Table 2), supported by fabricated/anomalous future arXiv citations (e.g., Yang et al. arXiv:2505.09388, Huang & Yang arXiv:2507.15855, Li et al. arXiv:2506.18349). Furthermore, Appendix G claims inference benchmarks were conducted on a '48GB 4090', a GPU that does not exist in NVIDIA's product line.",
+        "Unrealistic Inference Benchmarking Setup: Table 4 reports LLM generation benchmarks on Qwen 2.5 7B and 14B using batch sizes of 2048 and 512, respectively, with recorded peak VRAM of ~28–31 GB. In realistic autoregressive generation, KV cache and activation memory at such massive batch sizes would vastly exceed the reported VRAM, making these benchmark numbers technically questionable.",
+        "Omission of Pruning Time and Overhead: While framed as a 'one-shot post-training pruning' algorithm, ARMOR executes 20,000 optimization iterations per layer using Adam and iterative least-squares group updates. This is orders of magnitude more computationally expensive than established one-shot methods like Wanda (instantaneous) or SparseGPT (single-pass Hessian sketch). The paper provides no wall-clock pruning time comparisons.",
+        "Unfair Parameter and Compute Comparison: The block-diagonal wrappers introduce an additional 2.4% to 5.0% dense parameter overhead. The baselines (SparseGPT, Wanda, NoWag-P) are evaluated strictly at 50% sparsity without any parameter overhead. The paper lacks baselines matched for equivalent parameter count or FLOP budget (e.g., 2:4 sparsity combined with low-rank adaptation or retaining a small subset of dense layers).",
+        "Evaluation Biased Towards Large Batch Sizes: Hardware acceleration is demonstrated only under massive batch sizes (batch size 8192 for batched MatVec, 512–2048 for generation). In real-world serving, single-token generation is memory-bandwidth bound at small batch sizes (e.g., batch sizes 1–16), where executing two extra block-diagonal GEMMs may introduce significant kernel launch overhead and negate 2:4 speedups.",
+        "Trivial Theoretical Contribution: Theorem 3.1 merely applies the standard Monotone Convergence Theorem to an alternating optimization procedure where each step is explicitly designed not to increase a non-negative proxy loss. It provides minimal novel theoretical insight."
+      ]
+    }
+  }
+}

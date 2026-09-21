@@ -1,0 +1,90 @@
+{
+  "v3": {
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Clear problem formulation: Context compression in RAG typically relies on heuristic summarization or extractive objectives that are disconnected from the downstream generation task, leading to suboptimal performance.",
+        "Effective methodology: Framing context compression as an end-to-end reinforcement learning task optimized with GRPO using task-level reward signals (Exact Match and F1) with a teacher distillation warm-start is elegant and well-motivated.",
+        "Strong empirical results: Compressing context by over 95% (to roughly 30–50 tokens) while not only avoiding performance drops but often outperforming uncompressed 5- and 10-document RAG baselines (e.g., +3.3 average EM improvement).",
+        "Thorough evaluation and ablations: The evaluation covers both single-hop (NQ, TriviaQA) and multi-hop (HotpotQA, 2Wiki) QA benchmarks, explores generalization to larger contexts (10 docs), transfers zero-shot to a different downstream LLM (LLaMA-3.1-8B), tests multiple compressor backbones (Qwen2.5-1.5B, LLaMA-3.2-1B/3B), and isolates the contributions of distillation warm-up and GRPO."
+      ],
+      "weaknesses": [
+        "Computational overhead during training: Training requires serving the frozen downstream LLM (Qwen2.5-14B) via vLLM across multiple rollouts per sample in GRPO, which can be computationally intensive compared to standard supervised fine-tuning.",
+        "Reward design scope: The current reward relies strictly on exact match and token overlap (EM and F1), which fits short-answer open-domain QA well, but the paper does not explore how the approach extends to open-ended, creative, or long-form generation tasks where EM/F1 metrics are inadequate.",
+        "Lack of inference runtime benchmarking: While token counts are clearly documented, the paper would benefit from explicit wall-clock latency/throughput comparisons accounting for the two-stage inference process (compressor generation time + downstream LLM generation time) versus direct single-pass inference on the uncompressed context."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Well-motivated approach: The paper addresses a core bottleneck in retrieval-augmented generation (RAG)—the trade-off between retrieval context length and task accuracy—by optimizing the context compressor end-to-end using downstream task performance via reinforcement learning (GRPO).",
+        "Compelling empirical results: Across four standard QA benchmarks (Natural Questions, TriviaQA, HotpotQA, and 2WikiMultihopQA), CORE compresses context length by roughly 94%–97% while matching or outperforming uncompressed contexts (e.g., achieving +3.3 EM on average over full 10-document contexts).",
+        "Thorough evaluation and generalization: The authors validate the method across multiple compressor model backbones (Qwen2.5-1.5B, LLaMA-3.2-1B, and LLaMA-3.2-3B), evaluate out-of-distribution context length generalization (trained on 5 documents, evaluated on 10), and demonstrate effective cross-model transferability to a different downstream reader (LLaMA-3.1-8B).",
+        "Ablations and case studies: The paper provides informative ablations dissecting the contributions of the distillation warm-up stage versus the GRPO optimization, the sensitivity of the reward mixing coefficient α, and qualitative case studies illustrating how compression filters out distractor details."
+      ],
+      "weaknesses": [
+        "Evaluation scope is restricted to short-answer QA: The evaluation and reward formulation (EM and token-level F1) rely heavily on exact-match or span-level ground-truth answers in open-domain and multi-hop QA benchmarks. It remains unclear how the framework generalizes to more complex, open-ended RAG generation tasks (e.g., long-form question answering, report generation, or multi-document synthesis) where deterministic lexical rewards are insufficient.",
+        "Training compute overhead and cost analysis are not addressed: During GRPO training, each sample requires generating G compressor rollouts and then executing forward passes on the frozen 14B reader model to calculate task rewards. The paper lacks an explicit discussion or empirical reporting of training wall-clock time, GPU hours, and inference latency during training.",
+        "Terminology clarification on 'Lossless': The term 'lossless' is typically reserved in information theory and data compression for exact, invertible data reconstruction. Using 'lossless' to denote that downstream task performance does not degrade is colloquial; the authors should clarify this distinction to avoid misleading the reader."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Formulating context compression for RAG as an end-to-end reinforcement learning problem directly addresses a key limitation of prior heuristic or decoupled summarization methods by aligning the compressor explicitly with downstream task performance.",
+        "Strong and consistent empirical results across four standard QA benchmarks (NQ, TriviaQA, HotpotQA, 2WikiMultihopQA), showing that the compressed context (~3-6% of original token count) matches or exceeds uncompressed full-document performance.",
+        "Comprehensive experimental analysis, including out-of-distribution context scaling (5 to 10 documents), compressor backbone variations (LLaMA-3.2 1B/3B, Qwen-2.5 1.5B), cross-model transferability to an unseen downstream generator (LLaMA-3.1-8B), and component ablations."
+      ],
+      "weaknesses": [
+        "The evaluation is restricted solely to short-answer factoid/multi-hop QA where binary EM and token F1 rewards are well-defined. It remains unclear how the method extends to more general and complex RAG use cases (e.g., long-form generation, report synthesis, or conversational RAG) where simple string-matching rewards do not apply.",
+        "Lack of inference latency and end-to-end efficiency analysis. The pipeline introduces a sequential two-model inference workflow (running the 1.5B compressor followed by the downstream LLM). The paper measures token count reductions but omits wall-clock inference times, FLOPs, and RL training compute costs, making it hard to verify whether context token savings outweigh the added latency of the compressor generation step.",
+        "The use of the term 'lossless compression' is misleading and non-standard. In information theory and compression literature, lossless implies exact reversibility without information loss. Using it here merely to mean 'no downstream metric degradation' overclaims the theoretical nature of the approach.",
+        "The mechanism for controlling compressed length during RL training is underspecified. Aside from a prompt instruction asking for a 2-sentence summary, there is no explicit length penalty or budget term in the objective (Eq. 2, 5). It is unclear how length stability is maintained or whether the policy risks length drift over longer RL training."
+      ]
+    }
+  },
+  "v4": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Clear motivation and elegant formulation: Framing context compression as policy optimization directly guided by downstream task performance (via GRPO) effectively resolves the mismatch between heuristic compression proxies and end-task accuracy.",
+        "Well-designed warm-start distillation: The distillation procedure is thoughtfully constructed by filtering teacher summaries based on downstream performance and explicitly training the compressor to output empty text when context degrades answers.",
+        "Strong and convincing empirical performance: CORE-RAG achieves genuine 'less-is-more' compression, outperforming both prior compression baselines (RECOMP, LongLLMLingua, NoiseFilter-IB) and uncompressed full-context baselines (e.g., +1.5 to +6.9 EM points) while reducing context length by over 90%.",
+        "Thorough experimental validation: The paper includes extensive evaluations, including cross-LLM transferability (Qwen-14B to LLaMA-3.1-8B), cross-dataset generalization (NQ to HotpotQA), compressor model scaling (1B to 3B), robustness under noisy retrieval, and long-context evaluation on LongBench."
+      ],
+      "weaknesses": [
+        "Limited task scope: The evaluation is restricted to short-answer and multi-hop factoid QA where exact match and token F1 provide reliable, non-adversarial reward signals. While Section 3.4 discusses open-ended generation, there are no empirical experiments demonstrating whether this framework scales to open-ended generation without suffering from reward hacking or evaluation bias.",
+        "Compressor acting as intermediate reader/QA solver: As shown in the case studies (Tables 9 and 10), the 1.5B compressor often directly generates the final answer within its 1–2 sentence summary. It remains somewhat ambiguous how much the method functions as true context compression versus an auxiliary reader model doing preliminary QA.",
+        "Lack of wall-clock latency and throughput measurements: While context token reductions are substantial, the inference pipeline requires an extra autoregressive decoding step through the compressor before passing the prompt to the generator LLM. End-to-end wall-clock latency, time-to-first-token (TTFT), and throughput measurements under varying batch sizes would make the efficiency claims more concrete."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Clear motivation and conceptually sound formulation: Framing context compression for black-box RAG as a reinforcement learning problem using Group Relative Policy Optimization (GRPO) directly aligns compressor outputs with downstream task utility, effectively bypassing the need for heuristic compression targets or gold summary annotations.",
+        "Strong empirical results: Across four standard QA benchmarks (Natural Questions, TriviaQA, HotpotQA, and 2WikiMultihopQA), CORE-RAG achieves a ~95-97% context length reduction (down to ~30-50 tokens) while consistently outperforming both uncompressed full-context RAG (by 1.5 to 6.9 EM points) and existing compression baselines (such as RECOMP, NoiseFilter-IB, LongLLMLingua, and QGC).",
+        "Thorough evaluation and robustness analyses: The paper provides extensive experiments demonstrating transferability across downstream generator LLMs (transferring from Qwen2.5-14B to LLaMA-3.1-8B), cross-dataset generalization (NQ to HotpotQA), context length extrapolation (trained on top-5, evaluated on top-10 documents), robustness to adversarial noise, compressor scaling (1B to 3B parameters), and long-context performance on LongBench.",
+        "Effective two-stage training scheme: The ablation study clearly validates the necessity of both the warm-start distillation filtering phase and the downstream reward-driven RL phase, showing that neither component alone is sufficient for optimal performance."
+      ],
+      "weaknesses": [
+        "Evaluation is predominantly confined to short-answer/extractive QA: The primary reward mechanism relies strictly on Exact Match (EM) and token-level F1 against ground-truth short answers. Although Section 3.4 conceptually discusses extending to open-ended and generative tasks, the paper lacks empirical verification on long-form QA, summarization, or dialogue, where reward formulation is less well-defined and prone to reward hacking.",
+        "Training-time compute overhead from LLM answer generation: While the generator LLM M is frozen, generating answers for G=5 rollouts per question during GRPO rollouts requires substantial forward passes through a 14B model, which introduces non-trivial computational overhead during the training phase.",
+        "Fixed heuristic length constraints: The compression length is constrained primarily through explicit prompting (\"into a 2-sentence summary\") rather than an adaptive, query-dependent length penalty incorporated into the RL objective, which may limit the model's flexibility to dynamically adjust summary detail for queries of varying difficulty."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Well-motivated framing: Directly optimizing the context compressor using downstream task performance via reinforcement learning (GRPO) effectively overcomes the misalignment and performance degradation inherent in heuristic- or proxy-driven compression methods.",
+        "Well-designed two-stage learning pipeline: Combining a warm-start distillation phase (filtered based on downstream utility) with GRPO reinforcement learning is intuitive and empirically shown to be essential via clear ablation experiments (Table 2).",
+        "Strong and comprehensive empirical results: On multiple standard single-hop and multi-hop QA benchmarks (NQ, TriviaQA, HotpotQA, 2WikiMultihopQA) as well as LongBench, CORE consistently achieves substantial token reductions (~94-97% compression) while outperforming full-context RAG baselines and prior compression techniques (e.g., RECOMP, NoiseFilter-IB, LongLLMLingua).",
+        "Extensive analysis of transferability and robustness: The authors demonstrate strong cross-model transferability (evaluating on an unseen downstream generator LLM, Llama-3.1-8B), scalability across compressor sizes (1B to 3B), cross-dataset generalization, and robustness against noisy/distractor passages."
+      ],
+      "weaknesses": [
+        "Evaluation restricted to extractive/short-form QA: The proposed reward function relies heavily on rule-based string matching (EM and token-level F1). Although Section 3.4 conceptually discusses extending the framework to open-ended generation, there are no empirical experiments on long-form QA, summarization, or creative generation tasks.",
+        "Lack of wall-clock latency and throughput profiling: While the reduction in input tokens for the downstream LLM is substantial, the inference pipeline requires an autoregressive generation step by the compressor model before calling the downstream LLM. The paper does not report actual wall-clock inference latency or system throughput comparisons against full-context generation and non-generative prompt pruners.",
+        "Details on the warm-start curation: In Section 3.2.1, the training data is filtered based on whether the downstream LLM answers correctly with/without the teacher summary, and all other samples are discarded. The paper does not report the retention rate (size of Xf relative to X) or analyze how this severe filtering affects coverage across diverse domains."
+      ]
+    }
+  }
+}

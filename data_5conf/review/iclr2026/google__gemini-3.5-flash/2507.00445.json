@@ -1,0 +1,90 @@
+{
+  "v2": {
+    "exp1_quality": {
+      "oa": 8,
+      "strengths": [
+        "Elegant theoretical framework that reformulates reward-guided diffusion fine-tuning as iterative policy distillation, leveraging a value-weighted maximum likelihood objective (forward KL) rather than policy gradients (reverse KL).",
+        "Successfully addresses the instability, sample inefficiency, and mode collapse common in on-policy RL methods like PPO/DDPO.",
+        "Bypasses the expensive and unstable training of a separate value network by using the practical approximation $v(x_t) \\approx r(\\hat{x}_0(x_t))$, which is highly efficient.",
+        "Comprehensive and diverse empirical evaluation spanning three distinct scientific domains: protein sequence design, DNA sequence design, and small molecule docking, achieving superior performance on realistic non-differentiable reward objectives (e.g., ipTM from AlphaFold, Enformer predictions, and QuickVina docking scores) while preserving sample diversity."
+      ],
+      "weaknesses": [
+        "Computational overhead of reward evaluation: In Algorithm 1, the soft-value functions are approximated by calling the reward function $r(\\hat{x}_0(x_t))$ for each timestep $t$. For expensive reward functions such as AlphaFold2/AlphaFold3 or ESMFold (used in the protein tasks), calling these models $T$ times per trajectory during training can be extremely computationally demanding. The paper would benefit from a discussion on how this cost is mitigated or quantified (e.g., the wall-clock training time compared to DDPO).",
+        "The core approximation $v_{t-1}(x_{t-1}) \\approx r(\\hat{x}_0(x_{t-1}))$ is noted as being adopted from recent inference-time guidance works. While its application to off-policy distillation is logical, the novelty of this specific approximation is somewhat incremental.",
+        "The sensitivity of the performance to hyperparameters like the lazy update interval $K$ and the value weight coefficient $\\alpha$ is only partially explored (e.g., Table 8 for DNA). A more systematic ablation across all three domains would strengthen the robustness claims of the algorithm."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Practical and Efficient Value Approximation: The proposed framework avoids the expensive training of a separate critic network or performing costly Monte Carlo simulations by approximating the soft value function of intermediate states with the reward of the model's posterior mean prediction, i.e., $r(\\hat{x}_0(x_t))$. This makes the algorithm computationally efficient and easy to integrate.",
+        "Theoretically Sound Formulation: The paper provides a clear theoretical connection, showing that policy gradient methods (such as DDPO) minimize the reverse KL divergence (which leads to mode-seeking behavior and mode collapse), whereas VIDD optimizes a target closer to the forward KL divergence, thereby improving sample diversity and training stability.",
+        "Comprehensive and Realistic Biomolecular Evaluation: The method is validated on three distinct, high-impact scientific modalities: protein sequence design (EvoDiff), DNA regulatory sequence design (Enformer), and small molecule docking (GDSS). These experiments rely on realistic, non-differentiable, and expensive simulators/oracles (e.g., ESMFold, AlphaFold-Multimer, QuickVina 2).",
+        "Strong Empirical Performance: VIDD consistently outperforms state-of-the-art baselines like DDPO and DDPP across multiple benchmarks, achieving higher target rewards while maintaining strong structural validity and sequence diversity."
+      ],
+      "weaknesses": [
+        "Conceptual Novelty: The core concept of value-weighted maximum likelihood estimation (MLE) and iterative policy distillation is closely related to existing reinforcement learning algorithms, such as Advantage Weighted Regression (AWR) and AWAC. While its adaptation to the step-by-step denoising process of diffusion models is well-designed, the algorithmic novelty is somewhat incremental.",
+        "Potential Over-Optimization / Naturalness Trade-off: In Table 1, for the DNA Enhancer HepG2 task, VIDD achieves a very high activity score (8.28) but suffers a significant drop in the 3-mer correlation (0.162) compared to DRAKES (0.307) and DDPO (0.398). This suggests that the method might over-optimize the proxy reward model at the expense of sequence naturalness, which warrants a more detailed discussion.",
+        "Value Approximation Error at Large Timesteps: In the initial phases of the reverse diffusion process (large $t$), the denoised prediction $\\hat{x}_0(x_t)$ is highly inaccurate. As a result, the estimated reward $r(\\hat{x}_0(x_t))$ can be highly noisy or biased. The paper would be strengthened by providing an analysis or ablation study on how this approximation error impacts the gradient quality across different timesteps $t$.",
+        "Notation Inconsistency in Algorithm 1: There is minor notation confusion in the pseudocode of Algorithm 1. Line 5 uses parentheses $x^{(i)}_t$ for roll-in samples, whereas lines 7 and 8 use brackets $x^{[i]}_t$ and $\\bar{x}^{[i]}_{t-1}$ for rollout samples, and Equation 7 mixes both symbols (e.g., conditioning on $x^{(i)}_t$ while evaluating $\\bar{x}^{[i]}_{t-1}$). This notation should be consolidated for clarity."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper addresses an important problem: fine-tuning generative diffusion models using non-differentiable reward functions, which is highly relevant for scientific domains like biochemistry.",
+        "The proposed framework (VIDD) utilizes an off-policy, forward-KL based objective (value-weighted MLE) which is theoretically sound for avoiding mode-seeking behavior and enhancing stability compared to reverse-KL / policy gradient methods.",
+        "The paper provides a diverse set of evaluation tasks across protein sequence design, regulatory DNA design, and small molecule design."
+      ],
+      "weaknesses": [
+        "Crucial computational intractability and lack of clarity on reward evaluations: The paper claims that the soft-value functions are approximated at each timestep $t$ by evaluating the true reward function $r$ on the denoised prediction $\\hat{x}_0$, i.e., $\\hat{v}_t \\leftarrow r(\\hat{x}_0(x_t))$ (Algorithm 1, Line 8). For small molecules, with a batch size of 1024, $T=1000$ steps, and 1000 training steps, this would require $1024 \\times 1000 \\times 1000 = 1,024,000,000$ (over 1 billion) QuickVina 2 docking evaluations. Similarly, for proteins, using ESMFold and AlphaFold-Multimer (which take seconds to minutes per prediction) over 10,000 steps with batch size 32 would require tens of millions of structure predictions. The authors claim all experiments were run on a 'single GPU'. This is computationally impossible under the described setup unless a surrogate reward model or some unmentioned caching/filtering was used. The lack of explanation on how this was executed raises serious concerns about the validity and reproducibility of the experimental results.",
+        "Heuristic value function approximation: Approximating the soft-value function $v_t(x_t)$ (which is an expectation over the future trajectory) with the point-wise reward of the current posterior mean $\\hat{x}_0(x_t)$ is highly heuristic. For large $t$ (near the beginning of the reverse process), $\\hat{x}_0$ is extremely noisy and chemically/structurally implausible, meaning $r(\\hat{x}_0)$ will yield highly inaccurate and misleading values. The paper does not analyze the impact of this approximation or discuss its limitations across different timesteps.",
+        "Notation and writing errors: There are several typos and inconsistencies. For example, in Section 3.2, 'These soft-optimal policies—including, which serve...' is grammatically broken. In Equation (6), the denominator uses $v_t(x_t)$ instead of $v^{out}_t(x_t)$, which contradicts the lazy target update explanation and the implementation in Algorithm 1."
+      ]
+    }
+  },
+  "v3": {
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "The paper presents a mathematically well-motivated and elegant framework (VIDD) that addresses a critical challenge: fine-tuning diffusion models with non-differentiable reward functions.",
+        "By adopting an off-policy formulation (mixture roll-in) and minimizing forward KL divergence, the proposed approach significantly improves training stability and avoids the mode-seeking/collapse behavior typical of on-policy, reverse KL methods like DDPO (PPO-based).",
+        "Excellent empirical validation across three distinct scientific design domains (protein sequence design, regulatory DNA sequence design, and small molecule design), showing consistent improvement over strong baselines like DDPO and DDPP.",
+        "The paper includes highly informative ablation studies in the appendix, investigating the effects of the update interval $K$, the regularization coefficient $\\alpha$, different value function approximations (posterior mean vs. Monte Carlo), and reward noise robustness."
+      ],
+      "weaknesses": [
+        "The manuscript contains several typos and drafting artifacts that should be polished. For example: (1) Page 2, Figure 1 caption has a trailing 'rather, which'; (2) Page 2, paragraph 3 contains a broken phrase: 'soft-optimal policies—including, which serve as...'; (3) Page 6, Algorithm 1 line 5 still contains the placeholder: '(explain in Section 4.1)'; (4) Page 18 contains a grammatical error: 'We learn two These datasets and reward models...'.",
+        "There is a lack of quantitative discussion regarding the actual computational cost (e.g., wall-clock time, GPU hours, or the number of reward function queries) of VIDD compared to DDPO and DDPP. Since scientific reward functions (like AlphaFold2 and ESMFold) are extremely expensive to evaluate, a sample/time-efficiency comparison would make the practical utility of VIDD even clearer.",
+        "The posterior mean approximation $v_t(x_t) \\approx r(\\hat{x}_0(x_t))$ is crucial for avoiding the training of an auxiliary value network. Although the paper briefly discusses it, a more critical discussion on when this approximation might fail (e.g., early in the denoising process when $\\hat{x}_0$ is highly inaccurate or noisy) would be valuable."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 8,
+      "strengths": [
+        "Casts reward-guided fine-tuning of diffusion models as policy distillation using a forward KL objective, which avoids the mode collapse and instability typical of reverse KL / on-policy RL methods like DDPO.",
+        "Proposes a highly practical and efficient way of approximating soft-value functions via the posterior mean, bypassing the need to train a separate, complex value network for intermediate states.",
+        "Solid theoretical backing, showing that policy gradient (PPO) minimizes the reverse KL, whereas the proposed VIDD objective aligns with the forward KL.",
+        "Very strong empirical results on diverse and challenging biomolecular tasks, including protein design (using ESMFold and AlphaFold-Multimer), DNA sequence design (using Enformer), and small molecule design (using QuickVina 2).",
+        "Extensive ablation studies in the appendix detailing the impacts of the lazy update interval, the regularization coefficient, different roll-in strategies, and value estimation methods."
+      ],
+      "weaknesses": [
+        "Computational Efficiency / Reward Calls: The method requires estimating the soft value function at intermediate timesteps, which involves predicting the clean state and evaluating the reward function across multiple timesteps. For expensive reward functions (e.g., ESMFold, AlphaFold, or QuickVina docking), evaluating them at every timestep (or even a subset) can be computationally prohibitive compared to standard policy gradient methods (like DDPO) which only evaluate the reward once at the final step (t=0). The paper should explicitly discuss the number of reward function calls required during training and whether any temporal subsampling of timesteps was utilized.",
+        "Clarity and Typos: There are several placeholders and formatting errors in the text: (1) Page 6, Line 5: \"Generate roll-in samples following roll-in policies (explain in Section 4.1)...\" — the parenthetical text is a drafting artifact that was not removed. (2) Page 2, Section 1: \"...distill soft-optimal policies—including, which serve as target...\" contains a grammatical glitch. (3) Page 18, Section D.1: \"We learn two These datasets and reward models...\" has a writing error."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper presents an interesting framework (VIDD) that casts reward-guided fine-tuning of diffusion models as iterative policy distillation using value-weighted MLE and forward KL divergence.",
+        "The evaluation spans multiple scientific domains (protein sequence design, regulatory DNA, and small molecules) with non-differentiable rewards, which are highly relevant and challenging applications.",
+        "The theoretical connection between entropy-regularized MDPs, soft-optimal policies, and the forward KL objective is clearly derived and presented."
+      ],
+      "weaknesses": [
+        "Extreme Computational and Reward Query Inefficiency: According to Algorithm 1 (lines 7-11), the reward function $r(\\cdot)$ must be evaluated on the predicted $\\hat{x}_0$ for every single timestep $t \\in [1, T]$ for each sample in the batch. For protein design (where $T \\approx 64$ and batch size is 32), a single training step requires $2,048$ evaluations of expensive oracles like ESMFold or AlphaFold2. Across 10,000 training steps, this would require over 20 million oracle evaluations, which is computationally prohibitive and contradicts the claim of 'sample efficiency.' If a subset of timesteps $t$ was sampled instead, this crucial detail is missing, making the algorithm as written incorrect or misleading.",
+        "Contradiction in Diversity/Mode Collapse Claims: The authors claim that minimizing the forward KL divergence (rather than the reverse KL used in DDPO/DPOK) prevents mode collapse and preserves diversity. However, the empirical results in Table 2 show that for the IFNAR2 task, VIDD's diversity is 0.5176, which is significantly lower than DDPO's diversity of 0.7169 (and pretrained's 0.9007). For PD-L1, VIDD's diversity (0.5539) is also very close to DDPO (0.5266). This directly undermines the claim that forward KL maintains superior diversity and prevents mode collapse in these tasks.",
+        "Crude Soft-Value Approximation: Approximating the value function $v_t(x_t)$ with the reward of the single-step denoised estimate $r(\\hat{x}_0(x_t))$ is highly inaccurate at early timesteps (large $t$), where the model's prediction of the final structure is extremely blurry or incorrect. The paper lacks an analysis or ablation on how this approximation error propagates and affects the gradient updates across different timesteps.",
+        "High Sensitivity to Hyperparameters: The ablation studies (Tables 9, 10, 16, 17, 18) reveal that performance is highly sensitive and non-monotonic with respect to the lazy update interval $K$ and regularization coefficient $\\alpha$. For example, changing $K$ from 5 to 10 drops the DNA Pred-Activity from 8.28 to 7.76. Such fragility makes the method difficult to deploy in real-world scenarios where reward queries are expensive and extensive hyperparameter sweeps are not viable."
+      ]
+    }
+  }
+}

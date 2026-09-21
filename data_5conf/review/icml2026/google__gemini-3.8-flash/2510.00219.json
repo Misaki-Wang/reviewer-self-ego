@@ -1,0 +1,101 @@
+{
+  "v2": {
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Novel and conceptually appealing architecture: The idea of dynamic 'thoughtbubbles'—forking and pruning latent residual streams based on learned importance scores during standard pretraining without requiring CoT supervision—is an original and elegant way to incorporate input-adaptive computation into Transformers.",
+        "Comprehensive empirical validation across scales: The authors evaluate models ranging from 150M to 1.9B parameters on multiple corpora (FineWeb, peS2o, OpenWebText) and demonstrate consistent perplexity and zero-shot benchmark improvements (e.g., LAMBADA, HellaSwag, PIQA, GSM8K).",
+        "Meaningful baselines: Comparing against both parameter-matched baselines and compute-expanded 'filler/copy' baselines (Copy-3, Copy-5) convincingly shows that the gains stem from adaptive allocation rather than merely having more parallel tokens.",
+        "Insightful qualitative and mechanistic analysis: The study of attention weights between original tokens and their forks (Figure 4) and the emergence of a concave correlation with token entropy/uncertainty (Figure 5) provide valuable insight into how the network utilizes the additional capacity.",
+        "Sound design details: Practical engineering choices—such as modified RoPE fractional rotation for forks, cumulative log-space score tracking, score attenuation of attention/residual updates, and dynamic budget scaling for autoregression—are well thought out."
+      ],
+      "weaknesses": [
+        "Equating token budget to compute budget: The claim that Thoughtbubbles outperforms baselines using 'half the training budget' is slightly overstated. Because the latent block length expands up to $\\kappa = 2L$ or $4L$ in layers after forking, the FLOPs per sequence step are noticeably higher than standard baseline steps (as reflected in Table 5 wall-clock times). Reporting total pretraining floating-point operations (FLOPs) alongside token counts would make compute parity explicit.",
+        "Inference latency and KV-cache overhead in autoregressive decoding: While Section 5.1 and Appendix G.1 discuss dynamic budget scaling during autoregression, the paper lacks detailed profiling of generation throughput (tokens/sec) and KV-cache memory consumption during autoregressive decoding, where managing dynamic token forks could introduce memory management overheads.",
+        "Non-differentiability of top-k selection: Pruning tokens via a hard top-$k$ cutoff prevents gradient propagation to dropped streams (as noted in Appendix D). Although score attenuation provides gradient signals to the kept tokens, a deeper discussion or ablation of potential alternatives (e.g., continuous relaxations or straight-through estimators) would strengthen the methodological analysis.",
+        "Minor typographical and tabular errors: In Table 2 (150M OpenWebText), 'Ours ($\\kappa = 2L$)' is duplicated where the second row should be '$\\kappa = 4L$'; typos include 'residual whites' (p. 4), 'cocatenated' (p. 4), 'corfers' (p. 6), and 'scaleis' (p. 12)."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Original and elegant formulation: The proposed method introduces a novel way to perform dynamic, parallel latent computation directly during pre-training via unsupervised language modeling loss, avoiding reliance on explicit CoT tokens, RL, or heuristic pause tokens.",
+        "Well-designed architectural mechanism: Modulating attention logits and residual stream updates via cumulative scores creates a natural feedback loop that aligns top-k selection with residual stream utility, preventing degenerate solutions without complex auxiliary losses.",
+        "Broad and consistent empirical validation: The authors evaluate across four parameter scales (150M, 319M, 772M, and 1.9B) and two diverse pretraining corpora, demonstrating consistent perplexity and zero-shot benchmark gains over both parameter-matched and copy-residual baselines.",
+        "Insightful mechanistic and behavioral analysis: The empirical connection between token entropy and fork allocation (demonstrating a concave relationship where moderate-uncertainty tokens receive the most computation) provides compelling evidence that the model learns non-trivial, interpretable computational allocation.",
+        "Practical wall-clock benchmarking: The inclusion of torch.compile wall-clock benchmarks (Table 5) and ablations on output aggregation (Table 6) and score modulation (Table 7) grounds the computational trade-offs effectively."
+      ],
+      "weaknesses": [
+        "Unclear KV caching dynamics during autoregressive inference: In standard autoregressive generation, past key-value states are cached. In Thoughtbubbles, since top-k score selection is performed across the full sequence (even with the dynamic budget scaling in Section G.1), appending a new token could theoretically alter the survival or allocation of forks in prior positions. The manuscript should explicitly detail whether/how KV caching is preserved during autoregressive decoding and what the resulting wall-clock generation throughput is.",
+        "Absence of depth/width compute-matched transformer baselines: While the authors compare against parameter-matched baselines and naive parallel copy baselines (Copy-3, Copy-5), they do not compare against a standard transformer scaled in depth or width to match the exact training/inference FLOPs and latency of Thoughtbubbles.",
+        "Marginal gain on GSM8K: At the 1.9B scale, the improvement on GSM8K (32.10 vs. 31.46) is quite modest (~0.6%). Given the inherent variance in few-shot/zero-shot generation on small LLMs, reporting error bars or multiple random seeds would strengthen this claim.",
+        "Notational ambiguities: In Equation 8, the term `1 \\log(P^{(k)})^\\top` is somewhat ambiguous (likely intended as an outer product with an all-ones vector $\\mathbf{1} \\log(P^{(k)})^\\top$ to broadcast across query tokens). Similarly, dimensions in Equations 9 and 10 would benefit from clearer notation."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Original and elegant architectural concept: The paper introduces an unsupervised mechanism ('Thoughtbubbles') that dynamically forks and prunes latent residual streams end-to-end using only standard next-token cross-entropy loss, moving beyond static pause tokens and explicit verbalized CoT.",
+        "Clever gradient routing design: The use of cumulative score attenuation on attention weights and residual updates provides a clean, differentiable surrogate pathway for the network to learn discrete top-k forking decisions.",
+        "Comprehensive scaling sweep: Experiments span multiple model sizes (150M, 319M, 772M, and 1.9B parameters) across multiple pretraining corpora (OpenWebText, peS2o, and FineWeb).",
+        "Insightful mechanistic analysis: The empirical findings connecting latent forking to token uncertainty (the concave relationship with entropy in Figure 5) and qualitative forking at relational boundaries on CLUTTR (Figure 7) provide meaningful interpretability for how compute is allocated."
+      ],
+      "weaknesses": [
+        "Marginal downstream gains on target reasoning tasks: A primary stated motivation is unlocking latent multi-step reasoning capabilities. However, at the 1.9B scale, GSM8K pass@1 improves by only 0.64% (from 31.46% baseline to 32.10% for the 40B token model, and 31.50% at 20B tokens). Furthermore, on several downstream tasks (notably BLiMP syntax evaluation across scales in Table 2), Thoughtbubbles underperforms both standard transformers and naive copy baselines.",
+        "Critical lack of autoregressive inference profiling and KV cache analysis: In real-world autoregressive generation, dynamically inserting and deleting tokens across intermediate layers severely complicates key-value (KV) caching. While Section B provides forward-backward wall-clock times for batch training, the paper omits any wall-clock latency, throughput, or memory benchmarks for autoregressive decoding with dynamic forking.",
+        "Imprecise compute-parity comparisons: Comparing 20B tokens of Thoughtbubbles against 40B tokens of baseline is framed as a generous lower bound, but expanding sequence length to kappa = 2L or 4L increases per-step FLOPs and latency (as shown in Table 5 where step time rises by ~40%). The paper lacks a rigorous FLOP-matched or wall-clock-matched Pareto frontier across training budgets.",
+        "Noticeable typographical and reporting inconsistencies: In Table 2 (150M OpenWebText), the row for 'Ours (kappa = 4L)' is mislabeled as 'Ours (kappa = 2L)'; Appendix D refers inconsistently to forking at 'layers 3, 7, and 13' and '3, 7, and 11' within the same paragraph; multiple distracting typos appear in the main text (e.g., 'residual whites' instead of 'residual writes', 'cocatenated' instead of 'concatenated', 'scaleis', 'corfers')."
+      ]
+    }
+  },
+  "v1": {
+    "exp3_positive": {
+      "oa": 3,
+      "strengths": [
+        "Original and creative architectural concept: the paper introduces an unsupervised mechanism for dynamic, parallel latent computation by learning to fork and prune residual streams within intermediate transformer layers purely from next-token language modeling loss.",
+        "Well-motivated mathematical formulation: the interplay between cumulative scoring, top-k selection, score-attenuated attention and residual writes (Section 2.4), and fractional RoPE position interpolation (Appendix D) provides an elegant way to train and position intermediate latent streams.",
+        "Promising pretraining scaling study: the method is trained across multiple parameter scales (150M, 319M, 772M) on two distinct corpora (OpenWebText and peS2o), demonstrating consistent validation perplexity improvements over standard transformers.",
+        "Insightful qualitative and mechanistic analysis: Section 5 provides interesting analyses correlating token entropy with forking frequency and visualizing how attention flows preferentially between original tokens and their corresponding forks."
+      ],
+      "weaknesses": [
+        "Weak and unconvincing computation-matched baselines: the primary FLOP-matched baselines are 'Copy-3' and 'Copy-5', which simply duplicate input tokens naively across all layers. The submission lacks comparisons against standard compute-matched dense baselines (e.g., deeper or wider standard transformers with equivalent training FLOPs) or existing dynamic compute architectures such as Mixture-of-Depths (Raposo et al., 2024).",
+        "Data and text contradictions in the manuscript: in Appendix B (Table 4), the perplexity is reported as 29.84 for 'Ours' and 28.02 for 'Ours (extended forking)', yet the accompanying text states that 'the extended forking approach is slightly worse than forking only in the beginning'. Since lower perplexity indicates better performance, this represents a direct contradiction between the numbers and the narrative. Additionally, Table 1 repeats 'Ours (κ = 2L)' twice for the 150M OpenWebText setting instead of labeling the second as 'κ = 4L'.",
+        "Mixed and modest downstream task performance: while perplexity and LAMBADA show gains, downstream task improvements are narrow or negative. On BLiMP and PIQA, the proposed method frequently performs on par with or worse than the baseline and naive copy models (e.g., 772M peS2o BLiMP drops from 73.3 on Copy-3 to 67.4 on Ours). The core hypothesis that dynamic latent forking aids reasoning remains unverified on standard reasoning benchmarks (e.g., GSM8k, ARC).",
+        "Practical wall-clock and KV-cache generation challenges: because tokens are dynamically created and pruned at layers 3, 7, and 11, the sequence length fluctuates across layers. The paper acknowledges reliance on slow custom PyTorch scatter operations without reporting wall-clock latency, throughput, or memory consumption. Crucially, the paper does not explain how KV caching is managed during autoregressive generation when tokens fork dynamically midway through the network."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "The core idea of dynamic, latent parallel computation via 'forking' residual streams in transformers is conceptually novel and distinct from both explicit chain-of-thought prompting and static pause-token insertions.",
+        "The approach is trained end-to-end using only standard language modeling cross-entropy loss without requiring auxiliary supervised reasoning chains or discrete reinforcement learning.",
+        "The manuscript provides insightful qualitative analyses (such as correlation with token entropy and attention allocation to sibling/child forks) to examine how the network utilizes the additional computation streams."
+      ],
+      "weaknesses": [
+        "Misleading compute and efficiency comparisons: In Section 4 and Figure 3, the authors emphasize that the 319M Thoughtbubbles model outperforms the 772M baseline. However, expanding the sequence block size by 2x or 4x across layers 3–36 increases self-attention FLOPs quadratically and MLP FLOPs linearly over the expanded tokens. A rough FLOP calculation reveals that the 319M (κ = 4L) model consumes roughly 7.4e11 FLOPs per sequence, nearly double the ~3.86e11 FLOPs of the 772M baseline. Comparing models purely on parameter count while ignoring active sequence FLOPs and memory footprint gives a misleading impression of efficiency.",
+        "Contradiction in ablation analysis: In Section B (Table 4), the text claims that 'the extended forking approach is slightly worse than forking only in the beginning', yet Table 4 reports a perplexity of 29.84 for 'Ours' and 28.02 for 'Ours (extended forking)'. Since lower perplexity is better (as noted elsewhere in the paper), 28.02 represents an improvement, directly contradicting the text and undermining confidence in the experimental conclusions.",
+        "Insufficient training scale and weak downstream margins: Models are pretrained on only 2.5 billion tokens across scales up to 772M parameters, leaving the larger models significantly undertrained according to standard scaling laws. On downstream tasks (Table 1), results on HellaSwag (~26–32% vs. 25% random baseline) and PIQA (~54–62% vs. 50% random baseline) are barely above chance level. Furthermore, on BLiMP, the proposed method underperforms the naive duplicated-token baselines (Copy-3 and Copy-5).",
+        "Discrete routing and optimization opacity: The forking mechanism relies on a hard top-k selection to keep or delete streams. Because unselected candidate streams are dropped, they receive no gradient updates via backpropagation. While the authors use cumulative scores P^(k) to attenuate attention and residual updates, the manuscript lacks a formal explanation of how the decision function f_θ learns to fork previously unselected paths without encountering standard discrete optimization / dead-path issues.",
+        "Unclear autoregressive generation and KV-cache mechanics: Section 2.6 and Section 5.1 discuss autoregressive generation, but intermediate forking dynamically shifts sequence lengths and inserts tokens between past tokens and the current token. The paper does not address how standard KV caching is maintained or whether entire prefixes must be recomputed at every step, which is a critical practical concern for decoder LMs.",
+        "Numerous typographical, formatting, and mathematical errors: Table 1 incorrectly lists 'Ours (κ = 2L)' twice for the 150M OpenWebText model (the second entry should be κ = 4L). Below Eq. 8, the text contains typos such as 'residual whites' instead of 'residual writes', 'attentuate', and 'cocatenated'. In Eq. 8, the term '1 log(P^(k))^T' lacks proper bolding/definition for the ones vector. In Figure 5 (middle-right plot), the attention axis shows negative values ('-0.05'), which is impossible for standard softmax attention without clarification."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Original and interesting conceptual architecture: learning to fork and prune residual streams purely via language modeling loss, enabling dynamic latent parallel computation without step-by-step reasoning supervision.",
+        "Careful architectural details addressing sequence branching, including score-based residual update attenuation, cumulative score tracking, output distribution averaging, and fractional RoPE position embeddings for forks.",
+        "Intriguing qualitative analysis demonstrating that the model learns to allocate more forks to tokens with higher entropy/uncertainty and near syntactic/relational boundaries without explicit supervision.",
+        "Consistent pre-training perplexity improvements on OpenWebText and peS2o over parameter-matched baselines and naive duplicated-token baselines (Copy-3, Copy-5)."
+      ],
+      "weaknesses": [
+        "Lack of established adaptive computation baselines: The method is only compared against a standard transformer and an artificial strawman ('Copy-3' and 'Copy-5'). Standard adaptive compute methods such as Mixture-of-Depths (Raposo et al., 2024) or learned pause/thinking tokens (Goyal et al., 2024; Herel & Mikolov, 2024) are cited but not empirically compared against.",
+        "Misleading compute comparisons: The authors highlight that a 319M model with $\\kappa=4L$ outperforms the 772M baseline. However, expanding the sequence length by $4\\times$ across 21 of the 24 layers increases the per-token FLOPs by roughly $4\\times$, meaning the 319M model actually uses more total compute per token than the 772M baseline. A strict ISO-FLOP evaluation is missing.",
+        "Direct contradiction in Table 4 and Section B: The text in Section B claims that 'extended forking approach is slightly worse than forking only in the beginning', yet Table 4 reports a perplexity of 28.02 for extended forking versus 29.84 for the default model (since lower perplexity is better, 28.02 is significantly better, not worse).",
+        "Mixed downstream evaluation results: While perplexity and LAMBADA show gains, performance on BLiMP and PIQA on peS2o is consistently worse than the baseline (e.g., 772M BLiMP drops from 69.8 to 67.4; PIQA drops from 55.4 to 54.6).",
+        "Practical inference and KV-caching challenges unaddressed: Dynamically creating and deleting tokens inside intermediate layers breaks standard autoregressive KV-caching. The paper does not discuss how KV caching could be implemented, making real-world generation efficiency severely constrained.",
+        "Presentation and formatting issues: Mislabeled entries in Table 1 (two rows labeled 'Ours (κ = 2L)' for 150M OpenWebText), very low-resolution/unreadable plots in Figure 4, stray numbers in captions (Figures 3 and 6), and multiple typos ('block size atr training', 'initial sequneces', 'to the to the left')."
+      ]
+    }
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 2.5,
+      "strengths": [
+        "The paper tackles a practically important problem: making speculative decoding effective at the larger batch sizes typical of production LLM serving, which is under-addressed in most SD literature that focuses on batch size 1.",
+        "The proposed method is well-motivated: combining prompt/self-output n-grams with a large fixed datastore, with a principled merging scheme (Algorithm 1) using calibrated pseudo-probabilities and discount factors by source/depth/prefix length.",
+        "Solid systems-level engineering contributions: parallelizing retrieval over the batch dimension (unlike REST, which was batch-size-1 only), sub-sampling continuations at regular intervals from the suffix array instead of truncating, and adaptively backing off to shorter prefixes when few continuations are found.",
+        "The roofline-based theoretical analysis (Section 3.2, Table 1, Figure 3) offering a principled account of how speculation length, batch size, and context length interact with hardware compute/memory bounds is a genuinely useful contribution that goes beyond prior empirical observations in the literature.",
+        "Reasonably broad empirical validation: multiple models (Llama2-7B, Llama3-8B), multiple context lengths (short/medium/long), multiple task types (QA, summarization, math, chat), and integration into a realistic continuous-batching serving stack (vLLM-based) rather than only synthetic/static benchmarks.",
+        "Reported gains (up to 4x throughput at fixed latency for short context, 1.7-2x for long context) are substantial and the throughput-latency tradeoff curves (Fig. 6-7) are a sensible way to present the practical value of the method versus both autoregressive decoding and PIA."
+      ],
+      "weaknesses": [
+        "Fit for an NLP/ACL venue is unclear: the contribution is essentially systems/ML-infrastructure engineering (hardware roofline modeling, kernel/retrieval optimization) with no NLP-specific evaluation of output quality, linguistic phenomena, or task-level correctness beyond \"accepted tokens\"; the connection to core CL/NLP research questions is thin.",
+        "Reproducibility is weak: experiments rely on a specific, non-standard accelerator (Huawei Ascend 910B4) and a customized, internally modified vLLM stack; no code, datastore, or artifact release is mentioned, and the described hardware constants (e.g., 280 TFLOP/s, 0.8 TB/s) make the roofline analysis hard for others to verify or reproduce on commodity GPUs.",
+        "Baselines for the main empirical comparison (Section 4.1, Figs 4 and 7) are limited to REST and PIA (also parameter-free methods); the paper does not empirically benchmark against trained/hybrid methods explicitly discussed in related work (Medusa, EAGLE, ReDrafter) that are noted to have higher acceptance rates and to already work at larger batch sizes, making it hard to judge the actual cost-quality trade-off versus the strongest competitors.",
+        "Statistical rigor is limited: results are reported as single curves/point estimates (accepted tokens, throughput, latency) without variance, confidence intervals, or multiple seeds, and the datasets used for the head-to-head comparisons are small (e.g., first 80 GSM8k prompts, first prompt per MT-Bench conversation).",
+        "The claim that outputs may differ slightly from the autoregressive baseline \"because of the precision of float16\" is asserted rather than substantiated; since correctness/losslessness is a core property expected of verification-based SD, this deserves a clearer characterization (e.g., quantitative agreement rate) rather than a brief aside.",
+        "The method requires a grid search/calibration step for merging weights and thresholds, plus large offline datastore construction and maintenance; this contradicts to some degree the \"parameter-free\"/\"simply-scalable\" framing and the practical costs (memory footprint of the datastore at scale, calibration overhead per model/domain) are not clearly quantified.",
+        "Novelty is incremental relative to REST and PIA: the core algorithmic ideas (suffix-array datastore, prefix backoff, tree-based candidate merging) are extensions/re-implementations of existing methods with engineering improvements (sampling continuations, batch parallelization) rather than a conceptually new mechanism, which somewhat tempers the paper's claimed contribution."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 3.5,
+      "strengths": [
+        "Extensive, realistic empirical evaluation: the method is integrated into a production-grade serving system (SGLang) rather than evaluated in isolation, and is tested across multiple model families/sizes (Llama-3.1-8B, Llama-3.3-70B, Qwen3-14B, DeepSeek-R1-Distill), multiple languages, long-context settings (up to 40k tokens), reasoning/non-greedy decoding, tensor-parallel and PD-disaggregated deployment, and batched throughput-latency trade-offs.",
+        "Careful systems-level analysis (roofline-based derivation of near-optimal speculation length as a function of batch size, hardware FLOPS/bandwidth, and GQA group size) that goes beyond typical SD papers which treat drafting cost as negligible; this hardware-aware rule is a genuinely useful practical contribution.",
+        "Strong practical motivation and relevant contribution to production LLM serving: eliminates training/maintenance of draft models, which is a real pain point highlighted by cited prior work (Hong et al. 2025; Yi et al. 2024; Sandler et al. 2025), and the paper directly targets known weaknesses of retrieval-based baselines (REST, PLD, Lookahead) by combining sources and improving datastore querying/merging.",
+        "Good ablations of algorithmic components (input vs. datastore contributions, cold-start behavior, effect of model-generated vs. generic datastore data, speculation length sweeps) that support the claimed mechanism (complementarity of prompt/self-output and large datastore).",
+        "Reasonable attention to broader considerations: multilinguality/fairness framing, privacy implications of storing user-generated outputs, and MoE/MLA limitations are explicitly discussed."
+      ],
+      "weaknesses": [
+        "The core algorithmic novelty is incremental: the method largely combines existing ideas (REST's suffix-array datastore, Lookahead/PLD-style prompt matching, tree-based speculative verification, roofline-guided speculation length) rather than introducing a fundamentally new technique; the primary contribution is systems engineering and integration rather than a new algorithmic or theoretical insight for NLP.",
+        "The abstract's claim of performance \"on par with leading training-based approaches\" is not uniformly supported by the results: EAGLE-3 is shown to outperform SSSD on English short-context conversational (MT-Bench) and coding (HumanEval) tasks for both 8B and 70B models, which somewhat undercuts the headline claim and is only partially caveated in the body text.",
+        "Hyperparameter treatment across methods is not entirely matched: SSSD's weighting/scaling parameters are tuned via grid search and described as transferring well, while EAGLE is run with SGLang defaults (the paper notes SSSD-tuned parameters degrade EAGLE, but does not report a comparably thorough tuning effort for EAGLE-family baselines), leaving some ambiguity about whether comparisons are fully apples-to-apples.",
+        "Many key throughput/latency figures do not report variance, confidence intervals, or statistical significance (only some cold-start/multilingual experiments mention 5-run averages), making it hard to assess robustness of the reported speedup differences, especially where margins between SSSD and EAGLE-3 are small.",
+        "Practical costs of the approach (CPU-side drafting overhead, host memory footprint for large datastores, e.g. 13GB for the 70B experiments) are acknowledged only briefly in the Limitations section without quantitative characterization (e.g., CPU utilization, memory footprint scaling, or datastore maintenance/update cost at scale), which is important given the paper's central deployability argument.",
+        "The roofline-based hardware analysis assumes idealized kernel behavior and explicitly notes that real kernels under-utilize hardware, and communication costs under tensor parallelism are ignored; while acknowledged, this limits the precision of the theoretical claims backing the hardware-aware speculation-length rule.",
+        "Reproducibility relies on promised code release, but no concrete artifact, link, or detailed hyperparameter table (beyond prose descriptions and Appendix pseudocode) is provided in the reviewed manuscript, which could hinder independent verification of the exact experimental configurations."
+      ]
+    }
+  }
+}

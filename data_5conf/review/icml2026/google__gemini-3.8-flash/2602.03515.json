@@ -1,0 +1,96 @@
+{
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Compelling insight and problem formulation: The paper identifies a fundamental connection between optimizer basis misalignment (specifically the coordinate-wise nature of Adam interacting with non-diagonal Hessians) and the severe degradation caused by gradient staleness in asynchronous pipeline parallelism.",
+        "Solid theoretical foundations: The convergence analysis under coordinate-wise smoothness (Theorems 2.3, E.6, and E.8) rigorously demonstrates how delay scales multiplicatively with the basis misalignment proxy C, formalizing both uniform and stage-dependent delay regimes with and without momentum.",
+        "Comprehensive empirical validation: Experiments span models from 95M up to 3B parameters, as well as Mixture-of-Experts architectures. The evaluations benchmark against strong and relevant async baselines (PipeDream, PipeDream-LR, Nesterov, Delay Compensation) and preconditioned optimizers (SOAP, Muon, Scion).",
+        "Thorough systems and efficiency consideration: The paper includes wall-clock time comparisons (showing a 54.3% reduction in GPU hours), evaluates memory footprint across bilateral vs. unilateral strategies, examines resilience to omitting weight stashing, and introduces an effective stage-aware budget allocation strategy.",
+        "Clear presentation and unifying perspective: The paper clearly contrasts and unifies different eigenbasis estimation strategies along two axes (approximation source and rotation geometry), effectively isolating the geometric impact from implementation artifacts."
+      ],
+      "weaknesses": [
+        "Algorithmic overlap with existing optimizers: The core algorithmic engine (Algorithm 1 and 2) is heavily based on concepts established in SOAP (Vyas et al., 2025) and Kronecker-factored preconditioning methods. While the authors contextualize this well and the primary contribution is the diagnosis and mitigation of gradient delay in async pipelines, the optimizer mechanism itself represents an incremental adaptation rather than a fundamentally new optimization framework.",
+        "Evaluation on simulated virtual stages: Experiments with deep pipelines (e.g., 24 and 32 stages) are run using multiple virtual stages on up to 8 physical GPUs. While this accurately reproduces the algorithmic gradient delay and communication dependencies, it leaves out potential real-world distributed networking dynamics (such as inter-node network jitter and real cross-node pipeline bubble hiding) on a physically scaled cluster.",
+        "Relatively narrow learning rate grid: The learning rate tuning for the baselines searches over only three discrete values ({0.0001, 0.0003, 0.001}). Given that delayed gradients often require fine-grained tuning of learning rate and momentum parameters, a wider grid search would provide stronger assurance that the baselines were evaluated at their absolute optimal performance."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Novel and insightful perspective connecting optimization geometry (specifically, Hessian basis misalignment) to the staleness pathology in asynchronous pipeline parallelism, explaining why coordinate-wise adaptive optimizers like Adam suffer severely as pipeline depth increases.",
+        "Rigorous theoretical analysis: provides convergence bounds for asynchronous Adam under coordinate-wise smoothness and gradient delay (Theorem 2.3), extends the framework to stage-dependent delays (Theorem E.6) which inspires a stage-aware rotation frequency strategy, and addresses momentum (Theorem E.8).",
+        "Comprehensive empirical validation across diverse settings: clear toy experiments illustrating the mechanism, scaling experiments across model sizes (95M, 1B, and 3B parameters) and stage counts (up to 32 stages), validation without weight stashing, and generalization to Mixture-of-Experts (MoE).",
+        "The proposed stage-aware basis rotation scheme is a well-motivated, practical extension directly derived from the stage-dependent theoretical bound, yielding measurable efficiency gains under a fixed compute budget."
+      ],
+      "weaknesses": [
+        "Algorithmic novelty of the optimizer itself is somewhat incremental relative to recent preconditioning and basis-rotation optimizers such as SOAP (Vyas et al., 2025) and Shampoo variants. While the application to asynchronous pipelines and the conceptual link to staleness are novel, the optimizer formulation (Algorithm 1 & 2) closely parallels existing Kronecker-factored empirical Fisher rotations.",
+        "Hardware emulation constraints: Several deep pipeline experiments (e.g., 32 stages) are executed via virtual stages multiplexed on fewer physical GPUs (e.g., 8 RTX 3090s). Although this preserves the algorithmic step delay τ, it does not fully capture the real-world distributed networking dynamics, communication jitter, and pipeline bubble overlapping across independent physical nodes.",
+        "Experimental scale in terms of training tokens and batch size: Models are evaluated on 1B tokens with a sequence length of 512 and micro-batch size of 8 without gradient accumulation. While omitting gradient accumulation isolates the staleness per step, standard production pre-training employs substantial gradient accumulation and global batch sizes, which may alter the signal-to-noise ratio and delay sensitivity in practice."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Compelling conceptual insight: The paper convincingly identifies and formalizes a key root cause of failure in asynchronous pipeline parallelism—basis misalignment between the Hessian eigenbasis and the standard coordinate basis—which causes coordinate-wise adaptive optimizers (like Adam) to oscillate and makes delayed updates point in stale or adversarial directions.",
+        "Rigorous theoretical support: The authors provide non-convex convergence analysis (Theorem 2.3) showing that the delay penalty scales multiplicatively with the basis misalignment metric C (the l1,1 norm of the Hessian). Furthermore, this is elegantly generalized to stage-dependent delays (Theorem E.6) and momentum beta_1 > 0 (Theorem E.8), directly justifying the stage-aware update schedule.",
+        "Extensive empirical evaluation: The method is validated across various configurations, including pipeline depths up to 32 stages, model scales up to 3B parameters, MoE architectures, and memory-constrained scenarios without weight stashing, showing consistent and substantial reductions in convergence slowdown.",
+        "Thorough benchmarking and diagnostics: The paper compares not only against standard asynchronous pipeline techniques (PipeDream, PipeDream-LR, Nesterov momentum, Delay Compensation) but also against recent structural optimizers (SOAP, Muon, Scion), alongside direct empirical measurements of update oscillations and Hessian (1,1)-norms."
+      ],
+      "weaknesses": [
+        "Incremental optimizer machinery: The algorithmic core of basis rotation (Algorithm 1 and Algorithm 2) heavily borrows from existing Kronecker-factored preconditioned optimization literature (e.g., SOAP and Shampoo variants). While its application and theoretical tie-in to asynchronous gradient delay are novel, the optimizer itself represents an adaptation rather than an entirely new optimization primitive.",
+        "Evaluation environment uses simulated/virtual stages: Much of the experimental validation (e.g., running 32 pipeline stages across 8 GPUs) relies on virtual staging on local nodes rather than a large-scale, multi-node physical deployment. While this preserves logical delay and pipeline schedule, it does not fully capture non-deterministic network jitter, interconnect bandwidth variations, and overlap overheads inherent to real-world distributed clusters.",
+        "Memory overhead in pipeline contexts: Pipeline parallelism is often adopted primarily to overcome strict device memory limits. The highest-performing variant (2nd-order bilateral) incurs non-trivial memory overhead for storing Kronecker factor buffers and rotation matrices (e.g., ~1.66 GB per MLP matrix for 8B models), which partially offsets memory savings unless falling back to lower-fidelity variants.",
+        "Lack of downstream evaluation: Experiments report language modeling training and validation loss on OpenWebText, but do not provide evaluations on downstream zero-shot benchmarks (e.g., ARC, HellaSwag, MMLU) to confirm downstream task quality across extended training runs."
+      ]
+    }
+  },
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Compelling conceptual insight: The paper makes a novel and insightful connection between the coordinate-basis sensitivity (basis misalignment) of adaptive optimizers like Adam and their vulnerability to gradient staleness in asynchronous pipeline parallelism.",
+        "Rigor and theoretical grounding: Theorem 2.3 provides a formal convergence analysis for asynchronous Adam under coordinate-wise smoothness, highlighting the multiplicative interplay between delay $\\tau$ and basis misalignment $C$. Furthermore, Theorem 3.1 formally justifies the bilateral Kronecker rotation as minimizing the Hessian $(1,1)$-norm proxy.",
+        "Comprehensive experimental evaluation: The authors conduct extensive experiments across diverse pipeline configurations (varying $P$ from 1 to 32), model scales (95M to 1B parameters), and architectural scaling regimes. They also ablate rotation geometries (unilateral vs. bilateral), approximation sources (1st vs. 2nd order), update frequencies, and memory optimizations (with and without weight stashing).",
+        "Wall-clock efficiency analysis: The inclusion of GPU-hour benchmarks (Figure 10a) and basis update frequency ablations demonstrates that the computational overhead of the rotation matrices does not undermine the throughput advantages of asynchronous execution."
+      ],
+      "weaknesses": [
+        "Disentanglement from zero-delay preconditioning gains: Optimizers operating in rotated coordinate frames (e.g., SOAP, Shampoo) are known to accelerate convergence even in the synchronous, zero-delay setting ($P=1$, as visible in Figure 11a). While the authors partially address this by measuring the slowdown ratio $T_{\\text{delay}} / T_{\\text{no-delay}}$, more discussion is needed to isolate how much of the performance advantage stems from delay resilience versus standard second-order preconditioning acceleration.",
+        "Limited exploration of hybrid baselines: The evaluated baselines (PipeDream-LR, Nesterov, Delay Compensation) are implemented strictly with standard coordinate-wise Adam. It remains an open question whether combining Nesterov momentum or delay-aware learning rate schedules with basis rotation would yield synergistic improvements.",
+        "Pre-training regime constraints: While testing up to 1B parameters is commendable, training is limited to 1B tokens with a short sequence length (512) and a small per-device batch size (8) without gradient accumulation. In industrial LLM pre-training, large global batch sizes and gradient accumulation across micro-batches can alter the effective staleness and signal-to-noise ratio of delayed updates."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Insightful Connection Between Delay and Basis Misalignment: The paper provides a clear, intuitive explanation for why Adam-style coordinate-wise adaptive optimizers degrade under gradient staleness in asynchronous pipeline parallelism, linking the failure mode to oscillations induced by basis misalignment.",
+        "Solid Theoretical Convergence Analysis: Theorem 2.3 establishes a formal convergence rate for delayed Adam under coordinate-wise smoothness, rigorously demonstrating that the delay parameter tau couples multiplicatively with the Hessian misalignment proxy C.",
+        "Comprehensive Empirical Evaluation: The empirical evaluation spans varying pipeline depths (P = 1 to 32), model scales up to 1B parameters, multiple asynchronous training baselines (PipeDream, PipeDream-LR, Nesterov, Delay Compensation), and practical variations such as omitting weight stashing.",
+        "Clear Presentation and Diagnostic Toy Experiments: The 2D quadratic and spiral landscape experiments clearly illustrate the geometric intuition and validate the hypothesis that delay-induced slowdown is localized to regions of basis misalignment."
+      ],
+      "weaknesses": [
+        "Algorithmic Novelty is Incremental: The proposed basis rotation mechanism relies on Kronecker-factored empirical Fisher and momentum approximations that closely mirror existing second-order and rotational optimizers such as SOAP, Shampoo, and GaLore. While applying these to asynchronous pipeline parallelism is well motivated, the core optimizer formulation itself is not fundamentally new.",
+        "Confounding Zero-Delay Performance Gains: Rotational/preconditioned optimizers like SOAP are known to significantly outperform standard Adam even in the zero-delay (P = 1) synchronous setting (as also visible in Figure 11a). While the authors evaluate normalized slowdown ratios, it remains difficult to completely disentangle how much of the final loss reduction at deep pipeline stages is due to delay mitigation versus simply using a fundamentally stronger base optimizer.",
+        "Training Regime and Evaluation Scale Limitations: Although the paper evaluates a 1B parameter model, it is trained on only 1B tokens, which is far below standard compute-optimal training regimes (e.g., Chinchilla scaling). Furthermore, real-world distributed pipelines universally employ gradient accumulation and hybrid parallelism (data/tensor/pipeline), which alters the effective staleness dynamics compared to the unaccumulated pipeline setting evaluated here.",
+        "Theoretical Gap in Momentum: Theorem 2.3 requires setting the first-moment parameter beta_1 = 0, whereas all practical Transformer pre-training experiments and asynchronous baselines crucially rely on momentum (beta_1 = 0.9 or 0.99)."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Novel and insightful perspective: The paper identifies a fundamental connection between the geometry of the optimization space (Hessian basis misalignment) and the vulnerability of coordinate-wise adaptive optimizers (Adam) to gradient staleness in asynchronous pipeline parallelism.",
+        "Solid theoretical support: Theorem 2.3 nicely formalizes how gradient delay tau couples multiplicatively with the basis misalignment metric C (the coordinate-wise smoothness constant, proxy for the (1,1)-norm of the Hessian), providing a rigorous explanation for why basis alignment dampens delay-induced instability. Theorem 3.1 further proves that bilateral Kronecker-factored rotation minimizes the (1,1)-norm.",
+        "Clear, pedagogical conceptual illustrations: The 2D quadratic and spiral toy landscapes in Section 2 effectively visualize the core pathology—namely, that basis misalignment induces high-frequency oscillations along dominant curvature directions, which causes delayed gradients to point in stale or adversarial directions.",
+        "Comprehensive empirical evaluation: Experiments span decoder-only Transformers from 95M up to 1B parameters across various pipeline depths (up to P=32). The empirical results demonstrate that basis rotation mitigates the severe convergence slowdown observed in standard async baselines (e.g., reducing slowdown from 4.24x to 1.27x at P=32), effectively restoring model scaling behavior.",
+        "Extensive practical ablations: The authors thoroughly investigate critical systems questions, including wall-clock/GPU hour efficiency, basis update frequency (showing stability even with updates every 100 steps), various approximation regimes (1st vs. 2nd order, unilateral vs. bilateral), and operation without weight stashing (via weight prediction)."
+      ],
+      "weaknesses": [
+        "Algorithmic novelty vs. SOAP/GaLore: As detailed in Appendix E, the core algorithmic mechanism (Algorithm 1 and 2 with S=2nd, G=bilateral) is closely related to SOAP (Vyas et al., 2025) and related Kronecker-based optimizers. While standardizing these into an eigenbasis estimation abstraction is helpful, the algorithmic update itself is not entirely new; the primary novelty lies in recognizing and proving its utility for staleness mitigation in asynchronous pipeline parallelism.",
+        "Confounding baseline optimizer gains: Rotated/preconditioned optimizers like SOAP are known to converge noticeably faster than vanilla Adam even in synchronous, zero-delay settings (as visible in Figure 11a for P=1). While the relative slowdown metric (P=32 vs P=1 in Figure 5c–e) helps isolate the staleness effect, the paper would benefit from explicitly disentangling how much of the final loss advantage at P=32 comes from SOAP's intrinsic optimization acceleration versus true delay mitigation.",
+        "Combinations with existing delay mitigation techniques: It remains unexplored whether combining basis rotation with staleness-aware techniques (such as PipeDream-LR's delay-dependent learning rate schedule or Ajanthan et al.'s Nesterov momentum applied within the rotated space) yields complementary benefits or if rotation renders them redundant.",
+        "Theoretical simplifications: Like several recent Adam convergence analyses, Theorem 2.3 assumes beta1 = 0, whereas all main practical language modeling experiments rely on beta1 = 0.9. While understandable for theoretical tractability, discussing how momentum interacts with rotated stale updates theoretically would strengthen the analysis.",
+        "Evaluation horizon and scale: The 1B-parameter model is trained for 1B tokens with a sequence length of 512, which is somewhat undertrained relative to standard LLM pretraining regimes (where models are trained on hundreds of billions or trillions of tokens with sequence lengths of 2048–4096)."
+      ]
+    }
+  }
+}

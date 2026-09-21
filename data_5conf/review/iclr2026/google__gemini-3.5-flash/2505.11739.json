@@ -1,0 +1,95 @@
+{
+  "v1": {
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "An elegant and novel concept of utilizing the semantically empty initial token (which naturally acts as an attention sink) as a task-agnostic control point to modulate model behavior.",
+        "A solid theoretical foundation demonstrating that scaling the attention of the initial token mathematically acts to sharpen or flatten the attention distribution over subsequent tokens while preserving their relative proportions.",
+        "Extensive empirical evaluation across 15 different datasets spanning text classification, multiple-choice question answering, and multi-turn conversations, demonstrating consistent improvements across diverse LLM families (Llama, Qwen, and DeepSeek).",
+        "Thorough analysis of the behavior across different attention layers and heads, showing that earlier layers have a greater impact and identifying head-specific preferences.",
+        "Excellent robustness analyses, including experiments with different context lengths, decoding strategies, prompt variations, and quantization levels."
+      ],
+      "weaknesses": [
+        "The approach is not entirely zero-shot or unsupervised, as it relies on a small calibration dataset (e.g., 500 samples) to profile head sensitivity and determine whether to scale attention up or down.",
+        "The optimal tuning direction is highly task-dependent (some tasks benefit from sharpening with gamma < 1, while others benefit from flattening with gamma > 1), which limits its ease of plug-and-play use in completely unknown scenarios.",
+        "The profiling phase (traversal of attention heads) introduces an upfront computational overhead before inference on a new task can proceed."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Novel and Creative Perspective: Utilizing the initial token (the attention sink) as a task-agnostic control knob to compress or expand attention over the remaining tokens is an intuitive and interesting idea.",
+        "Solid Theoretical Foundation: The mathematical formulation clearly shows how scaling the initial token's attention acts as a compression/expansion mechanism on the relative attention weights of subsequent tokens.",
+        "Extensive Empirical Evaluation: The authors evaluate the proposed method across multiple modern LLMs (Llama-3.1-8B, Qwen-2-7B, DeepSeek-R1-14B) and 15 datasets, showing notable improvements when properly tuned.",
+        "Thorough Robustness Analyses: The appendix provides a rich set of additional experiments covering resource constraints, context lengths, decoding strategies, quantization, and prompt variations."
+      ],
+      "weaknesses": [
+        "Heavy Dependence on Labeled Calibration Data: ZeroTuning relies on a 500-sample labeled validation set to perform 'Head Behavior Profiling' and search for the optimal scaling factor. In a true training-free or unsupervised inference-time scenario, such labeled data is unavailable. If 500 labeled samples are indeed available, standard Parameter-Efficient Fine-Tuning (PEFT, e.g., LoRA) on these 500 samples would be a natural and powerful baseline that is currently missing.",
+        "Extremely High Computational Overhead for Profiling: To profile each attention head individually (Section 2.6), the model's performance on the validation set must be evaluated for each head. For Llama-3.1-8B (32 layers, 32 heads = 1024 heads), evaluating each head individually on 500 samples would require 512,000 forward passes. This computational cost is several orders of magnitude higher than standard fine-tuning (e.g., LoRA for 3 epochs on 500 samples is only 1500 steps), which undermines the 'training-free' and 'lightweight' claims of the method.",
+        "High Sensitivity and Risk of Degradation: As shown in Table 4 (Level 0 results), applying the wrong scaling factor or scaling direction can lead to catastrophic performance drops (e.g., SST-2 accuracy drops from 73.20% to 53.80% when using $\\gamma=0.6$). This high sensitivity makes the method risky to deploy in unsupervised settings where validation data is not available to determine the correct scaling direction.",
+        "Missing Baseline of Attention Temperature Scaling: Since the theoretical analysis shows that scaling the initial token's attention compresses or expands the attention differences of subsequent tokens, a natural baseline is simply applying a temperature parameter to the attention softmax. The authors should compare ZeroTuning with direct attention temperature scaling to demonstrate whether targeting the initial token specifically provides unique benefits.",
+        "Typo in Table 1: In Table 1, the first two columns of the datasets are both labeled 'SST-2'. The second column is highly likely 'SST-5', given its accuracy range (~45%)."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Intriguing concept: The paper explores an interesting property of the initial token (attention sink) as an implicit control point to modulate attention distributions across the rest of the sequence without model training.",
+        "Extensive empirical analysis: The manuscript provides detailed layer-wise and head-wise analyses of how large language models (LLMs) react to initial token scaling, demonstrating that different heads exhibit heterogeneous behaviors (up-effective vs. down-effective).",
+        "Hardware compatibility: The authors show that the method can be implemented by modifying key/query states, making it compatible with fast attention implementations like FlashAttention."
+      ],
+      "weaknesses": [
+        "High Hidden Computational Overhead of 'Training-Free' Profiling: The proposed 'Head Behavior Profiling' requires evaluating the sensitivity of individual attention heads on a calibration set. For a model like LLaMA-3.1-8B, which has 1,024 heads (32 layers $\\times$ 32 heads), evaluating each head individually on a 500-sample validation set requires 512,000 full-model forward passes. This profiling cost is extremely high and can easily exceed the cost of standard Parameter-Efficient Fine-Tuning (PEFT) like LoRA on the same 500 samples. Calling this method 'training-free' and 'lightweight' is therefore highly misleading.",
+        "Risk of Overfitting and Labeled Data Dependency: The paper relies on 500 labeled validation samples to profile heads and search for the optimal scaling factor $\\gamma$. Tuning 1,024 head-specific choices on 500 samples represents a significant search space that is highly prone to overfitting. It is unclear whether the reported results are evaluated on a completely disjoint, held-out test set. For small datasets like CommitmentBank (CB), which has only 56 examples, the evaluation protocol seems particularly problematic, as a 500-sample validation set is not even possible.",
+        "Unfair Baseline Comparison: Since ZeroTuning utilizes 500 labeled validation examples to optimize its parameters, a fair evaluation must compare it against other methods that leverage the same labeled data budget. The paper lacks comparisons against standard PEFT (e.g., LoRA, prompt/prefix tuning) or validation-based prompt selection trained/selected on those 500 samples.",
+        "Low Baseline Performance and Fragile Evaluation: The vanilla zero-shot performance of LLaMA-3.1-8B-Instruct on SST-2 is reported as 73.20%, which is abnormally low for a state-of-the-art instruction-tuned model (which typically scores >90% with standard templates or log-likelihood evaluation). The authors note that the vanilla model often outputs invalid words like 'neutral'. This indicates that the evaluation protocol relies on fragile raw text generation and exact string matching, and that ZeroTuning might simply act as a fragile hack to restrict the output vocabulary rather than improving the model's actual semantic understanding.",
+        "Unjustified Direct vs. Indirect Attention Modulation: The theoretical analysis shows that scaling the initial token's attention compresses or expands the difference of other attention weights. However, a similar sharpening or flattening effect can be achieved much more directly and cleanly by applying a temperature scaling factor to the attention logits of the non-initial tokens. The paper does not justify why routing this modulation through the initial token is mathematically or empirically superior to direct attention temperature scaling."
+      ]
+    }
+  },
+  "v2": {
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Elegant and Simple Idea: Instead of using complex heuristics to identify and tune 'important' task-specific tokens, ZeroTuning targets only the initial token (<BOS>), making the intervention elegant, highly interpretable, and computationally lightweight.",
+        "Strong Theoretical Grounding: The paper formalizes the tuning process and theoretically proves that scaling the initial token's attention monotonically controls the downstream attention distribution (smoothing or sharpening).",
+        "Unsupervised Entropy-guided Calibration: The discovery of a strong inverse correlation between task accuracy and next-token prediction entropy allows for a powerful unsupervised calibration strategy, which eliminates the need for labeled validation data.",
+        "Kernel-Agnostic and Practical: Unlike previous attention steering methods, ZeroTuning can be applied directly to the query or key states of the initial token. This enables compatibility with optimized attention kernels (SDPA and FlashAttention) and requires only four lines of code modification.",
+        "Thorough and Robust Empirical Evaluation: The method is rigorously tested across 15 datasets, 4 modern LLMs (including Llama-3.1-8B and DeepSeek-R1-14B), and various challenging setups (long context, quantization, few-shot, different decoding strategies, and prompt variations)."
+      ],
+      "weaknesses": [
+        "Calibration Cost: Both the supervised and unsupervised variants require a calibration step to identify the optimal scaling factor \\gamma and classify attention heads (up-effective vs. down-effective). Although Appendix H shows it can work in a 'Level 0' resource-constrained setting with fixed scaling factors, the best performance still requires this searching phase.",
+        "Lack of Ultra-Large Scale LLM Evaluation: While the evaluation includes modern models up to 14B (DeepSeek-R1-14B), it remains to be seen whether the behavior of attention sinks and head-level classification scales identically to ultra-large models (e.g., 70B+ parameters).",
+        "Complexity in Head Co-adaptation: Section 3.5 mentions that a hybrid strategy (UP+DOWN) that scales both up-effective and down-effective heads simultaneously does not outperform tuning them individually. A deeper investigation or discussion on why joint scaling is suboptimal could further strengthen the work."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 8,
+      "strengths": [
+        "High Novelty & Simplicity: The paper shifts the paradigm of attention steering from complex, heuristic-driven task-specific token selection to a universal, task-agnostic control point: the initial token (attention sink). The resulting method, ZeroTuning, is elegant and requires only a few lines of code change.",
+        "Solid Theoretical Grounding: Provides rigorous mathematical proofs explaining how scaling the initial token's attention acts as a monotonic control lever for the entropy of the downstream attention distribution. It also provides a compelling theoretical distinction of stability between tuning attention scores vs. key/query states, making the method robustly kernel-agnostic.",
+        "Extensive and Diverse Evaluation: Evaluation spans 15 datasets across text classification, multiple-choice QA, and multi-round chat using diverse open-source LLMs (Llama-3.1-8B-Instruct, Llama-2-13B-Chat, Qwen-2-7B, DeepSeek-R1-14B). The results show consistent and substantial performance gains.",
+        "Practical Unsupervised Mode: The unsupervised variant minimizing next-token output entropy is highly effective, yielding performance nearly identical to the supervised version while bypassing the need for labeled validation data.",
+        "Thorough Robustness and Boundary Analysis: Investigates a wide range of practical conditions, including long contexts, few-shot prompts, quantization, resource levels, and decoding strategies, and honestly discusses the boundaries of efficacy (e.g., unlocking latent knowledge vs. correcting factual errors)."
+      ],
+      "weaknesses": [
+        "Profiling and Calibration Cost: Both supervised and unsupervised modes require a profiling phase to classify the behavior of attention heads (up-effective vs. down-effective) and search for the scaling factor γ. Minimizing entropy on the test inputs can introduce notable computational overhead, and the paper would benefit from a more explicit discussion regarding the exact wall-clock time and search space complexity of this calibration step.",
+        "Coarse-grained Task-Level Adaptation: ZeroTuning establishes a static, dataset-wide γ and head configuration. While highly effective for addressing systemic dataset-level biases, it does not adapt dynamically on an instance-by-instance basis, which could be sub-optimal if different samples in the same task require opposing attention adjustments."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Simple and lightweight concept: Tuning only the initial token's attention (e.g., <BOS>) is elegant and avoids complex, heuristic-based token identification pipelines used by previous methods like PASTA or ACT.",
+        "Comprehensive empirical study: The authors evaluate their approach on 15 datasets across 4 different LLM families (Llama-3.1, Llama-2, Qwen-2, and DeepSeek-R1), and offer a wide range of analysis including context length sensitivity, quantization, and decoding strategies.",
+        "Compatibility with optimized kernels: The paper addresses the practical limitation of direct attention score modification in optimized attention engines (like FlashAttention) by providing a key/query scaling alternative along with a comparison of its dynamics."
+      ],
+      "weaknesses": [
+        "Extremely weak baselines and questionable evaluation setup: The vanilla performances reported for instruction-tuned models are abnormally low. For instance, in Table 1, Llama-3.1-8B-Instruct achieves only 73.20% on SST-2, 14.00% on TREC (which is worse than random guessing for 6-way classification), and 44.60% on SUBJ (worse than random guessing). This strongly suggests that the models were evaluated without their official chat templates, or that the generation parsing was highly flawed. Standard zero-shot performance with proper chat templates on these datasets should be significantly higher. This raises concerns that the observed gains of ZeroTuning are merely artifacts of mitigating format/instruction-following issues caused by improper prompting.",
+        "High hidden calibration complexity: To categorize the attention heads as up-effective or down-effective, the method requires profiling each head individually. For Llama-3.1-8B, evaluating 1024 heads (32 layers x 32 heads) individually on a validation set of 500 samples requires an enormous number of forward passes. This profiling cost is extremely high and must be repeated for every new dataset or task, undermining the 'practical' and 'training-free' nature of the method.",
+        "Practical limitations of the unsupervised mode: The unsupervised variant relies on finding the scaling factor that minimizes the average output entropy over a dataset. As shown in the paper's own analysis (Figures 12 & 13), individual samples suffer from 'entropy traps,' meaning that the minimization must be performed collectively over a batch. This transductive requirement prevents the method from being used in true online, streaming, or single-instance inference scenarios.",
+        "Limited theoretical depth: The mathematical formulation in Section 3.1 is basic. It simply shows that scaling one element in a softmax distribution and renormalizing compresses or expands the remaining elements. While mathematically correct, it does not provide deep mechanistic insights into why modulating the attention sink improves the representation space of the network."
+      ]
+    }
+  }
+}

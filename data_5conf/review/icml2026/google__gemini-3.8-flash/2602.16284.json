@@ -1,0 +1,96 @@
+{
+  "v1": {
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Principled and elegant formulation: The paper clearly justifies the need for both local attention output matching and attention mass matching via the mixture decomposition of concatenated attention blocks (Eq. 5). This provides a solid theoretical foundation for why traditional token eviction underestimates past context and motivates the introduction of per-token scalar attention biases.",
+        "Efficient algorithmic design: By decomposing the compaction problem into key selection (highest attention or OMP), bias fitting (NNLS), and value fitting (OLS), the method completely avoids expensive end-to-end backpropagation at compaction time, achieving 1-2 orders of magnitude speedup over Cartridges.",
+        "Strong empirical results across multiple model families and architectures: The approach is validated on Qwen3-4B, Llama-3.1-8B, and Gemma-3-12B (including its hybrid sliding-window attention architecture) across QuALITY and LongHealth, consistently defining a superior Pareto frontier over heuristic eviction baselines (H2O+, SnapKV, PyramidKV, KVzip).",
+        "Thorough ablation study and insightful extensions: The paper comprehensively evaluates the impact of each design component (attention biases, fitted values, nonuniform budgets, on-policy queries) and explores compelling extensions, such as compounding compaction on top of summarization and online mid-trajectory compaction during mathematical reasoning on AIME."
+      ],
+      "weaknesses": [
+        "Compaction latency remains non-negligible for real-time serving: While orders of magnitude faster than Cartridges, the query generation phase (specifically self-study, ~139s on 60k tokens) and exact OMP key selection (~565s) still require several minutes, which may limit practical adoption in strict real-time or latency-sensitive interactive settings.",
+        "Benchmark scope is focused primarily on multiple-choice QA: Evaluation is concentrated on QuALITY and LongHealth multiple-choice question answering. Including standard long-context synthetic retrieval and generation benchmarks (e.g., RULER, BAMBOO, or InfiniteBench) would provide a more complete picture of preservation across diverse retrieval patterns.",
+        "Degradation in extreme compaction regimes compared to continuous optimization: As acknowledged in the limitations, at extreme compaction ratios (e.g., 100x on LongHealth), Cartridges outperforms AM because gradient-based continuous optimization can explore arbitrary latent representations beyond subset selection of original keys."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Principled and sound mathematical formulation: The paper grounds KV compaction in the exact decomposition of attention over concatenated key-value blocks (Eq. 5), neatly demonstrating that preserving downstream attention requires matching both the local attention output and the unnormalized attention mass.",
+        "Clever, lightweight mechanism for attention mass matching: Introducing a per-token scalar bias beta to reweight retained keys solves the inherent mass-underestimation problem of token dropping/merging with minimal parameter overhead and compatibility with standard kernels (PyTorch SDPA, FlexAttention).",
+        "Efficient closed-form / greedy solver decomposition: Rather than relying on prohibitively expensive gradient-based optimization (like Cartridges, which takes hours per context), the proposed pipeline uses fast linear algebra routines (NNLS for biases, OLS for values, and OMP or attention ranking for keys), dropping compaction runtime by up to two orders of magnitude into the range of seconds to minutes.",
+        "Comprehensive empirical validation and Pareto frontier improvement: The method consistently outperforms popular token-pruning baselines (H2O+, SnapKV, PyramidKV, KVzip) and textual summarization across three model families (Qwen, Llama, Gemma) at high compaction ratios (20x-100x), while matching the performance of Cartridges at 50x.",
+        "Thorough ablation and exploration of practical extensions: The paper includes extensive leave-one-out ablations, sensitivity curves across heads and layers, analysis of query sampling techniques, chunked processing, and an interesting proof-of-concept for mid-trajectory online compaction on reasoning tasks (AIME)."
+      ],
+      "weaknesses": [
+        "Limited benchmark diversity: Downstream evaluation is primarily restricted to two multiple-choice QA benchmarks (QuALITY and LongHealth, the latter consisting of only 4 concatenated contexts). Evaluating on broader standard long-context benchmark suites (e.g., RULER, LongBench, or InfiniteBench) across tasks such as needle-in-a-haystack retrieval, aggregation, and code understanding would significantly strengthen the empirical claims.",
+        "Computational overhead of reference query generation: While total time is orders of magnitude faster than Cartridges, query generation (especially when using self-study, taking ~139s out of ~150s for faster variants in Table 1) still constitutes the primary wall-clock bottleneck. Although repeat-prefill is faster, the trade-offs in different real-time serving setups deserve more granular systems profiling.",
+        "Offline profiling required for nonuniform budgets: Achieving optimal performance relies heavily on nonuniform per-head allocation (as shown in the leave-one-out ablation, Figure 4), which requires an upfront, offline sensitivity curve estimation per model. While reusable across contexts, this adds a non-trivial prerequisite step for each newly supported model architecture.",
+        "Degradation at extreme compaction ratios compared to Cartridges: As noted honestly in the limitations, at extreme compaction budgets (100x on LongHealth), Cartridges outperforms Attention Matching. Because the key selection is constrained to a subset of original keys rather than continuous latent representations, representational capacity becomes restrictive under extreme compression."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Principled and elegant mathematical formulation: recognizing that attention over concatenated blocks decomposes into a mixture of local outputs weighted by unnormalized attention mass, the paper neatly identifies that matching both the output and the mass (via an introduced scalar bias per token) preserves global attention behavior under arbitrary future decodings.",
+        "Efficient, training-free optimization: by decomposing the problem into key selection (highest attention or OMP), NNLS for mass reweighting biases, and standard least-squares for values, the method avoids expensive end-to-end gradient-based optimization (Cartridges), reducing compaction time from hours to seconds/minutes while achieving competitive or superior accuracy at up to 50x compaction.",
+        "Thorough design enhancements: the paper thoughtfully incorporates practical design choices, including model-specific nonuniform head budget allocation (which shows consistent sensitivity patterns across contexts), on-policy reference query generation to combat inter-layer distribution shifts, and chunked compaction for long contexts.",
+        "Strong empirical Pareto frontier: across three model families (Qwen3-4B, Llama-3.1-8B, and Gemma-3-12B with sliding window attention), Attention Matching consistently outperforms existing heuristic eviction/merging methods (H2O+, SnapKV, PyramidKV, KVzip) and summarization, and demonstrates promising feasibility for online reasoning compaction on AIME."
+      ],
+      "weaknesses": [
+        "Relatively narrow benchmark scope: empirical evaluation relies predominantly on two QA benchmarks (QuALITY with 50 contexts, and LongHealth with only 4 concatenated contexts). Evaluation on broader suites such as RULER, LongBench, or standard synthetic retrieval benchmarks (e.g., Needle-in-a-Haystack) would provide a more complete assessment of potential retrieval failure modes.",
+        "Compaction latency remains noticeable for long contexts: although orders of magnitude faster than Cartridges, full AM-OMP still takes several minutes (e.g., over 10 minutes total on a 60k context for Gemma-3-12B), primarily bottlenecked by greedy OMP selection and self-study query generation.",
+        "Memory bottleneck during prefill remains in KV-based chunking: the default KV-based chunking approach requires running full context prefill upfront to slice out representations, meaning peak memory during prefill is not mitigated by the compaction algorithm itself.",
+        "Degradation at extreme compression ratios: at 100x compaction on LongHealth, gradient-based Cartridges still outperforms Attention Matching, reflecting the intrinsic limitation of restricting compact keys to a discrete subset of original tokens."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Principled and elegant mathematical formulation: Decomposing attention over concatenated KV blocks into local normalized attention and attention mass (Eqs. 1–2) provides a rigorous foundation for one-shot compaction. The realization that eviction systematically underestimates attention mass and that introducing per-token scalar biases $\\beta$ allows exact/approximate mass preservation is a compelling and neat insight.",
+        "Bypassing gradient descent via closed-form and convex subproblems: By structuring compaction into key selection, mass fitting via Nonnegative Least Squares (NNLS), and value fitting via Ordinary Least Squares (OLS), the method achieves prefix-tuning/Cartridges-level quality while running up to two orders of magnitude faster (seconds to minutes instead of GPU-hours).",
+        "Insightful nonuniform head allocation: Demonstrating that attention head sensitivity to compaction is largely invariant across inputs allows the authors to precompute an offline nonuniform budget schedule via greedy exchange, providing significant empirical gains with zero runtime overhead.",
+        "Comprehensive empirical evaluation: Evaluated across three modern open-weight LLMs (Qwen3-4B, Llama-3.1-8B, and the sliding-window hybrid Gemma-3-12B) and a diverse suite of benchmarks (QuALITY, LongHealth, QASPER, LongBench v2, and RULER), showing dominant Pareto-frontier performance over standard token-eviction and merging baselines.",
+        "Thorough ablations and extensions: The leave-one-out study, query sampling comparisons, exploration of aggregation metrics, combination with text summarization, and proof-of-concept online mid-trajectory compaction on AIME provide strong depth and clarity."
+      ],
+      "weaknesses": [
+        "Compaction latency remains nontrivial for interactive serving: Although dramatically faster than Cartridges, the strongest variant (AM-OMP with self-study) still requires several minutes for long contexts (e.g., ~700 seconds for a 60k context on an H200 in Table 3). While faster heuristics like repeat-prefill and fast-OMP mitigate this, true real-time synchronous compaction remains constrained without asynchronous background offloading.",
+        "Limited evaluation sample sizes on select long-context benchmarks: Due to base model constraints and computational overhead, LongHealth is evaluated on only 4 contexts (5 concatenated patient files), and LongBench v2 is reported on a filtered 47-context subset where the base model succeeded with full context. While the rationale is understandable, broader validation on larger sample sets would strengthen the generality of these findings.",
+        "Key selection restricted to discrete subsets: Restricting $C_k$ to a subset of original keys limits expressivity at extreme compaction ratios (e.g., 100x), where continuous optimization (like Cartridges) can search a broader latent space and occasionally retains higher accuracy.",
+        "Architectural incompatibility with Multi-Head Latent Attention (MLA): As noted in Appendix G.2, the method assumes decoupled key and value projections per head and is not directly applicable to models utilizing low-rank joint latent attention (e.g., DeepSeek architectures), which are increasingly prevalent."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Principled and elegant mathematical formulation: the paper neatly shows that preserving attention behavior under concatenation with future tokens decomposes into matching local attention outputs and local attention mass, which naturally motivates the introduction of per-token scalar biases and closed-form linear algebraic solvers (least squares and NNLS).",
+        "Substantial practical speedup over end-to-end optimization: by replacing slow gradient-based prefix-tuning (as in Cartridges) with closed-form / greedy steps, the method achieves up to two orders of magnitude wall-clock speedup while establishing a superior Pareto frontier against both token-eviction/merging heuristics and Cartridges at high compaction ratios (e.g., 20x to 50x).",
+        "Comprehensive empirical validation: the approach is evaluated across three contemporary model families (Qwen3-4B, Llama-3.1-8B, Gemma-3-12B) and a diverse suite of benchmarks (QuALITY, LongHealth, QASPER, LongBench v2, and RULER), demonstrating strong performance across multiple-choice, free-form generative QA, and retrieval tasks.",
+        "Insightful architectural extensions: the paper provides solid contributions beyond the core formulation, notably the input-invariant precomputed head sensitivity allocation schedules, sliding-window compatibility analysis, compound summarization + compaction (reaching 200x reduction), and preliminary online mid-trajectory compaction on AIME reasoning."
+      ],
+      "weaknesses": [
+        "Compaction runtime overhead in real-time pipelines: although orders of magnitude faster than end-to-end gradient training, the unoptimized OMP and self-study variants still take several minutes for long sequences (e.g., ~700s for a 60k context in Table 3). While faster variants (repeat-prefill + HighestAttnKeys) run within tens of seconds, a clearer discussion or profiling of end-to-end serving throughput/TTFT impacts in realistic inference engines would strengthen the systems motivation.",
+        "Limited head-to-head comparison with Cartridges across all regimes: due to the high computational cost of Cartridges, it is evaluated only on a 20-context subset of QuALITY for Qwen3-4B and omitted on other benchmarks/models. Although the authors note that Cartridges outperforms Attention Matching at extreme ratios (100x on LongHealth), empirical data points for Cartridges on LongHealth are missing in the figures/tables.",
+        "Subset filtering on LongBench v2: for LongBench v2, the evaluation is conditioned on a 47-context subset where the model succeeded with full context but failed without context. While this isolates context-dependent behavior, reporting the complete benchmark numbers in the appendix alongside the subset would prevent potential selection-bias concerns and give a clearer view of raw performance.",
+        "Architectural incompatibility with Multi-head Latent Attention (MLA): as acknowledged in Appendix G.2, the method operates directly on explicit, decoupled key and value caches, making it incompatible with architectures utilizing low-rank latent KV projections (e.g., DeepSeek models)."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Principled and elegant formulation: The paper identifies a fundamental mathematical reason why conventional KV eviction/pruning methods degrade at high compression ratios—namely, the loss of unnormalized attention mass when concatenating the compacted prefix with future tokens (Eq. 5). Introducing scalar attention biases $\\beta$ and solving for values $C_v$ to preserve both local outputs and total attention mass is a clean, theoretically well-motivated solution.",
+        "Efficient non-gradient optimization: By decoupling key selection, mass fitting, and value fitting, the framework avoids expensive end-to-end backpropagation through the LLM. Fitting $\\beta$ via non-negative least squares (NNLS) and $C_v$ via ordinary least squares (OLS) yields closed-form or fast convex subproblems, operating orders of magnitude faster than gradient-based latent methods like Cartridges.",
+        "Strong empirical performance across diverse tasks and architectures: The approach is validated across three distinct model families (Qwen3-4B, Llama-3.1-8B, Gemma-3-12B with sliding-window attention) and multiple benchmarks (QuALITY, LongHealth, QASPER, LongBench v2, RULER), consistently outperforming prior eviction/merging baselines (H2O+, SnapKV, PyramidKV, KVzip, KVMerger) especially in extreme compaction regimes (20x-100x).",
+        "Thorough ablations and extensions: The manuscript provides insightful leave-one-out ablations isolating the benefits of attention biases, fitted values, non-uniform head budgets, and query sampling strategies. Furthermore, the preliminary demonstration of mid-trajectory online compaction on AIME reasoning presents an exciting path forward for agentic and reasoning workloads."
+      ],
+      "weaknesses": [
+        "Compaction latency of the strongest configuration: Although AM-OMP is much faster than Cartridges, full OMP key selection with self-study still requires substantial wall-clock time (~10 minutes on a 60k-token context, as shown in Table 3). While faster variants (AM-HighestAttnKeys-fast) exist and run in ~20 seconds, there is an evident quality trade-off.",
+        "Evaluation subset selection on certain benchmarks: For Cartridges on QuALITY, only a 20-context subset was evaluated due to compute constraints. For LongBench v2, evaluation was narrowed to a 47-context subset where the base model succeeded with full context but failed without it; while justified to increase signal-to-noise ratio, presenting results on the full benchmark would provide a more complete picture of end-to-end utility.",
+        "Heuristic nature of key subset selection: While solving for $\\beta$ and $C_v$ is convex and optimal under the $L_2$ objectives given $C_k$, the selection of $C_k$ remains restricted to a discrete subset of original keys via heuristics (RMS attention score) or greedy pursuit (OMP), lacking theoretical approximation bounds relative to jointly optimal latent representations."
+      ]
+    }
+  }
+}

@@ -1,0 +1,94 @@
+{
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "The paper identifies a clear activation memory bottleneck in current context parallel methods (specifically DeepSpeed Ulysses' large projection and communication buffers) and proposes an elegant, simple, and effective solution via headwise chunking (UPipe).",
+        "The proposed Grouped-Query Attention (GQA) scheduling mechanism is highly clever: by processing query heads out-of-order, it maximizes key/value tensor reuse across chunking stages and significantly reduces the communication volume compared to a naive chunking strategy.",
+        "The empirical results are outstanding, showing that UPipe can scale Llama 3-8B training up to 5M tokens on a single 8xH100 node (a 25% improvement in context length over state-of-the-art FPDT) while maintaining high throughput on par with DeepSpeed Ulysses.",
+        "The paper provides a detailed and rigorous theoretical breakdown of the activation memory usage across different stages of Transformer training (including both forward and backward passes), which makes the memory savings very clear and verifiable.",
+        "The authors explore practical ways to reinvest the saved memory—such as Strided Activation Offloading, Selective Activation Checkpointing, and larger batch sizes—to further improve training performance and throughput."
+      ],
+      "weaknesses": [
+        "At shorter sequence lengths (<1M), UPipe exhibits a slight throughput drop compared to standard DeepSpeed Ulysses due to the overhead of multiple kernel launches/stages, though this overhead is well-amortized in the long-context regime.",
+        "The chunk size $U$ must be a multiple of the context parallel degree $C$ and must divide the total number of attention heads $H$, which slightly restricts the hyperparameter search space depending on the model's architecture."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Strong Practical Impact: The paper addresses a major memory bottleneck in sequence/context parallelism (specifically DeepSpeed Ulysses) to scale Transformer training to multi-million token contexts (up to 5M on a single node and 8M on two nodes).",
+        "Simple yet Effective Design: Chunking along the head dimension (headwise chunking) is an elegant solution. Since a subset of heads is sufficient to saturate GPU compute, serializing head execution allows substantial memory reuse without sacrificing training throughput.",
+        "Optimized GQA Scheduling: The authors design a custom GQA scheduling algorithm that rearranges the processing of query heads to maximize the reuse of communicated key/value tensors, keeping the communication volume low.",
+        "Comprehensive Evaluation: The paper evaluates the proposed UPipe against multiple strong baselines (Ulysses, Ring Attention, FPDT, etc.) on Llama-3-8B and Qwen3-32B, showcasing impressive memory savings (up to 87.5% reduction in intermediate attention activations) and comparable/better throughput.",
+        "Clear Presentation: The paper is exceptionally well-written, with detailed mathematical and peak-memory analyses, clear diagrams, and a thorough discussion of implementation details."
+      ],
+      "weaknesses": [
+        "Incremental System Innovation: While the system-level execution and GQA scheduling are clever, the underlying concept of head-wise serialization or chunking to save memory is a known design pattern in deep learning optimization.",
+        "Overhead on Shorter Contexts: As shown in the experiments, UPipe exhibits a slight throughput overhead at shorter sequence lengths (<1M tokens) due to the kernel launch overhead from multi-stage processing, although this is amortized at longer context lengths.",
+        "Exploration of Hybrid Schemes: While the authors state that UPipe is orthogonal to sequence-dimension chunking (like FPDT) and can be combined with hybrid context parallelism (Ulysses + Ring), the paper does not empirically evaluate the joint combination of UPipe + FPDT to push memory limits even further."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Addresses a highly practical and critical bottleneck in long-context LLM training (activation memory overhead of DeepSpeed-Ulysses context parallelism).",
+        "Provides a thorough, step-by-step mathematical memory accounting of both the forward and backward passes (detailed in Appendix A), which clearly justifies the theoretical memory savings.",
+        "Proposes an elegant GQA-compatible scheduling algorithm to avoid redundant key/value tensor communication during head-wise chunking, maintaining the communication efficiency of GQA.",
+        "Demonstrates strong empirical results on modern hardware (8xH100) and models (Llama-3 8B, Qwen-3 32B), achieving a maximum context length of 5M tokens on a single node."
+      ],
+      "weaknesses": [
+        "A major limitation is that the chunk size $U$ must be a multiple of the context-parallel size $C$ ($U \\ge C$). On large clusters or setups where $C$ is close to the number of query heads $H$, the chunking factor $H/U$ becomes very small, and the memory savings of UPipe diminish or completely disappear (when $C = H$).",
+        "The sequential processing of heads introduces kernel launch overheads and potential GPU underutilization at shorter sequence lengths (e.g., 128K to 512K), leading to a throughput penalty compared to Ulysses.",
+        "The core idea of chunking/serializing computation along the head dimension is a relatively standard engineering technique (similar to tiling/chunking along other dimensions). The conceptual novelty, while practical, is somewhat incremental.",
+        "The evaluation is restricted to decoder-only text LLMs (Llama-3, Qwen-3). Evaluating on other modalities mentioned in the text (e.g., Diffusion Transformers) would strengthen the claim of broad applicability."
+      ]
+    }
+  },
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "The paper addresses a highly relevant and critical bottleneck in long-context training of LLMs: the activation memory overhead of context parallelism (specifically DeepSpeed Ulysses).",
+        "The core idea of UPipe—chunking the attention computation along the head dimension—is simple, elegant, and highly effective, allowing for direct memory reuse of communication and projection buffers.",
+        "A key contribution is the GQA-compatible scheduling algorithm, which avoids redundant communication of key/value heads across different chunks. This makes the method highly practical for modern architectures like Llama 3 and Qwen 3 which rely heavily on Grouped Query Attention.",
+        "The empirical evaluation is solid and comprehensive. UPipe is shown to support up to 5M tokens on a single 8xH100 node for Llama3-8B (a 25% improvement over FPDT and a 66% improvement over Ulysses) without sacrificing throughput at larger sequence lengths.",
+        "The paper is well-written, with clear theoretical memory analyses (Table 1, Table 2) and detailed implementation details that facilitate reproducibility."
+      ],
+      "weaknesses": [
+        "A limitation of the proposed method is that the headwise chunk size $U$ must be at least equal to (and divisible by) the context parallel size $C$. In scenarios where the context parallel degree $C$ is scaled up to match the number of attention heads $H$ (i.e., $C = H$), the chunk size $U$ must also equal $H$. In this extreme case, UPipe collapses back to standard DeepSpeed Ulysses and yields no memory benefits.",
+        "There is a minor performance overhead at smaller sequence lengths (e.g., 128k to 512k) due to the increased number of kernel launches and sequential all-to-all operations. While this is amortized at extremely long contexts, it remains a drawback for workloads that dynamically mix short and long sequences.",
+        "The paper could benefit from a more explicit ablation showing the standalone memory savings of UPipe versus the savings contributed by the other integrated optimizations (like Liger-Kernel and tiled MLP/RMSNorm)."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Well-motivated and tackles a highly relevant bottleneck (activation memory scaling) in long-context LLM training.",
+        "Simple yet elegant design: by chunking attention along the head dimension, UPipe reduces the massive intermediate buffer memory required by DeepSpeed-Ulysses' all-to-all communications.",
+        "Clever GQA scheduling strategy that avoids redundant key-value communications while retaining the memory benefits of headwise chunking.",
+        "Comprehensive experimental evaluations on real-world models (Llama3-8B, Qwen3-32B) showing state-of-the-art context lengths (5M tokens on a single 8xH100 node) while maintaining comparable or superior throughput to existing methods.",
+        "Solid theoretical analysis of memory usage during training (Tables 1 & 2), which is helpful to the community."
+      ],
+      "weaknesses": [
+        "The maximum context length gains rely heavily on a combination of external tiling techniques (e.g., Liger-Kernel, ALST) for other Transformer components like FFN and Cross-Entropy. A clearer ablation isolating the exact memory savings of UPipe on attention activations versus other components would strengthen the paper.",
+        "Reduced performance at shorter sequence lengths (e.g., 128k, 256k) due to increased kernel launch overhead and stage synchronization. Although the target is long sequences, this limit restricts UPipe as a general-purpose attention layer replacement.",
+        "The concept of serialization/chunking along the head dimension is relatively straightforward, representing more of a practical engineering optimization rather than a fundamental algorithmic breakthrough."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Highly practical and effective: UPipe achieves an impressive 5M context length for Llama3-8B on a single 8xH100 node, representing a 25% improvement over FPDT and a 1.6x improvement over standard Ulysses, while maintaining comparable throughput.",
+        "Elegant GQA-compatible scheduling: The paper addresses a key issue when combining headwise chunking with Grouped Query Attention (GQA). By scheduling head computations out-of-order, it avoids redundant communications of the shared Key/Value heads.",
+        "Thorough theoretical and empirical analysis: The paper provides detailed analytical breakdowns of activation memory usage across different training phases (Tables 1, 2, and 6) and evaluates both throughput and peak memory across various sequence lengths.",
+        "Orthogonal and complementary nature: The proposed head-dimension chunking is orthogonal to sequence-dimension chunking or activation offloading, meaning they can potentially be combined for even greater memory savings."
+      ],
+      "weaknesses": [
+        "Modest conceptual novelty: The core idea of serializing or chunking along the head dimension is a relatively straightforward engineering approach. While the GQA scheduling is a nice addition, the overall novelty is somewhat incremental given that it heavily builds on DeepSpeed-Ulysses and USP.",
+        "Complexity in GQA scheduling formulation: The mathematical explanation of the communication volume for the GQA scheduling algorithm in Section 4.1 is somewhat dense and could benefit from a step-by-step derivation or a formal pseudocode block to make it easier to reproduce and understand.",
+        "Dependency on other tiled/optimized components: The extreme sequence lengths achieved (e.g., 5M) depend on a stack of other optimizations (Liger-Kernel tiled loss, ALST tiled MLP, fused RoPE, and CPU activation offloading). A clearer ablation showing the standalone memory savings of UPipe versus these orthogonal optimizations would strengthen the analysis."
+      ]
+    }
+  }
+}

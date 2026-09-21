@@ -1,0 +1,67 @@
+{
+  "v1": {
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Targets an important problem: obtaining localized embeddings from frozen vision-language foundation models without fine-tuning the backbone.",
+        "Simple and intuitive approach: optimize a token embedding at test time so that its explainability map matches a query mask via Dice loss.",
+        "Proposes a gradient decomposition strategy to reduce the computational cost of repeated explainability-map computations, with runtime analysis showing benefits for multiple masks.",
+        "Evaluates on multiple downstream tasks, including referring expression retrieval, region-based classification, localized captioning, and diffusion, across several datasets such as PhraseCut, RefCOCO, RefCOCO+, PascalVOC, PascalContext, MSCOCO, and OpenImagesV7.",
+        "Reports strong quantitative results compared with adapted baselines such as AlphaCLIP, ReCLIP, FGVP, and CLIP variants, and includes ablations on mask quality, explainability method, and gradient decomposition."
+      ],
+      "weaknesses": [
+        "Novelty is limited: the method is an incremental combination of test-time token optimization, gradient-based explainability, and mask-alignment loss; the core idea of matching an explanation map to a mask is heuristic and insufficiently analyzed theoretically.",
+        "Technical justification for the gradient decomposition is questionable: Eq. (6) effectively drops normalization and other terms when differentiating a cosine-similarity-based objective, so the optimization may not truly minimize the stated loss; no convergence or sensitivity analysis is provided.",
+        "Missing important baselines: simple region-pooling baselines using CLIP patch tokens inside the mask, MaskCLIP, SCLIP, or other training-free localized CLIP methods are not compared, making it unclear whether the gains come from the proposed optimization rather than the mask-aware evaluation setup.",
+        "The comparison to AlphaCLIP and other methods is potentially unfair: different backbones and adapted/reproduced evaluation protocols are mixed, and some baselines may not be optimally reimplemented under the same mask-conditioned setting.",
+        "The localized captioning evaluation uses a non-standard metric (CLIP similarity to ground-truth referring expressions) instead of standard captioning metrics or human evaluation, so the captioning claim is not convincingly supported.",
+        "The diffusion application is only qualitative, without quantitative comparisons or user studies, limiting evidence for the claimed broad applicability.",
+        "Reproducibility is incomplete: key details such as the learning rate for the test-time optimization are not specified, and public code/weights are not clearly provided.",
+        "The 'drop-in replacement' characterization overstates practicality: inference requires optimizing a separate token for each mask via multiple gradient steps, making it significantly more expensive than simple feed-forward alternatives, and the accuracy-vs-runtime trade-off against simple pooling baselines is not demonstrated."
+      ]
+    }
+  },
+  "v2": {
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Addresses a well-motivated and practically relevant problem: producing region-level embeddings from frozen vision-language foundation models, which CLIP-style global alignment does not provide, and doing so in a backbone-agnostic, training-free way.",
+        "The core mechanism is simple and clearly exposed: a learnable embedding token is initialized from the [CLS] token and refined so that its gradient-based explainability map (e.g., LeGrad) matches a query mask under a soft-Dice objective, with an optional regularizer to the global image embedding that explicitly controls the local/global trade-off.",
+        "The evaluation is broad: referring-expression retrieval (PhraseCut, RefCOCO, RefCOCO+), zero-shot region classification (PascalVOC, PascalContext, MSCOCO, OpenImagesV7), localized captioning, and localized diffusion, each evaluated with four CLIP backbones (B/32, B/16, L/14, H/14).",
+        "A useful ablation suite is provided in the appendix: mask-perturbation robustness (erosion/dilation/box-box+SAM masks), choice of explainability method, the influence of the alpha hyper-parameter, convergence in K iterations, runtime/resolution scaling, and multi-object behavior.",
+        "The gradient-decomposition trick (pre-computing the Jacobian of the pooled representation with respect to the activations once and reusing it across optimization steps) is correct and well derived (Appendix I), and the runtime analyses in Tables 5 and 10 show it gives real speed-ups for many masks/iterations.",
+        "Several comparisons are strong and carefully reimplemented (reproduced Crop/MaskedCrop/RedCircle/FGVP and the training-free poolers MaskCLIP/CLIPSurgery/SCLIP), and gains are consistent across backbones rather than being reported for a single model.",
+        "The paper is generally clearly written and organized, and the qualitative examples (Figures 3, 8, 11, 12) are informative about what the learned localized embeddings capture."
+      ],
+      "weaknesses": [
+        "Limited conceptual novelty. The method is, in essence, an inference-time analogue of AlphaCLIP: instead of fine-tuning CLIP on mask-text pairs, a token is optimized so that an attribution/attention map matches the mask. The authors acknowledge that using explainability signals as a differentiable training objective is not new (Chefer et al., 2022; Paiss et al., 2022), and the \"gradient decomposition\" is a straightforward chain-rule consequence of detaching the token from the graph (as the appendix proof itself shows). The contribution is therefore incremental rather than a new problem formulation or a new theoretical insight.",
+        "Important baselines are missing. For region-level / dense CLIP features the paper compares only against MaskCLIP, CLIPSurgery, SCLIP (Table 3), all of which are not mask-conditioned. The strongest and most directly relevant recent methods - CLIPSelf, ProxyCLIP, NACLIP and other self-distillation/dense-CLIP approaches - are absent, even though they report numbers on exactly the VOC/Context/COCO benchmark used in Table 2. Without these the \"SOTA\" claim is not substantiated.",
+        "The comparison protocols are heterogeneous and hard to validate. In Table 1 rows marked with the dagger come from other papers with a different evaluation (pretrained region proposals, prediction counted as a hit if the matched region has IoU > 0.5), rows marked with * are the authors' own reproductions, and different backbones (ViT-L/14@336) appear in the same block as ViT-B/16 rows. Columns are inconsistently populated (top-k for some methods, mIoU/oIoU only for others; e.g., CLIP* has only oIoU for RefCOCO while MaskInversion has Acc@k and mIoU). It is therefore impossible to tell whether the reported \"new SOTA on every dataset\" reflects the method or the protocol, and the paper itself notes that \"the original evaluation settings can vary for different methods\".",
+        "The claim that a training-free method surpasses AlphaCLIP (fine-tuned on millions of mask-text pairs) rests on the authors' own reproduction of AlphaCLIP and on a bespoke evaluation (ground-truth MSCOCO masks as candidates, averaged maximization). No per-baseline hyperparameter tuning is reported, and the paper does not check whether the baselines were re-tuned for the mask-conditioned setting; small details (prompt templates, mask preprocessing, resolution) could easily drive several points.",
+        "The localized-captioning evaluation (Table 6) uses an ad hoc metric: the generated caption is deemed correct if its CLIP text embedding has the highest cosine similarity to the ground-truth referring expression for that mask among other expressions of the same image. No human evaluation, no standard captioning metric (CIDEr/SPICE/BERTScore) and no comparison with image-region-captioning literature is given; the reported 48.4 vs. 20.1 for CLIP is not interpretable as a measure of caption quality and is difficult to relate to prior work.",
+        "The localized-diffusion results are purely qualitative (Figures 3 and 12). There is no quantitative evaluation of region fidelity (e.g., IoU between the generated content and query mask, CLIP-Score, FID, or a user study). Given that a whole application is advertised as one of the method's capabilities, this is insufficient.",
+        "No mechanistic analysis is provided for why a token whose attribution map matches a mask should be semantically aligned with the region. There are no control experiments (random/shuffled/empty masks, random vs. [CLS] initialization, region/mask mismatches) and no study of the structure of the learned LET space. The fact that performance collapses with GradCAM (85.4 with LeGrad vs. 34.6 with GradCAM in Table 8) indicates the method depends critically on one particular explainability method, which weakens the claim of being \"a general method that can be used with any differentiable explainability method\".",
+        "The runtime discussion is incomplete. Table 5 compares only the decomposed vs. vanilla versions of the authors' own method; it does not compare against the essentially free masked-pooling baselines, nor report the per-image time including the initial forward/backward pass. The practical motivation for paying for 10 gradient steps per mask instead of simple pooling is therefore not quantified.",
+        "Reproducibility gaps: the learning rate, the exact LeGrad configuration used (which layers, head aggregation, normalization), the mask binarization/resizing, and the number of gradient steps per dataset are not all specified; no code or model release is mentioned. The Python hyper-parameters (AdamW without a learning rate) cannot be reproduced from the paper alone.",
+        "Claim/evidence mismatch and editorial issues: the abstract and Section 1 promise \"improved results across a range of different applications\" while the diffusion results and the caption metric are qualitative/bespoke; there are duplicated words (\"the gradient gradient-based explainability map\"), inconsistent cross-references (Appendix A refers to \"Sec.4.3\" when discussing the appendix content), an ambiguous sentence about AlphaCLIP (\"demonstrating its ability to excel without the need to fine-tune CLIP\"), and an appendix table (Table 9) that merely describes baselines rather than providing evidence."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Proposes a novel test-time optimization framework, MaskInversion, that learns localized embedding tokens by aligning a frozen backbone's explainability map with a query mask, without fine-tuning the backbone.",
+        "Provides a principled gradient decomposition that makes the inversion efficient and avoids repeated second-order derivative computations, with runtime and scalability analyses.",
+        "Evaluation covers multiple downstream tasks (referring expression retrieval, class retrieval, localized captioning, and localized diffusion) across several datasets and CLIP backbone scales, showing strong gains over training-free baselines and competitive results against fine-tuned methods.",
+        "The method is modular and can be used as a drop-in replacement for the CLIP [CLS] token, enabling localized classification, captioning, and generation in a zero-shot setting.",
+        "Includes useful ablations on mask quality, gradient decomposition, explainability method choice, and the global-local regularization hyperparameter alpha, as well as qualitative visualizations."
+      ],
+      "weaknesses": [
+        "Performance is highly dependent on the choice of explainability method: LeGrad yields 85.4% accuracy on PascalVOC, while GradCAM falls to 34.6% and CheferCAM to 12.6%, which is below the CLIP baseline and undermines the claim that MaskInversion can be used with any differentiable explainability method.",
+        "The localized captioning evaluation is non-standard, relying on CLIP-similarity matching to referring expressions rather than standard captioning metrics or human evaluation, so the reported gains should be interpreted cautiously.",
+        "The method assumes a query mask is available at test time; although the box+SAM experiment is promising, the practical cost and performance loss when masks are imperfect or unavailable are not fully characterized.",
+        "The localized diffusion application is demonstrated only qualitatively, without quantitative metrics or human studies, so its practical benefit remains less substantiated than the retrieval/classification results.",
+        "Some baseline comparisons involve reproduced settings and adapted evaluation protocols, which are clearly noted but still make standardized comparison with all fine-tuned and training-free methods challenging."
+      ]
+    }
+  }
+}

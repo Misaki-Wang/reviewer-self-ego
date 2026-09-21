@@ -1,0 +1,96 @@
+{
+  "v1": {
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Presents a well-motivated approach targeting the core memory-bandwidth bottleneck of long-context LLM autoregressive decoding.",
+        "Introduces mathematically sound, unbiased estimators ($S^2$ANTA) with formal proofs of variance reduction and concentration bounds.",
+        "Addresses the practical GPU implementation challenges of stochastic sampling by designing two custom parallelization strategies: $S^2$ANTA-prop and $S^2$ANTA-flash.",
+        "Demonstrates solid kernel-level performance gains (up to $1.5\\times$ speedup over highly optimized baselines like FlashInfer and FlashDecoding) on an NVIDIA RTX 6000 Ada at $32k$ context length.",
+        "Provides a thorough empirical evaluation across diverse datasets (GSM8K, MMLU, and RULER) alongside interesting structural analyses like layer-wise budget optimization using REINFORCE."
+      ],
+      "weaknesses": [
+        "The memory-bandwidth savings are largely restricted to the autoregressive decoding stage, as the causal prefill stage still requires accessing the union of sampled rows, which quickly covers nearly the entire value matrix.",
+        "While SANTA is mathematically multiplier-free, modern commodity GPUs are heavily optimized for dense matrix multiplications (MACs), meaning the elimination of multiplications does not currently yield additional compute-level speedups on standard hardware.",
+        "The scaling behavior of the required sample budget $S$ for extremely long contexts (e.g., beyond $32k$ up to $1M$ tokens) is not fully explored, leaving it unclear if $S$ must grow to preserve accuracy as sequence lengths scale further."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Innovative Stochastic Approach: Proposes an unbiased stochastic estimator (SANTA) for post-softmax value aggregation during decoding, which replaces expensive matrix multiplications with highly efficient gather-and-add operations.",
+        "GPU-Friendly Parallelization: Successfully tackles the systems challenge of GPU parallelization for stochastic sampling (which normally has a sequential CDF dependency) by introducing two novel kernel designs: S2ANTA-prop and S2ANTA-flash.",
+        "Rigorous Theoretical and Empirical Validation: Backs the methodology with solid mathematical proofs (unbiasedness, variance reduction, and concentration bounds) and demonstrates a practical 1.5x decode-attention kernel speedup on an RTX 6000 Ada GPU at 32k context length while preserving model accuracy.",
+        "Insightful Layer-wise Ablation: Uses RL (REINFORCE) to optimize layer-wise sample budgets, discovering that different transformer layers have significantly different tolerances to stochastic approximation."
+      ],
+      "weaknesses": [
+        "Kernel-Level vs. End-to-End Speedups: The evaluated speedups (1.5x) are reported strictly at the attention-kernel level. While decode steps are memory-bound, a comprehensive end-to-end decode throughput evaluation (e.g., tokens per second) is missing, which would show the ultimate impact of the method when accounting for other model components (MLPs, projections) under Amdahl's Law.",
+        "Limited Prefill Utility: As analyzed in Section 2.2 and Appendix F, SANTA does not offer sparse memory access benefits in the prefill stage because the union of sampled rows across all queries covers almost the entire value matrix. This restricts its benefits exclusively to the autoregressive decoding stage.",
+        "Immaturity of Bernoulli qKT: The proposed Bernoulli qKT for sparsifying the key cache is less developed than the value-cache sampling. It lacks optimized CUDA kernels, introduces some accuracy degradation (unless grouped queries are used with specific modifications), and its performance benefits remain theoretical/forward-looking."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Unbiased attention estimation: Unlike deterministic truncation or pruning methods (such as Top-k, H2O, or Quest) which introduce systematic bias into the attention matrix, SANTA provides an unbiased estimator of the post-softmax value aggregation.",
+        "Hardware-friendly parallel sampling design: The paper addresses a core challenge of implementing stochastic sampling on highly parallel architectures (GPUs) by introducing two novel kernel strategies: S2ANTA-prop (global budget allocation) and S2ANTA-flash (speculative local sampling), breaking the sequential bottleneck of global CDF computation.",
+        "Solid kernel-level performance: The custom CUDA kernels achieve a practical 1.5x decode-step speedup over state-of-the-art backends like FlashInfer and FlashDecoding at 32k-token contexts on modern hardware (RTX 6000 Ada).",
+        "Comprehensive theoretical and empirical evaluation: The authors back their method with solid mathematical proofs of unbiasedness and variance reduction (Appendix A), a vector Bernstein tail bound (Appendix B), and evaluate across multiple benchmarks (GSM8K, MMLU, RULER) on multiple models (Llama-3.1-8B, BitNet 2B).",
+        "Insightful layer-wise budget optimization: Using a REINFORCE-style algorithm to learn per-layer sample budgets provides valuable insights into transformer sensitivity, showing which layers can handle heavy sparsification."
+      ],
+      "weaknesses": [
+        "Lack of end-to-end system throughput evaluation: The speedups reported are strictly kernel-level. Since end-to-end decoding involves key-value projections, feed-forward networks (MLPs), and framework overheads, the real-world throughput improvement in a serving framework (e.g., vLLM) remains unclear and is subject to Amdahl's Law.",
+        "Incomplete benchmarking against other dynamic sparsity baselines: While the authors compare accuracy against Top-k attention, they do not show latency or trade-off curves against other state-of-the-art runtime sparsification methods (such as Quest, SparQ, or H2O) which also target memory-bound decoding.",
+        "Score-stage overhead: Although SANTA sparsifies the value-cache access, the query-key dot product ($qK^T$) must still be fully computed to obtain the attention scores. The proposed Bernoulli $qK^T$ estimator is a promising way to address this, but it lacks an optimized CUDA implementation to demonstrate joint speedups."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "The paper addresses a highly critical bottleneck in long-context Large Language Model (LLM) serving: the memory bandwidth limits of value-cache access during autoregressive decoding.",
+        "Strong hardware-software co-design: the authors do not just propose a mathematical approximation, but implement and optimize custom CUDA kernels ($S^2$ANTA-prop and $S^2$ANTA-flash) that show real-world speedups (up to 1.5x kernel-level and 1.25x end-to-end) over highly optimized exact baselines like FlashInfer and FlashDecoding.",
+        "Rigorous theoretical backing: the authors provide mathematical proofs for the unbiasedness of the estimators, variance reduction guarantees for stratified sampling, and a dimension-free concentration bound.",
+        "Extensive and clean empirical validation: evaluations span multiple standard benchmarks (RULER, LongBench v2, MMLU, GSM8K) on Llama-3.1-8B-Instruct with 32k context, showing that the model can recover full attention accuracy at competitive sampling budgets.",
+        "Creative analytical additions: the paper includes a layer-wise sensitivity study using a one-hot stochastic attention diagnostic ($S=1$) and uses reinforcement learning (REINFORCE) to learn optimal layer-wise budgets, which matches the diagnostics perfectly."
+      ],
+      "weaknesses": [
+        "The speculative local sampling method ($S^2$ANTA-flash) suffers from significant 'sample waste' when attention is diffuse, requiring a vastly larger budget ($S=2048$) than the proportional method ($S=128$) to match baseline accuracy.",
+        "The complementary score-stage technique (Bernoulli $qK^T$) is evaluated mostly in PyTorch simulations and is primarily demonstrated on a heavily quantized model (BitNet 2B), leaving its efficiency on standard precision (bf16/fp16) models less explored in terms of hardware-level speedups.",
+        "On modern hardware, non-coalesced sparse gather-and-add memory accesses can be highly inefficient compared to dense tensor-core operations. Although the authors achieve solid speedups, the hardware limitations of gather operations on GPUs are a persistent challenge that could be discussed in greater detail."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "The paper successfully bridges theory and systems, presenting a mathematically rigorous stochastic estimator (SANTA) alongside highly optimized CUDA kernels ($S^2$ANTA-prop and $S^2$ANTA-flash).",
+        "It addresses a critical bottleneck in modern LLM serving (KV cache memory bandwidth during long-context decode) through value-stage sparsification, demonstrating practical 1.5x kernel-level and 1.25x end-to-end speedups over state-of-the-art backends (FlashInfer and FlashDecoding).",
+        "Replacing post-softmax float multiplications with integer-like gather-and-add offers a compelling path toward multiplier-free, energy-efficient attention computation, which is highly valuable for emerging specialized AI hardware.",
+        "The empirical evaluation is highly thorough, testing across multiple architectures (Llama-3.1, DeepSeek, BitNet), various benchmarks (RULER, LongBench v2, GSM8K, MMLU), and including detailed comparison with deterministic baselines like top-k.",
+        "The paper is exceptionally well-written, with clean diagrams, comprehensive appendices, explicit pseudocode for both kernels, and transparent descriptions of the microbenchmarking protocols."
+      ],
+      "weaknesses": [
+        "The systems evaluation and speedups are restricted to a single desktop workstation GPU (NVIDIA RTX 6000 Ada). Performance behaviors, scaling, and actual latency savings on datacenter-class GPUs (like H100 or A100) with highly optimized HBM or under large batch sizes are not thoroughly investigated.",
+        "The $S^2$ANTA-flash variant, which is designed to avoid global synchronization, suffers from massive 'sample waste,' requiring a significantly higher sample budget ($S=2048$ vs. $S=128$) to recover baseline accuracy, which limits its practical benefit.",
+        "While Bernoulli $qK^T$ is proposed as a complementary method for sparse key-feature access, it lacks a dedicated GPU kernel implementation, leaving its actual hardware acceleration benefits for the score-stage speculative."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Clear Practical Significance: Autoregressive decoding of long-context Transformer models is heavily memory-bandwidth bound. SANTA directly targets this bottleneck in the post-softmax value-aggregation stage, successfully reducing value-cache reads by sampling $S \\ll n_k$ indices.",
+        "Strong Theoretical Foundations: The paper frames value-aggregation as a categorical sampling problem, providing unbiased estimators with $1/S$ variance scaling. It introduces stratified ($S^2\\text{ANTA-strat}$) and systematic ($S^2\\text{ANTA-sys}$) sampling to systematically reduce variance.",
+        "Hardware-Friendly Design & Fused Kernels: The authors implement custom CUDA kernels ($S^2\\text{ANTA-prop}$ and $S^2\\text{ANTA-flash}$) to parallelize the stochastic sampling process on GPUs. They achieve up to 1.5× decode attention-kernel speedup over highly optimized baselines (FlashInfer and FlashDecoding) and up to 1.25× end-to-end latency speedup on Llama-3.1-8B.",
+        "Honest and Thorough Empirical Validation: Evaluation spans multiple long-context benchmarks (RULER, LongBench v2) as well as general reasoning benchmarks (GSM8K, MMLU). The paper shows that at accuracy-matching budgets, the speedups are real while maintaining baseline performance.",
+        "Ablations and Advanced Insights: The inclusion of layer-wise budget optimization using REINFORCE is highly innovative. It reveals which layers are sensitive to stochastic approximations and yields better accuracy-efficiency trade-offs than uniform budgets."
+      ],
+      "weaknesses": [
+        "Limited Benefit in Prefill Phase: As analyzed in Section 2.2 and Appendix F, the sparse memory access benefits of SANTA do not easily translate to the prefill phase due to the union of sampled rows across multiple queries quickly covering almost the entire value matrix. Thus, it remains a specialized decoding-only optimization.",
+        "Lack of Hardware Kernels for Bernoulli $qK^T$: While the Bernoulli $qK^T$ sampling is an interesting complementary contribution for score-stage key-access sparsification, it is only evaluated via PyTorch reference simulations, with no optimized CUDA kernels demonstrating actual speedups.",
+        "Hardware Evaluation Scope: The end-to-end and kernel-level latency measurements are evaluated primarily on an NVIDIA RTX 6000 Ada GPU. Testing on datacenter GPUs like H100 or A100 would further strengthen the claims regarding practical enterprise deployments.",
+        "Sample Waste in $S^2\\text{ANTA-flash}$: The speculative per-tile sampling approach in $S^2\\text{ANTA-flash}$ requires a significantly larger sample budget ($S=2048$ vs $S=128$ for $S^2\\text{ANTA-prop}$) to match baseline accuracy, due to sample waste on tiles with low attention mass."
+      ]
+    }
+  }
+}

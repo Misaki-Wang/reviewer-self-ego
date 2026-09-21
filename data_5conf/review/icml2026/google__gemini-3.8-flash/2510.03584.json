@@ -1,0 +1,96 @@
+{
+  "v1": {
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Addresses an important and practical bottleneck in video understanding with VLMs: uniform sampling often suffers from temporal redundancy and visual noise, whereas existing selectors typically enforce fixed frame budgets or lack model portability.",
+        "The dual-head architecture and four-stage curriculum training strategy (distilling cross-modal alignment from SigLIP, temporal salience via leave-one-out loss, dynamic budget optimization, and fine-tuning on ground-truth keyframes) is well-conceived and systematically ablated.",
+        "Introduction of FrameOracle-41K: mining minimal sufficient keyframes via an iterative multimodal agent and validating them with a 3-VLM consensus filter is a valuable dataset contribution for video keyframe selection.",
+        "Thorough empirical evaluation across five diverse VLM architectures (including both open-source models and GPT-4o) and six major video benchmarks, demonstrating consistent compute and latency reductions without compromising task accuracy."
+      ],
+      "weaknesses": [
+        "The method still relies on an initial uniform pre-sampling step ($N=16$ or $N=64$) before selection, meaning temporal coverage in very long-form videos (e.g., 30+ minutes or hours) remains constrained by the initial candidate pool resolution.",
+        "Offline training cost for supervisory signal generation is non-trivial: Stage 2 relies on leave-one-out (LOO) forward passes across frames for 300K instances, which requires substantial compute despite being an offline procedure.",
+        "In Table 2, the adaptive $K$ head is disabled to match the fixed 8-frame budget of prior plug-and-play selectors. A direct comparison against other adaptive or agent-based frame selectors (e.g., AKeyS, VCA) in terms of both end-to-end latency/runtime and accuracy trade-offs would provide a more complete picture of the efficiency gains."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Addresses an important and practical problem in video-language understanding: dynamically selecting both which frames are informative and how many frames are necessary for a given query, rather than enforcing a fixed frame budget.",
+        "Broad empirical evaluation across five different vision-language models (Qwen2.5-VL, LLaVA-OneVision, LLaVA-Video, VideoLLaMA3, and GPT-4o) and six established video benchmarks covering both short and long video contexts.",
+        "Comprehensive computational profiling in Table 3 that accounts for visual encoder (DINOv2) and selector module overheads alongside downstream VLM FLOPs, visual token counts, and end-to-end latency.",
+        "Clear paper structure and detailed documentation of prompts and training hyperparameters in the appendix."
+      ],
+      "weaknesses": [
+        "Misleading characterization of pseudo-labels as ground truth: The paper repeatedly claims to provide the first dataset with 'ground-truth annotations' specifying the 'minimal set of frames' (FrameOracle-41K). However, these annotations are generated entirely synthetically via an iterative API agent (Qwen2.5-VL-72B) and verified by three VLMs. They represent model-derived pseudo-labels rather than human-verified ground truth, and the greedy heuristic does not guarantee true minimality.",
+        "Confounded comparison between 64-to-13.9 FrameOracle and 16-frame baselines: In Table 1, the +1.4% improvement for the 64-frame selector is compared against baselines that only sample 16 frames. Because FrameOracle observes 64 frames of the video to select 13.9, it has access to 4x denser temporal context. A crucial baseline—evaluating the downstream VLMs directly on 64 uniform frames or comparing with equivalent downsampling baselines from 64 frames—is omitted.",
+        "High training complexity and resource intensity: The proposed four-stage curriculum requires massive training resources (hundreds of GPU hours on 8xH100 systems across multiple large datasets) for an auxiliary selector module. In the ablation (Table 4), Stage 1 (text-visual alignment via SigLIP distillation) significantly degrades performance across almost all benchmarks relative to random selection (e.g., Perception drops from 65.0% to 60.3%, MLVU drops from 56.7% to 51.3%), calling into question the necessity and stability of this multi-stage setup.",
+        "Marginal or inconsistent gains over existing plug-and-play selectors: In Table 2, when evaluated at a fixed 8-frame budget, FrameOracle shows modest improvements on some datasets but is outperformed by existing heuristic methods such as KFC on MLVU (62.9% vs. 65.0% on LLaVA-OneVision-7B; 63.4% vs. 66.9% on LLaVA-Video-7B), despite FrameOracle's significantly higher training and dataset curation cost.",
+        "Potential evaluation bias / data contamination: FrameOracle-41K is filtered using Qwen2.5-VL-72B, LLaVA-OneVision-72B, and LLaVA-Video-72B. Downstream evaluations then test on models from the exact same families (Qwen2.5-VL-3B, LLaVA-OneVision-7B, LLaVA-Video-7B). This shared inductive bias may inflate reported transferability across these architectures."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Addresses an important and practical problem in multimodal video understanding: dynamically predicting both which frames are relevant to a query and the minimal number of frames required, avoiding the inefficiency and dilution of fixed-budget frame selection.",
+        "Introduces FrameOracle-41K, a dataset of ~41k video-QA pairs annotated with minimal sufficient keyframe sets constructed via iterative agent exploration and cross-verified with three independent 72B-scale VLMs.",
+        "The proposed four-stage curriculum training strategy is logically designed, progressively transitioning from weak cross-modal distillation (SigLIP) and VLM loss degradation to direct supervised fine-tuning on FrameOracle-41K.",
+        "Thorough empirical evaluation across five diverse downstream VLMs (including proprietary GPT-4o) and six established benchmarks, demonstrating strong generalizability as a plug-and-play module without requiring backbone co-training.",
+        "Clear ablation studies (e.g., Table 4) that validate the additive benefit of each training stage in refining ranking and budget prediction."
+      ],
+      "weaknesses": [
+        "The 64-to-13.9 frame configuration in Table 1 is compared against the 16-frame baseline rather than a dense 64-frame uniform sampling baseline on the downstream VLMs, leaving it somewhat unclear how much accuracy (if any) is retained vs. lost compared to full 64-frame inference.",
+        "The method still relies on an initial uniform candidate pool (e.g., N=16 or N=64); for very long videos (such as tens of minutes or hours), crucial transient moments may already be missed during the initial pre-sampling step before FrameOracle operates.",
+        "While the multi-VLM filtering pipeline for FrameOracle-41K is sensible, the paper lacks human validation or spot-checking to assess annotation quality, potential VLM hallucination shortcuts, and whether the mined sets are genuinely minimal in human judgment.",
+        "The training curriculum and data generation pipeline are computationally heavy, requiring substantial H100 compute across four stages in addition to large-scale agent exploration using 72B models."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Addresses a fundamental challenge in multimodal video understanding by jointly learning 'what to see' (frame relevance ranking) and 'how much to see' (dynamic frame budget prediction) in a lightweight, plug-and-play module.",
+        "Introduces FrameOracle-41K, a novel and well-constructed dataset providing minimal sufficient keyframe annotations for VideoQA. The two-stage automated generation and filtering pipeline is rigorous, backed by solid cross-model validation and a thorough human verification study on 4,000 samples (94% agreement, 93.3% accuracy).",
+        "Comprehensive experimental evaluation across five contemporary vision-language backbones and six established video benchmarks (covering both short and long video understanding), demonstrating consistent accuracy retention or improvements alongside significant reductions in latency, FLOPs, and visual token count.",
+        "Extensive and insightful ablation studies (Appendices F.1–F.7), effectively validating the necessity of the four-stage training curriculum, the decoupling of the Rank and K heads, teacher backbone independence, and comparisons against token-budgeting and long-video memory compression methods."
+      ],
+      "weaknesses": [
+        "The multi-stage training pipeline is complex and computationally demanding: generating leave-one-out (LOO) targets in Stage 2 and testing multiple frame budgets in Stage 3 across large corpora incurs heavy offline computation and multiple training phases on 8×H100 GPUs.",
+        "FrameOracle remains constrained by an initial uniform candidate pool (N=16 or N=64 frames). For very long videos, critical events that fall completely outside this initial uniform temporal grid cannot be retrieved without relying on multi-segment heuristics.",
+        "Lack of an explicit sensitivity analysis / Pareto frontier for the cost-penalty hyperparameter lambda_k in Stage 3 (Equation 2). Demonstrating how continuous adjustment of lambda_k regulates the trade-off between frame count and downstream task accuracy would provide greater operational insight for practical deployment."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Addresses an important and practical problem in video-language modeling: moving beyond heuristic fixed-budget sampling toward dynamically predicting both frame relevance ('what to see') and the required frame budget ('how much to see') in a plug-and-play manner.",
+        "Introduces FrameOracle-41K, a valuable resource providing minimal keyframe annotations across ~41K video-question pairs, supported by rigorous multi-VLM consensus filtering and extensive human verification (4,000 samples, 94% agreement).",
+        "Presents a well-motivated multi-stage training curriculum that resolves optimization instability between frame ranking and frame-count prediction, supported by insightful ablations (e.g., verifying collapse under joint optimization in Table 10).",
+        "Comprehensive empirical evaluation across five VLM backbones (LLaVA-Video, LLaVA-OneVision, VideoLLaMA3, Qwen2.5-VL, Qwen3-VL) and six distinct benchmarks, showing consistent compute/latency savings and competitive accuracy gains alongside paired bootstrap significance tests."
+      ],
+      "weaknesses": [
+        "Reliance on a pre-sampled candidate pool ($N=16$ or $N=64$): in hour-scale videos (such as in MLVU or HourVideo), initial uniform downsampling can cause critical temporal events to fall between frames before FrameOracle can even evaluate them. While the segment-wise heuristic in Appendix F.4 helps, native long-context or continuous-time candidate exploration remains unaddressed.",
+        "The training pipeline is relatively intricate and expensive, requiring four distinct stages (SigLIP distillation, leave-one-out VLM loss estimation, expected value regression, and SFT on FrameOracle-41K) totaling over 100-200 GPU hours across 8xH100s per variant.",
+        "In the comparative analysis with existing keyframe selection methods (Table 2), FrameOracle's adaptive K prediction is disabled to match fixed budgets ($K=8$). The paper would benefit from evaluating adaptive-K against standard threshold-based stopping or top-$p$ selection heuristics on existing scoring baselines."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Addresses an important and practical problem in multimodal video reasoning: moving beyond fixed-budget heuristic subsampling to jointly learn both frame relevance ('what to see') and dynamic frame budgeting ('how much to see') in a plug-and-play, backbone-agnostic manner.",
+        "Valuable dataset contribution with FrameOracle-41K: providing explicit, verified keyframe subsets and minimal-sufficiency counts for VideoQA. The dataset generation pipeline is rigorous, featuring cross-model verification across three frontier 72B VLMs and human validation on 4,000 samples (demonstrating 94% inter-annotator agreement and 93.3% accuracy).",
+        "Comprehensive empirical evaluation: the method is evaluated across five distinct VLM backbones and six established benchmarks spanning both short and long video reasoning, backed by statistical significance testing via bootstrap resampling.",
+        "Lightweight and practical design: FrameOracle represents frames as single tokens during fusion, resulting in minimal compute overhead (~10% of total inference FLOPs) and delivering substantial latency and visual token reductions (e.g., ~40% latency reduction when pruning 16 frames to ~10.4).",
+        "Thorough ablation studies in the appendix addressing crucial design aspects, including curriculum stage contributions, the instability of joint head optimization, teacher backbone transferability, segment-wise inference for long videos, and comparisons against token-level budgeting and memory compression methods."
+      ],
+      "weaknesses": [
+        "High training pipeline complexity: The four-stage curriculum requires substantial training effort and intermediate data generation (e.g., leave-one-out downstream loss estimation in Stage 2 and full-budget sweep evaluations in Stage 3), which complicates training and reproduction compared to end-to-end approaches.",
+        "Dependency on uniform candidate subsampling: FrameOracle operates on an initial pre-sampled frame pool (e.g., N = 16 or 64). For hour-long videos (such as instances in MLVU), critical events may be missed prior to selection if the candidate pool is too sparse, requiring heuristic segmentation workarounds at inference time.",
+        "Potential synthetic data bias: Although Stage II multi-model consensus and human spot-checking mitigate noise, the automatic annotation pipeline relies heavily on Qwen2.5-VL-72B and LLaVA series models, which may encode specific biases regarding what visual evidence is deemed necessary or sufficient.",
+        "Modest performance delta in low-budget regimes: When starting from 16 frames, FrameOracle primarily functions as an efficiency filter (preserving baseline accuracy while reducing frame count to ~10.4) with minimal accuracy gains on benchmarks like MLVU or Video-MME; notable accuracy improvements (+1.4% to +1.5%) primarily emerge when scaling candidate pools to 64 or 128 frames."
+      ]
+    }
+  }
+}

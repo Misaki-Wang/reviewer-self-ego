@@ -1,0 +1,122 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 6,
+      "strengths": [
+        "Addresses a timely and practically important problem: making open-source diffusion LLMs (LLaDA, Dream) actually fast, closing the gap with AR models in deployment settings.",
+        "Clear identification of two root causes of slow/low-quality inference: (i) lack of KV cache due to bidirectional attention, and (ii) quality degradation from conditional-independence violations in parallel decoding.",
+        "The proposed techniques are simple, training-free, and composable: block-wise approximate KV caching (with the DualCache prefix+suffix variant) and confidence-thresholded parallel decoding, both well-motivated by empirical evidence (cosine-similarity heatmaps of KV activations across steps).",
+        "Theorem 1 provides a formal justification for when greedy parallel decoding with independent marginals matches greedy sequential decoding in the high-confidence regime, with tightness analysis and Lp/TV/KL divergence bounds; the appendix proof is largely correct and honest about idealized assumptions (Remark 1).",
+        "Comprehensive empirical evaluation: two diffusion LLMs, four standard benchmarks (GSM8K, MATH, HumanEval, MBPP), varying generation lengths (256/512/1024), extensive ablations (block size, threshold vs. fixed tokens-per-step, prefix vs. dual cache, prefill length), and code/project page for reproducibility.",
+        "Well-written and well-organized paper; clear figures (Fig. 1 breakdown of contributions, Fig. 5 threshold analysis) that isolate the effect of each component."
+      ],
+      "weaknesses": [
+        "Conceptual novelty is moderate: block-wise KV reuse is a natural adaptation of prefix caching to bidirectional attention (the paper itself notes Block Diffusion [1] already reuses decoded-block KVs), and confidence-thresholded unmasking is a simple heuristic relative to LLaDA's top-k; the theory, while clean, justifies a fairly obvious greedy criterion under strong assumptions.",
+        "No comparison to optimized AR baselines (e.g., LLaMA3-8B with vLLM/FlashAttention) in wall-clock terms; the paper claims to 'close the performance gap with autoregressive models' but only reports speedups relative to vanilla diffusion LLMs. The LLaMA3-3B point in Fig. 1a is anecdotal.",
+        "Experiments use single-batch inference on A100 without serving-framework optimizations; throughput numbers may not reflect realistic deployment and the 27.6x figure is achieved only under long prefill (8-shot) and long generation (1024), settings highlighted but not representative of all use cases.",
+        "The KV cache approximation is evaluated mainly by cosine-similarity visualizations and end-task accuracy; no direct measurement or bound of approximation error, no perplexity/likelihood analysis, and no study of failure modes on longer-context or open-ended generation tasks (only the four benchmarks).",
+        "Hyperparameters (block size 32, threshold 0.9) appear selected per benchmark/model; sensitivity is studied but cross-domain robustness (e.g., chat quality, MT-Bench) is not evaluated beyond one trivial case-study prompt in Appendix B, which adds little scientific value.",
+        "Theorem 1 assumes a well-defined joint p over simultaneously predicted tokens, which MDMs do not strictly satisfy (acknowledged in Remark 1), and the practical consequence of the epsilon <= 1/(n+1) condition on actual decoding dynamics is not analyzed quantitatively.",
+        "Some accuracy drops are non-trivial (e.g., GSM8K 256: 79.3 -> 78.5 with cache; MATH Dream 38.4 -> 37.6), and the paper's claim of 'negligible performance drop' is somewhat stronger than the evidence in the worst settings."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Practically important problem: accelerating inference for open-source diffusion LLMs (LLaDA, Dream) is timely and relevant to the field.",
+        "Clean, training-free combination of two complementary techniques (block-wise approximate KV cache and confidence-aware parallel decoding), with a DualCache variant that caches both prefix and suffix activations.",
+        "Strong empirical speedups (up to ~27.6x end-to-end) across two models and four standard benchmarks (GSM8K, MATH, HumanEval, MBPP), evaluated with a standardized harness (lm-eval), with mostly minor accuracy degradation.",
+        "Useful ablations: cache block size, confidence threshold, prefix vs. dual cache, generation/prefill length scaling, and comparison against fixed tokens-per-step baselines; empirical KV-similarity heatmaps motivate the cache approximation.",
+        "Theoretical justification (Theorem 1) is provided for when greedy parallel decoding with independent marginals matches sequential decoding, with tightness analysis and divergence bounds in the appendix.",
+        "Code and project page are released, supporting reproducibility."
+      ],
+      "weaknesses": [
+        "Limited novelty of the individual components. Confidence-threshold token selection is a small step beyond LLaDA's existing top-k confidence remasking (essentially replacing a fixed K with a threshold), and block-wise KV caching closely mirrors the block diffusion approach [1] that the paper itself cites as enabling KV reuse for previously decoded blocks. The DualCache suffix-caching extension is a straightforward corollary.",
+        "The approximate KV cache is justified only empirically (cosine similarity heatmaps) with no formal error analysis tying activation-similarity to output-quality bounds; the method is a heuristic approximation whose failure modes (e.g., long blocks, high-entropy distributions, sudden context shifts) are not characterized.",
+        "Theorem 1, while correct, is elementary (Bonferroni/union-bound style) and its condition epsilon <= 1/(n+1) is a worst-case guarantee that is vacuous in practice for realistic n (e.g., n=32 blocks), so the 'theoretical justification' is weaker than claimed; Remark 1 concedes the joint distribution assumption may not even hold for MDMs.",
+        "Missing comparisons with other acceleration baselines for diffusion LLMs, e.g., dLLM-Cache and other caching/approximation methods for masked diffusion models, or distillation-based approaches; the speedup comparison is essentially only against the vanilla models and internal ablations.",
+        "Some accuracy drops are non-trivial (e.g., +Parallel alone drops GSM8K from 79.3 to 69.2 at length 256; HumanEval and MBPP show several-point drops), which weakens the 'negligible quality degradation' narrative; the threshold/block-size hyperparameters appear tuned per benchmark without a principled selection rule.",
+        "Evaluation is limited to a single A100, batch size 1, and short generation lengths (up to 1024); throughput claims under batching, serving workloads, or larger models are untested, and hardware/framework dependence of the speedups is not discussed.",
+        "The case study (Appendix B) uses a single trivial arithmetic prompt repeated across settings, adding little evidentiary value."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Timely and significant problem: enabling KV caching and safe parallel decoding for masked diffusion LLMs directly addresses the two main obstacles to practical deployment of Diffusion LLMs, and the paper is among the first to tackle both in a unified, training-free framework.",
+        "Technically sound core ideas: the block-wise approximate KV cache (with prefix-only and DualCache variants) is well-motivated by empirical cosine-similarity analysis of activations across inference steps (Figure 3), and the confidence-aware parallel decoding is supported by a formal theorem characterizing when greedy parallel decoding matches sequential decoding, with a tightness argument and divergence bounds.",
+        "Strong empirical results: up to 27.6x end-to-end speedup with minimal accuracy loss (within 1-2 points), demonstrated across two model families (LLaDA, Dream), four standard benchmarks (GSM8K, MATH, HumanEval, MBPP), and multiple generation/prefill lengths; the component ablations (Table 1, 2, 3, 4) cleanly isolate the contribution of each mechanism.",
+        "Good ablation coverage: cache block size, confidence threshold, prefill/generation length, dynamic-vs-fixed token-per-step comparison, and qualitative case studies all support the design choices.",
+        "Reproducibility and practical value: code and project page are released, evaluation uses the standard lm-eval harness, and the method is training-free, making adoption straightforward for the community."
+      ],
+      "weaknesses": [
+        "The KV cache approximation is heuristic; beyond the cosine-similarity visualizations, there is no formal bound or quantitative error analysis on how cached activations drift, and the accuracy drops (e.g., GSM8K 79.3 to 78.5, MATH degradation in some settings) are acknowledged but not deeply analyzed.",
+        "Theorem 1's conditions are quite restrictive (per-token confidence epsilon <= 1/(n+1)), and Remark 1 concedes the true joint may not be well-defined in MDMs; the theoretical guarantee therefore has limited direct applicability to the actual decoding regime, functioning more as intuition than a guarantee for the deployed threshold (e.g., 0.9).",
+        "Comparison with closely related/concurrent acceleration approaches for diffusion LLMs (e.g., block diffusion [1], distillation-based or cache-free NAR methods) is mostly limited to internal ablations; a direct head-to-head against at least one external acceleration baseline is missing.",
+        "Evaluation is restricted to batch size 1 on a single A100 and two ~7B models; throughput claims under batching, larger models, or serving workloads (where the speedup profile could change) are untested.",
+        "Some reported gains depend on long prefill/long generation settings (e.g., the 27.6x figure requires 8-shot prompts and 1024-token generation), so headline numbers may overstate typical-case benefits.",
+        "Writing has minor issues (e.g., duplicated 'Curse of Parallel Decoding' content between Section 2 and 3, occasional grammatical slips), and hyperparameter sensitivity across tasks (block size 4-32, threshold 0.5-1.0) suggests per-task tuning may be needed."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 8,
+      "strengths": [
+        "Addresses a timely and important problem: practical inference acceleration of open-source diffusion LLMs (LLaDA, Dream), where the gap to autoregressive models is well-documented.",
+        "Both proposed techniques are training-free and practically deployable: (1) a block-wise approximate KV Cache with prefix and dual (bidirectional) caching variants tailored to bidirectional attention, and (2) confidence-aware parallel decoding with threshold and factor-based variants.",
+        "Provides theoretical grounding (Theorem 1) for when parallel decoding via product-of-marginals is equivalent to sequential decoding under high confidence, with a tightness argument and divergence bounds; the factor-based decoding strategy is directly derived from the theory.",
+        "Comprehensive empirical evaluation: two text models (LLaDA, LLaDA-1.5, Dream), one multimodal model (LLaDA-V), four text benchmarks plus two multimodal benchmarks, varying generation lengths, block sizes, thresholds, batch sizes, and prefill lengths; large reported speedups (up to 27.6x end-to-end) with small accuracy degradation.",
+        "Good ablation and analysis: KV activation cosine-similarity heatmaps justifying cache reuse, threshold vs. factor strategy comparison, parallel token count dynamics over decoding steps, and honest discussion of limitations (e.g., difficulty matching LLaMA at large batch sizes).",
+        "Code and project page released, supporting reproducibility."
+      ],
+      "weaknesses": [
+        "The core ideas are largely heuristic engineering; the block-wise KV cache concept closely resembles the caching scheme in Block Diffusion [1], which is discussed only briefly in related work. A more careful differentiation (e.g., why the approximation works for models not trained block-wise) would strengthen the novelty claim.",
+        "The theoretical result relies on an idealized, well-defined joint distribution that real MDMs may not satisfy (acknowledged in Remark 1), so the worst-case guarantees only loosely connect to actual model behavior; the practical benefit of the factor-based strategy over simple thresholding is modest and comes with a 1-3% accuracy cost.",
+        "Evaluation focuses on accuracy metrics on four benchmarks; no evaluation of open-ended generation quality (e.g., perplexity, MT-Bench, human evaluation), where parallel decoding and cached approximations might have different effects. Absolute throughput numbers (tens of tok/s at batch size 1) remain modest versus commercial systems.",
+        "Some accuracy drops are non-trivial in certain settings (e.g., LLaDA-V MathVista drops from 59.2 to 56.6; MBPP 512 from 55.6 to 55.2 but with cache-only dropping to 53.8), and the paper sometimes describes degradation as 'negligible' when it is 1-3 points.",
+        "Minor presentation issues: several typos (e.g., 'hgiher', 'non-trival', 'langauge'), and some table inconsistencies/mislabels (e.g., speedup annotations in Table 11 and Figure 8) that could confuse readers.",
+        "Main results use single GPU and batch size 1; throughput vs. batch size analysis appears only in the appendix and shows diffusion LLMs still lag AR models in compute-bound regimes."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 6,
+      "strengths": [
+        "Practical and relevant problem: enabling KV caching and parallel decoding for masked diffusion LLMs addresses the two most cited obstacles to real-world diffusion LLM deployment, and a training-free solution is immediately usable by practitioners.",
+        "Comprehensive empirical evaluation: two model families (LLaDA, Dream), an instruction-tuned variant (LLaDA-1.5), a multimodal model (LLaDA-V), four text benchmarks plus two multimodal ones, and multiple ablations (block size, threshold, refresh interval, generation/prefill length, batch size).",
+        "The paper provides some theoretical grounding (Theorem 1) for when parallel decoding of high-confidence tokens is safe, including tightness of the epsilon <= 1/(n+1) bound and KL/TV divergence bounds, which is more than most inference-acceleration papers attempt.",
+        "Significant and reproducible reported gains: up to 27.6x end-to-end speedup with accuracy within 1-2 points, with public code and project page supporting reproducibility.",
+        "Honest reporting of limitations in places, e.g., the batch-size analysis (Section C.5) showing PrefixCache loses to LLaMA at large batch sizes and that diffusion LLMs remain compute-bound.",
+        "The DualCache extension (caching suffix as well as prefix tokens) is a sensible, well-motivated refinement, and the block-size/refresh-interval sensitivity analysis for LLaDA-V is a useful practical guide."
+      ],
+      "weaknesses": [
+        "The KV cache approximation is justified only empirically (cosine-similarity heatmaps) rather than theoretically; high cosine similarity of KV activations does not directly bound the error in logits or sampling decisions, and the approximation error compounds across blocks and layers. No analysis of when the approximation fails (e.g., long blocks, low-confidence regimes).",
+        "The confidence-threshold parallel decoding strategy is technically simple: it replaces LLaDA's top-K selection with a threshold. The main theorem validates a scenario (all n tokens have confidence > 1-epsilon with epsilon <= 1/(n+1)) that essentially never holds in practice, and the authors concede in Remark 1 that MDMs do not satisfy the well-defined joint PMF assumption. The gap between theory and the deployed heuristic (threshold = 0.9) is acknowledged only loosely.",
+        "Limited comparison to concurrent/alternative approaches: Block Diffusion [1] directly enables KV caching in diffusion LMs (with training), and no head-to-head accuracy/throughput comparison is given; other parallel-decoding or cache methods for masked diffusion LMs are discussed in related work but not benchmarked.",
+        "Some headline claims are conditioned on favorable settings: the 27.6x figure requires 8-shot prefill and 1024-token generation; under more standard settings speedups are 3-8x, and at large batch sizes the method cannot match AR throughput, which should be foregrounded rather than confined to an appendix.",
+        "Accuracy degradation is not uniformly negligible: MathVista drops 59.2 -> 56.6, DualCache costs ~2-3 points on several GSM8K/MATH settings, and factor decoding trades 1-3% accuracy for speed; no statistical significance or error bars are reported for accuracy.",
+        "Evaluation omits open-ended generation quality and perplexity/likelihood-based evaluations (MT-Bench is cited but never used); the benchmark suite is confined to math/code tasks where answer extraction makes 'no accuracy loss' easier to claim.",
+        "Writing quality issues undermine polish: typos ('hgiher', 'non-trival', 'langauge', 'LLAda-V'), inconsistent table references (text cites Table 9 where Table 3 is shown), duplicated 'Step 4' labels in the proof, and the Figure 1c annotation mismatch (13.3x labeled for Parallel, 2.1x for DualCache) is confusing.",
+        "The factor-based decoding strategy, presented as theoretically grounded, is evaluated only against fixed token-per-step baselines on a single benchmark (GSM8K) in the main paper, with MATH relegated to the appendix; the ablation scope for the second contribution is thin relative to the cache ablations."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Addresses a timely and important problem: closing the practical inference gap between open-source diffusion LLMs (LLaDA, Dream) and autoregressive models, which is highly relevant given the recent surge of interest in diffusion-based text generation.",
+        "Two well-motivated, complementary contributions: (1) a block-wise approximate KV Cache with prefix and suffix (DualCache) reuse designed specifically for bidirectional attention, and (2) confidence-aware parallel decoding with a global threshold/factor strategy, both training-free and broadly applicable.",
+        "The theoretical analysis (Theorem 1) is a genuine strength: it characterizes when greedy parallel decoding with product-of-marginals matches joint decoding in the high-confidence regime, provides tightness of the bound, and directly motivates the factor-based decoding rule — moving the confidence-threshold heuristic beyond pure heuristics.",
+        "Comprehensive and convincing evaluation: multiple models (LLaDA, LLaDA-1.5, Dream, multimodal LLaDA-V), four mainstream benchmarks plus multimodal benchmarks, two generation lengths, ablations over block size, threshold, factor, prefill/generation length, and batch-size comparisons against AR baselines (LLaMA). Speedups of 5.7×–27.6× with typically <2-point accuracy loss are well supported by Tables 1–5 and Figure 1.",
+        "Strong empirical validation of the KV cache approximation itself (Figure 3 cosine-similarity heatmaps) and a thoughtful analysis of limitations (compute-bound behavior at large batch sizes, block-size sensitivity of LLaDA-V with a refresh-based workaround).",
+        "Good reproducibility: code and project page are released, standardized lm-eval evaluation, and hardware/hyperparameters are clearly specified."
+      ],
+      "weaknesses": [
+        "The approximate KV Cache is justified only empirically (cosine similarity) and lacks any formal error bound or theoretical guarantee; the accuracy-impact of this approximation could degrade on distributions or tasks beyond those tested.",
+        "Theorem 1 holds for an idealized, coherent joint distribution p_θ, which the authors themselves concede MDMs may not satisfy (Remark 1); thus the theory only loosely supports the practical decoding rule, and the threshold/factor hyperparameters still require tuning per task/model.",
+        "Some results show non-trivial accuracy degradation when pushing speedups (e.g., LLaDA-V MathVista drops from 59.2 to 56.6; factor decoding sacrifices 1–3% accuracy for 40–50% higher throughput), and there are internal inconsistencies (e.g., Table 11 MATH-256 factor row shows 78.3 with a 32.0 accuracy), which should be clarified.",
+        "No comparison against alternative acceleration approaches for diffusion LLMs (e.g., distillation-based or block-diffusion-style methods) — the baseline set is limited to the vanilla models plus the paper's own component ablations.",
+        "Presentation issues remain: typos ('hgiher', 'non-trival', 'langauge'), a few figure/table inconsistencies, and the case study (Section B) is anecdotal with a single prompt."
+      ]
+    }
+  }
+}

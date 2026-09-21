@@ -1,0 +1,92 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Strong theoretical motivation demonstrating why DPO-aligned models inherit SFT reference model biases, and showing how decoding with the implicit token-level reward can bypass this issue.",
+        "Thorough and extensive empirical evaluation across multiple datasets (Ultrachat, Agrilla, OpenRLHF, HHRLHF, Skywork, Nectar) and model architectures (Llama 3B, 8B, Qwen 0.6B, 4B) demonstrating consistent improvements.",
+        "Explores practical use cases beyond direct generation, showing how AAD can be used as a high-quality data generator to improve standard decoding via iterative DPO.",
+        "Well-designed ablation and analysis studies, such as the effect of the beta hyperparameter, beam search with entropy thresholding, and qualitative comparative analysis of generation trajectories."
+      ],
+      "weaknesses": [
+        "The core formula $\\log \\pi_{DPO} - \\log \\pi_{SFT}$ restricted to a plausible set is technically identical to Contrastive Decoding (Li et al., 2023a) applied to the DPO and SFT models. The novelty of the decoding algorithm itself is therefore somewhat incremental, although its application and interpretation as an implicit alignment reward is interesting.",
+        "The method introduces substantial inference-time overhead, requiring two forward passes (DPO and SFT models) per generated token. Although using LoRA adapters can reduce memory overhead, the computational latency is still doubled.",
+        "The codebase link in the appendix (Section A.6) is empty, which should be corrected for reproducibility.",
+        "Lacks empirical comparisons with other recent inference-time alignment steering methods (such as ARGS or Controlled Decoding)."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The theoretical motivation in Section 4 is clear and mathematically sound. It provides a helpful perspective on why DPO-aligned models may still suffer from SFT bias due to the SFT term in the closed-form DPO policy equation, motivating the need to optimize the reward ratio directly at inference.",
+        "The experimental evaluation is extensive, spanning multiple open-weight models (Llama and Qwen across various scales) and multiple popular preference datasets (Ultrachat, Agrilla, OpenRLHF, HHRLHF, Skywork, Nectar).",
+        "The application of AAD to generate high-quality synthetic data for iterative DPO under data scarcity is highly practical and shows promising results.",
+        "The paper is generally well-written, with clear presentation of background concepts, methodology, and experimental details."
+      ],
+      "weaknesses": [
+        "Limited conceptual novelty over existing decoding methods: The proposed Alignment-Aware Decoding (AAD) is mathematically identical to applying Contrastive Decoding (Li et al., 2023a) where the 'expert' is the DPO-aligned model (π_DPO) and the 'amateur' is the SFT model (π_SFT), combined with min-α filtering. Framing this as an entirely new decoding method ('Alignment-Aware Decoding') oversells the technical contribution, as it is a specific application of an existing well-known contrastive decoding framework.",
+        "High inference overhead: AAD requires simultaneous hosting and forward passes of both the SFT reference model and the DPO aligned model at each step. This effectively doubles the memory footprint and significantly increases latency, making it less practical for real-world deployment on resource-constrained hardware. The paper does not provide an empirical analysis of inference latency/throughput or memory usage compared to standard greedy decoding and Best-of-N.",
+        "Lack of comparison with stronger decoding baselines: While the paper compares AAD with Best-of-2, the computational cost of AAD (requiring two forward passes per token) is comparable to or greater than Best-of-2. To make a compelling case under compute-equivalent conditions, comparisons should be extended to larger N values (such as Best-of-4 or Best-of-8) or other test-time alignment strategies like Proxy Tuning (Liu et al., 2024a) or Decoding-time Realignment (DeRa; Liu et al., 2024d) on all benchmarks, rather than just showing selective curves in Figure 2."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Strong theoretical motivation: The paper provides a clear mathematical justification of why standard DPO-aligned models inherit SFT biases, which logically leads to the design of the token-level reward formulation for inference-time steering.",
+        "Comprehensive empirical evaluation: The method is validated across various model architectures (Llama, Qwen) and scales (from 0.6B up to 8B parameters), and tested across multiple diverse preference datasets, showing consistent and substantial improvements over solid baselines.",
+        "Versatility and extended applications: The authors show that AAD can be effectively combined with iterative DPO to improve performance in data-scarce settings, and they propose an elegant entropy thresholding technique to stabilize beam search.",
+        "The paper is exceptionally well-written, with clear explanations, illustrative qualitative examples, and solid visualizations."
+      ],
+      "weaknesses": [
+        "High computational overhead at inference: AAD requires dual forward passes (from both the aligned DPO model and the reference SFT model) at every decoding step. This doubles the latency and increases the memory footprint, which might limit its deployability in real-time or resource-constrained applications.",
+        "Dependency on the exact SFT reference model: The method relies on the exact reference model used during training, which may not always be available for commercial or third-party open-source aligned models.",
+        "Lack of sensitivity analysis on the filtering parameter alpha: The min-p filtering threshold alpha is crucial to prevent token degeneration, but the paper does not provide an ablation or sensitivity study on how different values of alpha affect the balance between coherence and alignment."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Strong Theoretical and Intuitive Motivation: The paper elegantly connects DPO's sequence-level implicit reward to a token-level advantage function via a Markov Decision Process (MDP) framework. This provides a solid mathematical foundation for using the log-likelihood ratio at inference time.",
+        "Exemplary and Comprehensive Evaluation: The authors evaluate AAD across multiple model scales (ranging from 0.6B to 13B parameters), various open-source architectures (Llama, Qwen, and OLMo-2), and six distinct preference datasets. The inclusion of human evaluation and GPT-4 evaluations on AlpacaEval significantly strengthens the empirical claims.",
+        "Simplicity and Practical Utility: The method requires no extra training or auxiliary reward models. It is a plug-and-play decoding-time intervention that can be easily integrated into existing SFT/DPO pipelines.",
+        "Iterative DPO Application: Demonstrating that AAD can be utilized to generate high-quality synthetic data for iterative self-improvement is a highly practical extension, showing how inference-time alignment gains can eventually be distilled back into the model weights."
+      ],
+      "weaknesses": [
+        "Inference Latency Overhead: Since AAD requires running both the SFT reference model and the DPO-aligned model, it doubles the computational cost (two forward passes per token). While the authors discuss mitigation strategies (like multi-GPU parallelization and KV-cache sharing), it remains a notable barrier for latency-sensitive applications.",
+        "Relation to Contrastive Decoding: Algorithmically, the method of taking the log-likelihood ratio between an aligned model and its base version with a plausibility threshold is conceptually very close to Contrastive Decoding (CD) and Emulated Fine-Tuning (EFT). Although the DPO reward framework uniquely justifies setting the multiplier parameter to 1, the algorithmic novelty is somewhat incremental over these existing paradigms.",
+        "Dependency on the DPO Formulation: As shown in Table 10, the method's effectiveness is inconsistent when applied to models trained via Proximal Policy Optimization (PPO), because online RL algorithms do not preserve the exact mathematical relationship of the SFT-DPO probability ratio. This limits the generalizability of AAD primarily to offline DPO-aligned models."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Elegant and theoretically well-grounded formulation: The paper clearly motivates the proposed method by proving that even the optimal DPO policy inherits SFT biases, and that maximizing the token-level log-ratio of the DPO policy to the SFT reference directly optimizes the implicit reward.",
+        "Simple and training-free method: AAD requires no additional training or auxiliary models, leveraging only the existing DPO and SFT models that are readily available in any standard DPO pipeline.",
+        "Strong and robust empirical results: The method is tested across a wide array of datasets (6 preference datasets), model families (LLaMA, Qwen, OLMo-2), and scales (0.6B to 13B), demonstrating consistent and significant gains over competitive baselines like Best-of-N and Emulated Fine-Tuning.",
+        "Thorough evaluation and analysis: The paper includes a diverse set of evaluations, including human evaluation, GPT-4 evaluation (AlpacaEval), parameter robustness analyses, and a clever application to iterative DPO for synthetic data generation under data-scarce regimes."
+      ],
+      "weaknesses": [
+        "Increased inference latency and memory footprint: AAD requires loading both the SFT and DPO models and running two forward passes per token, which doubles the computational overhead and increases the GPU memory requirements.",
+        "Incompatibility with non-DPO alignment pipelines: The method is strictly tied to the SFT+DPO paradigm. As demonstrated in Table 10, when applied to PPO-aligned models, the performance is inconsistent or degrades because PPO does not preserve the specific probability gap modeled by DPO.",
+        "Requirement of SFT model weights: In real-world deployment or when using proprietary/closed-source models, the original SFT reference weights may not be accessible, limiting the practical applicability of AAD in those settings.",
+        "Complexity in stabilizing search algorithms: While greedy decoding works well, scaling AAD to beam search requires introducing additional heuristics (such as entropy thresholding and hyperparameter tuning of alpha) to prevent beam collapse."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Strong theoretical motivation: The paper provides a clear mathematical justification for Alignment-Aware Decoding (AAD) by analyzing how preference optimization (DPO) inherits SFT biases, and shows how decoding with the token-level advantage directly maximizes the implicit reward.",
+        "Extensive and rigorous experimental evaluation: The method is validated across multiple model families (Llama, Qwen, OLMo), diverse preference datasets, and various evaluators (Oracle reward models, GPT-4 on AlpacaEval, and human evaluation).",
+        "Practical extension to low-resource regimes: The paper successfully demonstrates that AAD can be used for iterative DPO to generate high-quality synthetic preference data, effectively closing the gap with models trained on 100% of the data.",
+        "Thorough ablation and analysis: Includes detailed studies on hyperparameter sensitivity, compatibility with beam search (with entropy thresholding), latency/throughput benchmarks, and robustness to the DPO regularization parameter."
+      ],
+      "weaknesses": [
+        "Inference overhead: AAD requires two forward passes per token (one for the aligned model and one for the SFT reference), which reduces decoding throughput to approximately 0.5x–0.6x compared to standard greedy decoding and increases the overall memory footprint.",
+        "Requirement of the exact reference model: AAD requires access to the exact SFT model used during the DPO training phase. This limits its applicability to third-party open-source aligned models where the corresponding SFT checkpoint is not released or is unknown.",
+        "Hyperparameter sensitivity: The performance of the model is sensitive to the filtering threshold alpha. While alpha=0.1 works well across the tested benchmarks, a sub-optimal choice of alpha can lead to significant degradation in alignment score or text quality."
+      ]
+    }
+  }
+}

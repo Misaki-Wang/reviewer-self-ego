@@ -19,6 +19,24 @@
         "The novelty is primarily a recombination of existing components (UCB bandit exploration, DPO, LLM-based evidence probing) rather than a fundamentally new mechanism, and the related work on RL/bandit exploration for LLM sampling is not deeply engaged beyond citation."
       ]
     },
+    "exp3_negative": {
+      "oa": 2.5,
+      "strengths": [
+        "The core idea of framing chunk selection for long-context DPO data construction as a multi-armed bandit (UCB) problem is a reasonably novel and intuitive extension of prior similarity-based chunk sampling methods (e.g., LOGO/Tang et al.), and is well motivated by the lost-in-the-middle phenomenon.",
+        "The paper includes a fairly thorough set of ablations (Random-Dist, Final-Dist, Initial-Dist, Direct-PO) that isolate the contribution of the bandit rollout mechanism itself versus just chunk-aware sampling.",
+        "Additional analyses probing chunk recall/SubEM trends over rollout steps, response diversity via embedding similarity, sensitivity to K, and reward-design choices (full-response vs answer-based SubEM) provide some useful mechanistic insight into why the method works.",
+        "A qualitative case study illustrates the intended benefit (better use of mid-context evidence) in a concrete multi-hop example."
+      ],
+      "weaknesses": [
+        "Evaluation is conducted on very small test sets (150-351 examples per dataset), and no variance/significance analysis (multiple seeds, confidence intervals) is reported, making it hard to trust that reported gains (often only a few points, and inconsistent across metrics) are not noise, especially since DPO training with LoRA and stochastic sampling can be high-variance.",
+        "The claimed 'consistent' state-of-the-art performance is not actually consistent: on several dataset/metric/backbone combinations LongMab-PO is outperformed by LongFaith-PO or even the vanilla LLM (e.g., 2WikiMQA F1 for Llama, MuSiQue/MFQA-En for Qwen-2.5), and 'second-best' is frequently the actual result rather than the headline claim of uniform superiority.",
+        "The UCB incremental-average update in Eq. 13 divides by the global rollout step t rather than by the arm-specific selection count n_i(t), which is inconsistent with the standard bandit incremental-mean formulation and is either a notational error or a genuine methodological flaw that affects the correctness of the described reward estimation; this is not clarified or justified anywhere in the paper.",
+        "Training relies exclusively on MuSiQue-derived synthetic long contexts, and generalization is only demonstrated on QA-style benchmarks; no summarization or code/reasoning tasks are tested despite being mentioned as long-context use cases in the introduction, and the paper does not report results on tasks/domains different in structure from multi-hop QA.",
+        "The computational overhead of the method (30 bandit rollouts, LLM-based probe generation with access to ground-truth answers for reward initialization, embedding similarity computation) relative to baselines is not analyzed or reported, making it difficult to assess whether gains stem from genuinely better sampling versus simply a larger compute/sampling budget than some baselines use.",
+        "Reproducibility is currently limited: code and data are only promised for future release, backbone-specific hyperparameters (chunk size, T=30, K=4, α) appear to be chosen without a systematic ablation beyond K, and no separate ablation is given for chunk size or number of rollouts T.",
+        "The reward signal (SubEM/F1 against gold answers) used both for preference labeling and bandit reward is a coarse and potentially noisy proxy for response quality, especially for free-form CoT reasoning outputs, and no analysis of reward-label noise or its effect on the identified 'best'/'worst' responses is provided."
+      ]
+    },
     "exp3_positive": {
       "oa": 3.5,
       "strengths": [
@@ -56,6 +74,26 @@
         "No variance/significance reporting (single run per setting appears to be used, given fixed seed 42), leaving open whether observed differences, especially the small margins on Qwen, are robust rather than noise.",
         "The method incurs substantially higher training-data-construction cost (up to 30 rollout LLM calls plus a probe/reasoning-trace generation and embedding computation per example) relative to baselines, but this computational overhead is not quantified or compared against baselines in terms of cost-effectiveness, despite being acknowledged qualitatively in the limitations.",
         "The probe-based initialization requires access to the ground-truth answer to generate a reasoning trace for reward initialization; while apparently used only at training-data-construction time, this dependency and its implications (e.g., applicability only in domains with labeled QA pairs) could be stated more explicitly and analyzed for sensitivity to probe quality/reasoning-trace errors."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2.5,
+      "strengths": [
+        "The core idea of framing chunk selection for long-context preference data construction as a multi-armed bandit problem (UCB with probe-based initialization) is a reasonable and moderately novel combination of known techniques (UCB, embedding-based cold-start initialization) applied to a well-motivated problem (chunk-aware DPO data construction for long-context LLMs).",
+        "The ablation studies are fairly comprehensive: removing UCB, removing probe initialization, varying K, varying rollout steps T, varying the exploration-exploitation coefficient alpha, and comparing reward formulations (full-response SubEM vs answer-based SubEM). This helps isolate the contribution of individual components.",
+        "Additional generalization experiments (Qwen2.5-14B-Instruct, Qwen3-8B, and evaluation on LV-Eval up to 128k context) provide some evidence that the approach is not overly specific to the two main backbones/scales tested.",
+        "The paper provides reasonably detailed implementation details, prompts, and dataset statistics in the appendix, which aids reproducibility.",
+        "The mechanism analysis (ground-truth recall over rollouts, GLM-based multi-dimensional chunk-set quality scoring, chunk selection frequency distribution, response diversity/variance) offers some qualitative insight into why the method might work, beyond just end-task numbers."
+      ],
+      "weaknesses": [
+        "Results in Table 1 are mixed rather than uniformly favorable: for Qwen-2.5-7B, LongMab is not best on several individual dataset/metric combinations (e.g., MuSiQue SubEM, MFQA-En SubEM/F1 favor LongReward-PO/LongFaith-PO), and the headline '4% improvement' claim is driven largely by averages rather than consistent per-dataset dominance, undermining the strength of the central claim.",
+        "No statistical significance testing or multiple-seed/variance reporting is provided; many performance differences between LongMab and the strongest baselines (e.g., LongFaith-PO, Logo-PO) are within 1-3 points, which is not clearly distinguishable from noise given a single training/evaluation run.",
+        "The reward function used to construct preference pairs (and the probe-based cold-start initialization) directly uses the ground-truth answer y* to score chunks and generate the probe reasoning trace. While this is acceptable for offline preference-data construction, the paper does not sufficiently discuss how sensitive the method's benefits are to the quality/availability of gold answers, nor how this compares fairly in cost to baselines that may use weaker supervision signals.",
+        "The computational cost of the approach (up to T=30 LLM rollout calls per training example, plus a probe generation call and reward scoring) is not analyzed or compared against baseline data-construction costs (e.g., LongFaith-PO, Logo-PO), which is an important practical consideration for a method explicitly motivated by wanting 'high-quality diverse' data.",
+        "Training and construction rely on a single source dataset (MuSiQue, augmented with Wikipedia distractors) for the main experiments; while out-of-domain evaluation on other QA benchmarks is included, the domain diversity of training data (all multi-hop QA) limits confidence that gains generalize to other long-context task types (e.g., summarization, non-QA reasoning) despite the introduction mentioning such tasks.",
+        "Novelty is somewhat incremental: applying UCB (a well-established bandit algorithm) to segment/chunk selection is a natural extension of existing chunk-aware sampling works (e.g., Logo-PO) rather than a fundamentally new mechanism; the differentiation from prior heuristic chunk-sampling approaches is mainly the iterative reward-based UCB scoring, which, while reasonable, is a relatively modest methodological contribution.",
+        "The qualitative case study (Section A.7) is a single cherry-picked example, providing only anecdotal support rather than systematic evidence for the claimed reduction of the 'lost-in-the-middle' problem.",
+        "Code and data are stated as 'to be released' rather than currently available, and some evaluation details (e.g., exact judge prompts' reliability, consistency of GLM-4-Plus scoring) are not validated against human judgments, limiting confidence in the auxiliary analyses."
       ]
     },
     "exp3_positive": {

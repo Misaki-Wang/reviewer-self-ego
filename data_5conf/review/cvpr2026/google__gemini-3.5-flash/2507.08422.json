@@ -1,0 +1,94 @@
+{
+  "v2": {
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "The paper addresses a highly practical and relevant problem: training-free spatial acceleration of large Diffusion Transformers (DiTs) like FLUX and SD3, which suffer from high inference latency.",
+        "The proposed Region-Adaptive Latent Upsampling (RALU) cleverly targets only edge regions prone to aliasing artifacts during resolution transitions, significantly saving computation on smooth background regions.",
+        "The introduction of Noise-Timestep rescheduling with Distribution Matching (NT-DM) provides a solid mathematical foundation to prevent mismatch artifacts during spatial upsampling, showing clear improvement over heuristic methods like Bottleneck Sampling.",
+        "Extensive quantitative and qualitative evaluations on state-of-the-art models (FLUX and SD3) demonstrate impressive speedups (up to 7.0x and 3.0x respectively) with minimal quality degradation, and the method is shown to be complementary to temporal caching."
+      ],
+      "weaknesses": [
+        "The proposed method requires decoding the latent representation using the VAE decoder at an intermediate stage (Stage 1 to Stage 2) to perform Canny edge detection. Although the FLOPs overhead is analyzed, the actual wall-clock latency overhead of this additional VAE decoding step and CPU-GPU transfer (for Canny edge detection) is not fully detailed.",
+        "The edge-selection pipeline is somewhat heuristic, requiring Tweedie's formula, VAE decoding, Canny edge detection, and top-k patch selection. It remains unclear if edge detection could be performed directly on the latent feature maps or intermediate DiT self-attention maps to avoid VAE decoding entirely.",
+        "The NT-DM formulation is highly tailored to rectified flow / flow matching objectives. Its applicability to other popular diffusion formulations (e.g., standard DDPM/DDIM or epsilon/v-prediction used in SDXL) is limited or requires further adaptation, which reduces its immediate generalizability to non-flow-matching architectures."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "The paper addresses spatial acceleration for Diffusion Transformers (DiTs), which is highly valuable due to the quadratic complexity of self-attention on token sequence length.",
+        "Proposes a novel training-free three-stage framework (RALU) that progressively upsamples latents, prioritizing edge regions to avoid aliasing artifacts, combined with a mathematically sound noise-timestep rescheduling method (NT-DM).",
+        "Extensive quantitative and qualitative evaluations on state-of-the-art flow-matching models (FLUX.1-dev and Stable Diffusion 3) demonstrate superior performance over existing temporal and spatial acceleration methods.",
+        "The proposed method is complementary to temporal acceleration methods (e.g., token-caching), showing further speedup when combined.",
+        "The paper is very well-written, with clear explanations of the challenges in spatial acceleration (aliasing and mismatch artifacts) and comprehensive uncurated generation results in the appendix."
+      ],
+      "weaknesses": [
+        "Using the VAE decoder mid-step in Stage 2 to apply Canny edge detection, while computationally small in terms of FLOPs, might introduce system-level latency overhead (e.g., due to kernel launches or CPU-GPU synchronization) in highly optimized deployment pipelines. It would be beneficial to discuss or analyze this overhead more explicitly.",
+        "The hyperparameter selection (e.g., number of steps in each stage, specific noise-timestep schedules) requires optimization (via JSD minimization) per model and speedup target, which might limit its plug-and-play simplicity for arbitrary step numbers."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "The paper addresses a highly practical and timely problem: accelerating large-scale Diffusion Transformers (such as FLUX.1-dev and SD3) which suffer from high latency due to quadratic self-attention complexity.",
+        "The proposed method, Region-Adaptive Latent Upsampling (RALU), is training-free and targets two concrete and well-analyzed artifacts: aliasing (using progressive edge-selective upsampling) and noise-timestep mismatches (using Noise-Timestep rescheduling with Distribution Matching).",
+        "A solid mathematical framework is presented for the distribution alignment of noise after upsampling (derivation of Eq. 6), with parameters optimized using Jensen-Shannon Divergence minimization to match the pretrained model's native schedule.",
+        "Comprehensive experimental evaluation is conducted on current state-of-the-art flow-matching models (FLUX.1-dev and Stable Diffusion 3), showing significant speedups (up to 7.0x) with minimal degradation, outperforming competitive baselines like ToCa and Bottleneck Sampling.",
+        "Demonstrated compatibility with feature caching methods, indicating that RALU can be combined with other temporal acceleration techniques for even higher efficiency."
+      ],
+      "weaknesses": [
+        "To detect edge regions in Stage 2, the intermediate latent must be decoded into pixel space via the VAE decoder to run Canny edge detection. Although the authors state that the VAE decoder contributes only a small fraction of FLOPs, decoding to pixel space mid-generation breaks the end-to-end latent denoising pipeline and can introduce memory/latency overhead in practical execution frameworks (e.g., PyTorch on edge devices). It would be beneficial to see if edge detection can be performed directly on latent representations to avoid VAE decoding.",
+        "The partition of stages and the specific boundary timesteps (e.g., $e_1$, $e_2$) and step allocations are still selected empirically or hand-picked. The paper lacks a detailed sensitivity analysis showing how robust the generation quality is to variations in these stage boundaries.",
+        "There are some minor anomalies in the quantitative results that warrant discussion: for instance, in Table 2, RALU with 1.94x speedup achieves an FID of 23.58, which is noticeably better than the baseline SD3 (14 steps) FID of 26.63 and SD3 (28 steps) FID of 27.47. A brief explanation of why the accelerated version outperforms the full-step baseline in FID would improve clarity."
+      ]
+    }
+  },
+  "v3": {
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "The paper provides a thorough and insightful analysis of why naive latent upsampling introduces artifacts, breaking them down into aliasing in high-frequency regions (due to late upsampling) and distribution mismatch (due to correlated noise and skewed sampling trajectories).",
+        "The proposed method, Region-Adaptive Latent Upsampling (RALU), is a clever, training-free approach that selectively performs early upsampling only on edge regions (which are prone to aliasing) while keeping other regions at low-resolution for computational savings.",
+        "The introduction of Noise and Timestep Matching (NT-Matching) is mathematically well-supported. It analytically matches the covariance of injected noise and aligns the rescheduled timesteps with the target model's original distribution using JSD minimization.",
+        "Comprehensive experimental validation on state-of-the-art large-scale DiTs (FLUX-1.dev and Stable Diffusion 3) demonstrates significant speedups (up to 7x on FLUX) with superior image quality compared to other spatial/temporal acceleration baselines.",
+        "Excellent compatibility with other acceleration paradigms; the paper successfully demonstrates that RALU can be combined with temporal caching/forecasting methods (like TaylorSeer and ToCa) and distilled models (FLUX.1-schnell and SD3.5L-Turbo) for massive cumulative speedups (up to 15.9x)."
+      ],
+      "weaknesses": [
+        "To detect edge regions, the pipeline relies on estimating the clean latent using Tweedie's formula, decoding it to image space via the VAE decoder, and applying Canny edge detection. While the VAE decoding overhead is computationally small (<1% of FLOPs for massive models like FLUX), executing VAE decoding inside the diffusion loop introduces implementation complexity and extra latency on smaller, more efficient models.",
+        "The NT-Matching formulation is heavily tailored to flow-matching-based architectures (Rectified Flow). As noted in the limitations, its applicability and mathematical extension to standard DDPM/DDIM or variance-preserving (VP/VE) SDE models remain unverified, which slightly limits the generality of the proposed contribution.",
+        "The approach requires a calibration step (minimizing JSD via numerical search) to determine the stage-wise parameters ({h_k}, c) for each specific model and step configuration (as shown in Table S1). Although it is training-free, this search process adds configuration overhead when changing the number of steps or speedup ratios."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "The paper addresses an important and timely topic: spatial acceleration of Diffusion Transformers (DiTs), which has been significantly less explored compared to temporal acceleration methods.",
+        "The authors provide a solid, systematic analysis of the failure modes in training-free latent upsampling, categorizing them into aliasing artifacts (remedied by early upsampling on edges) and noise-timestep distribution mismatching.",
+        "The proposed Region-Adaptive Latent Upsampling (RALU) is a well-designed, training-free framework that effectively balances the speedup-quality trade-off by combining mixed-resolution processing with an analytical Noise and Timestep Matching (NT-Matching) formulation.",
+        "Comprehensive experiments are conducted on state-of-the-art models like FLUX-1.dev and Stable Diffusion 3 using a wide range of standard metrics (ImageReward, GenEval, CLIP-IQA, T2I-CompBench, etc.).",
+        "RALU demonstrates impressive compatibility and synergy with existing temporal acceleration baselines and distillation-based models (e.g., achieving up to 15.91× speedup when combined with FLUX.1-schnell)."
+      ],
+      "weaknesses": [
+        "The edge detection process requires approximating the clean latent, decoding it back to image space via the VAE decoder, and then applying Canny edge detection. While the authors state this overhead is small (less than 1% of total FLOPs), running the VAE decoder during the intermediate steps of the diffusion process could introduce memory and latency overheads that are non-negligible in constrained or on-device environments.",
+        "The actual latency reduction on GPU (e.g., 5.04s vs 5.18s for FLUX 10-step in Table 1) is somewhat modest compared to the theoretical FLOPs reduction. This is a common issue with mixed-resolution/masked token approaches due to the PyTorch/GPU kernel overhead of handling non-uniform token shapes and indexing, which could be elaborated on in the implementation details.",
+        "The analytical derivation of NT-Matching is specifically tailored to flow-matching-based formulations. Its generalization to standard DDPM/DDIM noise schedules (as used in older DiT models) is not explored, somewhat limiting its immediate applicability to other diffusion models."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Strong Mathematical Foundation: The paper provides a mathematically rigorous formulation for noise injection and timestep rescheduling during latent upsampling under flow matching. The derivation for restoring isotropic covariance post-upsampling is elegant and sound.",
+        "Effective Mitigation of Artifacts: It systematically identifies and addresses the two main failure modes of latent upsampling—aliasing and distribution mismatch—through mixed-resolution upsampling (focusing early upsampling on edges) and Noise-Timestep Matching (NT-Matching).",
+        "Training-Free and Practical: The framework is entirely training-free and plug-and-play, making it immediately applicable to massive, pre-trained state-of-the-art models like FLUX.1-dev and Stable Diffusion 3 without requiring expensive retraining.",
+        "Extensive Evaluation and Compatibility: The method is validated thoroughly across multiple benchmarks (ImageReward, CLIP-IQA, GenEval, T2I-CompBench). Furthermore, it shows excellent compatibility, achieving synergistic speedups (up to 15.9x) when paired with temporal acceleration techniques and step-distilled models."
+      ],
+      "weaknesses": [
+        "Generality Restrictions: The core Noise-Timestep Matching (NT-Matching) formulation is mathematically tailored specifically to flow-matching (rectified flow) models. It cannot be directly or easily applied to standard DDPM/DDIM-based diffusion models.",
+        "Sensitivity to Scheduling Hyperparameters: The calibration process requires a numerical search to minimize the Jensen-Shannon Divergence (JSD) for finding the optimal stage-wise shifting parameters {h_k} and noise coefficient c. The paper would benefit from a sensitivity analysis showing how performance fluctuates if these parameters are suboptimal.",
+        "Canny Edge Detection Sensitivity: The selection of edge regions depends on Canny edge detection thresholds applied to the intermediate VAE-decoded image. The impact and sensitivity of these edge detection hyperparameters on token selection stability are not thoroughly explored.",
+        "Reliance on Nearest-Neighbor Upsampling: Although nearest-neighbor upsampling is chosen because it allows for a mathematically tractable covariance matrix calculation, it can introduce blocky features in the latent space. The tractability of more sophisticated upsamplers under the NT-Matching framework remains an open question."
+      ]
+    }
+  }
+}

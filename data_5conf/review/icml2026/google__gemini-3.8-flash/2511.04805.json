@@ -1,0 +1,96 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Novel and principled algorithmic design: Formulating expert merging at the fine-grained entry level using dual masks (similarity-based mask for shared knowledge and activation saliency mask for specialized capabilities) effectively balances preservation of general language capabilities and expert specialization.",
+        "Clever hardware-algorithm co-design: The bit-packing scheme elegantly exploits the narrow exponent distribution in bfloat16 to free 3 exponent bits, allowing two sign bits and two mask bits to be packed directly into the 16-bit word without auxiliary metadata overhead.",
+        "Comprehensive empirical validation: Evaluated across four modern MoE architectures (Mixtral-8x7B, DeepSeek-MoE, Qwen1.5-MoE, and Qwen3-MoE-30B) across diverse benchmarks (zero-shot language benchmarks, GSM8K, and challenging math tasks like AIME). The method significantly outperforms previous expert pruning and merging baselines (e.g., outperforming HC-SMoE by large margins at 50% sparsity).",
+        "Real system-level speedups and practical compression cost: Demonstrates substantial reduction in offline compression runtime (2 minutes for Mixtral vs. 55 minutes for SVD-based methods) and achieves real inference speedup (up to 1.28x) and memory savings that reduce GPU requirements (e.g., running Mixtral-8x7B on a single A100-80GB GPU).",
+        "Solid theoretical and ablation analyses: Includes a theoretical derivation in Appendix B.2 explaining the origin of element-wise similarity across independent Gaussian weight distributions, as well as ablations covering grouping strategies, thresholds, calibration sets, and combination with weight quantization."
+      ],
+      "weaknesses": [
+        "Kernel evaluation is limited to GEMV / decode-dominant regime: The custom CUDA kernel and speedup numbers are reported for GEMV (batch size 1 decoding). The paper does not thoroughly discuss or evaluate performance under batched GEMM regimes (e.g., large batch prefill or high-concurrency serving), where computation becomes compute-bound rather than memory bandwidth-bound.",
+        "Inherent scalability limit of bit-packing beyond pairwise merging: The bit-packing mechanism is constrained by the 4 available bits (1 sign + 3 freed exponent bits), limiting the approach to merging pairs of experts ($k=2$). Merging 3 or more experts exceeds the available bits, requiring either multi-level trees or separate metadata tensors as discussed in Section 5."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Compelling Empirical Performance: PuzzleMoE significantly outperforms prior MoE pruning and merging techniques (such as NAEE, HC-SMoE, Sub-MoE, and D2) across four major MoE architectures (Mixtral-8x7B, DeepSeek-MoE-16B, Qwen1.5-MoE-A2.7B, and Qwen3-MoE-30B-A3B) across a wide range of general zero-shot benchmarks and challenging math reasoning tasks (e.g., retaining 96.2% on Math-500 at 25% sparsity where HC-SMoE collapses).",
+        "Clever System and Format Co-Design: The method cleverly observes that BF16 exponent values in MoE weights are tightly clustered, allowing an exponent shift to 5 bits that frees 3 exponent bits. Combined with the original sign bit, exactly 4 bits are recovered to pack two binary masks and two sign bits ($M_i, M_j, S_i, S_j$) directly into a standard 16-bit word without auxiliary metadata overhead.",
+        "Efficient and Practical Execution: By eliminating costly combinatorial search (as in NAEE) or iterative SVD decompositions (as in D2), PuzzleMoE executes in a single pass (compressing Mixtral-8x7B in ~2 minutes). The on-the-fly decoding custom CUDA kernel demonstrates concrete memory reductions and speedups (up to 1.28x) during inference.",
+        "Sound Theoretical Grounding: Appendix B.2 provides a solid theoretical analysis using half-normal distribution properties to analytically compute the expected proportion of similar entries between weight tensors, nicely explaining the empirical success of element-wise magnitude similarity."
+      ],
+      "weaknesses": [
+        "Inherent Architectural Bottleneck for Higher Compression Ratios: Because the bit-packing format precisely relies on the 4 freed/reused bits to encode two experts' masks and signs, the approach is fundamentally constrained to pairwise merging (maximum 50% compression). Merging three or more experts exceeds the available bit budget and causes steep degradation, as shown in Table 6.",
+        "Evaluation Restricted to GEMV (Batch Size = 1): The custom inference kernel and latency/speedup numbers are reported exclusively for GEMV (decoding phase). In real-world MoE deployment scenarios (e.g., vLLM or TensorRT-LLM with batched inference), execution shifts towards batched GEMM. The paper does not analyze kernel efficiency, register pressure, or memory bandwidth under batched GEMM settings.",
+        "Lack of Clarity on Co-Activated Paired Experts: In models with top-k routing (e.g., top-2 in Mixtral-8x7B), there is a non-zero probability that both experts $E_i$ and $E_j$ from the same merged pair are selected for the same token or batch. The paper does not explicitly detail the runtime execution path, overhead, or memory access behavior when both paired experts are activated concurrently.",
+        "Total Model vs. Expert-Only Compression Footprint: The paper interchangeably refers to 50% model compression and 50% expert compression. While experts dominate the parameter count in large MoE models, non-expert components (embeddings, attention layers, router) remain uncompressed; reporting the exact end-to-end parameter and memory reduction across the entire model would improve precision."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Strong empirical accuracy retention: Across multiple MoE architectures (Mixtral-8x7B, DeepSeek-MoE, Qwen1.5-MoE, Qwen3-MoE) and diverse zero-shot benchmarks, PuzzleMoE retains performance substantially better than prior expert dropping (NAEE, STUN) and coarse-grained merging (HC-SMoE, Sub-MoE) methods at 50% compression.",
+        "Fast, single-pass compression: The method avoids iterative optimization, layer-by-layer SVD, or combinatorial search over expert assignments. Offline compression takes only a few minutes (e.g., 2 minutes for Mixtral-8x7B), providing practical turnaround times.",
+        "Clever bit-level packing concept: Exploiting the narrow distribution of Bfloat16 exponents to free 3 exponent bits, thereby packing pair-level binary masks and sign bits directly into the 16-bit storage of the merged matrix, is a creative approach to eliminating sparse indexing metadata overhead.",
+        "Extensive empirical validation: The paper includes evaluations across 16 random seeds showing tight standard deviations, as well as an exact theoretical derivation of the folded Cauchy ratio distribution for independent Gaussian entries in the appendix."
+      ],
+      "weaknesses": [
+        "Conceptual contradiction regarding 'shared knowledge': The paper frames the similarity mask as identifying and preserving 'shared knowledge' between experts. However, Appendix B.2 and Table 9 prove that expert weights in models like DeepSeek-MoE and Qwen1.5-MoE have near-zero Pearson correlation (0.0000 to 0.0006) and match the ratio distribution of two completely independent Gaussian variables. Furthermore, Table 7 shows that random pairing performs virtually identically to search-based pairing. This demonstrates that the element-wise similarity is purely a statistical artifact of Gaussian distributions rather than meaningful semantic knowledge sharing. In effect, the method functions as unstructured pruning of the ~25% least salient entries per expert combined with pairwise magnitude perturbation, contradicting the core conceptual narrative.",
+        "Flawed inference speedup baseline comparison: The reported speedups (1.28x for Mixtral-8x7B, 1.19x for Qwen3-MoE) in Figure 4(c) appear to compare the compressed model running on a single GPU against the uncompressed vanilla baseline deployed across two GPUs with tensor/pipeline parallelism overhead (as shown in Figure 4(b) and Section 4.4). Conflating the elimination of multi-GPU communication overhead with algorithmic inference acceleration makes the efficiency claims methodologically unsound.",
+        "Lack of GEMM / batched inference support: The systems co-design relies strictly on a custom GEMV CUDA kernel (Algorithm 1), which is only applicable to single-batch (batch size = 1) decoding. In real-world deployments, prefill (e.g., the 1024 prompt tokens mentioned in Section 4.4) and batched serving require GEMM. The paper does not explain how GEMM is handled: if weights are materialized in full precision in DRAM during prefill, the memory advantage is lost; if computed sequentially via GEMV or scalar register unpacking, throughput degrades drastically.",
+        "Unclear exponent rounding logic: Section 3.2.2 states that 'any exponent smaller than 112 is rounded up to 112, and then all exponents are shifted down by 112.' Rounding small exponents up increases the absolute magnitude of near-zero weights (e.g., elevating values smaller than 3e-5 up to 3e-5) rather than flushing or clamping towards zero. The authors should clarify this logic and evaluate whether it introduces numerical bias or instability across sensitive layers.",
+        "Missing code and incomplete systems evaluation: The abstract contains a placeholder ('The code is available at ') with no link provided. Furthermore, the combined quantization experiment in Section 5 and Appendix B.3 (proposing 1.58 bits for masks) lacks an actual hardware kernel implementation or runtime latency numbers, remaining purely a theoretical calculation."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Innovative system-algorithm co-design: The authors observe that BFloat16 exponent values concentrate in a narrow range [112, 128], enabling an exponent shift that frees 3 bits. Combined with the original sign bit, this provides exactly 4 bits to pack two binary masks and two sign bits into standard 16-bit storage with zero metadata overhead.",
+        "Efficient hardware execution: The custom Triton decode-GEMM kernel fuses on-the-fly bit-level decoding directly into the memory-loading path and executes matrix multiplications for concatenated expert inputs in a single memory access, achieving up to 1.80x end-to-end throughput improvements during LLM decoding.",
+        "Strong empirical performance: PuzzleMoE consistently outperforms prior expert dropping (NAEE, STUN) and expert merging (HC-SMoE, Sub-MoE, D2) baselines by substantial margins across four diverse MoE models (Mixtral-8x7B, DeepSeek-MoE, Qwen1.5-MoE, Qwen3-MoE) on language modeling, standard reasoning benchmarks, code generation (HumanEval), and complex math tasks (AIME).",
+        "Sound theoretical and statistical backing: The paper provides theoretical grounding (Lemma 3.1 and Appendix A.6) demonstrating that element-wise weight similarity is an intrinsic property under Gaussian weight distributions, which closely matches empirical measurements.",
+        "Fast offline compression: PuzzleMoE operates in a single pass without backpropagation or expensive SVD operations, compressing Mixtral-8x7B in ~2 minutes compared to 52 minutes for D2 and prohibitive combinatorial searches for NAEE."
+      ],
+      "weaknesses": [
+        "Inherent architectural constraint on compression ratio for zero-overhead inference: The elegant bit-packing scheme into BFloat16 strictly relies on having exactly 4 freed bits, naturally restricting the zero-metadata format to 2-to-1 merging (up to 50% expert reduction). While Appendix A.8.4 shows results for higher compression ratios (66.7% and 75%), those require external metadata storage or further quantization.",
+        "Throughput benefits are primarily restricted to memory-bound regimes: As acknowledged in Appendix A.2 and Figure 10, the speedup drops noticeably as prefill lengths and batch sizes increase because computation becomes compute-bound (and attention becomes a larger bottleneck), where on-the-fly bit manipulation introduces minor arithmetic overhead without memory bandwidth savings.",
+        "Evaluation lacks integration into standard high-performance MoE serving engines: The kernel benchmarks and end-to-end throughput are measured in standalone Triton setups rather than integrated into production serving systems (e.g., vLLM, TensorRT-LLM, or SGLang) that utilize grouped GEMM and ragged batching across dynamic expert routings."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Compelling System-Algorithm Co-design: The paper creatively leverages an intrinsic empirical property of MoE weight representations (narrow exponent distribution) to compress exponents to 5 bits, freeing up bits to embed 2 mask bits and 2 sign bits directly into standard 16-bit storage without requiring auxiliary metadata or index overhead.",
+        "Superior Accuracy Preservation: PuzzleMoE significantly outperforms existing state-of-the-art MoE compression techniques (HC-SMoE, Sub-MoE, D2, NAEE) across four modern MoE models (Mixtral-8x7B, DeepSeek-MoE, Qwen1.5-MoE, Qwen3-MoE) on diverse benchmarks (general reasoning, perplexity, GSM8K, and HumanEval), maintaining near-dense performance even at 50% expert sparsity.",
+        "Practicality and Fast Compression: Unlike combinatorial search (NAEE) or iterative SVD decomposition (D2, Sub-MoE), PuzzleMoE executes in a single pass in minutes (e.g., 2 minutes for Mixtral-8x7B and 9 minutes for DeepSeek-MoE).",
+        "Real Inference Acceleration: The authors provide custom Triton decode-GEMM kernels and demonstrate genuine wall-clock inference speedups (up to 1.80x end-to-end throughput on RTX 5090 GPUs) rather than relying solely on theoretical FLOP reductions.",
+        "Solid Theoretical and Empirical Analysis: Lemma 3.1 provides an intuitive probabilistic derivation of element-wise magnitude similarity under Gaussian weight distributions, which is well validated against empirical weight statistics across multiple model families."
+      ],
+      "weaknesses": [
+        "Coupling with 2-to-1 Compression: The elegant bit-packing scheme is tightly bound to pairwise (2-to-1) merging to fit within 16 bits (4 metadata bits: 2 masks and 2 signs). Extending beyond 50% sparsity (such as 3-to-1 or 4-to-1, as shown in Appendix A.8.4) necessitates auxiliary metadata storage or additional quantization, diminishing the zero-overhead bit-packing advantage.",
+        "Dispatching and Kernel Behavior under Unbalanced Activation: The decode-GEMM kernel achieves maximal throughput savings when both paired experts $E_i$ and $E_j$ process tokens concurrently. The paper could provide more details on runtime scheduling and performance characteristics when the top-$k$ router activates only one expert of the pair in a given batch.",
+        "Minor Presentation Imprecision: In Section 3.3.2, the manuscript states that exponent shifting 'frees 3 bits within the original 8-bit exponent field, which can be used to pack the binary mask bits and a sign bit', which makes it appear that only 3 bits are available. It should explicitly clarify that the original 1 sign bit is also repurposed (since merged weights store non-negative magnitudes), yielding 4 total bits for $\\{S_i, S_j, M_i, M_j\\}$ as correctly detailed in Algorithm 1 and Figure 4."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Innovative dual-mask formulation: Moving from coarse-grained expert/tensor-level merging to fine-grained element-wise merging effectively resolves the over-merging problem in prior MoE pruning/merging works. The combination of magnitude similarity and activation-weight saliency provides an elegant mechanism to retain both shared and specialized knowledge.",
+        "Clever hardware-algorithm co-design: The bit-packing scheme that exploits the narrow exponent distribution in BF16 weights to embed 2 mask bits and 2 sign bits without metadata overhead is technically sound and practical. The custom Triton decode-GEMM kernel demonstrates concrete end-to-end throughput improvements (up to 1.80x) on real GPU hardware (RTX 5090/4090).",
+        "Thorough and rigorous empirical evaluation: The paper evaluates four modern MoE architectures (Mixtral-8x7B, DeepSeek-MoE-16B, Qwen1.5-MoE-A2.7B, Qwen3-MoE-30B) across diverse reasoning, coding, and mathematical benchmarks (including MMLU, GSM8K, HumanEval, and AIME). The performance retention at 50% expert sparsity notably exceeds existing baselines.",
+        "Strong statistical grounding and ablations: The derivation and empirical verification of element-wise magnitude similarity under zero-mean Gaussian distributions (Lemma 3.1) provide sound motivation. Ablations across 16 random seeds, grouping strategies, similarity thresholds, and calibration datasets demonstrate robustness."
+      ],
+      "weaknesses": [
+        "Bit-packing scheme is tightly coupled to 2-to-1 merging: The 16-bit packed representation specifically allocates 4 freed/sign bits for 2 experts (2 sign bits + 2 mask bits). Compressing beyond 50% (e.g., 3-to-1 or 4-to-1 merging) cannot fit within the 16-bit budget without truncating mantissa precision or introducing auxiliary metadata storage, as acknowledged in Appendix A.8.4.",
+        "Handling of upper exponent outliers is underspecified: While the manuscript explains clamping exponents smaller than 112 upward, it does not explicitly clarify how exponent values greater than 143 (which would overflow the 5-bit unsigned range [0, 31]) are handled, nor does it quantify how frequently such upper-tail outliers occur across layers.",
+        "Speedup gains diminish under compute-bound regimes: As shown in Figure 10, the end-to-end throughput benefits decline noticeably at larger batch sizes and longer sequence lengths where prefill and dense attention computation dominate memory bandwidth bottlenecks in MoE decoding.",
+        "Pairwise grouping relies primarily on random grouping: Although Table 5 demonstrates that evolutionary search provides only minor improvements over random grouping, the paper lacks an in-depth analysis explaining why random expert pairing is sufficient, especially in models with highly specialized or heterogeneous experts."
+      ]
+    }
+  }
+}

@@ -1,0 +1,92 @@
+{
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Introduces an innovative fine-grained element-wise expert merging technique using a dual-mask design (similarity-based and saliency-based masks), moving past the coarse-grained tensor-level operations of prior work.",
+        "Presents an elegant hardware-software co-design: it frees up BFloat16 exponent bits via exponent shifting to store the merging masks and sign bits directly in the weight representation, eliminating metadata storage overhead.",
+        "Includes a custom Triton decode-GEMM kernel that performs on-the-fly weight decoding, unlocking genuine hardware speedups (up to 1.8x end-to-end throughput) over standard cuBLAS instead of just theoretical savings.",
+        "Provides a thorough mathematical analysis using zero-mean Gaussian models to justify element-wise similarity, which is empirically validated on multiple MoE models.",
+        "Demonstrates exceptional performance preservation on diverse benchmarks (general reasoning, math, and coding) at high compression ratios (e.g., 50% sparsity), significantly outperforming existing expert dropping and merging baselines."
+      ],
+      "weaknesses": [
+        "The hardware-friendly bit-packing scheme and custom Triton kernel are heavily optimized and tailored specifically for 2-to-1 merging (i.e., compressing pairs of experts). Extending this system design to higher compression ratios (e.g., 3-to-1 or 4-to-1) requires redesigning the bit layout and decoding logic, which limits the hardware flexibility of the overall system.",
+        "The grouping of experts relies primarily on random grouping. Although the authors show that evolutionary search-based grouping yields similar performance in the ablation, it is not fully explored whether routing or architectural-level similarity metrics can yield better clusters for extremely large or highly specialized MoE models."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Innovative Algorithm-System Co-design: PuzzleMoE presents a highly elegant co-design where fine-grained element-wise expert merging is made practical on hardware. Repurposing underutilized exponent bits of BFloat16 to store sign and mask metadata is an exceptionally clever system trick that eliminates metadata overhead.",
+        "Solid Theoretical and Empirical Motivation: The paper provides a clear mathematical explanation (Lemma 3.1) of element-wise similarity in expert weights under Gaussian distribution assumptions, backed by empirical validation showing tight alignment on real MoE LLMs (Qwen and DeepSeek-MoE).",
+        "Excellent Hardware Evaluation: The authors do not just claim theoretical speedups; they implement a custom Triton decode-GEMM kernel and show substantial performance improvements (~2x kernel speedup, up to 1.80x end-to-end throughput gain on RTX 5090/4090 GPUs).",
+        "Strong Experimental Results: Comprehensive evaluation across 4 MoE models (including Mixtral-8x7B, DeepSeek-MoE, and Qwen models) and 9 benchmarks. PuzzleMoE achieves state-of-the-art compression-accuracy trade-offs, significantly outperforming prior methods (like HC-SMoE, Sub-MoE, NAEE) at 25% and 50% expert sparsity."
+      ],
+      "weaknesses": [
+        "Limited to 2-to-1 Merging for Bit-Packing: The highly efficient bit-packing scheme is structurally restricted to pairwise (2-to-1) expert merging. For higher compression levels (e.g., 3-to-1, 4-to-1), storing more masks/signs requires explicit metadata storage, which compromises the memory-saving and throughput benefits.",
+        "Dependence on BFloat16 Exponent Structure: The proposed bit-packing relies specifically on the BFloat16 format which allocates 8 bits to exponents. It is less straightforward to apply this technique directly to other standard formats such as FP16 (which only has 5 exponent bits) or lower-bit integer/float quantized formats, limiting its generalizability to diverse deployment environments."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Novel and Effective Fine-Grained Merging Strategy: Moving away from coarse-grained expert/tensor-level merging to element-wise merging with a dual-mask design (combining weight similarity and activation saliency) is highly effective at preserving both shared and specialized knowledge.",
+        "Hardware-Algorithm Co-Design (Bit-Packed Representation): Reusing underutilized exponent bits in BFloat16 to store masks and signs is a brilliant engineering solution. It completely bypasses the metadata storage overhead that typically negates the memory benefits of unstructured/fine-grained sparsity.",
+        "Excellent Performance: Negligible accuracy drops under 25% and 50% expert compression across multiple model families (Mixtral, DeepSeek, Qwen), dramatically outperforming previous state-of-the-art compression/merging methods (e.g., up to 16.7% improvement on MMLU under 50% compression).",
+        "Practical Speedups: The custom Triton decode-GEMM kernel achieves a ~2x kernel speedup and up to 1.8x end-to-end decoding throughput improvement by fusing HBM memory accesses when paired experts are co-activated.",
+        "Theoretical and Empirical Grounding: Provides a clear mathematical formulation of element-wise similarity and empirical validation showing that MoE weights closely match the zero-mean Gaussian distribution assumption."
+      ],
+      "weaknesses": [
+        "Pairwise Limitation for Optimal Bit-Packing: The 4-bit packaging budget (1 sign + 3 exponent bits) restricts the highly efficient, zero-overhead storage format to 2-to-1 merging. Scaling to higher compression ratios (e.g., 3-to-1 or 4-to-1) requires explicit mask storage, which degrades the efficiency gains.",
+        "Dynamic Range / Outlier Sensitivity: Shifting the exponent range and rounding values below 112 to 112 could potentially hurt models that have wider weight distributions or are highly sensitive to small weight values, especially if the model is fine-tuned post-compression.",
+        "Hardware Portability: The custom kernel is implemented in Triton and tailored to NVIDIA GPUs. Porting this system-level optimization to other hardware (like TPUs, Apple Silicon, or AMD GPUs) requires non-trivial engineering effort.",
+        "Incompatibility with Standard Fine-tuning: Because of the highly custom, non-differentiable bit-packed representation, it is difficult to perform standard gradient-based post-training fine-tuning on the compressed model without unpacking."
+      ]
+    }
+  },
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Excellent hardware-algorithm co-design. While many MoE compression methods offer purely theoretical savings or require simulated compression metrics, this work introduces a practical, hardware-friendly bit-packing scheme that achieves actual memory footprint reduction and a 1.28x wall-clock speedup on GPUs.",
+        "Clever and highly elegant bit-packing mechanism. The authors leverage the empirical observation that Bfloat16 exponents are highly concentrated in MoE models to free up 3-4 bits. They use these bits to store the sign and mask information of the two merged experts directly within the weight tensor, eliminating auxiliary index overhead.",
+        "Strong empirical results. PuzzleMoE significantly outperforms prior training-free MoE compression/pruning methods (such as NAEE, HC-SMoE, and Sub-MoE), demonstrating up to 16.7% higher MMLU accuracy at 50% compression, with very little degradation compared to the uncompressed baseline.",
+        "Well-conducted analysis and ablations. The paper provides detailed mathematical analysis in Appendix B.2 explaining the element-wise weight similarity of independent normal distributions, and demonstrates robustness to calibration data, random seeds, and expert grouping strategies."
+      ],
+      "weaknesses": [
+        "The bit-packing mechanism introduces a hard ceiling on the compression ratio. Because the technique can only free enough bits to store signs and masks for two experts, merging is limited to pairwise groups, capping the maximum expert compression ratio at 50%. Compressing beyond 50% using this specific bit-packing scheme is currently mathematically/physically impossible.",
+        "The custom CUDA kernel is designed primarily for GEMV (batch size of 1 during the autoregressive decoding phase). The paper would benefit from a discussion or evaluation of how this decoding overhead scales to larger batch sizes (GEMM) during the prefill phase or high-throughput serving scenarios.",
+        "The paper does not provide detailed statistics on how many original weights had exponents outside the [112, 143] range, and how the rounding/clipping of those extreme exponents affects the model's performance on highly sensitive tasks."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "A highly innovative algorithm-system co-design that addresses a major bottleneck in MoE compression (metadata storage overhead and memory access during sparse inference).",
+        "The dual-mask pairwise merging strategy is theoretically motivated and elegant, effectively separating shared knowledge (via symmetric percent difference similarity) and expert specialization (via activation-weight saliency).",
+        "The bit-packing scheme is exceptionally clever: by exploiting the narrow distribution of exponent values in bfloat16 expert weights, the authors successfully free up 3 exponent bits to pack signs and mask bits directly into the weights, achieving zero-metadata overhead.",
+        "Comprehensive evaluation across four state-of-the-art MoE models (Mixtral, Deepseek-MoE, Qwen1.5-MoE, Qwen3-MoE) showing massive performance improvements over existing pruning and expert-merging baselines, with minimal accuracy loss even at 50% compression.",
+        "Demonstrates excellent real-world efficiency gains, showing a 1.28x inference speedup and enabling single-GPU deployment of large MoEs."
+      ],
+      "weaknesses": [
+        "The bit-packing scheme is fundamentally constrained to pairwise expert merging (maximum 50% compression ratio), as merging three or more experts would require more metadata bits than those freed up in the exponent field.",
+        "The custom GEMV CUDA kernel is highly tailored to the specific bfloat16 exponent range and GPU architecture, limiting its immediate portability to other precisions (e.g., FP16 or FP8) or alternative hardware accelerators (e.g., TPUs).",
+        "While random pairwise expert grouping is shown to be robust, the paper relies heavily on heuristics for pairing experts, leaving room for more structured, routing-aware pairing strategies."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Highly innovative hardware-algorithm co-design that reuses underutilized exponent bits in the Bfloat16 format to store mask and sign metadata, avoiding any auxiliary storage overhead.",
+        "Strong empirical results across multiple architectures (Mixtral, DeepSeek-MoE, Qwen) where PuzzleMoE significantly outperforms prior MoE pruning and dropping baselines, especially at high (50%) compression ratios.",
+        "Excellent compression efficiency: the training-free approach takes only minutes to compress large models (e.g., 2 minutes for Mixtral-8x7B) compared to hours or days required by search- or SVD-based alternatives.",
+        "Rigorous theoretical and empirical analysis in the appendix justifying the element-wise weight similarity of MoE experts."
+      ],
+      "weaknesses": [
+        "The evaluated speedups and custom kernels are restricted to GEMV (batch size = 1). In practical multi-user LLM serving scenarios where batch size > 1, both experts in a merged pair are highly likely to be activated simultaneously within the same batch. Since they share the same physical weight tensor but require different decoding masks/signs, the kernel would need to load the merged weights from global memory multiple times, negating the memory bandwidth savings.",
+        "Lack of evaluation or discussion on how the on-the-fly bit-unpacking scales in GEMM (batch size > 1) workloads, which are crucial for high-throughput LLM serving.",
+        "Implementing on-the-fly bit-manipulations within the critical path of the GPU execution can introduce register pressure and instruction overhead, which may vary significantly across different GPU generations and architectures, limiting the portability of the custom kernel."
+      ]
+    }
+  }
+}

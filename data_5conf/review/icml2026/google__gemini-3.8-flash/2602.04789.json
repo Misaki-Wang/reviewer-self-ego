@@ -1,0 +1,98 @@
+{
+  "v1": {
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Addresses an important and timely challenge: adapting sparse attention mechanisms specifically to autoregressive (AR) video diffusion models, where attention over accumulated past KV cache constitutes the primary runtime bottleneck.",
+        "Well-motivated insights: convincingly illustrates and addresses the phenomenon that early AR chunks are sensitive to error propagation (justifying lower sparsity early on) and that fixed sliding windows fail to capture structured attention sinks across distant history.",
+        "Sensible algorithmic design: Hierarchical Sparse Attention (HSA) cleanly decouples keyframe retrieval via framewise pooling from blockwise token selection, maintaining low overhead and compatibility with block-sparse GPU kernels like SpargeAttention.",
+        "Solid empirical results: extensive evaluation on VBench across multiple competing sparse attention baselines (STA, Radial, SVG2, VMoBA, SLA) on two AR backbones (Self-Forcing and LongLive), showing superior generation quality and consistency alongside speedups.",
+        "System-level deployment: demonstrates a complete acceleration pipeline (FP8 quantization + LightVAE + Light Forcing) achieving 19.7 FPS on an RTX 5090 GPU, showcasing real-world practicality."
+      ],
+      "weaknesses": [
+        "The theoretical bridge connecting the TV-distance diffusion convergence bounds (Eq. 4 and Appendix B) to the exact chunk sparsity allocation rule ($s_i = s_{\\text{base}} - \\alpha_i \\beta$) is heuristic; the mapping between intra-chunk diffusion timesteps and the autoregressive chunk index $i$ is not fully formalized.",
+        "Standalone end-to-end acceleration is relatively modest (1.19x to 1.30x speedup) on 5-second video sequences, as attention only dominates total latency in later chunks (chunk > 10) while linear projections and VAE remain major contributors.",
+        "Evaluation is currently confined to 1.3B parameter models; validating scalability on larger parameter AR video models (e.g., 14B) would strengthen the generalizability of the findings.",
+        "Finetuning fairness: methods like Light Forcing, SLA, and VMoBA benefit from 2,000 steps of post-training, whereas static methods (STA, Radial, SVG2) do not, creating a slight discrepancy across baseline comparisons."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Well-motivated problem: Autoregressive (AR) video diffusion models are emerging as strong candidates for interactive and real-time generation, but attention over accumulating past KV frames quickly dominates runtime. Addressing sparse attention specifically for the AR paradigm is timely and significant.",
+        "Insightful analysis of AR sensitivity (CAG): The observation that early chunks are far more sensitive to sparsity-induced degradation than later chunks—and that early errors propagate irreversibly—is clearly demonstrated through intuitive pilot experiments (Fig. 2) and addressed via Chunk-Aware Growth.",
+        "Effective coarse-to-fine design (HSA): Hierarchical Sparse Attention effectively tackles the growing history context by first retrieving keyframes via framewise pooling and then selecting fine-grained blocks, maintaining fixed computational complexity while preserving long-range consistency and motion dynamic degree.",
+        "Solid empirical results and profiling: Thorough evaluations on two open-source AR models (Self-Forcing and LongLive 1.3B) across VBench metrics demonstrate superior visual fidelity and consistency compared to existing bidirectional sparse baselines. Real deployment profiling on an RTX 5090 (reaching 19.7 FPS with FP8 and LightVAE) proves strong practical value."
+      ],
+      "weaknesses": [
+        "Theoretical connection of CAG is largely heuristic: While Section 4.1 and Appendix B leverage TV bounds from diffusion literature (Li et al., 2023), the formal connection between the bound and the linear sparsity modulation formula ($s_i = s_{\text{base}} - \\alpha_i \beta$) is more of an intuitive metaphor than a rigorous mathematical derivation, particularly since each chunk executes a fixed number of denoising steps.",
+        "Evaluation scale is restricted to 1.3B models and short durations: Experiments are conducted on 1.3B models generating 5-second videos (7 chunks). Although this reflects the current open-source state of AR video diffusion, evaluating on larger models or significantly longer rollouts would provide deeper insights into long-horizon error compounding.",
+        "Dependence on post-training: As shown in Table 2, sparse attention without fine-tuning incurs significant quality drops (73.0 vs. 84.1). While 2,000 fine-tuning steps is relatively lightweight, clarifying how much training budget is necessary and whether CAG/HSA can provide any zero-shot benefits would be beneficial.",
+        "Modest standalone end-to-end acceleration: Standalone attention speedup is substantial (up to ~3.3x), but the end-to-end speedup over dense FlashAttention is around 1.19x to 1.30x due to Amdahl's law with non-attention layers (linear projections, VAE), requiring additional orthogonal optimizations (FP8, LightVAE) to reach real-time frame rates."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Timely and well-motivated problem: Autoregressive (AR) video diffusion models are emerging as strong candidates for interactive and real-time generation, but attention latency over growing KV history is a major computational bottleneck. Developing sparse attention mechanisms specifically tailored to the unique error accumulation dynamics of AR video diffusion is an important research direction.",
+        "Well-designed technical components: The Chunk-Aware Growth (CAG) strategy directly tackles the asymmetric vulnerability of early vs. late chunks to error propagation, while Hierarchical Sparse Attention (HSA) effectively resolves the trade-off between the latency growth of past context and the history-forgetting flaw of rigid sliding-window attention.",
+        "Strong empirical quality on VBench: Across both Self-Forcing and LongLive backbones, the proposed method preserves generation fidelity much better than existing bidirectional sparse attention baselines (e.g., STA, Radial, SVG2, VMoBA), matching or slightly exceeding dense FlashAttention-2 quality scores.",
+        "Practical deployment demonstration: Combining Light Forcing with FP8 quantization and LightVAE yields an end-to-end throughput of 19.7 FPS on an RTX 5090 GPU, demonstrating practical feasibility for real-time video generation."
+      ],
+      "weaknesses": [
+        "Modest standalone end-to-end acceleration: Although attention-level speedup reaches ~3.3x, the end-to-end speedup solely attributable to the proposed sparse attention is relatively modest (1.19x to 1.30x on 5-second videos). The higher 2.33x speedup heavily relies on orthogonal optimizations (FP8 linear quantization and LightVAE replacement).",
+        "Requires post-training fine-tuning: The method is not plug-and-play; as shown in Table 2, directly applying sparse attention yields significant quality degradation (73.0 total score), requiring 2,000 iterations of fine-tuning to recover quality. The paper would benefit from greater clarity regarding training cost, dataset details, and sensitivity to fine-tuning length.",
+        "Heuristic connection between theory and sparsity allocation: While Section 4.1 and Appendix B provide TV-distance bounds related to diffusion sampling and score estimation errors, mapping these bounds to the specific linear schedule $s_i = s_{\\text{base}} - \\alpha_i \\beta$ is largely an empirical heuristic rather than an analytically derived optimal schedule.",
+        "Evaluation restricted to 1.3B scale: All experiments are conducted on 1.3B models. Validating the findings and scalability on larger AR models (e.g., 14B scale) would significantly strengthen the empirical claims."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Timely and well-motivated problem: Autoregressive (AR) video diffusion models (e.g., Self-Forcing, LongLive) have gained massive traction for interactive and streaming generation, but the compounding KV cache and quadratic attention present major runtime bottlenecks. Adapting sparse attention to AR video generation is an important and under-explored topic.",
+        "Insightful method design: The observation that early chunks act as visual anchors and require lower sparsity, while subsequent chunks can tolerate higher sparsity, is intuitive and validated empirically. Chunk-Aware Growth (CAG) operationalizes this effectively, and Hierarchical Sparse Attention (HSA) smartly addresses history forgetting via coarse-to-fine (frame-then-block) dynamic selection.",
+        "Thorough experimental evaluation: The paper compares against five competitive sparse attention baselines across two standard benchmarks (VBench and VBench-Long) and three different AR base models (Self-Forcing, LongLive, Infinite-Forcing). Both quantitative metrics and qualitative visual comparisons clearly show that Light Forcing avoids the severe color drift, duplication, and flickering artifacts suffered by chunk-agnostic baselines.",
+        "Realistic hardware deployment and profiling: Testing across multiple GPU architectures (RTX 5090, A100, H100) and combining the attention sparsity with complementary optimizations (FP8, LightVAE, fused Triton kernels) demonstrates an impressive end-to-end throughput of 27.4 FPS on RTX 5090."
+      ],
+      "weaknesses": [
+        "Loose connection between theory and implementation: While Section 4.1 and Appendix C present a TV distance error bound adapted from prior diffusion theory (Li et al., 2023), the formal connection to the linear sparsity allocation formula $s_i = s_{base} - \\alpha_i \\beta$ is largely heuristic. Referring to this derivation as a rigorous 'theoretical proof of CAG' is an overstatement.",
+        "Modest end-to-end acceleration from sparse attention alone: The isolated end-to-end speedup provided by Light Forcing alone ranges between 1.11× and 1.33× depending on the duration and GPU (e.g., 1.30× on 5090 for 5s, 1.11× on H100/A100). The headlining 2.0×–3.0× speedup is predominantly achieved by incorporating orthogonal deployment optimizations (FP8 quantization, kernel fusions, and LightVAE).",
+        "Evaluation restricted to 1.3B models: All experiments are conducted on 1.3B parameter models. Although this is typical for current open-source AR video diffusion systems, verifying whether the same sparsity schedules and compression ratios generalize seamlessly to larger scale models (e.g., 5B–14B) remains to be demonstrated.",
+        "Requirement of post-training: Unlike purely training-free sparse attention mechanisms, Light Forcing relies on 2,000 steps of fine-tuning to recover performance, which adds training overhead and restricts immediate plug-and-play adoption across arbitrary off-the-shelf checkpoints."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Addresses an important and timely challenge: accelerating autoregressive (AR) video diffusion models, where growing temporal context creates an attention bottleneck that cannot be solved well by bidirectional sparse attention.",
+        "Well-motivated core mechanisms: Chunk-Aware Growth (CAG) leverages the insight that early chunks serve as visual anchors sensitive to error propagation, while Hierarchical Sparse Attention (HSA) provides an effective coarse-to-fine (framewise then blockwise) retrieval mechanism to capture global context without sliding-window history forgetting.",
+        "Extensive empirical validation across multiple open-source AR video diffusion architectures (Self-Forcing, LongLive, Infinite-Forcing) and comprehensive benchmarking on VBench and VBench-Long against multiple sparse attention, feature caching, and token-reduction baselines.",
+        "Comprehensive deployment analysis: evaluates real hardware execution and profiling on consumer (RTX 5090) and datacenter GPUs (A100, H100), including breakdown of attention kernels, quantization, and VAE optimizations."
+      ],
+      "weaknesses": [
+        "The standalone speedup from sparse attention is relatively modest: on its own, Light Forcing delivers around 1.11× to 1.33× end-to-end acceleration. The highlighted 2.0×–3.0× end-to-end speedup relies predominantly on orthogonal optimizations (LightVAE, FP8 quantization, fused Triton kernels).",
+        "Heuristic connection between theory and sparsity formulation: Section 4.1 and Appendix C invoke diffusion TV distance bounds from prior literature, but the mapping to the linear chunk-wise sparsity formula (Equation 5) is largely heuristic and empirical rather than an analytical derivation.",
+        "Evaluation is restricted to 1.3B models: larger scale models (e.g., 5B–14B) may have different attention redundancy profiles, memory bounds, and error accumulation characteristics, leaving scalability to larger foundation models unverified.",
+        "Requires fine-tuning: as shown in Table 3, applying sparse attention directly without 2,000 steps of post-training causes significant quality collapse (Total Score drops from 84.1 to 73.0), which restricts plug-and-play application compared to strictly training-free approaches."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Clear problem motivation: The paper identifies specific failure modes (e.g., compounding error accumulation, over-saturation, and context forgetting) that arise when sparse attention methods developed for bidirectional video diffusion models are directly applied to autoregressive (AR) video diffusion.",
+        "Complementary and tailored methodological design: The proposed approach combines Chunk-Aware Growth (CAG) for macro-level chunk budget allocation—leveraging earlier chunks as visual anchors—with Hierarchical Sparse Attention (HSA) for coarse-to-fine (frame-level then block-level) retrieval of historical context.",
+        "Comprehensive empirical evaluation: The method is validated across three AR video models (Self-Forcing, LongLive, Infinite-Forcing) on both standard VBench and VBench-Long benchmarks, outperforming multiple competitive bidirectional sparse attention baselines (STA, Radial, SVG2, SLA, VMoBA) both quantitatively and qualitatively.",
+        "Detailed deployment and hardware profiling: The paper evaluates execution latency and peak memory across diverse GPU architectures (RTX 5090, A100, H100) and provides a clear breakdown of attention speedup versus full-stack acceleration."
+      ],
+      "weaknesses": [
+        "Disconnect between theoretical error bound and heuristic sparsity formulation: Section 4.1 and Appendix C invoke TV error bounds from diffusion theory (Li et al., 2023) to motivate Chunk-Aware Growth. However, the connection between the bound and the linear sparsity formula $s_i = s_{\\text{base}} - \\alpha_i \\beta$ is largely heuristic. In AR video diffusion, every chunk undergoes an identical number of denoising steps (e.g., 4 steps), making the operational definition and chunk-wise computation of $\\alpha_i$ underspecified and not rigorously derived from the theorem.",
+        "Modest standalone speedup from the proposed attention mechanism: The end-to-end acceleration strictly attributable to LIGHT FORCING is modest (1.19× on LongLive and 1.30× on Self-Forcing). The headline speedup of ~3× relies heavily on orthogonal, standard systems optimizations (FP8 quantization, Triton kernel fusion, and LightVAE), rather than the sparse attention formulation itself.",
+        "Reliance on post-training / fine-tuning: As shown in Table 3, applying sparse attention in a training-free manner causes severe degradation (Total Score drops from 84.1 to 73.0), and 2,000 fine-tuning iterations are required to recover generation quality. This diminishes the plug-and-play practicality of the method compared to training-free sparse attention techniques.",
+        "Limited evaluation scale and context length: Experiments are conducted exclusively on 1.3B parameter models and up to 15 seconds of video. Given that the quadratic attention bottleneck in AR diffusion becomes most critical at larger model scales (e.g., 14B) and extended rollouts (minute-scale), validation on larger foundation models is lacking.",
+        "Sensitivity and tuning overhead: Several key hyperparameters governing CAG and HSA (e.g., $s_{\\text{base}}$, $n_{\\text{sink}}$, $n_{\\text{win}}$, $n_{\\text{past\\_keep}}$) are configured with duration-specific values in Table 5 without a thorough sensitivity analysis, raising questions regarding how easily these parameters transfer to new architectures or frame rates."
+      ]
+    }
+  }
+}

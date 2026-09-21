@@ -1,0 +1,121 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 6,
+      "strengths": [
+        "Clear and well-motivated idea: learning per-token, per-layer/head retention scores at creation time as an alternative to attention-guided eviction heuristics, with a principled framing of eviction as a constrained optimization problem (Section 3.2) and a differentiable surrogate (retention-gated attention) for training.",
+        "Comprehensive empirical evaluation across diverse task families (math reasoning on AIME24/GSM8K/MATH-500, long procedural generation on LongProc, long-context memory on LongMemEval/SCBench/LongBench-V2), multiple model families (Qwen3, DeepSeek-R1-Distill, Phi-3-mini), and multiple memory budgets, including Pareto frontier plots.",
+        "Strong and relevant baselines, including the SOTA learnable retrieval method SeerAttn-R, recent heuristics (R-KV, SnapKV, H2O, StreamingLLM), KeyDiff, and a direct learnable-eviction competitor (LocRet) under its original chunked-prefill setting.",
+        "Solid ablations: objective components (KL, NTP, capacity loss), forward vs. reversed KL, gate architecture (MLP vs. linear), initialization bias, training memory capacity M, and cross-domain generalization of the gates.",
+        "Systems credibility: implementation on FlexAttention with custom Triton kernels, throughput/latency measurements showing ~2x decoding speedup over full cache at 32K context, and negligible per-token overhead for the gates.",
+        "Interesting analysis: emergent eviction patterns (sinks, sliding windows, A-shape, context switching) without hard-coding, head-level interpretability findings, and honest discussion of failure cases (incompressible retrieval tasks) and of limitations (per-head variable-length caches left to future work)."
+      ],
+      "weaknesses": [
+        "Train–inference mismatch is not fully analyzed: training uses smooth exponentially-decaying retention-gated attention, while inference uses standard attention with hard eviction based on β^{t−i}. The paper does not quantify how well the soft surrogate actually approximates the hard eviction behavior, or how sensitive results are to this gap (e.g., comparing outputs of retention-gated attention vs. hard-evicted inference).",
+        "The claim that TRIM-KV 'surpasses the full-cache model' in several settings deserves more scrutiny: eviction-induced improvements could stem from removing distracting tokens, but there is no control experiment (e.g., baseline training on the same math data with only the NTP/distillation objective and full KV) to isolate the regularization effect, nor statistical significance/variance reporting for AIME24 (only 30 problems) and other benchmarks.",
+        "The soft capacity loss (Eq. 5) penalizes the sum of retention scores against M but does not guarantee the hard budget at inference; the relationship between the trained M and the evaluated budgets is discussed only briefly, and some results (e.g., SnapKV beating TRIM-KV on parts of SCBench; large SCBench failures on Retr.KV/Code.RepoQA) suggest the method's behavior outside its training regime is not uniformly strong.",
+        "Novelty is incremental relative to existing work: exponential decay of attention weights is well established (RetNet, gated linear attention, Forgetting Transformer), and learnable eviction scores have been explored (LocRet, LoRCret, attention-gate methods); the main novelty is the creation-time token-intrinsic score with joint multi-layer training, which limits the conceptual advance.",
+        "Some implementation details are ambiguous: it is unclear whether the budget M is enforced per head/layer or globally, how eviction interacts with batched serving, and Figure 3/Table 2 do not report error bars or seed variance for the fine-grained pass@1 comparisons.",
+        "The abstract/introduction overstate the interpretability contribution ('a new path toward LLM interpretability'); the analysis is qualitative and based on a single AIME24 example, with no validation that the head-role findings generalize."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Comprehensive empirical evaluation spanning long-generation (AIME24, GSM8K, MATH-500, LongProc), long-context (SCBench, LongMemEval_S), and chunked-prefill (LongBench/LongBench-V2) settings, with multiple model families (Qwen3, DeepSeek-R1-Distill, Phi-3-mini)",
+        "Extensive ablations: objective components, gate architecture, training memory capacity M, training datasets, forward vs. reversed KL, supporting the design choices",
+        "The train/test framing in Section 3.2 (eviction as constrained optimization over binary α variables) is a clean formulation that motivates the method",
+        "Systems-aware engineering: FlexAttention/Triton implementation, throughput and decode-time measurements (Table 5), and honest discussion of limitations (e.g., per-head variable-length caches left to future work)",
+        "Qualitative analyses (Figures 4-5, 12-26) are unusually detailed and provide a genuine interpretability angle, showing emergent sink/sliding-window/A-shape patterns across layers and heads"
+      ],
+      "weaknesses": [
+        "Train/inference mismatch is significant and under-analyzed: during training, retention scores softly modulate attention (Eq. 3), but at inference the gates only drive hard eviction while attention is standard (Section 4.3 admits this). There is no analysis quantifying how well the soft-decay training objective actually predicts hard-eviction behavior, which is the crux of the method's validity",
+        "The claim of 'surpassing full-cache models' is cherry-picked from narrow settings (Qwen3-4B on AIME24, LongProc Countdown/HTML-to-TSV, LongBench-V2) and AIME24 has only 30 problems; no variance, error bars, or significance tests are reported anywhere, making headline claims like '198% relative improvement' and '58.4% pass@1 gain' statistically fragile",
+        "Results on SCBench (Table 2) show substantial degradation vs. Full KV on several tasks (e.g., En.MultiChoice 13.10 vs 20.52; Code.RepoQA 4.32 vs 53.86), and the 'incompressible context' explanation applies to all eviction methods, weakening the claim of broad advantage; the method's applicability boundary is not characterized",
+        "Novelty is moderate: per-token learned gates with exponential decay are closely related to forgetting transformers, attention-gate eviction (Zeng et al., 2024), and LocRet; the 'Ebbinghaus brain-inspired' framing is decorative rather than technically load-bearing, and the comparison to LocRet is relegated to the appendix with acknowledged chat-template discrepancies in the reproduced Full KV baseline",
+        "Unfair-comparison risk: TRIM-KV is trained on task-matched data (OpenR1-Math) for the math benchmarks while eviction baselines are training-free, potentially inflating the reported gains; the general-data ablation (Figure 8) helps but the main results do not",
+        "Presentation issues that should have been caught: 'Patero' for 'Pareto' (twice), garbled sentence 'As shown in Table 3 and Table 2 show the results', 'Lllam-8B' typo, and an empty 'Source Code' link despite a reproducibility statement promising code release",
+        "Training uses a fixed capacity M=512 while evaluation sweeps budgets from 256 to 32768; the interaction between training M and deployment budget is only partially explored (Figure 11) and no guidance or theory is given for transfer to unseen budgets"
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Clear and well-motivated idea: learning token-intrinsic importance at creation time via lightweight retention gates, framed as a long-horizon alternative to myopic attention-based eviction heuristics",
+        "Simple and practical method: only gate parameters are trained (backbone frozen), distillation + next-token + hinge capacity loss, negligible inference overhead, FlashAttention/FlexAttention compatible with good throughput results (Table 5)",
+        "Extensive and broad evaluation: math reasoning (AIME24, GSM8K, MATH-500), long procedural generation (LongProc), long-memory chat (LongMemEval), long-context (SCBench, LongBench/V2), across multiple model families (Qwen3, DeepSeek-R1-Distill, Phi-3-mini)",
+        "Consistently outperforms strong eviction baselines (R-KV, SnapKV, H2O, StreamingLLM) at equal or lower budgets, and beats the learnable retrieval baseline SeerAttn-R, which is notable given the stricter pure-eviction setting",
+        "Strong ablation coverage: loss components (KL/NTP/capacity), forward vs. reversed KL, gate architecture (MLP vs. linear), initial bias, training memory capacity M, and cross-domain training-data generalization",
+        "Interesting qualitative/interpretability analysis: learned scores recover sink tokens, sliding windows, A-shape patterns and head specializations without hard-coding; budget-allocation analysis of layer/head sparsity",
+        "Honest identification of limitations (per-head variable-length cache left to future work, train-time soft gating vs. inference-time hard eviction) and a reasonably thorough related-work discussion"
+      ],
+      "weaknesses": [
+        "Novelty is moderate: exponential decay retention is essentially the forget-gate mechanism popularized in gated linear attention/RetNet-style models and the Forgetting Transformer (Lin et al., 2025), and learnable eviction via gates has been explored (Zeng et al., 2024; LocRet); the contribution is largely adapting this idea to frozen pretrained softmax LLMs with a plug-in training recipe",
+        "Train/inference mismatch is only partially addressed: training uses retention-gated (soft-decay) attention with standard attention elsewhere, while inference uses standard attention plus hard eviction based on the gates; the paper does not measure how faithfully the inference-time eviction decisions approximate the trained retention-gated attention, leaving the central mechanism under-validated",
+        "Some claims are stronger than the evidence: on SCBench (Table 2) TRIM-KV underperforms Full KV on several tasks (e.g., En.MultiChoice, Math.Find, Code.RepoQA) and 'surpassing full-cache models' holds only in cherry-picked settings (e.g., Qwen3-4B on AIME24); the long-context advantage claim is overstated relative to Table 2",
+        "Retrieval-style tasks (Retr.KV, Code.RepoQA) collapse to near-zero for all eviction methods including TRIM-KV, highlighting a fundamental limitation of the approach that is downplayed",
+        "The learned heterogeneous per-head budgets (a claimed insight) are not exploitable at inference due to uniform-length cache assumptions, limiting the practical value of that finding",
+        "Missing direct empirical comparison to other learnable eviction methods discussed in related work (e.g., Attention-Gate/Zeng et al., 2024), and the LongBench comparison relies on reproduced full-KV numbers with acknowledged discrepancies from reported values",
+        "Presentation issues: 'Source Code' link is empty, typos ('Patero frontiers'), and Table 2 is hard to parse without budget annotation clarity"
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 6,
+      "strengths": [
+        "Clear and well-motivated core idea: learning token intrinsic importance at creation time via lightweight retention gates, decoupling eviction decisions from transient attention scores, which is a sensible reframing of the KV eviction problem for long-horizon generation.",
+        "Simple and practical method: only gate parameters are trained on a frozen LLM (distillation + NTP + capacity loss), with negligible inference overhead; the exponential-decay formulation connects cleanly to attention-logit biasing and is compatible with FlashAttention-style kernels.",
+        "Extensive and convincing evaluation: math reasoning (GSM8K, MATH-500, AIME24), LongProc, LongMemEval-S, SCBench, LongBench/LongBench-V2, across multiple model families (Qwen3, DeepSeek-R1-Distill, Phi3-mini-128K), with strong baselines including R-KV, SnapKV, H2O, StreamingLLM, SeerAttn-R, LocRet, and KeyDiff.",
+        "Real efficiency measurements (throughput/decode time on H200) showing ~2x decoding speedup over full cache and even faster than SnapKV, not just accuracy claims.",
+        "Comprehensive ablations (loss components, gate architecture, training M, training datasets) and thoughtful qualitative analyses showing emergent eviction patterns (sinks, sliding windows, context switching) that could serve as interpretability tools; honest reporting of failure modes on incompressible retrieval tasks.",
+        "Well-written and generally complete; reproducibility statement promises code and checkpoints."
+      ],
+      "weaknesses": [
+        "Limited fundamental novelty: exponential per-token decay/gating of attention is closely related to prior work such as Retentive Network, gated linear attention, the Forgetting Transformer (Lin et al., 2025), and learned attention-gate eviction (Zeng et al., 2024; Chen et al., 2024). The contribution is a recombination (creation-time gating + distillation training for a frozen LLM + eviction at inference) rather than a new mechanism, and positioning against these decay-based methods could be deeper.",
+        "Train/inference mismatch is only partially justified: training uses continuous retention-gated attention, while inference uses standard attention plus hard binary eviction; the paper argues the proxy is faithful but provides no direct measurement of the gap (e.g., KL between retention-gated and evicted attention).",
+        "Claims of 'surpassing the full-cache model' rest partly on AIME24, which has only 30 problems (64 samples) — differences are likely within noise, and no variance/significance analysis is reported.",
+        "SCBench results are weak on retrieval-heavy tasks (Retr.KV = 0.00, Code.RepoQA = 3.86), and several LongProc settings score 0 at 8K budget; the method's practical applicability to tasks requiring verbatim recall is thus questionable.",
+        "The capacity loss uses a fixed soft M during training while inference supports arbitrary budgets; the interaction between M and deployment budgets is addressed only empirically, and heterogeneous per-head budgets are deferred to future work, limiting realized memory savings.",
+        "No released code at review time (source-code link is empty), so reproducibility currently depends on the appendix descriptions; minor typos (e.g., 'Patero frontiers') suggest insufficient polish."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "The core idea of learning a token's intrinsic retention at creation time, rather than relying on query-dependent attention heuristics, is well-motivated and clearly articulated; the connection to exponential decay (Ebbinghaus / ALiBi-style logit bias) is clean.",
+        "The method is lightweight and practical: gates are tiny, trained with a simple distillation + hinge capacity loss, and inference requires only an argmin over cached scores with negligible overhead; hardware-aware implementation (FlexAttention + custom Triton kernel) supports training up to 128K tokens.",
+        "The evaluation is broad for this line of work: math reasoning (AIME24/GSM8K/MATH-500), long procedural generation (LongProc), long-memory chat (LongMemEval-S), SCBench, and a chunked-prefill setting with a matched comparison to LocRet, plus efficiency/throughput measurements.",
+        "Ablations cover loss components, gate architecture, training budget M, and training-data generalization; the qualitative analysis showing emergent sink/sliding-window/A-shape patterns and head specialization is a nice interpretability contribution."
+      ],
+      "weaknesses": [
+        "Limited conceptual novelty: per-token learned exponential decay in attention is essentially a learnable forgetting/logit-bias mechanism closely related to Forgetting Transformer (Lin et al., 2025), RetNet-style decay, and learned ALiBi-style biases; the contribution is an application of these ideas to KV eviction rather than a new mechanism, and the positioning against these closely related methods is thin.",
+        "Train/inference mismatch is only partially addressed: training uses retention-gated (soft) attention, while inference uses standard attention plus hard eviction; no direct measurement of the proxy gap (e.g., quality of retention-gated attention vs. hard-evicted attention at the same effective budget) is provided.",
+        "Potential unfairness/contamination concerns: gates are trained on 564M tokens of OpenR1-Math data and then evaluated on GSM8K/MATH/AIME, while key baselines (H2O, SnapKV, R-KV, StreamingLLM) are training-free; this makes the headline claims ('4x better with less budget', 'surpasses full cache') hard to attribute purely to the caching policy. The 'surpasses full-cache' claims are also not backed by variance/significance analysis, and AIME24 has only 30 problems, so such claims may be within noise.",
+        "The capacity loss uses a soft, averaged hinge with a training-time M, but inference budgets differ widely (256 to 32K); there is no analysis of how well the learned policy calibrates to budgets very different from the training M beyond one ablation figure.",
+        "Several results raise questions: TRIM-KV scores 0.00 on incompressible retrieval tasks (understandable, but worth deeper analysis); the '198.4% relative improvement' figure is not explained in a way that can be verified; Table 2 shows TRIM-KV at 4096 vs. baselines but no matched-budget comparison for some SCBench tasks.",
+        "Layer/head heterogeneous budgets enabled by the learned scores are not actually realized at inference (uniform per-head caches are used due to systems constraints), so a claimed advantage of the method is deferred to future work.",
+        "Reproducibility is stated as a promise (code/checkpoints 'upon publication'), not provided at submission time; given the training-data-dependent results, the code release is important for verification."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Well-motivated reframing of KV eviction as learning a token's intrinsic, creation-time importance rather than relying on recency/attention proxies; the formulation in Section 3.2 clearly connects the heuristic eviction literature to a learnable objective.",
+        "Extensive and convincing empirical evaluation across math reasoning (AIME24, GSM8K, MATH-500), long procedural generation (LongProc), long-memory (LongMemEval_S), long-context (SCBench, LongBench/LongBench-V2), and throughput benchmarks, with multiple base model families (Qwen3, DeepSeek-R1-Distill, Phi3-mini).",
+        "Strong headline results: outperforming eviction baselines even at 4x smaller budgets, beating a strong learnable retrieval baseline (SeerAttn-R) in a stricter eviction setting, and in some cases surpassing full-cache performance, supported by 2x decoding throughput gains.",
+        "Thorough ablation studies: loss components, gate architecture, training memory capacity M, training data generalization, and comparisons to query-agnostic baselines (KeyDiff) and trainable eviction baselines (LocRet) under matched settings.",
+        "Insightful qualitative analysis showing that common eviction heuristics (sinks, sliding windows, A-shape) emerge naturally from the learned policy, plus a novel interpretability angle (head-specific retention specializations, implicit gist behavior), which adds scientific value beyond raw benchmark numbers.",
+        "Practical training recipe: only gate parameters are trained on a frozen backbone, kernel-level implementation with FlexAttention/Triton enabling 128K-token training on 4 GPUs, and no CPU-GPU orchestration at inference."
+      ],
+      "weaknesses": [
+        "Train-inference mismatch is a conceptual gap: training uses soft exponential decay (retention-gated attention) while inference uses standard attention with hard eviction, and the backbone is frozen with distillation toward the *full* model rather than toward the evicted model. The paper does not formally analyze or empirically quantify this approximation gap (e.g., no comparison of retention-gated attention outputs vs. hard-evicted outputs).",
+        "Limited architectural novelty in isolation: the exponential decay on attention logits closely resembles ALiBi-style biases, forget gates (e.g., Forgetting Transformer), and decays in linear-attention/RNN models; the contribution is primarily in combining this with a distillation + capacity loss for plug-in KV eviction in pretrained LLMs, which is incremental relative to prior learnable eviction work (LocRet, NACL, attention-gate).",
+        "Some headline numbers appear cherry-picked: e.g., '198.4% relative improvement' and 'surpasses 4x larger budgets' are quoted at specific budgets/datasets where baselines are weakest; per-budget results in figures show the margin narrows or inverts at larger budgets.",
+        "On SCBench (Table 2), TRIM-KV is weak on incompressible retrieval tasks (Retr.KV = 0, Code.RepoQA far below full KV), and the explanation leans on prior work rather than being analyzed; long-context gains (Table 3) are against only StreamingLLM and SnapKV, omitting stronger recent eviction baselines such as R-KV in that setting.",
+        "The learned-gate vs. attention-score comparison (KeyDiff) is relegated to the appendix with a small plot; given the paper's central claim about intrinsic vs. attention-based importance, a more prominent and rigorous comparison would strengthen the claim.",
+        "Missing details on statistical significance/variance (e.g., pass@1 over 64 samples for AIME24 is reported but confidence intervals are not), and the source code link is not populated in the submission, limiting reproducibility verification at review time."
+      ]
+    }
+  }
+}

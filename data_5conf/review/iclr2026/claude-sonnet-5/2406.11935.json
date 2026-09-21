@@ -22,6 +22,25 @@
         "The writing has some clarity issues (e.g., minor typos, dense notation in Section 3) and the related work section is somewhat thin, missing deeper discussion of alternative code-optimization approaches or recent works closer to this topic (e.g. superoptimization, other LLM-based performance optimization papers post-PIE)."
       ]
     },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The core motivation is intuitive and well illustrated: constructing optimization pairs from a single programmer's iterative history biases the model toward local/incremental edits, while pairing across different programmers on the same problem can expose genuinely different algorithmic strategies. The qualitative examples (Figures 2, 8-10) are convincing illustrations of this phenomenon.",
+        "The empirical results show a large, consistent improvement in %OPT and Speedup when switching from PIE-User to PIE-Problem fine-tuning across multiple model families and scales, which is at least suggestive that the reorganized pairs carry useful signal.",
+        "The paper is reasonably well organized, with clear metrics (using gem5 for deterministic timing) and a reasonably thorough breakdown of error types and merge-weight sensitivity.",
+        "Releasing the dataset/code (if it materializes) would be useful to the community given the sparse research on LLM-based performance optimization."
+      ],
+      "weaknesses": [
+        "The central comparison between PIE-User and PIE-Problem is confounded by construction: PIE-Problem pairs are filtered to keep only pairs with >90% relative time improvement, while PIE-User pairs only need >10%. This means PIE-Problem is trained almost exclusively on dramatic, often algorithm-class-changing rewrites, which trivially explains higher %OPT/Speedup and also explains the large drop in correctness (the model is essentially being asked to imitate much more aggressive, harder-to-verify transformations). The paper never ablates this threshold or reports PIE-User results under a matched 90% threshold, so the 'problem-oriented vs user-oriented' framing is not isolated from the 'threshold' variable, undermining the paper's main causal claim.",
+        "The GPT-4-based categorization of 'global vs local' optimizations (used as key supporting evidence in Section 3) is self-referential and admittedly unreliable—the authors note GPT-4 over-classifies changes as 'global,' yet still lean on this analysis, with only 100 human-annotated pairs as a weak secondary check.",
+        "The PIE-Problem dataset is drastically smaller (336 unique problems / 14k pairs vs. 1,135 problems / 56k pairs), raising concerns about overfitting, statistical robustness, and whether gains generalize beyond the specific held-out problem distribution, especially since problems are selected precisely because they admit a huge speedup trajectory (a systematic, non-random subset of competitive-programming problems).",
+        "The correctness bottleneck identified (Table 2) is a serious issue that is only partially addressed: model merging recovers some correctness but final %OPT/Correct values (e.g., 76.65%/78.76% for the best merged model) still leave a large fraction of outputs unusable, and the method to fix this (naive linear/SLERP merging with a hand-tuned scalar weight) is not novel—it is a direct application of existing model-soup techniques with limited methodological contribution.",
+        "No error bars, multiple seeds, or significance testing are reported for any of the headline numbers, despite the merge-weight curve (Figure 5) showing non-trivial sensitivity to a single hyperparameter (λ), which is only tuned/validated on the same test-adjacent setup without a clear held-out selection procedure.",
+        "The model pool is limited to CodeLlama and DeepSeek-Coder (up to 33B/34B); there is no fine-tuning experiment with more recent/stronger open code models, and GPT-4/GPT-3.5 are only evaluated via prompting, not fine-tuning, making the comparison between 'prompted state-of-the-art' and 'fine-tuned older models' somewhat apples-to-oranges when drawing conclusions about the value of problem-oriented data.",
+        "Curriculum learning and self-correction baselines are relatively weak/underexplored (single simple recipe each), so the claim that model merging is uniquely suited to reconcile the two data regimes is not rigorously established against stronger alternative baselines (e.g., mixed-data fine-tuning, weighted joint training, or multi-task objectives).",
+        "The contribution is largely a data-engineering repackaging of an existing dataset (PIE) plus a well-known model-merging technique; there is limited new methodological or algorithmic insight, and the paper's own limitations section acknowledges the scope is narrow (time-only optimization, given-code setting)."
+      ]
+    },
     "exp3_positive": {
       "oa": 5,
       "strengths": [
@@ -66,6 +85,26 @@
         "The paper's contribution is largely dataset construction plus an off-the-shelf refinement pipeline; the significance/impact for the broader field, beyond this specific benchmark setting, is somewhat narrow."
       ]
     },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The core idea of shifting from single-programmer (user-oriented) optimization trajectories to problem-oriented trajectories that aggregate solutions from multiple programmers is intuitive and reasonably well-motivated with qualitative examples.",
+        "The paper backs its claim with a multi-dimensional analysis (Graph Edit Distance on CFGs, t-SNE semantic embedding dispersion, and human/LLM categorization of optimization types) that consistently supports the narrative that PCO pairs involve more global/algorithmic changes than PIE pairs.",
+        "The anchor verification idea, using the known-correct 'slow code' as an oracle to generate verified input/output test cases rather than relying on LLM-synthesized outputs, is a sensible and cheap way to reduce test-case-generation noise in the optimization-refinement setting.",
+        "Experiments span multiple model families and sizes (CodeLlama, DeepSeek-Coder, Qwen2.5-Coder, GPT-4/4o, DeepSeek-V3) and both BEST@1/BEST@8 decoding, giving a reasonably broad empirical footprint.",
+        "Reasonable reproducibility support: prompts, training hyperparameters, dataset statistics, and code release are provided."
+      ],
+      "weaknesses": [
+        "Potential confound in the PCO vs. PIE comparison: PCO pairs are constructed by sorting ALL valid submissions across all users by runtime and taking adjacent pairs, then keeping the 'top speedup' pairs per problem to match PIE's pair count. This selection procedure inherently biases PCO pairs toward much larger slow-to-fast runtime gaps (since it draws from the full cross-user runtime spectrum rather than each individual's incremental trajectory), which could mechanically inflate measured SPEEDUP/%OPT gains regardless of any genuine improvement in 'algorithmic' reasoning ability. The paper does not adequately control for or ablate this selection effect (e.g., by matching average speedup magnitude between PIE and PCO pairs), making it hard to disentangle 'problem-oriented diversity' from 'larger training deltas'.",
+        "The problem-oriented pairing procedure ('All users: [A1, C1, B1, A2, B3, C2, ..., CM]', taking consecutive pairs after globally sorting by runtime) can pair semantically and stylistically unrelated solutions (different data structures, even implicitly different algorithms unrelated to genuine 'improvement' narratives), and the paper provides no systematic analysis of how many such pairs are noisy/adversarial versus genuinely instructive, beyond a 100-sample human study.",
+        "Evaluation is restricted to a single narrow domain: competitive-programming C++ submissions from CodeNet judged via the gem5 simulator. No results are shown for other languages, real-world software repositories, or non-competitive-programming code, limiting claims of general applicability to 'code optimization' broadly.",
+        "Human and LLM sampling analyses (100 and 1,000 pairs, respectively) are relatively small for the strong categorical claims made (e.g., 78% vs 44% global optimization), and no inter-annotator agreement or confidence intervals are reported.",
+        "No comparison against other plausible baselines for improving optimization capability besides the PIE dataset itself (e.g., data augmentation techniques, retrieval-based methods, or alternative curriculum/pairing strategies), making it unclear whether the improvement is specific to the proposed problem-oriented construction or could be achieved by simpler means such as filtering PIE pairs for larger speedup deltas.",
+        "Anchor verification's core assumption, that LLM-generated test inputs from a slow-code explanation adequately cover functional edge cases, is not rigorously validated (e.g., no coverage analysis against the original judge's hidden test suites); the method still leaves substantial residual incorrectness (~25-30%) after refinement, and the single-iteration cap used for all methods may not reflect their full potential, limiting the fairness of the comparison.",
+        "Results are reported as single-run point estimates without variance across seeds or multiple fine-tuning runs, so the magnitude of reported improvements cannot be judged against noise inherent to LLM fine-tuning and sampling.",
+        "The framing of 'first to introduce a problem-oriented perspective' is a fairly incremental data-curation contribution rather than a new modeling or algorithmic technique, and the paper's overall novelty is modest relative to the extensive empirical apparatus built around it."
+      ]
+    },
     "exp3_positive": {
       "oa": 6,
       "strengths": [
@@ -104,6 +143,26 @@
         "Much of the critical validation (cross-language generalization, hardware validation, cost analysis, failure-mode analysis) is relegated to appendices rather than integrated into the main paper, and some experiments (e.g., 20-sample physical hardware validation) are fairly small-scale.",
         "No statistical significance testing or variance/error bars are reported for the main results, despite BEST@k sampling introducing stochasticity, making it hard to assess the robustness of the reported percentage-point improvements.",
         "The paper's framing of contributions (e.g., 'first to introduce a problem-oriented perspective') is a strong claim for what is fundamentally a dataset-construction strategy; the significance of the contribution to the broader field beyond this specific optimization-pair benchmark is somewhat narrow."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "The core empirical claim -- that pooling solutions from many programmers for the same problem yields richer, more 'global' optimization supervision than single-user iterative trajectories -- is intuitive and is backed by multiple complementary analyses (Graph Edit Distance, t-SNE semantic clustering, human and LLM categorization of edit type).",
+        "Extensive experimental coverage: five LLM backbones/sizes, BEST@1/BEST@8 decoding, data-scarcity/percentage ablations, a controlled study that disentangles the 'perspective' effect from the 'top-speedup selection' effect (Appendix H), GED-stratified subset ablations, cross-language (Python) replication, and even physical-hardware validation against gem5 simulation.",
+        "The anchor verification framework is a sensible, low-overhead idea: using the known-correct-but-slow code as an oracle to generate verified I/O test cases, rather than relying on LLM-synthesized outputs that can themselves be wrong. The 'Comparison Group' ablation (using LLM-guessed outputs instead of real execution) nicely isolates why real execution matters.",
+        "Reasonably transparent reporting of limitations, failure-mode breakdown (Appendix I), iteration-count studies, and cost/latency analysis of the proposed refinement pipeline.",
+        "Solid engineering documentation (training details, prompts, GPU hours) that aids reproducibility."
+      ],
+      "weaknesses": [
+        "Conceptual validity concern with the 'problem-oriented pair' construction: pairing two independently-written correct solutions from different users, sorted only by runtime (e.g., (A1,C1),(C1,B1)), does not represent a genuine edit/optimization trajectory the way a single user's iterative refinement does. The model is trained to treat two unrelated programs as if one were derived by 'optimizing' the other, which is a questionable supervision signal even if it empirically improves benchmark numbers; this construct-validity issue is not seriously interrogated beyond showing that performance improves.",
+        "The magnitude of gains (e.g., %OPT 31%→59%, speedup 2.95×→5.22×) is very large for what is essentially a data-reorganization trick, raising the concern that the model may be learning to recognize problem-specific algorithmic tricks common in competitive programming (prefix sums, hashing, DP-state reduction) rather than a generalizable 'code optimization' skill -- i.e., possible overfitting to the narrow distribution of CodeNet/competitive-programming idioms rather than genuine algorithmic reasoning transferable to real software.",
+        "All experiments are conducted on competitive-programming benchmarks (CodeNet-derived PIE/PCO); the 'Discussion of Generalizability to Complex Real-World Scenarios' in Sec. 4 is purely speculative/qualitative and not empirically tested, so claims about real-world software optimization applicability are unsupported.",
+        "The test set is small (41 unique problems, 978 pairs), limiting the statistical robustness of the reported improvements, especially the fine-grained per-metric deltas in Tables 2-4.",
+        "Novelty of the anchor verification framework is incremental relative to existing execution-feedback/self-repair literature (CodeT, Self-Debug, LDB); the core difference (use the slow code, not synthesized tests, as the oracle) is a reasonable but fairly narrow technical contribution.",
+        "At BEST@8, correctness for PCO-tuned models is sometimes worse than for PIE-tuned models (Finding 1), indicating the proposed perspective trades off correctness for aggressive optimization in some regimes; this trade-off is acknowledged but not fully resolved.",
+        "Human and LLM categorization studies (global/local/other) rely on small samples (100 pairs) and subjective category boundaries, weakening the strength of the qualitative claims about 'algorithmic innovation'.",
+        "The paper's writing is dense with contributions spread thinly across a large appendix; several important robustness results (disentangling ablation, GED-stratified ablation, hardware validation) are relegated to appendices rather than being core to the main narrative, making it harder to assess the paper's true robustness from the main text alone."
       ]
     },
     "exp3_positive": {

@@ -1,0 +1,48 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 2.5,
+      "strengths": [
+        "Addresses a well-motivated and practically relevant problem (length bias/reward hacking in RLHF) and clearly identifies a limitation of prior work—the linear length-reward assumption—that is worth challenging.",
+        "The proposed FiMi-RM framework is reasonably intuitive: decoupling reward from length by learning a flexible non-linear fitting model (length encoding + ResNet) rather than assuming linearity, and then using a correlation-based debiasing loss to remove that learned dependency from the reward model.",
+        "The paper provides fairly comprehensive empirical validation across multiple angles: preference-dataset accuracy split by C-longer/R-longer, length-reward scatter/binned plots, downstream alignment via both BoN and DPO, length-controlled AlpacaEval, and length distribution/histogram analyses of selected and DPO-annotated responses.",
+        "The qualitative analysis of the fitted length-reward curve (strong linear regime for short responses, decelerating for medium, and noisy for long responses) is an interesting empirical observation that could be useful to the community even independent of the debiasing method itself.",
+        "Comparisons against a reasonable baseline (ODIN) and vanilla RM lend some context to the results."
+      ],
+      "weaknesses": [
+        "Evaluation relies on only a single dataset (Anthropic HH-derived Dahoas-rm-static) and GPT-4-based Alpaca-Eval judging references generated from the same small-ish SFT model; no results on more standard/larger benchmarks (e.g., UltraFeedback, TL;DR, Reddit, standard AlpacaEval leaderboard) or multiple preference datasets, which limits generalizability claims.",
+        "No statistical significance testing, error bars, or repeated runs are reported for any of the tables (accuracy, LC-WR, WR); given that reported differences between FiMi-RM and ODIN/vanilla RM are often small (e.g., 1-2 points in LC-WR), it's unclear whether these differences are meaningful or within noise.",
+        "The accuracy table shows FiMi-RM has *lower* overall RM accuracy than both baselines on both model sizes (69.00 vs 70.83/70.31 for 7B), and the paper's justification (that this reflects a fairer length-balanced evaluation) is plausible but not rigorously established—e.g., no analysis of whether the R-longer subset itself contains more inherently low-quality-but-longer chosen responses, or whether the drop stems from genuinely lost preference-modeling capacity rather than bias removal.",
+        "The method introduces a fairly complex three-stage, alternating-training pipeline (with several hyperparameters: encoding dimension d=32, alternation frequency a=8, ResNet depth) but provides no ablation studies isolating the contribution of individual design choices (length encoding vs. raw length input, Pearson-only vs. MSE-only loss, ResNet vs. simpler MLP, alternation frequency sensitivity), making it hard to assess necessity/robustness of each component.",
+        "No comparison to other recent non-linear or post-hoc debiasing baselines mentioned in related work (e.g., Huang et al.'s local linear regression approach, Shen et al.'s Product-of-Experts approach), only to ODIN and vanilla RM, weakening the comparative evidence for superiority.",
+        "The claim of a 'multiphase' length-reward relation (linear-sublinear-noisy) is drawn from visual inspection of a single fitted curve on one dataset/model with no quantitative characterization (e.g., changepoint detection, confidence intervals) or replication across models/datasets, so the generalizability of this finding is unclear.",
+        "Models used (Qwen2.5-7B/1.5B) are relatively small and only two sizes are tested; no discussion of whether findings hold at scale or transfer to more modern/larger reward model setups, which are increasingly standard in current RLHF research.",
+        "Reproducibility is only partially supported: exact code/model release is not mentioned, and some pipeline details (e.g., exact ResNet architecture, multi-GPU aggregation specifics for Pearson computation, LR/scheduler for the fitting model) are described somewhat tersely, which could hinder faithful reproduction.",
+        "The DPO setup (reannotating a held-out set using different RMs, then training DPO on the relabeled data) is somewhat unconventional and could introduce confounds (e.g., relabeling noise, dataset size effects) that are not analyzed separately from the RM's inherent quality."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a well-recognized and practically important problem in RLHF (length bias/reward hacking), motivated with clear examples of prior work's limitations (no bias characterization, or linear-only assumptions).",
+        "The proposed three-stage pipeline (warm-up, non-linear bias fitting via a lightweight ResNet-based model, and decoupling via Pearson-correlation minimization) is a reasonably novel way to move beyond the linear length-reward assumption used by prior methods like ODIN and Length Penalty.",
+        "Extensive empirical validation: two base model families (Qwen2.5-7B, Gemma2-9B), two primary alignment algorithms (DPO, BoN) plus additional SimPO and GRPO results in the appendix, several benchmarks (length-controlled AlpacaEval, MT-Bench, IFEval), and a second training dataset (RLHFlow) for generalization checks.",
+        "Reasonably thorough ablation study covering joint vs. multi-stage training, alternating vs. non-alternating updates, and multiple fitting-model architectures (linear, polynomial, CNN, MLP vs. ResNet), which helps justify design choices.",
+        "Useful diagnostic visualizations (length-reward scatter plots, BoN selection length distributions, DPO chosen/rejected length gaps, fitted curve evolution) that make the qualitative claims about reduced length bias easier to verify.",
+        "Includes a computational cost analysis showing the added fitting model does not meaningfully increase training time, supporting practical applicability.",
+        "Thoughtful discussion in the limitations section acknowledging that length and human preference are not necessarily fully independent, which shows appropriate scientific caution."
+      ],
+      "weaknesses": [
+        "The core debiasing mechanism relies on minimizing the Pearson correlation between the reward and the fitted model's output; despite the paper's claim that this does not assume linearity, Pearson correlation is fundamentally a linear-dependence measure, so achieving near-zero correlation does not guarantee that non-linear/higher-order length dependence has been removed from the reward model itself (only that it doesn't correlate linearly with the fitted curve). This leaves a logical gap between the stated goal (non-linear debiasing) and the actual optimization objective.",
+        "Primary experiments rely on a single, relatively small and dated dataset (Dahoas-rm-static, 30k RM training samples); while RLHFlow is used as a secondary generalization check, broader coverage across more diverse/larger preference datasets would strengthen claims of general applicability.",
+        "No standard PPO evaluation is included (justified by computational cost), which limits the completeness of the RLHF picture, since PPO remains a common deployment setting for reward models.",
+        "Evaluation depends entirely on GPT-4/automatic judges (AlpacaEval, MT-Bench) with no human evaluation, which is a known-imperfect proxy especially for a paper specifically about mitigating evaluator/annotator length bias.",
+        "Results are reported as single-run point estimates without variance or significance testing across seeds, making it hard to assess how robust the reported improvements (often a few points in LC-WR) are to run-to-run variability.",
+        "Comparison baselines are limited to Vanilla RM, Length Penalty, and ODIN; several other more recent length-debiasing methods discussed in related work (e.g., RRM, ALBM, SamPO, Park et al.) are not empirically compared despite being readily available, weakening the claim of state-of-the-art performance.",
+        "The interpretation of the accuracy trade-off in Table 1 (drop in C-longer accuracy framed as removal of a length 'shortcut' rather than capability loss) is argued qualitatively rather than being verified with an independent, length-controlled ground-truth quality measure."
+      ]
+    }
+  }
+}

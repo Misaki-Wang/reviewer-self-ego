@@ -1,0 +1,100 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Well-motivated concept: The paper convincingly demonstrates through empirical analysis that token importance shifts substantially across layers and heads (Figure 2). The proposed reversible 'compress-and-decompress' approach directly resolves the fundamental flaw of irreversible token eviction methods.",
+        "Hardware compatibility and orthogonality: By compressing tokens into contiguous tensors prior to attention computation, the method runs standard dense FlashAttention kernels without requiring irregular hardware-unfriendly sparse attention patterns. It also cleanly stacks on top of existing block-sparse mechanisms like FlexPrefill and Minference.",
+        "Principled selection criteria: The use of cumulative token coverage to dynamically allocate layer-wise sparsity and the Inter-Layer Representation Drift metric for identifying robust layers are both well-formulated and empirically grounded.",
+        "Extensive experimental evaluation: The authors validate their method across diverse long-context benchmarks (RULER, InfiniteBench, LongBench, and Needle-in-a-Haystack) with multiple LLMs (LLaMA-3.1-8B, Mistral-Nemo-12B), demonstrating consistent Pareto-frontier improvements over competitive baselines."
+      ],
+      "weaknesses": [
+        "Reporting primarily attention-only speedup: The speedups shown in Table 1, Table 4, and Figure 5/6 focus on attention latency rather than full end-to-end prefill latency (Time-to-First-Token). Because linear projections, FFN/MLP blocks, and layer norms remain full-size, the end-to-end model acceleration will be lower than the reported attention acceleration.",
+        "Interaction between query-key selection and causal dependencies: Pruning both queries and keys down to L' means that kept queries cannot attend to pruned keys even if those pruned keys had non-zero influence. A clearer ablation comparing symmetric Q/K pruning versus asymmetric K-only pruning within the reversible framework would provide deeper insight.",
+        "Figure 7 caption copy-paste error: In Appendix A.2, the caption for Figure 7 mistakenly copies the caption of Figure 6(b) ('Attention latency breakdown with Token Sparse Attention at 128K context...'), although the figure displays Needle-in-a-Haystack heatmaps."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Clear, empirically grounded motivation: The paper provides convincing preliminary analysis (Figure 2) demonstrating that token importance varies significantly across both Transformer layers and attention heads, which convincingly highlights the fundamental limitation of irreversible early-layer token eviction.",
+        "Hardware-friendly 'compress-and-decompress' design: Gathering subset tokens per head into contiguous Q, K, V tensors and scattering the output back via the residual connection allows the method to plug directly into standard FlashAttention or existing block-sparse kernels (e.g., FlexPrefill, Minference) without requiring custom fused attention backends.",
+        "Complementary acceleration: The approach is genuinely orthogonal to existing block-sparse attention mechanisms. Experiments demonstrate that combining Token Sparse Attention with FlexPrefill or Minference pushes the accuracy–speedup Pareto frontier further out (e.g., Table 1 and Figure 5a).",
+        "Thorough evaluation across diverse long-context suites: The empirical study evaluates multiple context lengths up to 128K/256K on standard benchmarks (RULER, InfiniteBench, LongBench, Needle-in-a-Haystack) across two representative open-weight LLMs (LLaMA-3.1-8B and Mistral-Nemo-12B), including comparisons against dedicated token eviction baselines (FastKV, GemFilter)."
+      ],
+      "weaknesses": [
+        "Focus on attention-only speedup rather than end-to-end Time-To-First-Token (TTFT): The paper consistently reports attention speedups (e.g., 1.36× on FlashAttention, 2.76× on FlexPrefill at 128K). However, in modern LLMs, feed-forward (MLP) layers consume roughly two-thirds of prefill FLOPs, and Token Sparse Attention only sparsifies 50% of attention layers ($\\delta = 0.5$). End-to-end latency and memory throughput improvements for the full forward pass should be reported.",
+        "Overhead at shorter context lengths: In Figure 6(a), at 32K context length, the attention speedup drops below 1.0× (~0.39×–0.42×), indicating that the gather, scatter, and scoring overhead outweighs the computational savings of token reduction at non-extreme sequence lengths. The boundary where the method becomes net-positive should be clearly characterized.",
+        "Sensitivity and details of proxy scoring: Importance scoring relies on taking a slice of recent queries ($Q_{[-last\\_q:]}$) to attend over all keys. The paper does not specify the exact size of $last\\_q$ used across experiments nor ablate how sensitive the layer budget and token selection are to this hyperparameter.",
+        "Minor editorial error in the appendix: The caption for Figure 7 on page 11 ('Attention latency breakdown with Token Sparse Attention at 128K context...') is mistakenly copied verbatim from Figure 6(b), whereas the figure itself depicts Needle-in-a-Haystack heatmaps."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Sound and well-motivated empirical foundation: The paper clearly illustrates the fundamental limitations of permanent token eviction via layer-wise and head-wise token importance dynamics (Figure 2), convincingly demonstrating why token importance shifts across layers and varies across heads.",
+        "Clever and practical architectural design: The 'compress-and-decompress' framework preserves dense memory layout for attention computations, enabling native compatibility with existing kernels (e.g., FlashAttention, Minference, FlexPrefill) while retaining skipped token representations through residual streams.",
+        "Strong orthogonality and composability: By operating at the token level prior to block-level or structured sparse attention, the method acts as an orthogonal layer of acceleration, reliably improving the Pareto frontier of existing state-of-the-art sparse attention methods like FlexPrefill.",
+        "Comprehensive experimental evaluation: The authors validate the method across multiple long-context benchmarks (RULER up to 128K, InfiniteBench, LongBench, and Needle-in-a-Haystack) and two representative open-weight LLMs (LLaMA-3.1-8B and Mistral-Nemo-12B), demonstrating speedup with minimal accuracy loss.",
+        "Principled layer and budget selection: The introduction of Inter-Layer Representation Drift to identify stable layers for sparsification is supported by controlled empirical analysis (Figure 4), and the Dynamic Token Coverage mechanism outperforms fixed sparsity baselines."
+      ],
+      "weaknesses": [
+        "Lack of end-to-end prefill and total inference runtime measurements: The reported speedups focus primarily on attention-kernel latency. While attention computation scales quadratically and dominates at extreme sequence lengths, prefill also involves substantial MLP, LayerNorm, and linear projection overheads. Providing end-to-end prefill wall-clock time and TTFT (time-to-first-token) would provide a clearer picture of real-world system benefits.",
+        "Missing details and sensitivity analysis on the scoring query window: Algorithm 1 estimates token importance by attending a small set of recent queries (`Q[-last_q:]`) to all keys. The paper does not specify the exact value of `last_q`, nor does it analyze sensitivity to cases where critical prompt instructions appear at the beginning or middle of the sequence rather than at the very end.",
+        "Overhead details of per-head gather/scatter: Because token selection is performed independently per head, gathering QKV and scattering the attention output across disparate index sets could induce memory bandwidth bottlenecks and kernel launch overhead. A more detailed profiling of the custom gather/scatter Triton kernels across various batch sizes and hardware architectures would strengthen the efficiency claims.",
+        "Typographical error in Appendix caption: The caption for Figure 7 in Appendix A.2 is mistakenly duplicated verbatim from Figure 6(b) ('Attention latency breakdown with Token Sparse Attention at 128K context...'), even though Figure 7 displays Needle-in-a-Haystack accuracy heatmaps."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "The paper is motivated by a sound empirical observation: token importance varies significantly across both layers and attention heads, which fundamentally limits irreversible token-eviction techniques.",
+        "The 'compress-attention-decompress' framework is conceptually elegant and practical; by gathering per-head tokens into contiguous sub-tensors, it maintains compatibility with standard high-performance attention backends (like FlashAttention) and composes well with existing block-sparse methods.",
+        "The dynamic token coverage policy and representation drift-based layer selection provide principled, adaptive mechanisms for deciding both layer-level eligibility and token sparsity budgets without heuristic trial-and-error.",
+        "Extensive empirical evaluation across multiple long-context benchmarks (RULER, InfiniteBench, LongBench, NIAH) and diverse baselines (FlashAttention, MInference, FlexPrefill, SeerAttention, X-Attention, FastKV, GemFilter, OrthoRank) demonstrates consistent complementary speedups with minimal accuracy degradation.",
+        "The paper provides realistic hardware measurements (prefill TTFT on A100 and A6000 GPUs) along with detailed overhead breakdowns rather than relying solely on theoretical FLOPs."
+      ],
+      "weaknesses": [
+        "The exact implementation details regarding the scoring proxy are slightly under-specified: the text does not clearly specify the exact number of recent queries (`last_q`) used in Algorithm 1, nor does it explicitly discuss how causal masking is handled during compressed attention computation.",
+        "Speedups at moderate sequence lengths (e.g., 8K) are negative to marginal due to the fixed overhead of token scoring, index calculation, and gather/scatter operations, meaning the method's benefits are primarily restricted to ultra-long contexts (>= 32K).",
+        "Evaluation is limited to 8B and 12B parameter models; validation on larger models (such as LLaMA-3-70B) would further substantiate the scalability and overhead characteristics on larger distributed setups.",
+        "The paper does not detail the peak memory overhead incurred by materializing the gathered indices and intermediate compressed tensors (Q̂, K̂, V̂, Ô) across all heads during prefill."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Compelling motivation: The paper provides clear empirical evidence (Figure 2) that token importance fluctuates substantially across layers and differs significantly across attention heads, identifying a key limitation of prior token eviction methods that permanently drop tokens based on early layers.",
+        "Clean and hardware-compatible design: The compress-then-decompress mechanism gathers contiguous per-head Q, K, V tensors, allowing seamless execution with off-the-shelf kernels (e.g., FlashAttention, FlexPrefill) without requiring custom non-contiguous sparse matrix operations.",
+        "Strong orthogonality and composability: Token Sparse Attention acts as an orthogonal token-level pruner that stacks effectively on top of diverse sparse attention techniques (FlexPrefill, MInference, SeerAttention, X-Attention), achieving additive latency reductions with marginal accuracy loss.",
+        "Principled selection strategies: The inter-layer representation drift metric ($R_\\ell$) and dynamic token coverage ($τ$) offer well-grounded, thoroughly ablated criteria for layer and token selection.",
+        "Comprehensive evaluation: The authors validate the method across multiple demanding long-context benchmarks (RULER, InfiniteBench, LongBench, Needle-in-a-Haystack) and against several eviction and non-eviction baselines on multiple hardware setups (A100, A6000)."
+      ],
+      "weaknesses": [
+        "Unclear handling of Grouped Query Attention (GQA): Both evaluated models (LLaMA-3.1-8B and Mistral-Nemo-12B) employ GQA (8 KV heads vs. 32 Q heads). The paper describes head-wise independent token selection ($S_{H=h}$) for Q, K, and V. It is not clarified whether K and V are gathered independently for each query head (which would expand the effective KV memory/gather traffic and replicate KV tensors) or aggregated per GQA group.",
+        "Gather/scatter overhead at moderate context lengths: While overhead remains bounded at 128K context, the gather and scatter operations result in latency degradation at shorter sequence lengths (e.g., 0.97× on A100 and 0.86× on A6000 at 8K context, as shown in Tables 10 and 11).",
+        "Scope limited to prefill and partial layers: The technique accelerates only prefill for a selected subset of layers ($δ = 0.5$, i.e., 50% of the layers), leaving decoding untouched. Consequently, overall end-to-end prefill speedup is modest (e.g., 1.27× over dense FlashAttention at 128K on A100).",
+        "Formalization of causal masking: When subsetting tokens to form compressed $\\hat{Q}, \\hat{K}, \\hat{V}$, the paper should explicitly state whether indices are strictly monotonically ordered to maintain causal masking in prefill attention without leakage."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Reversible token selection design: Unlike prior token eviction approaches (e.g., FastKV, GemFilter, PyramidInfer) that permanently discard tokens across subsequent layers, the proposed 'compress-and-decompress' mechanism scatters attention outputs back into the full sequence space and leverages the residual connection. This allows tokens to be re-evaluated dynamically across layers and attention heads.",
+        "Head-wise heterogeneity: The method allows each attention head to select its own subset of salient tokens based on head-specific attention maps, aligning well with the observation in Figure 2 that different heads attend to distinct context features.",
+        "Kernel compatibility and composability: By gathering selected tokens into dense contiguous tensors before attention, the method natively works with standard FlashAttention and can be stacked orthogonally onto existing sparse attention kernels (e.g., FlexPrefill, MInference, SeerAttention, X-Attention) without kernel modifications.",
+        "Thorough empirical evaluation: The paper evaluates two open models (LLaMA-3.1-8B and Mistral-Nemo-12B) across diverse long-context suites (RULER, InfiniteBench, LongBench, Needle-in-a-Haystack), reporting both attention-level speedup and actual wall-clock prefill latency (TTFT) across multiple GPU architectures (A100 and A6000).",
+        "Principled layer selection: The proposed Inter-Layer Representation Drift metric provides an effective, data-driven heuristic to identify layers robust to sparsification, well-supported by the ablation experiments in Section 2.4 and Table 8."
+      ],
+      "weaknesses": [
+        "Modest end-to-end wall-clock speedups: While attention-only speedup reaches up to 1.36x over FlashAttention at 128K context, the end-to-end prefill speedup is more moderate (1.27x on A100). When combined with an already strong baseline like FlexPrefill, the wall-clock prefill latency reduces from 18.45s to 16.81s (approximately a 1.10x incremental gain).",
+        "Overhead and latency regression at shorter contexts: As shown in Table 10 and Table 11, at 8K context length, the method suffers from a latency penalty (0.97x on A100 and 0.86x on A6000 compared to FlashAttention) due to the scoring kernel and gather/scatter memory copies, limiting its practical utility in dynamic serving where prompt lengths vary.",
+        "Coupling of query and key pruning: Algorithm 1 uses the attention weights of the trailing queries to score token importance and selects the same token set S_h for Q, K, and V. While identifying salient context tokens (keys/values) via recent queries is intuitive, pruning queries based on key importance is less justified: an informative context token may not need an attention representation update, whereas a less salient query token might still need to attend to context.",
+        "Reliance on trailing queries for importance scoring: The heuristic scoring proxy assumes that the most recent queries (Q[-last_q:]) are representative indicators of token relevance throughout the prompt. While this holds for typical query-at-end retrieval benchmarks (e.g., RULER, Needle-in-a-Haystack), it may be less effective for tasks with multi-hop dependencies or long structured inputs where intermediate tokens have complex cross-context dependencies.",
+        "Prefill-only acceleration without KV cache footprint reduction: The approach operates strictly during the prefill phase and retains full dense KV states for decoding, meaning it does not address memory capacity bottlenecks during the decoding phase."
+      ]
+    }
+  }
+}

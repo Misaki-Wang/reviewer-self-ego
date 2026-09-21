@@ -1,0 +1,63 @@
+{
+  "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Addresses an underexplored direction (training-free spatial acceleration) for DiT inference, complementing the more heavily studied temporal acceleration/caching literature.",
+        "Clear identification and diagnosis of two distinct artifact types (aliasing near edges, noise-timestep mismatch) caused by latent upsampling, with intuitive visualizations (Fig. 2, Fig. 4) that motivate the method design.",
+        "The noise-timestep rescheduling derivation (NT-DM) is grounded in a principled analysis of how upsampling changes the covariance structure of the flow-matching trajectory, and the distribution-matching formulation for adapting timestep schedules in a training-free setting is a reasonable technical contribution beyond simply reusing pyramidal-flow-style correlated noise injection.",
+        "Strong empirical results across two backbones (FLUX.1-dev, SD3) and multiple speedup regimes, with consistent improvements over relevant baselines (ToCa, RAS, Bottleneck Sampling) on FID, NIQE, CLIP-IQA, and compositional alignment metrics (T2I-CompBench, GenEval).",
+        "Demonstrated compatibility with caching-based temporal acceleration, showing additive speedups (up to ~7.9x) with modest quality loss, supporting the claimed complementarity.",
+        "Extensive appendix material: derivations, ablations (upsampling ratio, NT-DM component ablation), FLOPs breakdown for the extra VAE decode, and large uncurated qualitative galleries, which aids reproducibility and mitigates cherry-picking concerns."
+      ],
+      "weaknesses": [
+        "The edge-region selection mechanism (Canny edge detection + top-k patch selection via one extra VAE decode) is a fairly simple heuristic; its sensitivity to the top-k ratio, image content, or failure cases (e.g., few edges, textured whole-image content) is not deeply analyzed, and the ablation in Fig. 6 uses only 3 prompts/ratios.",
+        "Results are limited to text-to-image generation on two flow-matching backbones (FLUX, SD3); no video diffusion or other DiT architectures are tested despite the framework being motivated as generally applicable to DiTs, and the authors themselves flag NT-DM as unverified beyond flow matching (Limitations section).",
+        "GenEval scores for RALU are sometimes noticeably lower than the base full-step model and occasionally lower than Bottleneck Sampling (e.g., Table 1, FLUX 4x: 0.639 vs 0.669 for Bottleneck; 7x: 0.646 vs 0.649), suggesting text-alignment gains are not uniformly superior, which is somewhat underdiscussed in the text that otherwise emphasizes RALU's superiority.",
+        "Key hyperparameters (stage timesteps e_k, s_k, top-k ratio, number of stages/steps per stage) appear to be manually chosen per model/speedup setting (Table S1, appendix B.2-style configs) rather than derived automatically, raising questions about the effort needed to tune RALU for new models or resolutions, which is not fully addressed as a limitation.",
+        "The paper compares to only one prior spatial-acceleration baseline (Bottleneck Sampling) since it claims to be the only other training-free spatial method; broader comparison against training-based cascaded/relay diffusion approaches (even as an upper-bound reference) is missing, making it harder to judge the absolute quality gap versus training-based multi-resolution methods.",
+        "Some experimental details (e.g., exact latency measurement protocol, whether TFLOPs include the extra VAE decode and Canny detection overhead consistently, batch size, hardware warm-up) could be more explicit to ensure fair reproducibility of the reported speedups."
+      ]
+    }
+  },
+  "v3": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Addresses an underexplored angle in DiT acceleration: training-free spatial acceleration via latent upsampling, which is complementary to the more heavily studied temporal (caching/forecasting) acceleration methods.",
+        "Clear diagnostic analysis (Sec. 3) that carefully identifies and empirically characterizes two distinct artifact types (aliasing from late upsampling, and distribution mismatch from noise injection), motivating the proposed design in a principled way rather than an ad hoc engineering fix.",
+        "The mixed-resolution/region-adaptive upsampling idea (only upsampling edge-prone regions early, keeping the rest low-res) is a sensible and reasonably novel way to trade off computation against artifact suppression, backed by an interpretable mechanism (Canny edge detection on Tweedie-estimated x0).",
+        "Noise-Timestep Matching (NT-Matching) is derived with an explicit closed-form analysis (matching first/second moments of the upsampled and target trajectory distributions, then minimizing JSD to fit a parametric timestep schedule), giving the method a level of mathematical grounding beyond typical heuristic noise-reinjection.",
+        "Reasonably comprehensive empirical evaluation: two different base models (FLUX.1-dev, SD3), multiple standard metrics (ImageReward, CLIP-IQA, NIQE, T2I-CompBench, GenEval), comparisons to several temporal baselines and the only known spatial competitor (Bottleneck Sampling), plus integration experiments showing complementarity with temporal caching methods and timestep-distilled models (up to 15.9x speedup).",
+        "Thorough ablations (edge-detection method, fixed vs adaptive ratio, upsampling interpolation kernel, effect of NT-Matching via controlled JSD sweep) and artifact-ratio vs FLOPs comparison (Fig. 7) that directly supports the core claim of reduced artifacts at matched compute.",
+        "Appendices include GPU cross-hardware latency/memory results, detailed derivations, and large uncurated qualitative galleries, aiding reproducibility and reducing cherry-picking concerns."
+      ],
+      "weaknesses": [
+        "Quantitative gains, while consistently favorable, are often modest in absolute metric terms (e.g., ImageReward 0.999 vs 0.972-0.992 for baselines at 7x on FLUX), and some competing methods win on individual metrics (e.g., RAS's GenEval/T2I-Comp at SD3 2x, TaylorSeer's NIQE in some settings), so the overall superiority rests on aggregate/qualitative judgment more than a uniform sweep.",
+        "The method introduces several hand-tuned hyperparameters (edge-ratio r, per-model {N_k}, {e_k}, shifting parameters h_k, c) that are separately fit per model/speedup setting (Table S1), raising questions about how much manual tuning transfers to new models/resolutions not tested (e.g., no results on video DiTs or other architectures despite the framing around DiTs broadly).",
+        "NT-Matching is explicitly stated in the Limitations to be tailored to flow-matching architectures, and the method's generality to other diffusion formulations (e.g., DDPM/U-Net, or non-rectified-flow DiTs) is untested, narrowing the claimed scope of 'DiTs' acceleration.",
+        "The perceptual/quality evaluation relies heavily on learned proxy metrics (ImageReward, CLIP-IQA, NIQE) without any human study, despite the paper's central claims being about visually perceptible artifacts (aliasing, mismatching); a small human preference study would strengthen the artifact-reduction claims considerably.",
+        "The three-stage pipeline (low-res denoise, edge-region early upsampling, full-resolution refinement) adds implementation complexity (Tweedie estimation, VAE decode, Canny edge detection, mask construction, JSD-based schedule fitting) relative to simpler baselines like TeaCache/TaylorSeer, and the runtime accounting of these auxiliary steps (edge detection ~2.48 TFLOPs) is only partially transparent for all settings.",
+        "Discussion section is largely speculative (open question about attention behavior across resolutions) rather than offering deeper insight, and the observed 'robustness' claim about token merging is only loosely connected via a brief pointer to unrelated work."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Identifies and clearly analyzes two distinct failure modes of naive latent upsampling for DiT spatial acceleration—aliasing artifacts in high-frequency edge regions and distribution-mismatching artifacts from noise/timestep discrepancies—supported by controlled empirical studies (Fig. 2, 3) that motivate the proposed design.",
+        "The proposed RALU method is principled: mixed-resolution/region-adaptive upsampling restricted to artifact-prone edge regions, combined with a mathematically derived Noise-Timestep Matching (NT-Matching) scheme that analytically aligns the post-upsampling distribution with the pretrained model's original timestep schedule; derivations are provided in detail in the appendix.",
+        "Strong empirical results across two base models (FLUX.1-dev, SD3) and multiple metrics (ImageReward, CLIP-IQA, NIQE, T2I-CompBench, GenEval), showing RALU consistently outperforms both temporal acceleration baselines and the only prior training-free spatial baseline (Bottleneck Sampling) at comparable FLOPs, achieving up to 7x speedup with minimal degradation.",
+        "Demonstrated complementarity with existing temporal acceleration methods and timestep-distilled models, reaching up to 15.9x combined speedup with limited quality loss, indicating practical value and broad applicability.",
+        "Thorough ablation studies (edge detection method, fixed vs. adaptive upsampling ratio, choice of upsampler, effect of NT-Matching via JSD) and inclusion of uncurated qualitative samples (Figs. S10-S13) strengthen credibility and reduce concern about cherry-picking.",
+        "Method is training-free, which is practically appealing compared to distillation or retraining-based acceleration approaches, and latency/FLOPs/VRAM are reported across two GPU types for reproducibility."
+      ],
+      "weaknesses": [
+        "Evaluation is restricted to two flow-matching-based DiT backbones (FLUX.1-dev and SD3) at a single output resolution (1024x1024); generality of the approach (particularly NT-Matching, which is explicitly tailored to flow-matching schedules) to non-flow-matching diffusion formulations (e.g., DDPM/U-Net) or to higher-resolution generation regimes is unverified, a limitation the authors themselves acknowledge.",
+        "The method requires per-setting calibration: the edge-region ratio r and NT-Matching parameters (shifting parameters, noise correlation coefficient) are determined via numerical JSD minimization tuned separately for each model/speedup configuration (Table S1), which adds practical overhead when adapting to new acceleration targets not explicitly quantified in wall-clock terms.",
+        "Comparisons to genuine training-free spatial acceleration baselines are limited to a single prior method (Bottleneck Sampling); broader spatial-acceleration literature comparisons (if any exist) are not discussed beyond related work citations.",
+        "Quality assessment relies solely on automatic metrics and qualitative visual comparisons; no human preference/user study is included to corroborate the automatic metric improvements, despite artifacts being a primarily perceptual phenomenon.",
+        "Some presentation aspects (e.g., dense derivations in Sec. 4.2, notation overload with multiple subscripted parameters) could be streamlined for clarity, and the interaction between region-adaptive early upsampling and self-attention across mixed resolutions is left as an open question in the Discussion rather than being analyzed."
+      ]
+    }
+  }
+}

@@ -1,0 +1,98 @@
+{
+  "v2": {
+    "exp1_quality": {
+      "oa": 6,
+      "strengths": [
+        "Well-motivated approach addressing the critical trade-off between inference cost and reasoning accuracy in video large language models (MLLMs).",
+        "Novel formulation of token compression as an RL alignment problem (C-GRPO), leveraging a teacher-student retention reward gated by correctness to preserve reasoning capability under extreme token reduction.",
+        "Significant token and memory savings: achieves a 95% reduction in visual tokens (compressing input to ~1 frame / ~122 tokens) with an average score across six benchmarks competitive with the 64-frame baseline, accompanied by a 72.4% reduction in peak GPU memory.",
+        "Comprehensive experimental setup across six varied video understanding benchmarks (reasoning and general), with informative ablations comparing against SFT and analyzing the retention threshold parameter."
+      ],
+      "weaknesses": [
+        "Substantial degradation on long video understanding: on VideoMME (w/o sub), the baseline score drops sharply from 53.55 (64 frames) to 39.44 (MARC-3B, ~1 frame). Given that long-form videos are the primary motivation for aggressive token compression, this steep performance drop is a notable limitation.",
+        "Omission of retrieval and segmentation overhead in efficiency measurements: Figure 5 and Section 4.2 report LLM peak memory and generation latency, but do not quantify the runtime latency and compute cost introduced by the Visual Memory Retriever (event segmentation via TransNetV2, feature extraction, and kNN search) during end-to-end inference.",
+        "Comparison baseline disparity: MARC is compared primarily with training-free compression methods (MovieChat, VidCom, ByteVideoLLM). While an SFT comparison is included in Table 2, evaluating training-free baselines directly on top of the RL-tuned backbone or comparing against other learned compression architectures would provide a clearer attribution of gains.",
+        "Imprecise definition of C-GRPO reward terms: in Section 3.2.2, $a_{\\text{full}}$ and $a_{\\text{comp}}$ are introduced as the 'average reward with 64 frame inputs' and 'reward with compressed input', but the exact calculation per roll-out group during training (e.g., whether the teacher is evaluated on-the-fly or precomputed) could be articulated with greater mathematical precision."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Addresses an important and timely challenge: reducing the visual token overhead in Video-LLMs to enable lower latency and memory footprint during inference.",
+        "The conceptual formulation of combining structured retrieval (VMR) with RL-based reasoning distillation (C-GRPO) to compensate for aggressive token compression is coherent and well-motivated.",
+        "Impressive efficiency gains on the LLM decoder side, demonstrating up to 72% GPU memory reduction and faster generation by compressing visual inputs to roughly ~120 tokens.",
+        "The authors provide transparent discussions of failure cases, specifically analyzing why the retrieve-then-compress paradigm experiences degradation on long-duration videos (e.g., VideoMME)."
+      ],
+      "weaknesses": [
+        "Unfair baseline comparison in Table 1: As noted on page 7 ('Only the MARC-3B experiments employ VMR for benchmark processing, with top-k = 3'), the baseline token compression methods (MovieChat, ByteVideoLLM, VidCom) did not receive the benefit of VMR pre-filtering. Given that Table 2 shows VMR alone boosts Qwen2.5-VL-3B mean performance from 42.21 to 45.56 (and MVBench from 44.77 to 57.24), comparing MARC against baselines that process raw unsegmented videos confounds the benefits of retrieval with the benefits of the proposed compression/distillation.",
+        "Missing critical RL ablation: While Table 2 compares MARC to SFT and SFT+VMR, there is no comparison against standard GRPO (i.e., running GRPO on the compressed input with answer correctness reward only, without the retention reward bonus $r_c$). It remains unclear how much gain originates specifically from the C-GRPO retention alignment reward versus standard RL-based reasoning fine-tuning.",
+        "End-to-end overhead is not fully addressed: The framework adds multiple preprocessing stages—shot boundary detection via TransNet v2, fragment embedding extraction, query-clip retrieval, and two-stage token merging. The latency and throughput analysis in Section 4.2 focuses primarily on LLM forward/generation latency on MMVU, leaving the computational and time overhead of the offline/online VMR pipeline unaccounted for.",
+        "Limited exploration across scales: Experiments are conducted exclusively with Qwen2.5-VL-3B. It is not demonstrated whether C-GRPO scales effectively to larger base models (e.g., 7B/8B or 72B), or whether the compression retention bonus remains stable across architectures.",
+        "Severe drop on long-form video: On VideoMME, performance drops significantly from 53.55 to 39.44 (-14.1 points). The claim of achieving 'nearly identical mean performance' is largely sustained by benchmarks where VMR provides an initial boost on short clips (e.g., MVBench), which somewhat masks the limitations under true long-context video settings."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Novel integration of post-training reinforcement learning (C-GRPO) with visual memory retrieval and token compression for video LLMs.",
+        "Comprehensive evaluation across six diverse video reasoning and understanding benchmarks (VSI-Bench, VideoMMMU, MMVU, MVBench, TempCompass, and VideoMME).",
+        "Substantial outperformance against existing training-free visual token compression baselines (such as MovieChat, ByteVideoLLM, and VidCom) when matched under identical aggressive token budgets (~120 tokens / 1 frame equivalent).",
+        "Clear ablation studies contrasting C-GRPO against conventional supervised fine-tuning (SFT) and analyzing the sensitivity of the retention threshold parameter tau."
+      ],
+      "weaknesses": [
+        "Conflation of retrieval improvements with compression retention: The paper emphasizes that MARC-3B achieves parity with the 64-frame baseline (42.20 vs. 42.21). However, Table 2 reveals that applying VMR alone without compression improves the 64-frame model to 45.56. When compared against the appropriate retrieved baseline (Qwen2.5-VL-3B + VMR), compression incurs a noticeable drop from 45.56 to 42.20, including a severe decline on VideoMME (53.55 down to 39.44). Presenting MARC as matching the uncompressed model obscures the performance trade-off.",
+        "Unclear latency and overhead accounting for retrieval: In Figure 5 and Section 4.2, the paper reports an 11.1% total end-to-end latency reduction. However, it is not explicitly clarified whether the runtime of the Visual Memory Retriever—specifically the TransNet V2 event segmentation and feature extraction/nearest-neighbor retrieval using the perception encoder—is included in this measurement. If omitted, the practical efficiency advantage during inference on raw long videos may be overstated.",
+        "Mathematical ambiguity in the C-GRPO objective: In Equation (6), the retention ratio is defined as eta = a_comp / a_full. For discrete QA tasks where individual trajectory rewards are typically binary (0 or 1), the paper does not specify how division by zero is handled when the teacher fails (a_full = 0), nor whether a_full and a_comp represent scalar sample rewards or expectations over the group G.",
+        "Limited exploration across model families: Although inference benchmarks evaluate different architectures, the proposed RL training framework (C-GRPO) is only applied to Qwen2.5-VL-3B. Demonstrating the transferability of this RL compression recipe to other base models (e.g., InternVL or Gemma) or larger scales (7B/8B) would significantly strengthen the empirical claims."
+      ]
+    }
+  },
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "The paper targets a critical and timely problem: mitigating the significant computational and memory bottlenecks of video-LLMs when processing long or dense video inputs.",
+        "Formulating token compression as a policy optimization distillation problem via C-GRPO is an interesting and creative adaptation of GRPO.",
+        "The empirical results show strong accuracy retention across six diverse video understanding and reasoning benchmarks despite a ~95% token reduction.",
+        "The paper includes clear ablation studies comparing C-GRPO against conventional supervised fine-tuning (SFT) and examining the sensitivity to the retention threshold parameter $\\tau$."
+      ],
+      "weaknesses": [
+        "Unfair baseline comparison and confounding effect of VMR: In Table 1, baseline models and existing compression methods (ByteVideoLLM, MovieChat, VidCom2) do not use the Visual Memory Retriever (VMR). As revealed in Table 2, simply adding VMR to the vanilla 64-frame Qwen2.5-VL model increases performance from 42.21 to 45.56 (and on MVBench from 44.77 to 57.24). This indicates that a large portion of the performance benefit comes from the retrieval pre-filtering rather than compression or C-GRPO. Baselines like MovieChat or VidCom should be evaluated with VMR input to isolate the effect of C-GRPO.",
+        "Unclear inference overhead and latency accounting: The VMR module relies on an external event boundary detector (TransNet v2) and an embedding model for contrastive cross-modal retrieval. It is unclear whether Figure 6 includes the runtime and GPU memory footprint of these external models in the 'Total Latency' and peak memory measurements.",
+        "Mathematical ambiguities in C-GRPO: In Equation 6, $\\eta = a_{comp} / a_{full}$ defines the retention ratio, but the paper does not explain how $a_{full}$ is computed during GRPO rollouts (e.g., whether teacher rollouts are sampled or teacher answers are generated greedily) and how edge cases (such as $a_{full} = 0$, leading to division by zero) are handled.",
+        "Incomplete submission and broken references: The manuscript contains unresolved references (e.g., 'Appendix ??' on page 8) and repeatedly references Appendices A and B for critical implementation details, yet no supplementary material or appendix is included."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Addressing the computational overhead and latency of video large multimodal models (VLLMs) via extreme token compression is a highly timely, practical, and important research direction.",
+        "The retrieve-then-compress paradigm is conceptually sound: combining structured event-level retrieval (VMR) with intra-segment token merging and reinforcement learning distillation provides a coherent end-to-end framework.",
+        "Formulating token compression as an RL alignment problem via C-GRPO is an interesting extension of GRPO to distillation under constrained visual budgets.",
+        "Impressive compression ratio: achieving an average score of 42.20 across six benchmarks with only ~122 visual tokens (a ~95% token reduction from the 64-frame baseline) demonstrates the effectiveness of the pipeline."
+      ],
+      "weaknesses": [
+        "Unfair baseline comparisons: In Section 4.1, the authors explicitly state that 'Only the MARC-3B experiments employ VMR for benchmark processing, with top-k = 3.' As Table 2 demonstrates, VMR alone boosts the uncompressed baseline from 42.21 to 45.56 (and MVBench from 44.77 to 57.24). Comparing MARC against existing compression baselines (MovieChat, VidCom, ByteVideoLLM) without providing them the same retrieved clips makes it impossible to decouple whether the improvements stem from C-GRPO or simply better input frame selection.",
+        "Pre-processing and retrieval overhead in efficiency evaluation: The efficiency evaluation (Figure 6) reports LLM latency and GPU peak memory during generation, but appears to omit the computational overhead and latency introduced by the Visual Memory Retriever (event boundary detection via TransNetV2 and fragment embedding/retrieval). For a fair real-world latency evaluation, the end-to-end wall-clock time including VMR must be reported.",
+        "Severe degradation on long video understanding: On the VideoMME benchmark, performance drops substantially from 53.55 (baseline) to 39.44 (-14.11 points), indicating that compressing a long video down to a single frame's token budget inevitably loses vital temporal context. The paper points to 'Appendix ??' for analysis, but no appendix is provided.",
+        "Mathematical clarity and edge cases in C-GRPO: In Equation (6), the retention ratio is defined as $\\eta = a_{comp} / a_{full}$. The paper does not specify how division by zero is handled when the teacher model fails to answer correctly ($a_{full} = 0$), nor does it explicitly define what base reward metric $r_i$ represents during training rollouts.",
+        "Missing appendix and broken references: Crucial implementation details, training hyperparameter specifications, and extended analyses are deferred to Appendices A and B (as well as an unresolved reference 'Appendix ??' on page 8), none of which are included in the manuscript, hindering reproducibility."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Addresses an important and highly practical problem: mitigating the significant computational and memory overhead of visual tokens in video large language models (VLMs).",
+        "Evaluated across a comprehensive suite of six diverse video understanding and reasoning benchmarks (VSI-Bench, VideoMMMU, MMVU, MVBench, TempCompass, VideoMME).",
+        "The conceptual formulation of treating token compression as a policy alignment/distillation task using RL (C-GRPO) against a full-frame teacher is an interesting direction."
+      ],
+      "weaknesses": [
+        "Conflated and unfair baseline comparisons: The central claim that MARC matches the 64-frame baseline (42.20 vs. 42.21) while reducing visual tokens by 95% is misleading due to confounding with the retrieval module. As Table 2 reveals, applying VMR to the 64-frame baseline achieves 45.56, meaning MARC compression actually degrades accuracy by 3.36 points. Furthermore, competing compression methods (MovieChat, VidCom, ByteVideoLLM) were not provided with VMR retrieval, creating an uneven comparison.",
+        "Omission of retrieval overhead in efficiency metrics: Figure 6 reports latency and memory reductions solely for the downstream LLM generation stage. The computational cost, latency, and GPU overhead required for the upstream retrieval pipeline—specifically running deep event segmentation (TransNet-v2), extracting feature representations with an embedding model, and nearest-neighbor retrieval across long videos—are entirely omitted. In realistic deployment, this preprocessing overhead may eliminate the reported latency gains.",
+        "Missing appendix and unresolved references: Crucial implementation details, hyperparameters, and training setups are deferred to Appendix A and Appendix B, but no appendix is included in the manuscript. Additionally, there are broken cross-references in the main text (e.g., 'Appendix ??' on page 8), hindering completeness and reproducibility.",
+        "Underspecified and mathematically imprecise formulation of C-GRPO: In Equation 6, the retention ratio is defined as $\\eta = a_{comp} / a_{full}$. For question answering tasks with binary correctness rewards, $a_{full}$ is frequently zero, causing division by zero; the paper does not explain how this edge case is handled or how $a_{comp}$ and $a_{full}$ are computed across group rollouts.",
+        "Limited technical novelty: The pipeline largely connects existing tools without fundamental methodological advancements: TransNet-v2 is used for boundary detection, frame-level cosine-similarity merging follows MovieChat/ToMe, and C-GRPO applies standard GRPO with an auxiliary reward term."
+      ]
+    }
+  }
+}

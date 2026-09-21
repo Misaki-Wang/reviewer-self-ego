@@ -1,0 +1,88 @@
+{
+  "v1": {
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Intuitive and elegant methodology: The paper proposes an elegant, architecture-agnostic method to achieve bidirectional process reward modeling simply by reversing the reasoning steps. This requires no structural modifications or additional parameters.",
+        "Extensive and rigorous evaluation: The authors test the proposed BiPRM framework across three different LLM backbones, three distinct policy models, three reward loss objectives, and two mathematical reasoning benchmarks. The consistent improvements across all configurations demonstrate strong robustness and generalizability.",
+        "Clear motivation and exposition: The introduction of backward verification is well-motivated with a concrete mathematical induction example, and the paper is written with excellent clarity and structured progression.",
+        "Thorough ablation studies: The ablation experiments clearly isolate the contribution of both the forward (L2R) and backward (R2L) components, proving that their integration is complementary."
+      ],
+      "weaknesses": [
+        "Compute and FLOPs overhead: While parallel execution can hide the latency, running both L2R and R2L streams doubles the total inference FLOPs. The paper should discuss this computational trade-off more transparently, as doubling the query budget can be a significant constraint in resource-limited deployments.",
+        "Lack of analysis on R2L language modeling coherence: Reversing reasoning steps yields a text trajectory that violates standard forward language patterns. It would be highly insightful to analyze how the base LLMs (typically pre-trained on forward text) handle the reversed syntax of the R2L sequence, perhaps by reporting perplexity or specific failure modes of the R2L head alone."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "The proposed bidirectional process reward model (BiPRM) addresses a key limitation of existing unidirectional PRMs (their inability to perform backward verification) in a clever, simple, and elegant manner.",
+        "The approach requires no additional parameters and is compatible with any standard decoder-only language model backbone as well as various training objectives (BCE, MSE, Q-value rankings).",
+        "The evaluation is exceptionally thorough, spanning three distinct LLM backbones (Qwen2.5-Math, Rho-Math, DeepSeek-Math), three inference policy models, and two popular mathematical reasoning benchmarks (GSM-Plus and MATH500).",
+        "The ablation studies and qualitative case studies clearly demonstrate and explain the mechanism behind BiPRM's performance gains."
+      ],
+      "weaknesses": [
+        "While the paper claims 'zero inference latency' due to parallel execution, running two forward passes (L2R and R2L) doubles the computational footprint (total FLOPs) and GPU memory/compute resource requirements, which represents a non-trivial trade-off.",
+        "There is limited analysis or discussion on how standard autoregressive decoder-only language models handle reversed reasoning steps (i.e., q, s_T, s_{T-1}, ..., s_1), given that it violates the natural causal order of text they were pretrained on.",
+        "The paper relies heavily on the 'min' aggregation operator for trajectory-level scoring. A more detailed exploration of alternative aggregation functions (such as product or average) under the bidirectional framework would have provided a more complete picture."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "Comprehensive and rigorous empirical evaluation across three distinct LLM backbones, three policy models, and three different process reward model (PRM) objectives, totaling 54 experimental configurations.",
+        "Consistent and notable performance improvements under the Best-of-N (BON@n) metric across all configurations compared to the standard unidirectional left-to-right (L2R) baseline.",
+        "Detailed ablation studies and qualitative case studies that effectively illustrate how incorporating backward context helps correct or refine step-level reward predictions."
+      ],
+      "weaknesses": [
+        "The claim of 'zero inference latency' is highly misleading. While the parallel right-to-left (R2L) stream does not introduce new parameters, executing both L2R and R2L streams requires two forward passes (or doubling the batch size). This doubles the computational cost (FLOPs), halves the serving throughput, and can increase wall-clock latency under resource-constrained settings.",
+        "The proposed method of reversing the order of steps is conceptually suboptimal. Forcing a causal LLM to read reasoning steps in reverse logical order (e.g., conclusion first, then proof steps, then premise) severely disrupts the natural syntax and logical flow of the text. A much more standard and computationally efficient approach to bidirectionality would be to use a bidirectional/non-causal attention mask over the forward sequence, which would also only require a single forward pass.",
+        "The mathematical formulation in Section 3.2 is sloppy. The authors take the partial derivative of the reward with respect to a discrete reasoning step (a sequence of discrete text tokens), i.e., $\\frac{\\partial r}{\\partial s_{t+k}}$, which is mathematically undefined. This dependency should instead be formulated in terms of token embedding gradients or attention dependencies.",
+        "Important details regarding the exact training protocol of BiPRM are missing. It is unclear whether the model optimizes the training loss directly on the averaged reward (requiring backpropagation through both forward and backward passes simultaneously) or via multi-task training on both paths separately."
+      ]
+    }
+  },
+  "v2": {
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "The paper addresses a critical and intuitive limitation of standard Left-to-Right (L2R) Process Reward Models (PRMs): their inability to leverage future steps to retrospectively verify the correctness of earlier ones.",
+        "The proposed method is highly elegant and simple to implement, requiring no modifications to the underlying LLM's architecture. The R2L stream is achieved purely through step-level sequence reversal in the prompt, resulting in a negligible (0.3%) parameter overhead for the gating module.",
+        "The authors conduct a thorough and comprehensive evaluation spanning multiple LLM backbones (Rho-Math, Qwen2.5-Math, Deepseek-Math), distinct training objectives (BCE, MSE, Q-value Ranking), and various benchmarks (MATH500, GSM-Plus, ProcessBench).",
+        "The paper provides exceptional analytical depth. The error distribution analysis across reasoning steps and the visualization of the dynamic gating weight (sigma) beautifully illustrate why and how the L2R and R2L streams complement each other.",
+        "The authors proactively address the concern of compute scaling by comparing BiPRM against homogeneous ensembles (2xL2R and 2xR2L), convincingly demonstrating that the performance gain stems from the bidirectional context rather than just added compute."
+      ],
+      "weaknesses": [
+        "Although the wall-clock latency is well-optimized to a mere 5% increase using parallel GPU batching, the method still doubles the theoretical FLOPs and increases the GPU memory usage, which could limit its throughput in resource-constrained serving environments.",
+        "The prompt-reversal mechanism depends on having explicit, structured, and clearly demarcated steps (e.g., Step 1, Step 2). Reversing step sequences in unstructured or purely free-form Chain-of-Thought (CoT) trajectories might be less straightforward and could require an additional parsing step.",
+        "The empirical validation is currently confined to mathematical reasoning tasks. Although math is a standard and challenging testbed for PRMs, the generalizability of step-level reversal to other structured tasks (like code generation or logical planning) is left unproven."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Novel and Intuitive Concept: The paper identifies a key limitation of conventional unidirectional PRMs—their inability to utilize downstream context—and addresses it through a bidirectional evaluation scheme (BiPRM) incorporating a parallel right-to-left (R2L) stream.",
+        "Elegant and Efficient Implementation: The R2L stream is elegantly implemented via simple step-level trajectory reversal without modifying the LLM's architecture. Parallel execution on GPU keeps the inference wall-clock latency overhead minimal (~5%), which is highly practical for real-world deployment.",
+        "Extensive and Rigorous Evaluation: The empirical evaluation is exceptionally comprehensive, covering 3 backbone models (from 1B to 7B parameters), 3 training objectives (BCE, MSE, Q-value ranking), and 3 sampling policies across multiple benchmarks (MATH500, GSM-Plus, and ProcessBench).",
+        "In-depth Analysis and Ablation: The paper provides excellent analytical insights, such as the position-dependent error profiles of L2R vs. R2L streams, the visualization of the dynamic gating weights, and a rigorous comparison against homogeneous ensembles to rule out simple parameter/compute scaling effects."
+      ],
+      "weaknesses": [
+        "Domain Scope: The experimental validation is entirely restricted to mathematical reasoning. While mathematics is an ideal testbed for step-level verification, it remains to be seen how well step-level prompt reversal generalizes to other domains like code generation, where syntax and logical flows might be significantly harder to evaluate in reverse order.",
+        "Lack of Empirical Comparison to Existing Bidirectional Approaches: The paper discusses BiRM (Chen et al., 2025) in the introduction/related work as an approach attempting to incorporate future guidance. However, there is no direct empirical comparison with BiRM or similar prospective/retrospective verifiers to demonstrate the superiority of the proposed structural context reversal over auxiliary head methods."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "The paper is exceptionally well-written, with highly clear figures, a structured presentation, and a clean mathematical formulation of the proposed bidirectional framework.",
+        "The empirical evaluation is remarkably thorough, covering three distinct LLM backbones (Rho-Math, Qwen2.5-Math, DeepSeek-Math), three different PRM objectives (BCE, MSE, Q-value rankings), and multiple solution-level/step-level benchmarks.",
+        "The ablation studies are comprehensive, comparing BiPRM against homogeneous ensembles (2xL2R, 2xR2L) to demonstrate that the performance gains are not simply due to doubled computation."
+      ],
+      "weaknesses": [
+        "Fundamental Limitation of R2L in Handling Consistent Error Propagation: A primary goal of PRMs is to identify the first incorrect step in a reasoning chain. In practice, once an LLM makes an error, subsequent steps are often logically consistent with that false premise. Because the R2L stream evaluates step s_t based solely on future steps s_{>t} (Eq. 3), it will systematically fail to detect such errors. This is demonstrated in Table 12, where the R2L stream gives a high score of 0.63 to an erroneous step because the subsequent derivation is consistent with it, which in turn degrades BiPRM's fused score to 0.18 (compared to the baseline L2R's correct score of 0.01).",
+        "Blindness to State-Dependent Transitions: According to Eq. 3, the R2L stream completely ignores the preceding context s_{<t}. In logical and mathematical reasoning, the validity of a step depends entirely on assumptions and definitions introduced in prior steps. Without access to s_{<t}, the R2L stream is structurally incapable of verifying state-dependent transitions and must rely on superficial semantic consistency with the future steps.",
+        "Misleading Efficiency and Latency Claims: The abstract and evaluation claim that parallel execution of the two streams incurs only a 5% latency overhead. While this holds true for low-concurrency or single-request scenarios with underutilized GPUs, the theoretical FLOPs are doubled (as acknowledged in the Limitations). In realistic, high-throughput production settings where batch sizes are maximized to saturate GPU compute, this 2x increase in FLOPs will halve the serving throughput and double the cost. Presenting the 5% wall-clock latency as the primary efficiency metric is highly misleading for real-world deployment."
+      ]
+    }
+  }
+}

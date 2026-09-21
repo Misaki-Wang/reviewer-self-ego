@@ -1,0 +1,89 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Elegant and mathematically sound formulation: The paper decomposes the KV compaction problem into matching local attention output and attention mass, which mathematically preserves the block's contribution under concatenation with future tokens.",
+        "Drastic speed improvements: It achieves comparable or superior quality to gradient-based prefix-tuning (Cartridges) while being orders of magnitude faster (seconds/minutes instead of hours), tracing out a strong Pareto frontier.",
+        "Comprehensive and rigorous evaluation: The authors validate the method on modern open-source LLMs (Qwen3, Llama-3.1, Gemma-3) and realistic long-context benchmarks (QuALITY, LongHealth), comparing against a solid list of state-of-the-art token-pruning and summarization baselines.",
+        "Practical and effective design choices: The introduction of per-token scalar biases to resolve the mismatch in attention mass, alongside model-specific precomputed nonuniform head budgets, are clever, practical, and thoroughly ablated."
+      ],
+      "weaknesses": [
+        "Compaction overhead for real-time serving: While much faster than Cartridges, the compaction time is still non-trivial (e.g., over 100 seconds for OMP-fast on a 60k-token context). This latency overhead might limit its utility in highly interactive, real-time streaming applications.",
+        "Performance gap at extreme compression ratios: Because the method is constrained by selecting a subset of the original keys, it can be outperformed at extreme compression rates (e.g., 100x) by continuous, gradient-based optimization methods like Cartridges.",
+        "Lack of end-to-end systems-level serving benchmarks: The paper demonstrates physical size reduction and accuracy retention, but lacks wall-clock generation throughput or memory footprint benchmarks in an inference engine (like vLLM) to demonstrate the actual systems-level benefits during decoding."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Elegant Formulation: The paper decomposes the complex objective of matching latent-space attention outputs into two highly efficient and well-behaved subproblems: Non-negative Least Squares (NNLS) for mass correction biases and Ordinary Least Squares (OLS) for value fitting. This avoids slow end-to-end backpropagation.",
+        "Principled Attention Mass Correction: Introducing the per-token scalar bias is a clever and mathematically sound way to address the attention mass mismatch issue when shrinking the cache. This explains why simple token-eviction/merging methods systematically underestimate the compacted block's contribution during future decoding.",
+        "Strong Empirical Results: The method demonstrates a state-of-the-art Pareto frontier for compaction quality versus compaction speed. At 50x-100x compaction ratios, it significantly outperforms prior token-eviction/pruning baselines and matches or exceeds the accuracy of Cartridges while being up to two orders of magnitude faster.",
+        "Comprehensive Ablations and Extensions: The authors present thorough analyses of the key components (on-policy queries, head budgets, self-study) and explore practical downstream applications, such as combining text-based summarization with Attention Matching (up to 200x compaction) and repeated online compaction mid-trajectory on AIME."
+      ],
+      "weaknesses": [
+        "Compaction Latency: While a massive improvement over Cartridges, the compaction time (e.g., 104 seconds for AM-OMP-fast on a 60k-token context with Gemma-3-12B) is still relatively high for interactive, real-time multi-turn chat applications where sub-second Time-to-First-Token (TTFT) is expected.",
+        "Integration Complexity: Deploying this method requires attention kernels that support both variable-length sequences (due to non-uniform budgets across heads) and per-token scalar biases. Although supported in modern tools like FlexAttention, integrating these custom features into production-level, high-throughput engines (such as vLLM or TensorRT-LLM) remains non-trivial."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "The paper proposes a novel, principled framework called Attention Matching (AM) for KV cache compaction that successfully bridges the gap between high-speed heuristic pruning methods and high-quality but prohibitively slow optimization methods.",
+        "The mathematical formulation is elegant and clean: by decomposing the objectives into matching local attention outputs and attention masses, the authors are able to derive closed-form solutions (ordinary least squares and non-negative least squares) that avoid expensive gradient-based backpropagation.",
+        "The introduction of per-token scalar biases to match attention mass is a clever and computationally cheap addition that prevents the systematic underestimation of the compacted block's contribution.",
+        "The work includes a comprehensive evaluation across multiple state-of-the-art models (Qwen3, Llama3.1, Gemma3) and long-context benchmarks (QuALITY, LongHealth), demonstrating a significantly improved Pareto frontier of compaction speed versus downstream accuracy.",
+        "The paper is exceptionally well-written, with thorough explanations, robust ablation studies, and clear presentation of both algorithms and empirical results."
+      ],
+      "weaknesses": [
+        "While the fastest variants are very efficient, the best-performing variant (AM-OMP) still requires a non-trivial amount of time (nearly 10 minutes for a 60k token context, or ~1.5 minutes for the fast variant) due to the sequential nature of greedy key selection, which may limit its viability for real-time online applications.",
+        "The performance of the method relies heavily on the quality and representative nature of the reference queries ($Q_{ref}$). While 'self-study' and 'repeat-prefill' work well for the evaluated tasks, there could be scenarios with highly unpredictable user queries where the pre-computed compacted cache experiences degradation.",
+        "Although the authors discuss using variable-length attention kernels (like FlashAttention/FlexAttention) to support nonuniform head budgets, integrating such dynamically sized, per-head compacted caches into highly optimized production serving engines (like vLLM) remains a complex engineering challenge."
+      ]
+    }
+  },
+  "v2": {
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Strong theoretical foundation: The proposed Attention Matching objective is elegantly formulated by decomposing attention into locally normalized attention outputs and attention mass. Introducing a per-token scalar bias to model this decomposition is mathematically rigorous and highly effective.",
+        "Outstanding empirical performance: Across multiple benchmarks (QuALITY, LongHealth, QASPER, LongBench v2, and RULER), the proposed methods (AM-OMP, AM-HighestAttnKeys) define a new Pareto frontier, maintaining high downstream accuracy even at extreme compression ratios (50x to 100x) where prior heuristics fail.",
+        "Exceptional speedup over optimization-based methods: By decomposing the objective into closed-form subproblems (OLS and NNLS) and selecting keys from the original set, the method achieves Cartridges-level accuracy while being over 100x faster (seconds to minutes instead of hours).",
+        "Insightful extensions and ablations: The paper includes a thorough ablation of each component (such as the importance of non-uniform head budgets) and demonstrates a compelling proof-of-concept for online compaction on AIME 2025, showing that reasoning performance can be preserved over successive compactions."
+      ],
+      "weaknesses": [
+        "Computational latency overhead: Although orders of magnitude faster than training-based approaches, the query generation and OMP-based key selection steps still take significant time (up to several minutes on a 60k-token context on an H200 GPU, as shown in Table 3). While asynchronous compaction is discussed, this overhead remains high compared to zero-cost token eviction methods.",
+        "Sensitivity to reference query distribution: The method's accuracy depends on the quality of the reference queries (obtained via self-study or repeat-prefill). If a downstream user query is highly out-of-distribution compared to these reference queries, the compaction quality might degrade.",
+        "Lack of downstream decoding throughput evaluation: While the paper thoroughly evaluates KV cache size reduction and compaction time, it does not provide end-to-end decoding wall-clock speedup or serving throughput numbers using optimized engines (e.g., vLLM with variable-length packing and attention biases) to demonstrate the actual serving-time benefits."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Well-motivated and mathematically sound formulation of context compaction through attention output and attention mass matching.",
+        "Clever introduction of per-token attention bias terms ($\\beta$) which elegantly solves the issue of representing lost attention mass when reducing the key-value cache size.",
+        "Outstanding performance-to-speed tradeoff: achieves compaction quality comparable to or better than gradient-based prefix-tuning (Cartridges) while running up to two orders of magnitude faster (seconds/minutes vs. hours).",
+        "Comprehensive and rigorous evaluation spanning multiple models (Qwen3, Llama-3.1, Gemma-3), diverse tasks (QuALITY, LongHealth, QASPER, LongBench v2, RULER), and including interesting extensions like summarization fusion and online mid-trajectory compaction."
+      ],
+      "weaknesses": [
+        "Compaction overhead remains noticeable for very long sequences when using the highest-quality configurations (e.g., OMP and self-study query generation still take several minutes, though fast variants mitigate this).",
+        "Integrating the learned attention biases ($\\beta$) into existing high-throughput inference engines requires non-trivial framework support (like PyTorch FlexAttention), which might limit immediate out-of-the-box deployment compared to simple token eviction."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "An elegant mathematical formulation that decomposes the global attention preservation objective into two simpler subproblems: matching local attention outputs and matching attention mass.",
+        "The introduction of per-token attention mass biases (β) successfully addresses the scale mismatch inherent in reducing the size of the key-value cache, allowing the compacted cache to represent the mass of discarded keys.",
+        "Extensive and rigorous experimental validation across multiple state-of-the-art open-source LLMs (Qwen3, Llama-3.1, Gemma3) and diverse datasets spanning multiple-choice QA, generative QA, and retrieval-intensive tasks.",
+        "The proposed method establishes a new state-of-the-art Pareto frontier for latent space compaction, achieving performance comparable to gradient-based optimization methods (e.g., Cartridges) while being orders of magnitude faster."
+      ],
+      "weaknesses": [
+        "Compaction overhead remains non-trivial: while significantly faster than Cartridges, the highest-performing configurations (using OMP and self-study query generation) still require several minutes of computation for long contexts, which may limit their utility in latency-sensitive, real-time interactive applications.",
+        "The method requires storing and utilizing per-token attention biases (β) during decoding. While supported by modern libraries like FlexAttention, this requirement complicates integration with standard, highly-optimized LLM serving engines that do not natively support per-token bias offsets.",
+        "The key selection process is constrained to choosing subsets of the original keys rather than synthesizing entirely new, optimal virtual keys in continuous latent space, potentially limiting the compression capacity at extreme compression ratios (e.g., 100x)."
+      ]
+    }
+  }
+}

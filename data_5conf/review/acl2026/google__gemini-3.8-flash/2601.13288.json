@@ -1,0 +1,97 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3.5,
+      "strengths": [
+        "Practical and timely motivation: Modern production deployments often suffer significant latency and memory overhead from separate guardrail or classification models; exploiting internal hidden states within the primary serving LLM forward pass directly addresses this bottleneck.",
+        "Well-structured two-stage aggregation design: The separation into token-level aggregation followed by layer-level aggregation provides an intuitive, modular framework that spans fixed pooling, lightweight parameter-efficient gating (~100K params), and downcast multi-head attention.",
+        "Comprehensive empirical evaluation: The approach is evaluated across safety moderation (ToxicChat in-distribution, cross-dataset generalization from WildGuardMix, and WildGuardMix) and NLU tasks (IMDB, SST-2, Emotion), showing consistent gains over logit-only reuse (MULI) and approaching or matching multi-billion parameter standalone models.",
+        "Systems and efficiency validation: Real hardware benchmarks (throughput, latency, peak GPU memory) concretely quantify the operational savings of single-pass reuse versus a standard guard-then-serve pipeline (e.g., Llama-Guard-3-8B).",
+        "Insightful layer-wise interpretability analysis: Layer attention visualizations demonstrate that safety and sentiment features are non-trivially distributed across intermediate and final layers, validating the core hypothesis that multi-layer aggregation is superior to single-layer or final-token probing."
+      ],
+      "weaknesses": [
+        "Limited backbone diversity: All experiments are conducted exclusively on Llama-3.2-3B-Instruct. While the authors discuss this in limitations, demonstrating that the two-stage aggregation mechanisms transfer across different model scales (e.g., 7B/8B, 70B) and architectures (e.g., Mistral, Gemma, Qwen) would significantly strengthen empirical generalizability.",
+        "Moderate algorithmic novelty: Layer-weighting and token-pooling mechanisms (such as scalar attention over layer representations pioneered in ELMo and classic BERTology works) are well-established; the novelty lies primarily in the systems framing and application to decoder-only LLM serving.",
+        "Incomplete baseline controls in cross-dataset comparisons: In Tables 1, 2, and 4, several baseline numbers are collated from prior publications rather than re-evaluated in a unified inference setup, introducing minor discrepancies in training recipes and prompt formats across comparisons."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3.5,
+      "strengths": [
+        "Practical and well-motivated problem formulation: Reusing serving LLM hidden states to avoid the latency, VRAM, and operational overhead of auxiliary guardrails or classifiers in production pipelines is a compelling research direction.",
+        "Clean and modular architecture: The two-stage aggregation framework (token-level pooling/attention followed by layer-level aggregation) systematically explores a clear design spectrum from lightweight gating (100K parameters) to downcast multi-head attention (35M parameters).",
+        "Solid empirical results and systems benchmarking: The proposed probes consistently outperform logit-only reuse (MULI) and prompting, achieving competitive results with standalone guard models and task-specific classifiers, supported by wall-clock latency, throughput, and VRAM profiling in Table 5.",
+        "Insightful interpretability analysis: The layer-wise attention analysis (Figures 2 and 4) provides concrete evidence that task-discriminative information is distributed across intermediate and deeper layers rather than confined strictly to the final layer or first-token logits."
+      ],
+      "weaknesses": [
+        "Evaluation is restricted to a single LLM backbone: All experiments rely exclusively on Llama-3.2-3B-Instruct. Validating whether the layer-weight dynamics and efficiency gains hold across different model scales (e.g., 8B, 70B) and model families (e.g., Gemma 2, Mistral, Qwen 2.5) is critical to establish the generality of the method.",
+        "Lacks direct capacity-matched single-layer probe baselines: While the paper compares against logit-based reuse (MULI) and standalone models, it does not provide an explicit ablation comparing the full two-stage aggregation against a single-layer probe (e.g., best intermediate layer vs. final layer) trained with the exact same classifier architecture (e.g., MHA with token pooling), making it difficult to strictly quantify the isolated gain from multi-layer aggregation versus token attention.",
+        "Ambiguity regarding deployment scope (prompt vs. generation monitoring): The evaluation focuses on prompt-level classification (ToxicChat, WildGuardMix, sentiment). It is unclear how this architecture integrates into full generation/decoding passes or whether it extends to streaming safety detection during autoregressive output generation."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Practical and timely problem formulation: Reusing serving LLM hidden states via lightweight probes eliminates the substantial VRAM and latency overhead of hosting separate multi-billion-parameter guard models in production pipelines.",
+        "Well-structured aggregation design: The two-stage hierarchical readout (token aggregation per layer followed by cross-layer aggregation) systematically spans a spectrum of parameter and compute complexity, from parameter-free pooling to a minimal 0.1M parameter scoring gate and downcast MHA.",
+        "Strong empirical performance: Across safety (ToxicChat, WildGuardMix) and sentiment/emotion benchmarks (IMDB, SST-2, Emotion), the proposed probes consistently outperform first-token logit reuse (MULI) and match or surpass significantly larger standalone models.",
+        "Comprehensive systems profiling: Table 5 provides concrete, valuable latency, throughput, and peak memory measurements, clearly demonstrating the real-world efficiency advantages of single-pass probe reuse over typical guard-then-serve pipelines.",
+        "Insightful layer analysis: The stratification of attention weights across layers (Figures 2 and 4) provides meaningful qualitative analysis demonstrating that safety and sentiment signals emerge across different depths rather than being strictly localized to the final layer."
+      ],
+      "weaknesses": [
+        "Evaluation restricted to a single LLM backbone: All experiments are conducted exclusively on Llama-3.2-3B-Instruct. Demonstrating that the findings and probe behavior transfer across other architectures (e.g., Mistral, Gemma, Qwen) or larger scale models (8B, 70B) is essential to establish generality.",
+        "Missing single-layer probing baselines: The paper motivates multi-layer aggregation by arguing against committing to a single depth, but it lacks a direct comparison against a tuned single-layer probe baseline across each layer (e.g., standard linear/attention probe on layer $l^*$, as in OmniGuard or standard probing literature) to isolate the exact empirical gain of multi-layer fusion over just selecting the single optimal layer.",
+        "Unclear deployment semantics for input vs. output moderation: The latency benchmark processes prompts with `max_new_tokens=1`, essentially measuring prefill classification. However, content moderation in production often needs to intercept generation before streaming tokens or monitor generated output token-by-token; the paper does not clarify or benchmark how probes operate during autoregressive decoding.",
+        "Incomplete text and citation artifacts: Footnote 1 on page 4 ('Code available at') ends abruptly without a URL or placeholder, and several references in tables lack direct head-to-head experimental control (acknowledged by authors, but weakens comparative conclusions)."
+      ]
+    }
+  },
+  "v2": {
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Compelling systems and architectural motivation: repurposing the intermediate activations of a serving LLM to perform side-car classification in a single forward pass directly addresses substantial deployment overheads (VRAM, latency, operational complexity).",
+        "Clean and modular two-stage formulation (token aggregation within layer, followed by depth aggregation across layers) explored systematically across three aggregation mechanisms with varying parameter-efficiency trade-offs (direct pooling, scoring attention gate, downcast MHA).",
+        "Thorough empirical evaluation across safety moderation (in-distribution and out-of-distribution on ToxicChat and WildGuardMix) and sentiment classification (IMDB, SST-2, Emotion), showing competitive or superior accuracy compared to standalone classifiers and logit-based reuse baselines.",
+        "Solid generalization checks across multiple backbone architectures, including both dense (Llama-3.2-3B) and sparse mixture-of-experts (GPT-OSS-20B, Qwen3-30B-A3B) models.",
+        "Valuable systems benchmarking (Table 5) confirming meaningful reductions in peak memory usage and inference latency compared to traditional guard-then-serve pipelines, complemented by insightful layer-attention analyses."
+      ],
+      "weaknesses": [
+        "Lack of direct, controlled single-layer probe ablations: while the paper contrasts with prior single-layer methods conceptually (e.g., ShieldHead, OmniGuard), an explicit ablation comparing the two-stage multi-layer probe against an optimal single-layer baseline on the exact same backbone and setup is missing to quantitatively isolate the gain of multi-layer aggregation.",
+        "Inference memory traffic considerations: retaining or streaming intermediate layer representations to the probe modules introduces memory bandwidth and cache overheads that are not fully analyzed from an operational systems perspective, particularly under large batch sizes or long context windows.",
+        "Incomplete placeholder in the text: Footnote 1 on page 4 abruptly terminates with 'Code available at ' without an anonymized URL or code repository reference."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 4.0,
+      "strengths": [
+        "Addresses an important and highly practical systems challenge in production LLM deployment: eliminating the substantial latency, memory, and orchestration overhead of separate auxiliary/guard models by repurposing internal representations computed during the serving pass.",
+        "The two-stage token- and layer-aggregation formulation is conceptually clean, addressing the limitations of prior works that arbitrarily commit to fixed positions (e.g., first-token logits) or single layers.",
+        "Comprehensive empirical validation across two distinct application domains (safety moderation and sentiment/emotion classification) and multiple modern backbones, covering both dense (Llama-3.2-3B) and mixture-of-experts architectures (GPT-OSS-20B, Qwen3-30B-A3B).",
+        "Detailed system-level benchmarks (Table 5) that demonstrate significant wall-clock latency, throughput, and GPU VRAM advantages compared to guard-then-serve baselines.",
+        "Insightful qualitative analysis connecting probe layer-attention weights to BERTology literature, illustrating distinct depth-wise feature separability across classes and failure cases."
+      ],
+      "weaknesses": [
+        "The multi-backbone generalization is only evaluated on ToxicChat, whereas the NLU/sentiment benchmarks (IMDB, SST-2, Emotion) are restricted to Llama-3.2-3B.",
+        "Systems benchmarking in Table 5 is performed under batch size 1 and short sequences (length 512). In high-throughput concurrent serving engines (e.g., vLLM with continuous batching and PagedAttention), capturing and materializing activations across all layers simultaneously could introduce memory bandwidth bottlenecks that are not fully analyzed.",
+        "The core architectural components (token-wise pooling/attention followed by layer-wise attention mixing) are well-established building blocks in representation probing (e.g., ELMo/BERT scalar mixing and attention pooling); the primary novelty lies in the orchestration framing and empirical execution rather than algorithmic innovation."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3.5,
+      "strengths": [
+        "Compelling systems framing: Repurposing the hidden states from the serving LLM's forward pass to perform side-car classification tasks (e.g., safety guardrails and sentiment) addresses a real and important latency/memory bottleneck in LLM orchestration pipelines.",
+        "Well-motivated architecture: The two-stage aggregation framework (token-level summarization followed by layer-level aggregation) is conceptually clean, parameter-efficient, and grounded in interpretability/BERTology principles.",
+        "Comprehensive empirical validation: The paper evaluates across five datasets covering both safety moderation (ToxicChat, WildGuardMix) and sentiment/emotion (IMDB, SST-2, Emotion), showing consistent improvements over logit-only reuse (MULI) and single-layer heads (ShieldHead).",
+        "Systems and efficiency evaluation: Thorough latency, throughput, and VRAM benchmarks (Table 5) provide concrete evidence that single-pass reuse drastically cuts compute and memory footprint compared to guard-then-serve pipelines.",
+        "Interpretability insights: The layer attention analysis (Figures 2 and 4) provides valuable qualitative evidence that toxic and non-toxic inputs systematically engage different transformer depths, corroborating the hypothesis that fixed-layer readouts are suboptimal."
+      ],
+      "weaknesses": [
+        "Focus restricted to input prompt moderation: The evaluation and latency benchmarking focus almost entirely on the initial prompt processing (prefill) stage with max_new_tokens=1. In real-world LLM orchestration, guardrails must also monitor streaming output tokens during the autoregressive decode phase, which is not evaluated here.",
+        "Lack of aggregation order ablation: The architecture commits to token-aggregation followed by layer-aggregation (token-then-layer). The paper lacks ablation or empirical justification comparing this against alternative aggregation orderings (e.g., layer-then-token or unified 2D pooling/cross-attention).",
+        "Overhead of the MHA variant: While MHA yields the highest F1/accuracy scores, Table 5 shows it increases forward pass latency from 26.43 ms to 40.27 ms (~52% overhead) and adds up to 35M parameters, whereas the lightweight scoring attention gate (0.1M params) incurs only ~17% latency overhead with competitive performance. More analysis on this efficiency-accuracy Pareto trade-off would strengthen practical deployment recommendations.",
+        "OOD degradation: As acknowledged by the authors, cross-dataset transfer (Table 2) drops noticeably compared to dedicated LLM-based guardrails, underscoring that lightweight linear/attention probes over frozen features may remain sensitive to domain shifts and evolving adversarial attacks."
+      ]
+    }
+  }
+}

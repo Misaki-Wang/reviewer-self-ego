@@ -1,0 +1,95 @@
+{
+  "v1": {
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Focuses on the highly relevant and challenging setting of large reasoning models (LRMs) undergoing extensive test-time generation, where traditional sparse attention methods suffer from error accumulation.",
+        "Provides valuable token-level analysis showing significant spatial locality (overlap of token importance rankings) across GQA heads, challenging the common assumption that heads require highly specialized, disparate token subsets.",
+        "The proposed method, LessIsMore, is training-free and conceptually simple, combining Unified Attention Head Selection and a Stable Recency Window to achieve near-lossless reasoning accuracy at high sparsity levels (e.g., 87.5% sparsity).",
+        "Successfully mitigates the issue of generation length bloat. Imprecise sparse attention often causes reasoning models to generate excessively long, redundant steps; LessIsMore keeps generation lengths close to the full-attention baseline.",
+        "Demonstrates strong empirical performance across competitive benchmarks (AIME-24/25, MATH500, GPQA-Diamond) using Qwen3-8B and Qwen3-4B, outperforming both training-free and training-required baselines."
+      ],
+      "weaknesses": [
+        "The method is selection-based and requires keeping the full KV cache in GPU memory (as detailed in Section 5.3). Thus, it does not provide the physical memory footprint savings that eviction-based methods offer.",
+        "The implementation relies heavily on the pipeline architecture of TidalDecode (e.g., choosing specific selection layers), which slightly limits its standalone novelty as an independent sparse attention framework.",
+        "The token index aggregation stage is currently implemented using PyTorch primitives rather than highly optimized CUDA kernels, which leaves some potential efficiency gains on the table.",
+        "Hyperparameter sensitivity: The recency window ratio (r) is fixed at 25% based on empirical results, and the paper lacks a systematic approach to dynamically or adaptively adjust this ratio across different model sizes or tasks."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "The paper addresses a highly timely and critical bottleneck in large reasoning models: the high computational overhead and latency during long-chain reasoning generation.",
+        "The token-level analysis of spatial and recency locality in reasoning tasks is thorough, challenging the conventional wisdom of highly specialized independent heads and justifying the proposed global aggregation design.",
+        "The proposed 'LessIsMore' method is training-free, simple to implement, and achieves impressive results, consistently outperforming state-of-the-art baselines (including training-required methods) on difficult benchmarks like AIME-24/25, MATH500, and GPQA.",
+        "The paper presents a very valuable insight regarding generation length: showing that inaccurate sparse attention leads to error accumulation which forces the model to generate longer, more redundant reasoning paths. LessIsMore mitigates this, maintaining generation lengths close to full attention."
+      ],
+      "weaknesses": [
+        "The overall wall-clock speedup is relatively modest (1.1x over full attention), which is a common limitation of selection-based sparse attention due to index manipulation overhead (implemented in PyTorch primitives).",
+        "The current implementation is heavily reliant on the TidalDecode pipeline as its backbone, which limits the evaluation of its standalone integration into other architectures.",
+        "Although DeepSeek-R1 is used as a primary motivating example in the introduction, modern reasoning models like DeepSeek-R1 employ Multi-head Latent Attention (MLA) rather than Grouped Query Attention (GQA). The paper does not evaluate or explain how the spatial locality and head aggregation principles would adapt to MLA-based models."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a highly relevant and challenging problem: mitigating accuracy degradation in sparse attention during long-generation reasoning tasks.",
+        "Provides interesting empirical insights regarding spatial locality (high overlap of important tokens across attention heads) and recency locality in reasoning models.",
+        "Achieves impressive accuracy preservation on hard benchmarks like AIME-24/25 and GPQA compared to other training-free sparse attention baselines."
+      ],
+      "weaknesses": [
+        "The core token selection and ranking algorithm (UnionFlatten) is described ambiguously. The manuscript lacks a precise mathematical formulation of how global token ranking is resolved when tokens have different ranks across different heads, or how duplicates are handled.",
+        "The practical efficiency benefits are very marginal. Despite an 87.5% token sparsity level, the decoding speedup is only ~1.1x compared to full attention, which suggests that the overhead of the selection mechanism is excessively high.",
+        "The proposed method does not reduce the memory footprint. Because it is a selection-based approach that retains the full KV cache in memory, it fails to solve the memory capacity bottleneck of serving long-context reasoning models.",
+        "The choice of evaluation models is confusing and raises reproducibility concerns. The authors evaluate on 'Qwen3-8B' and 'Qwen3-4B' (referencing Team, 2025), which are not standard or widely available open-source models, and the paper lacks details on their architecture or training.",
+        "The paper lacks analysis explaining why LessIsMore (6K) outperforms Full Attention on AIME-24 (76.67% vs. 74.48%). Discarding context normally degrades performance, so a rigorous explanation of this regularization effect is necessary."
+      ]
+    }
+  },
+  "v2": {
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Strong motivation and key insights: The paper successfully identifies why existing sparse attention mechanisms fail on long-horizon reasoning tasks (namely, cascading errors leading to generation length inflation). The empirical observations of cross-head spatial locality and stable temporal recency proportions are insightful and well-visualized.",
+        "Simple yet highly effective design: LessIsMore is training-free and elegant. Enforcing unified token selection across heads (CUSA) and using a stable proportional recency window directly addresses the core issues of error accumulation.",
+        "Rigorous and comprehensive evaluation: The method is evaluated across multiple modern reasoning models (DeepSeek-R1-Distill-Llama-8B, Qwen3 family) and challenging benchmarks (AIME-24/25, GPQA-Diamond, MATH500), consistently outperforming prior sparse attention methods.",
+        "Practical systems speedup: By integrating with SGLang and FlashInfer, the paper demonstrates tangible system efficiency gains (up to 1.6x end-to-end decoding speedup and up to 1.72x kernel-level speedup), showing the real-world utility of the method.",
+        "Excellent generalization: The authors show that the method not only excels at reasoning tasks but also generalizes to MHA models and standard long-context retrieval benchmarks (Needle-in-the-Haystack, LongBench)."
+      ],
+      "weaknesses": [
+        "The mechanism of using a single intermediate layer (e.g., Layer 12 or 20) for token selection and reusing the indices across all other layers is inherited from TidalDecode. While empirically validated, the intuitive explanation of why a single layer's attention pattern remains representative of all other layers could be elaborated further.",
+        "There are a few minor referencing errors, such as Section 2.3 referring to itself ('Section 2.3 visualizes...') instead of referencing Figure 2, which makes reading slightly confusing.",
+        "While the paper mentions and references very recent 2025 works like R-KV (Cai et al., 2025) in the literature, a direct quantitative comparison with such contemporary baselines is missing in the evaluation section."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Addresses a highly important and timely problem: the high decoding latency of large reasoning models (LRMs) undergoing test-time scaling (such as DeepSeek-R1 and Qwen3).",
+        "Presents a novel and elegant insight that token importance in reasoning workloads is stable and globally shared across heads, challenging the common assumption of specialized, head-specific attention patterns.",
+        "Proposes a training-free, system-friendly solution (LessIsMore) that avoids 'generation length inflation'—a major issue with prior sparse attention methods on reasoning tasks.",
+        "Provides exceptionally strong empirical results across multiple model families and hard reasoning benchmarks (AIME, GPQA-Diamond, MATH500), achieving nearly lossless accuracy under high sparsity.",
+        "Includes solid system-level validation with custom CUDA kernels (implemented on FlashInfer/SGLang), demonstrating up to 1.6x end-to-end decoding speedup and up to 1.72x faster sparse attention computation."
+      ],
+      "weaknesses": [
+        "The method requires identifying an 'optimal re-selection layer' (e.g., Layer 12 or 20) via a needle-in-the-haystack pre-test, which introduces a model-dependent profiling step.",
+        "While the paper shows that reasoning models exhibit strong cross-head spatial locality, there is limited discussion or analysis of *why* this structural change happens during RL-based reasoning training compared to standard pre-trained LLMs."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Addresses a highly relevant and timely systems bottleneck: the extreme computational and memory cost of long-horizon test-time reasoning in large reasoning models (LRMs) like DeepSeek-R1 and Qwen3.",
+        "Provides convincing empirical observations on attention pattern locality in reasoning (cross-head spatial locality and temporal recency locality) which challenge traditional head-specialization assumptions of standard sparse attention.",
+        "Proposes a training-free, system-friendly mechanism (Cross-Head Unified Sparse Attention) that significantly reduces selection overhead by reusing globally consistent token indices across layers and heads.",
+        "Exhibits outstanding empirical results across challenging reasoning benchmarks (AIME-24/25, GPQA-Diamond, MATH500) and effectively mitigates the issue of generation length inflation common in other sparse attention methods.",
+        "Includes concrete systems-level evaluations with optimized GPU kernels (on FlashInfer), demonstrating actual end-to-end decoding speedups and memory bandwidth savings instead of relying solely on simulated FLOP counts."
+      ],
+      "weaknesses": [
+        "The optimal placement of the token selection layer (e.g., Layer 12 vs. Layer 20) relies on an offline needle-in-the-haystack search, which adds a tuning step for new model architectures.",
+        "While the method preserves accuracy remarkably well compared to other sparse baselines, there is still a noticeable accuracy gap compared to Full Attention under highly constrained token budgets (e.g., K=1000 or 2000) on the most complex benchmarks.",
+        "The paper lacks a deeper theoretical discussion or error-bound analysis on when the global cross-head token importance assumption might break down (e.g., in highly multi-modal or diverse routing mixtures of experts)."
+      ]
+    }
+  }
+}

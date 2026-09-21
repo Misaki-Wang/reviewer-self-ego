@@ -1,0 +1,91 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Proposes a novel and well-motivated autoregressive framework (InertialAR) for 3D molecule generation that successfully addresses SE(3)-invariance and permutation-invariance.",
+        "Introduces GeoRoPE, a creative extension of Rotary Positional Encodings to 3D space, elegantly combined with a low-rank Nyström approximation to encode pairwise distances directly into the attention mechanism without modifying standard Transformer architectures.",
+        "The hierarchical autoregressive paradigm, which decouples discrete atom type prediction (cross-entropy) and continuous coordinate generation (diffusion loss), is technically sound and highly effective.",
+        "Achieves outstanding empirical results, setting a new state-of-the-art on several metrics across QM9, GEOM-Drugs, and the large-scale B3LYP dataset, as well as showing massive improvements in class-conditional generation tasks."
+      ],
+      "weaknesses": [
+        "The proposed coordinate alignment relies on principal component analysis (PCA) to define the inertial frame, which is notoriously sensitive to degeneracy (e.g., when eigenvalues are equal or very close due to molecular symmetry). The paper does not thoroughly analyze how training is affected by coordinate discontinuities caused by tiny geometric perturbations near degenerate cases.",
+        "The unique direction alignment relies on a heuristic 'fourth node' (defined as the node non-coplanar with axes having the largest distance to the origin). In near-symmetric molecules, noise or minor coordinate perturbations might cause the 'largest distance' node to switch, leading to sudden reflections of the coordinate axes and training instability.",
+        "The atom reordering relies heavily on RDKit's 2D molecular graph canonicalization. This makes the training sequence order dependent on the 2D topology rather than pure 3D geometry, which might limit the model's adaptability if the 2D bond topology is ambiguous or hard to define a priori.",
+        "Lacks a detailed ablation study or analysis on the sensitivity and overhead of the Nyström approximation parameters, such as the number of anchor points $m$ and the anchor selection strategy."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "Casting 3D molecule generation as a sequence prediction task using an autoregressive (AR) framework is an interesting alternative to full-joint diffusion models.",
+        "The evaluation on the newly proposed, large-scale B3LYP-1M dataset demonstrates the capability of the model on a structurally and chemically diverse set of molecules.",
+        "Strong performance in class-conditional generation tasks with classifier-free guidance (CFG), showing notable improvements in target-specific metrics (Hit Rate)."
+      ],
+      "weaknesses": [
+        "Circular Dependency in Canonical Ordering: The canonical reordering (Step 2) relies on RDKit's topological graph-based canonization, which requires the complete molecular graph. During autoregressive generation (inference), the molecule is generated atom-by-atom. At step i, the future atoms and bonds are unknown, meaning the complete molecular graph cannot be constructed. The paper fails to explain how the model can canonically order and generate sequences when the graph structure is not available on-the-fly during inference.",
+        "Representation Instability in Nystrom Approximation: The Nystrom approximation requires sampling m anchor points from the n atoms of the molecule. If anchor points are sampled from the currently generated prefix during AR generation, the anchor set changes at each step. This alters the latent representations of previously generated tokens, violating the cacheability of keys/values and introducing representational drift. If fixed global coordinates are used as anchor points instead, it violates SE(3) invariance. This critical detail is left unaddressed.",
+        "Questionable Inference Efficiency: The abstract and introduction motivate AR models as a computationally efficient alternative to diffusion models due to the latter's 'computationally intensive iterative sampling'. However, InertialAR uses a coordinates prediction block with a 'Diffusion Loss'. During inference, the coordinates of each atom are generated sequentially by 'iterative denoising'. If each atom requires T denoising steps, generating a molecule of N atoms requires N * T network evaluations. In contrast, standard diffusion models denoise all N atoms in parallel (requiring only T steps). For GEOM-Drugs (average 44 atoms), this model is likely orders of magnitude slower than standard diffusion, contradicting the claim of high efficiency.",
+        "Instability and Non-Uniqueness of Inertial Frame Alignment: Aligning to the inertial frame via the moment of inertia tensor is highly sensitive to degenerate or near-degenerate eigenvalues (common in symmetric molecules like methane or benzene). In degenerate cases, the axes are not uniquely defined, breaking the unique canonical sequence assumption. In near-degenerate cases, minor geometric perturbations can lead to discontinuous rotations of the coordinate system, making the training targets extremely unstable."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3,
+      "strengths": [
+        "An interesting approach to adapting autoregressive (AR) models for 3D molecule generation by addressing SE(3) invariance using canonicalization (inertial frames) and deterministic reordering.",
+        "The proposed GeoRoPE attention mechanism elegantly combines 3D Rotary Position Encodings (RoPE-3D) for relative coordinate encoding with a Nyström approximation for pairwise distance information.",
+        "Strong experimental results across QM9, GEOM-Drugs, and the larger B3LYP datasets, along with promising class-conditional generation capabilities."
+      ],
+      "weaknesses": [
+        "Efficiency Contradiction: The introduction motivates AR models as being computationally more efficient than diffusion models because the latter suffer from intensive iterative sampling. However, since InertialAR generates the 3D coordinates of each atom sequentially via a multi-step diffusion process (Diffusion Loss), generating a molecule with N atoms requires N * T forward passes (where T is the number of denoising steps). This makes the generation N times slower than global diffusion models (which generate all N atoms in T steps), directly contradicting the paper's efficiency motivation. No wall-clock generation times are reported to clarify this.",
+        "Clarity on Nyström Approximation in AR Generation: The Nyström approximation requires sampling m anchor points. Crucial details are missing: (1) If they are sampled randomly, this violates the deterministic and permutation-invariant property of the tokenization. (2) During step-by-step autoregressive generation, how are anchor points chosen when fewer than m atoms have been generated? (3) If the anchor points change dynamically as the molecule grows, previous token representations must be updated, preventing the reuse of standard KV caches.",
+        "Inertial Frame Degeneracy: For highly symmetric molecules (e.g., methane or linear molecules), the eigenvalues of the inertia tensor are degenerate, meaning the principal axes are not uniquely defined. Arbitrary rotations chosen by the solver will lead to different coordinate representations for the same molecule, introducing ambiguity that hinders AR learning. Furthermore, for planar molecules, all atoms lie on the z=0 plane, meaning the sign of the z-axis cannot be resolved using the fourth-node method.",
+        "Inconsistent Theorem Statement: Theorem 2 in Appendix D states that the fourth point must be 'coplanar with the three basis vectors', but the proof and Figure 7 correctly argue that only 'four non-coplanar points' can uniquely determine the rotation matrix. This contradiction should be corrected.",
+        "Redundant Figures: Figure 4 and Figure 6 are identical, which represents an unnecessary redundancy between the main text and the appendix."
+      ]
+    }
+  },
+  "v2": {
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Well-written and highly polished manuscript with intuitive figures that clearly explain the proposed framework.",
+        "Addresses two core challenges of 3D molecular autoregressive generation in an elegant way: canonical tokenization via a resolved canonical inertial frame and RDKit canonical ordering, and hybrid token modeling via a hierarchical AR prediction block.",
+        "Proposes a novel Geometric Positional Encoding (GeoPE) that successfully integrates both Manhattan-style axis-wise relative positions and pairwise Euclidean distances (via low-rank Nyström RBF approximation) into standard Transformer attention.",
+        "Strong empirical performance across multiple benchmarks (QM9, GEOM-Drugs, and B3LYP-1M) for both unconditional and class-conditional 3D molecule generation, demonstrating scalability and controllability."
+      ],
+      "weaknesses": [
+        "The claim about efficiency is not fully backed by speed benchmarks. Since the continuous coordinates are generated via a diffusion process (iterative denoising) at each step of the autoregressive generation, the overall sampling time for a molecule of $N$ atoms requires $N \\times T$ total denoising steps. A quantitative comparison of inference speed/wall-clock time against standard non-autoregressive diffusion baselines (like EDM) is missing.",
+        "While the authors show that principal-moment degeneracy is rare, canonicalization approaches suffer from theoretical discontinuities under small perturbations near symmetric configurations. This could potentially affect the smoothness of the learned generative landscape.",
+        "RDKit-based canonical ordering relies on knowing the 2D molecular graph (connectivity, bond types, etc.). During autoregressive generation, the model must implicitly learn to generate atoms in this RDKit canonical order without having the complete 2D graph beforehand. The manuscript would benefit from a discussion on how this training-inference mismatch or ordering dependency affects generation when the topological structure is completely unknown."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "InertialAR presents a highly coherent and well-justified framework for autoregressive 3D molecular generation, addressing the twin challenges of SE(3)-invariance and coordinate/type tokenization in a principled manner.",
+        "The proposed Geometric Positional Encoding (GeoPE) is an elegant architectural contribution. By combining ManhattanPE (for axis-wise relative positions) with EuclideanPE (using the Nystrom method to approximate the RBF kernel), standard Transformer attention is effectively equipped with exact 3D spatial geometry awareness without losing compatibility with standard LLM architectures.",
+        "The empirical evaluation is highly comprehensive, spanning QM9, GEOM-Drugs, and a newly introduced large-scale B3LYP-1M dataset. InertialAR sets new state-of-the-art results on several challenging metrics, especially for molecular stability at scale.",
+        "The introduction of classifier-free guidance (CFG) for conditional generation yields outstanding performance improvements, dramatically increasing the 'Hit Rate' for targeted functional groups and showcasing strong potential for controllable drug design."
+      ],
+      "weaknesses": [
+        "Inference efficiency may be a concern: because coordinate generation relies on a step-wise Diffusion Loss, generating an $N$-atom molecule requires $N$ autoregressive steps, with each step involving $T$ iterative denoising evaluations. This results in $O(N \\times T)$ overall forward passes, which could be significantly slower than full-molecule 3D diffusion models that sample all atoms in $O(T)$ steps. The paper would benefit from a runtime and sampling speed comparison against these baselines.",
+        "The reliance on RDKit-based canonical ordering during training introduces a potential global-dependency issue. RDKit canonical indexing depends on the topology of the complete molecular graph. Since an autoregressive model generates the molecule atom-by-atom (from left to right), the model must implicitly 'anticipate' the final global topology to ensure the partial prefix remains aligned with the globally canonical order. The authors should discuss this 'look-ahead' planning challenge in AR generation under global canonical constraints."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "Attempts to address an important and challenging problem: extending autoregressive sequence models to 3D molecular generation.",
+        "Proposes a novel geometric positional encoding (GeoPE) that combines axis-wise relative encoding (ManhattanPE) and low-rank approximated pairwise distances (EuclideanPE) within the Transformer attention block.",
+        "Evaluates on multiple datasets (QM9, GEOM-Drugs, and B3LYP) and explores class-conditional generation using classifier-free guidance."
+      ],
+      "weaknesses": [
+        "Fundamental Causality Violation in Generation: The canonical tokenization relies on aligning the entire molecule to its global canonical inertial frame (using the center of mass and moment of inertia of all $N$ atoms). During autoregressive generation, at step $i$, the future $N-i$ atoms are unknown. If coordinates are predicted in the global canonical frame, the model must non-causally predict the final frame from the very first step. If the frame is dynamically re-aligned at each step, the coordinates of previously generated atoms shift, violating the core autoregressive assumption of a fixed past and preventing the use of standard KV-caching. The manuscript fails to explain or resolve this critical contradiction.",
+        "Ill-defined Axis Disambiguation during Initial Steps: The proposed sign disambiguation heuristic requires identifying a fourth anchor node. During the first few steps of autoregressive generation (steps 1 to 3), there are not enough atoms to define three principal axes, let alone select a fourth node. This makes the coordinate system ill-defined when initiating the generation process.",
+        "Incomplete Evaluation Metrics: Table 1 omits key metrics for the GEOM-Drugs dataset, such as 'Molecule Stability' (MolSta) and 'Valid&Uni', which are standard in literature and crucial for assessing the quality of larger generated molecules.",
+        "Lack of Efficiency Benchmarks: Although the Introduction claims that autoregressive models enable 'highly efficient and flexible generation' compared to diffusion models, the paper does not provide any empirical comparisons of sampling speed or computational cost."
+      ]
+    }
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Principled problem formulation: The paper formalizes critical KV cache identification through the lens of attention output perturbation rather than relying solely on empirical heuristics of attention weights.",
+        "Theoretical motivation: The derivation linking attention weights, value states, and the projection matrix $W^O$ provides a clear mathematical justification for incorporating value norms into the eviction criterion.",
+        "Plug-and-play design: The proposed two-stage selection algorithm easily integrates as a modular replacement into state-of-the-art eviction frameworks such as SnapKV and AdaKV without altering their core budgeting or windowing mechanics.",
+        "Comprehensive empirical validation: Evaluated across 16 datasets on LongBench and Needle-in-a-Haystack under both regular and context-only compression settings on two popular LLMs (Llama-3.1-8B and Mistral-7B), consistently demonstrating performance gains.",
+        "Insightful analysis: Detailed empirical diagnostics verify that output perturbation is reduced across over 90% of attention heads, across transformer layers, and across different cache budget levels."
+      ],
+      "weaknesses": [
+        "Lack of runtime and latency profiling: Computing $V W^O$ and its row-wise norms per attention head introduces computational and memory access overhead during the eviction/prefill step (especially since $W^O$ is ordinarily applied after the weighted sum $A V$). The paper lacks wall-clock time, throughput, and GPU kernel overhead measurements to verify that the eviction quality gain outweighs any compression latency penalty.",
+        "Handling of Grouped-Query Attention (GQA): Both evaluated models (Llama-3.1-8B and Mistral-7B) employ GQA where multiple query heads share a single KV head. The paper does not clarify how $W^O$ (which is specific to each query head) and value states are reconciled when multiple query heads share the same KV entries.",
+        "Minor inconsistencies in presentation: Algorithm 1 lists the default hyperparameter as $\\alpha = 0.25$, whereas Section 3.5 and Section 4.3 state that $\\alpha$ is fixed to $0.5$ for all experiments. The manuscript would benefit from reconciling this discrepancy.",
+        "Looseness of upper bound: The perturbation upper bound in Theorem 3.3 relies on a coarse application of the triangle inequality across all tokens, which can be loose in high dimensions, making Stage 2 a heuristic approximation to the true perturbation."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Principled theoretical formulation: The paper correctly identifies a fundamental limitation of existing KV cache eviction heuristics—namely, their exclusive reliance on attention weights—and formalizes cache eviction from an output perturbation perspective that explicitly incorporates the projected value states ($V W^O$).",
+        "Theoretical justification for the selection rule: The authors derive an upper bound on the attention output perturbation and show that their proposed two-stage greedy algorithm directly optimizes this bound under the empirically supported assumption of attention concentration.",
+        "Seamless plug-and-play integration: The proposed perturbation-constrained selection criterion does not require retraining or architecture modifications and can directly replace the selection phase in existing state-of-the-art frameworks (e.g., SnapKV and AdaKV).",
+        "Comprehensive empirical validation: Evaluated across two models (Llama-3.1-8B and Mistral-7B) on both Needle-in-a-Haystack and LongBench (16 datasets across 6 domains), showing consistent improvements, especially under the challenging context-only compression regime. The layer-wise and head-wise perturbation analyses in Section 4.6 provide valuable verification of the theoretical claims."
+      ],
+      "weaknesses": [
+        "Omission of runtime and computational overhead analysis: In standard Transformer decoding/prefill, the projection $W^O$ is applied after aggregating values ($o = (A V) W^O$), requiring only projecting the summary representation. Computing $\\mathcal{V} = V W^O$ and its row-wise norms for all $n$ candidate tokens introduces additional matrix multiplications ($O(n \\cdot d_h \\cdot d)$ per head). The paper does not report wall-clock eviction latency, memory peak, or generation throughput, leaving the practical efficiency tradeoff unverified.",
+        "Hyperparameter inconsistency: Algorithm 1 specifies `Hyper Parameter \\alpha = 0.25` in the input signature (Page 4), whereas Section 3.5 and Section 4.3 explicitly state that $\\alpha$ is fixed to `0.5` across all experiments. This discrepancy needs clarification.",
+        "Marginal improvements under standard regular compression: While improvements in the context-only setting and on Mistral multi-retrieval are notable, the performance gains on LongBench in the standard regular compression setup (Table 1) are modest (e.g., +0.14 to +0.44 points on average for Llama-3.1-8B).",
+        "Evaluation scale limited to 7B/8B models: The experimental evaluation is restricted to Mistral-7B and Llama-3.1-8B. Evaluating larger model variants (e.g., 70B) would provide stronger evidence of the method's generalizability across varying degrees of attention head specialization and Grouped-Query Attention (GQA) sharing ratios."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Principled perspective: The paper addresses an important blind spot in existing KV cache eviction techniques (e.g., H2O, SnapKV, AdaKV), which select critical tokens solely based on attention weights. Demonstrating that value states and output projection matrices ($V W^O$) significantly affect attention output perturbation is conceptually well-motivated.",
+        "Theoretical formulation: The paper formalizes critical KV cache entry selection as an output perturbation minimization problem under the $L_1$ norm and derives an upper bound that explicitly accounts for both attention weights and projected value states.",
+        "Extensive evaluation across diverse benchmarks: The method is validated on Needle-in-a-Haystack (single- and multi-retrieval) and the 16 datasets in LongBench, across two LLMs (Llama-3.1-8B and Mistral-7B) and under both regular and context-only compression settings.",
+        "Comprehensive empirical analysis: The head-wise, layer-wise, and budget-wise analyses provide clear empirical evidence that the proposed selection strategy effectively reduces output perturbation across attention heads and layers."
+      ],
+      "weaknesses": [
+        "Inconsistencies and pseudo-code bug in Algorithm 1: In Algorithm 1, Line 3 scales $A$ by the $L_1$ norm of $\\mathcal{V}$ before Stage 1 begins. Consequently, Stage 1 (Lines 5–10) selects based on $A_i \\|V_{i,:}\\|_1$ rather than pure attention weights $A_i$, which contradicts the textual description in Section 3.4/3.5 and renders Stage 1 and Stage 2 identical. Additionally, Line 1 sets the default $\\alpha = 0.25$, whereas Sections 3.5 and 4.3 state that $\\alpha = 0.5$ was fixed across all experiments.",
+        "Unaddressed computational and memory overhead: Calculating $\\mathcal{V} = V W^O \\in \\mathbb{R}^{n \\times d}$ and computing row-wise $L_1$ norms for all cached tokens across all layers and heads introduces non-trivial FLOPs and memory traffic during eviction (order of $2 L n d^2$). The paper lacks any wall-clock latency, runtime overhead, or peak GPU memory measurements to demonstrate that this overhead does not diminish the practical efficiency gains of KV eviction.",
+        "Unclear integration between Algorithm 1 and Algorithm 2: Algorithm 1 is formulated with a single query vector $q$ and recomputes attention via $\\text{softmax}(q K^T)$, whereas Algorithm 2 utilizes pooled attention $\\bar{A}$ over an observation window. The exact mechanism by which Algorithm 1 ingests $\\bar{A}$ and handles multi-query/pooled attention weights needs formal clarification.",
+        "Modest performance gains in standard evaluation settings: In the standard regular compression setup on LongBench (Table 1), the average performance gains over SnapKV and AdaKV are relatively marginal (e.g., +0.14 to +0.44 points on Llama-3.1-8B), with the most pronounced improvements occurring primarily in the artificial context-only compression scenario."
+      ]
+    }
+  }
+}

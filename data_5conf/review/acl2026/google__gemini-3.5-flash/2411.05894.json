@@ -1,0 +1,91 @@
+{
+  "v1": {
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "The paper addresses a highly practical and critical bottleneck in LLM deployment: scaling speculative decoding to the large batch sizes (e.g., >= 8) and continuous batching systems used in real production environments.",
+        "The proposed method (SSSD) is parameter-free, meaning it requires no extra trained draft models or model parameter modifications, drastically simplifying deployment and maintenance.",
+        "By smartly fusing localized prompt lookup with a global datastore (using suffix arrays), the method exploits the complementarity of both sources, leading to high-quality speculation candidates without heavy GPU-side draft overhead.",
+        "The paper provides a rigorous, hardware-level roofline model analysis that maps out the FLOPs/memory IO trade-offs under varying batch sizes and context lengths, which adds strong theoretical backing to the empirical results.",
+        "Strong empirical results are demonstrated through a real integration into vLLM, showing significant throughput and latency gains (up to 4x throughput improvement in continuous batching scenarios) over competitive baselines like REST and PIA."
+      ],
+      "weaknesses": [
+        "The method relies on several heuristic hyperparameters (e.g., prefix sizes, discounting factors, tree search thresholds) that require grid-searching and calibration to simulate LLM inference.",
+        "The CPU host overhead and memory usage for managing and querying the large suffix-array datastore is not fully detailed; while OpenMP handles parallelization, it might create a system bottleneck under resource-constrained host environments.",
+        "The performance on models with very large vocabularies (e.g., Llama 3's 128k vocabulary) shows a slightly degraded candidate quality compared to smaller vocabularies, indicating that the lookup-based heuristic remains sensitive to vocabulary scale."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3.5,
+      "strengths": [
+        "The paper addresses a highly practical problem: making speculative decoding viable at larger batch sizes without the overhead and complexity of training or deploying secondary draft models.",
+        "It provides a thorough hardware-aware analysis, including a detailed FLOPs/IO roofline breakdown, explaining the gap between theoretical speculation capacity and empirical operator bottlenecks.",
+        "The proposed method, SSSD, is successfully integrated into a continuous batching system (customized vLLM) and shows realistic end-to-end throughput and latency improvements up to batch size 64.",
+        "The engineering improvements over REST and PIA (such as OpenMP parallelization, systematic sampling of the suffix array, and priority-queue-based fusion) are well-justified and yield tangible speedups."
+      ],
+      "weaknesses": [
+        "The comparison with state-of-the-art model-based speculative decoding methods (like EAGLE, Medusa, or ReDrafter) in the continuous batching setting is limited. It is unclear how much throughput is traded off by choosing a parameter-free method over a highly optimized draft model in production.",
+        "The method relies on several heuristics and hyper-parameters for fusing data sources (e.g., dampening factors based on prefix length and tree depth) which require a grid search on target model outputs, reducing the 'plug-and-play' nature.",
+        "While the authors claim that similar unoptimized operator behavior applies to NVIDIA GPUs, the primary hardware-level profiling is conducted on a Huawei Ascend 910B4 NPU. Detailed benchmarking on standard NVIDIA GPUs (e.g., A100 or H100) would strengthen the generalizability of the empirical findings."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Practical and easy to deploy: As a parameter-free method, SSSD requires no additional training, fine-tuning, or architectural modifications (such as training auxiliary heads or deploying a separate draft model).",
+        "Effective at large batch sizes: Unlike many existing speculative decoding approaches that fail to scale beyond batch size 1 or 2, SSSD shows tangible throughput and latency improvements at realistic serving batch sizes (up to 64) under continuous batching.",
+        "Complementary source fusion: The paper demonstrates a clever way to merge candidate suggestions from the local context (prompt and self-output) with a large static text datastore using calibrated pseudo-probabilities.",
+        "Rigorous hardware and roofline analysis: The authors provide an excellent theoretical and empirical study of memory bandwidth, compute-to-memory access ratios (FLOPs:IO), and their interaction with batch size and context length on modern hardware."
+      ],
+      "weaknesses": [
+        "Limited evaluation scale: The experiments are conducted only on smaller models (Llama2-7B and Llama3-8B). Evaluating on larger models (e.g., 70B) or in multi-GPU/distributed setups would strengthen the claims, as speculative decoding is especially critical in those scenarios.",
+        "Host-device communication overhead: Since the drafting phase is fully offloaded to the host CPU, the paper lacks a detailed discussion on host-to-device (CPU-GPU) transfer latency, which can become a bottleneck at high batch sizes and in distributed environments.",
+        "Lack of direct comparison with state-of-the-art parameter-based methods: While SSSD outperforms other parameter-free methods (REST, PIA), comparing it against high-performing parameter-based draft methods (like EAGLE or Medusa) under batched settings would better illustrate the quality vs. complexity trade-off."
+      ]
+    }
+  },
+  "v2": {
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "High practical and deployment value: SSSD is a training-free, parameter-free speculative decoding approach that avoids the high maintenance and training costs of draft models, making it highly suitable for real-world production systems.",
+        "Innovative dual-source drafting: Combining a dynamic local trie (for prompt and self-output) with a self-updating, suffix-array-based text datastore successfully leverages the complementary strengths of local repetition and global distributional patterns.",
+        "Rigorous hardware-aware design: The application of the roofline model to analytically determine the optimal speculation length (sq = Iknee / b) provides a solid theoretical and systems-level foundation for speculative decoding budget allocation under batching.",
+        "Comprehensive and realistic evaluation: The method is integrated into a high-performance serving engine (SGLang) and evaluated across diverse configurations, including disaggregated prefill-decode, tensor parallelism (TP=2), multi-lingual cold starts, and reasoning models (DeepSeek-R1-Distill)."
+      ],
+      "weaknesses": [
+        "CPU overhead bottleneck: Executing candidate retrieval, suffix-array binary searches, and tree merging on the CPU introduces host-side latency and memory overhead. Although the authors note this is kept low, under high-throughput conditions, CPU-GPU synchronization and host-memory bandwidth could become a performance bottleneck.",
+        "Heuristic parameter tuning: Fusing the local and global datastore candidates relies on grid-searched heuristic weights and scaling factors (e.g., discount factors in Algorithm 3), which might need recalibration for dramatically different domains or tokenizers.",
+        "Diminished returns on modern architectures: As discussed in the limitations, SSSD's advantages are less pronounced for newer architectural optimizations such as Mixture of Experts (MoE) and Multi-Head Latent Attention (MLA), which are increasingly common in state-of-the-art models like DeepSeek-V3."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 4.5,
+      "strengths": [
+        "High Practicality & Training-Free: SSSD provides a compelling model-free speculative decoding approach that completely bypasses the need for training, fine-tuning, or deploying auxiliary draft models/heads. This significantly reduces maintenance complexity and deployment barriers in production serving systems.",
+        "Hardware-Aware Speculation Design: The paper introduces a principled, roofline-model-derived rule ($s_q = I_{\text{knee}} / b$) to dynamically determine the optimal speculation length based on batch size and hardware specs, successfully bridging the gap between algorithmic design and systems execution.",
+        "Rigorous & Extensive Evaluation: The method is integrated into SGLang (a high-performance LLM serving framework) and tested under realistic settings, including batching, prefill-decode disaggregation, long-context scenarios (up to 40k tokens), and reasoning traces (DeepSeek-R1-Distill).",
+        "Strong Multilingual & Cold-Start Robustness: Unlike trained-draft methods that struggle under domain/language shift, SSSD's combined use of an on-the-fly input trie and a suffix-array-based datastore enables rapid adaptation and strong performance in multilingual and cold-start scenarios.",
+        "Clarity and Completeness: The manuscript is beautifully written, with clear diagrams, detailed mathematical modeling of FLOPS/IO costs (Table 2), and transparent algorithmic pseudocode."
+      ],
+      "weaknesses": [
+        "CPU Bottleneck Analysis: SSSD moves the drafting phase (suffix array lookup and tree merging) entirely to the CPU/host. Under very high-throughput continuous batching, host CPU overhead and memory bandwidth contention could potentially become a bottleneck, which would benefit from more detailed hardware profiling.",
+        "Dependence on Heuristic Fusion Parameters: The fusion of different candidate sources requires scaling factors and dampening weights obtained through a grid search. Although the authors demonstrate that these parameters transfer well, it introduces minor heuristic-dependent tuning."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Highly practical, training-free approach to speculative decoding that eliminates the operational complexity of training, deploying, and maintaining auxiliary draft models.",
+        "Excellent hardware-aware analysis using the roofline model to dynamically scale the speculation length ($s_q$) based on batch size and hardware arithmetic intensity.",
+        "Extensive and rigorous empirical evaluation, including testing at scale (up to Llama-3.3-70B) in disaggregated prefill-decode serving environments integrated into the high-performance SGLang runtime.",
+        "Thorough exploration of real-world deployment challenges, such as multilinguality, cold-start datastore adaptation, and long-context scaling where KV-cache draft overhead is minimized."
+      ],
+      "weaknesses": [
+        "Algorithmic novelty is relatively incremental, as the method primarily fuses and refines existing concepts from Prompt Lookup Decoding (PLD), REST, and Lookahead decoding.",
+        "The CPU-side overhead of building and querying the trie and suffix array could bottleneck execution in systems with highly constrained host memory or weak CPU-to-GPU interconnects.",
+        "Model-based speculative decoding (like EAGLE-3) still outperforms SSSD in standard English-centric configurations, indicating a trade-off between deployment simplicity and peak acceleration."
+      ]
+    }
+  }
+}

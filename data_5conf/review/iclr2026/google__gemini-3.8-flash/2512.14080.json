@@ -1,0 +1,97 @@
+{
+  "v2": {
+    "exp1_quality": {
+      "oa": 8,
+      "strengths": [
+        "Addresses a timely and crucial bottleneck in modern LLM pre-training: the memory and IO inefficiencies arising from the recent architectural trend towards fine-grained and highly sparse MoEs (e.g., DeepSeek-V3, Qwen-MoE).",
+        "Principled and elegant backward pass reformulation: by mathematically refactoring the router gradient calculation ($dS$) and avoiding materialization/caching of $Y$ and $dY$, the activation memory usage becomes invariant to expert granularity, achieving a 45% memory reduction per layer without recomputation.",
+        "Comprehensive, hardware-level GPU kernel optimizations for both NVIDIA Hopper and Blackwell architectures, including gather-load fusion, TMEM double-buffering coordination via relay warps for 2-CTA clusters, and MMA-IO overlap via Ping-Pong scheduling.",
+        "The tile-aware 'Token Rounding' (TR) routing algorithm is a practical and creative solution to GEMM tile quantization/padding overheads, bounded by at most one tile deviation, and demonstrates an effective bridge between expert capacity constraints and drop-in autoregressive token-choice inference.",
+        "Thorough evaluation: benchmarks include both kernel-level profiling and end-to-end training runs (e.g., FSDP-2 on 64 H100s), extensive comparisons against competitive baselines (ScatterMoE, MoMoE, DeepGEMM, Megatron-LM), and downstream task evaluation across 11 NLP benchmarks."
+      ],
+      "weaknesses": [
+        "Token Rounding (TR) depends on microbatch size $T$; as shown in the ablation studies, model quality degrades noticeably when the average tokens per expert per microbatch drops near the tile boundary ($T_e / M_{\\text{tile}} = 1$), limiting its effectiveness in low-batch-size distributed training setups.",
+        "Full pretraining experiments with task evaluations are restricted to smaller model scales (0.5B to 1.8B parameters trained on up to 100B tokens); while larger models (up to 685B configurations) are profiled for kernel throughput and memory footprint, downstream task retention for TR at 7B+ scale remains unverified.",
+        "The manuscript is quite dense, with key algorithmic details, derivations, and notations heavily deferred to the extensive appendix, which can make reading the main text somewhat challenging."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Compelling and timely motivation: Modern frontier LLMs (such as DeepSeek-V3/V4, Qwen, and Kimi) increasingly rely on fine-grained and highly sparse MoE architectures, which suffer from memory bottlenecks and grouped GEMM tile quantization. The paper directly and effectively addresses these bottlenecks.",
+        "Comprehensive hardware-software co-design: The paper introduces rigorous mathematical reformulations of the MoE backward pass (eliminating $O(TKd)$ activation caching to achieve constant memory scaling with granularity) alongside sophisticated GPU kernel optimizations (fused gather loads, Ping-Pong scheduling on Hopper, and TMEM/UMMA overlap on Blackwell).",
+        "Novel and well-motivated routing mechanism: The proposed tile-aware 'token rounding' (TR) neatly bridges the gap between hardware execution tile size ($M_{\\text{tile}}$) and routing frequency, reducing padding waste by up to 16% in sparse regimes while showing negligible downstream accuracy drop when evaluated with standard top-$K$ routing.",
+        "Exceptional evaluation depth: The authors provide extensive microbenchmarks on both NVIDIA Hopper (H100) and Blackwell (B300) GPUs across multiple scales (from 1.4B up to 685B configurations), comparing thoroughly against strong baselines (ScatterMoE, MoMoE, MegaBlocks, Megatron-LM, and DeepGEMM).",
+        "Real end-to-end impact and reproducibility: Validated end-to-end training throughput using FSDP-2 on 64 H100 GPUs (achieving parity with 96 H100s running ScatterMoE) and commitment to open-sourcing the CuTe-DSL kernels."
+      ],
+      "weaknesses": [
+        "Pretraining validation of token rounding is conducted on smaller models (up to 1.8B parameters and 100B tokens). While sufficient as a proof of concept, empirical verification on larger scales (>10B parameters) would further solidify confidence in training stability and routing dynamics.",
+        "Limited evaluation under distributed Expert Parallelism (EP): The paper primarily benchmarks single-node kernels and FSDP-2 training. A discussion or benchmark of how SonicMoE's gather/scatter fusion coordinates with distributed all-to-all communication primitives (e.g., DeepEP) would be valuable.",
+        "Sensitivity under extreme batch size conditions: As noted in the ablation studies, token rounding exhibits performance degradation when the average token count per expert approaches the tile size ($\\bar{T}_e / M_{\\text{tile}} \\approx 1$). While practical training setups typically operate above this threshold, further discussion on fallback mechanisms for very small microbatch sizes would be helpful."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 8,
+      "strengths": [
+        "Addresses a timely and crucial bottleneck in modern LLM scaling: the memory footprint and hardware inefficiency of granular, sparse Mixture-of-Experts (MoE) architectures.",
+        "Presents a mathematically elegant backward pass reformulation that avoids caching O(TKd) intermediate activations (down-projection outputs and gathered tokens), making activation memory consumption invariant to expert granularity without incurring extra GEMM recomputations.",
+        "Impressive GPU kernel engineering using CuTe-DSL, featuring gather fusion with global-to-shared memory loads (including a relay mechanism for Blackwell 2-CTA clusters), heavy epilogue fusion, and overlapping MMA with asynchronous IO via Ping-Pong scheduling on Hopper and TMEM two-stage pipelining on Blackwell.",
+        "The tile-aware token rounding (TR) algorithm is a well-motivated algorithmic-system co-design that eliminates Grouped GEMM padding waste while maintaining training-to-inference alignment and downstream task accuracy.",
+        "Thorough empirical evaluation spanning kernel-level profiling, layer-level benchmarks across 1.4B to 685B model configurations, end-to-end cluster training (64 H100s vs 96 H100s), and actual pretraining runs up to 100B tokens across 11 downstream NLP benchmarks."
+      ],
+      "weaknesses": [
+        "Downstream pretraining evaluation is conducted only up to 1.8B parameters and 100B tokens; empirical verification of Token Rounding on larger scale models (e.g., >7B parameters) would strengthen the generality claims.",
+        "Token rounding performance is inherently tied to the microbatch size, and as shown in the ablation studies, suffers noticeable quality degradation when the average number of tokens per expert approaches the tile size (T_e / M_tile <= 1).",
+        "The kernel implementation and benchmarking are currently limited to BF16 precision, whereas many contemporary large-scale sparse MoEs (such as DeepSeek-V3) rely heavily on FP8 and microscaling formats.",
+        "The paper focuses primarily on single-node/FSDP execution, leaving the integration and co-optimization with distributed expert parallelism (e.g., overlapping all-to-all communication with computation) for future work."
+      ]
+    }
+  },
+  "v1": {
+    "exp3_negative": {
+      "oa": 8,
+      "strengths": [
+        "Timely and high-impact problem: As modern frontier architectures (e.g., DeepSeek-V3, Qwen-MoE, Kimi-K2) shift towards high expert granularity and high sparsity, MoE training increasingly becomes memory- and IO-bound. The paper directly tackles these practical bottlenecks with a principled systems-architecture co-design.",
+        "Sound mathematical and algorithmic insight: The paper mathematically reformulates the MoE backward computation graph (computing dS from dA' and A instead of dO and Y), eliminating the need to cache intermediate activations Y and dY of size O(TKd). This reduces peak activation memory by up to 45% and makes activation footprint completely independent of expert granularity without requiring GEMM recomputation.",
+        "Effective tile-aware Token Rounding (TR): TR addresses the tile quantization penalty inherent to grouped GEMMs in sparse MoEs. The authors demonstrate that rounding expert frequencies to tile multiples (e.g., 128) bounds deviation to at most one tile per expert, yields up to 16–25% compute throughput gains, and successfully preserves downstream accuracy across 11 benchmark tasks when evaluated with standard top-K routing.",
+        "High-performance GPU engineering: The kernel design incorporates modern Hopper and Blackwell architectural primitives, including asynchronous TMA loads/stores, Ping-Pong consumer warpgroup scheduling to overlap heavy epilogues with MMA, 2-CTA cluster synchronization via relay warps on Blackwell, and an efficient register-based bitonic top-K router.",
+        "Comprehensive and rigorous evaluation: The work is evaluated extensively across multiple model scales (1.4B to 120B/685B configurations), against strong and modern baselines (ScatterMoE, MoMoE, MegaBlocks, Megatron GroupedMLP, and an optimized DeepGEMM++ implementation), supported by detailed kernel-level breakdowns and multi-node FSDP-2 training benchmarks on H100 clusters."
+      ],
+      "weaknesses": [
+        "Scale of pretraining validation for Token Rounding: While throughput benchmarks span configurations up to 685B parameters, the convergence and downstream task validation for Token Rounding are limited to 0.5B–1.8B parameter models trained on up to 100B tokens. Validating the train-to-test routing gap at larger model scales (e.g., 7B+) would further strengthen the claims.",
+        "Integration with multi-node Expert Parallelism (EP): Modern trillion-parameter MoEs often distribute experts across nodes using EP and specialized communication libraries (e.g., DeepEP all-to-all). While the paper demonstrates strong single-GPU and FSDP-2 scaling, the interaction and overlap between SonicMoE's local gather/scatter optimizations and distributed EP communication patterns are left primarily to future work.",
+        "Visual and information density: Several key figures (notably Figures 6, 14, 16, and 20) pack extensive annotations, multiple bar variants, and tiny fonts into compact spaces, making them difficult to parse without significant magnification."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Compelling and timely systems-ML problem: modern frontier MoE architectures (such as DeepSeek-V3 and Kimi K2) are moving towards higher expert granularity and high sparsity, which makes MoE computation increasingly memory-bound and susceptible to tile quantization waste. The paper targets these exact bottlenecks.",
+        "Sound mathematical derivation and activation memory optimization: by reformulating the gradient computation for the router scores and intermediate activations (dS and dH), the authors successfully eliminate the need to cache activations that scale linearly with expert granularity (O(TKd)), reducing peak per-layer activation memory by up to 45% without increasing arithmetic operations.",
+        "Sophisticated GPU kernel implementation: the paper leverages modern GPU architecture features on Hopper and Blackwell (such as asynchronous TMA loads/stores, Ping-Pong consumer warpgroup scheduling, 2-CTA cluster relay mechanisms, and register-based bitonic sorting networks) to overlap memory I/O and Tensor Core MMA efficiently.",
+        "Novel algorithmic solution for tile quantization: the 'token rounding' (TR) routing mechanism effectively rounds per-expert token counts to multiples of the GEMM tile size (e.g., 128), preventing wasted FLOPs on padding while bounding deviation to at most one tile per expert. The empirical validation across 11 downstream benchmarks shows robust convergence and negligible train-test gap compared to vanilla top-K.",
+        "Comprehensive and rigorous experimental evaluation: the authors provide extensive single-layer and full-model benchmarks spanning 1.4B to 685B configurations against multiple strong baselines (ScatterMoE, MoMoE, DeepGEMM++, MegaBlocks, Megatron-LM), as well as multi-node cluster training on 64 H100s matching the throughput of 96 H100s running ScatterMoE."
+      ],
+      "weaknesses": [
+        "Limited evaluation under Expert Parallelism (EP): the kernel design and token rounding are primarily evaluated on single-node / FSDP settings. Modern frontier sparse MoEs predominantly rely on large-scale distributed Expert Parallelism with all-to-all communications; further analysis on how gather/scatter fusion and token rounding integrate with communication overlap libraries (e.g., DeepEP) would make the work even stronger.",
+        "Scale of pretraining validation: while downstream task quality for token rounding is rigorously validated on models up to 1.8B parameters trained on up to 100B tokens, it remains to be validated at the scale of 10B+ or frontier-scale models where slight routing perturbations might have subtler long-horizon effects.",
+        "Focus on BF16 precision: current frontier MoE pretraining (e.g., DeepSeek-V3) extensively uses FP8 precision. The group GEMMs and fusions in SonicMoE are primarily implemented and evaluated in BF16, leaving low-precision (FP8/NVFP4) adaptation to future work."
+      ]
+    },
+    "exp1_quality": {
+      "oa": 8,
+      "strengths": [
+        "Compelling and timely problem formulation: As modern MoEs trend toward higher expert granularity (small intermediate dimensions) and extreme sparsity, hardware utilization is increasingly bounded by IO overhead, activation memory expansion, and GEMM tile quantization. The paper systematically addresses each of these bottlenecks.",
+        "Principled algorithmic and mathematical redesign: The reformulation of the backward pass to compute dS and dH without materializing or caching intermediate activation tensors of size O(TKd) effectively decouples peak activation memory from expert granularity, reducing activation memory by up to 45% without FLOP recomputation.",
+        "Meticulous, state-of-the-art GPU kernel co-design: The system introduces effective low-level optimizations tailored to modern GPU architectures (NVIDIA Hopper and Blackwell), including asynchronous TMA load/store overlapping, Ping-Pong warpgroup scheduling for heavy epilogues, gather fusion with cp.async/TMA, and an optimized bitonic top-K router with mantissa bit packing.",
+        "Novel and practical 'Token Rounding' routing: The proposed tile-aware token rounding algorithm directly mitigates tile quantization padding waste in Grouped GEMM, yielding up to 16% end-to-end kernel speedup in sparse regimes while matching vanilla top-K inference performance across extensive downstream evaluations.",
+        "Thorough, rigorous evaluation: The authors conduct exhaustive kernel-level profiling, microbenchmarks against established baselines (ScatterMoE, MoMoE, MegaBlocks, DeepGEMM, Megatron), end-to-end distributed cluster training (64 H100s with FSDP-2), and pretraining runs up to 1.8B parameters / 100B tokens across 11 standard benchmarks."
+      ],
+      "weaknesses": [
+        "Pretraining scale for algorithmic validation: While the kernel profiling covers configurations up to 685B parameters, the end-to-end model pretraining and downstream task validation for Token Rounding are conducted on models up to 1.8B parameters and 100B tokens. While understandable given compute constraints, empirical validation on larger models (e.g., 7B+) would further solidify confidence in scaling behavior.",
+        "Interaction with distributed Expert Parallelism (EP): The paper primarily benchmarks single-layer and FSDP-2 setups. In large-scale MoE training where Expert Parallelism and All-to-All communication dominate, rounding token counts locally per GPU versus globally across the EP group warrants a more explicit discussion regarding communication volume and load balance.",
+        "Handling of corner cases in Token Rounding: Although the paper shows good empirical stability when the average tokens per expert T_e / M_tile >= 2, performance degrades when T_e / M_tile approaches 1. Clearer practical guidelines on choosing microbatch sizes and tile sizes dynamically during training would improve usability."
+      ]
+    }
+  }
+}
