@@ -1,0 +1,122 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 6,
+      "strengths": [
+        "Addresses an important and timely systems/modeling problem: fixed-budget KV-cache management for long-context and long-generation LLM inference.",
+        "Proposes a simple learnable retention-gate mechanism that is appealing in practice: backbone frozen, lightweight per-layer/head gates, cached scalar scores, and straightforward eviction at inference.",
+        "Empirical coverage is broad, spanning math reasoning, LongProc, LongMemEvalS, SCBench, LongBench, and LongBench-V2, with comparisons to several heuristic eviction methods and learnable baselines.",
+        "Reported gains are often substantial in low-memory regimes, and the throughput table suggests the method has practical efficiency benefits over full-cache decoding and retrieval/offloading-style approaches.",
+        "Includes useful ablations on objective components, gate architecture, training budget, and training data, plus qualitative analyses showing interpretable retention patterns across heads and layers."
+      ],
+      "weaknesses": [
+        "The formalization of eviction as exp(alpha * qk) is not a faithful representation of hard KV eviction: alpha=0 does not remove a token from attention, but gives it logit 0. This weakens the theoretical link between the training surrogate and the inference-time eviction policy.",
+        "The claim that TRIM-KV can surpass full-cache models is intriguing but underexplained; without stronger statistical analysis, seed variance, decoding controls, and error analysis, it is hard to know whether this reflects regularization, sampling noise, prompt/template effects, or benchmark artifacts.",
+        "Baseline fairness is somewhat difficult to assess. Some comparisons involve different paradigms, training data assumptions, or reproduced numbers with noted template discrepancies, and several strong recent compression/quantization or hybrid methods are not deeply evaluated end-to-end.",
+        "Reproducibility is incomplete at submission time: code, checkpoints, and scripts are promised only upon publication, and many implementation details rely on custom kernels and hardware-specific optimizations.",
+        "The evaluation is impressive but sometimes presentation-heavy: figures/tables report many wins, yet there is limited analysis of failure cases, sensitivity to model family, pathological contexts, or cases where learned intrinsic token importance is insufficient.",
+        "The capacity loss and inference rule are only loosely connected: the soft sum of decayed beta scores is used during training, while hard top-M eviction under beta^(age) is used at inference. More direct validation of this surrogate would strengthen technical soundness."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper addresses an important and timely problem: reducing KV-cache memory for long-context and long-generation LLM inference under fixed budgets.",
+        "The high-level idea of learning per-layer/per-head token retention scores is intuitive and potentially useful, especially compared with purely attention-history-based eviction heuristics.",
+        "The experimental section is broad, covering math reasoning, procedural generation, long-memory chat, long-context benchmarks, ablations, qualitative visualizations, and some throughput measurements.",
+        "The method is appealingly lightweight in principle: only small retention gates are trained while the backbone remains frozen."
+      ],
+      "weaknesses": [
+        "The core technical formulation appears flawed. In Eq. 1, setting an eviction variable alpha to 0 inside exp(alpha * qk) does not mask an evicted token; it gives that token logit 0, so it still contributes to the softmax numerator and denominator. This is not equivalent to KV eviction and can even increase attention to tokens whose original logits are negative.",
+        "The training-time retention-gated attention is poorly aligned with inference-time hard eviction. The model is trained with decayed logits, but deployed by argmin eviction from the cache. The paper does not convincingly justify that this surrogate optimizes the actual discrete cache policy.",
+        "The capacity loss constrains sums of decayed retention scores, not the number or identity of tokens actually retained under the inference policy. This weakens the claimed connection between the objective and strict memory-bounded inference.",
+        "Several headline claims are stronger than the evidence. Claims that TRIM-KV surpasses full-cache models and acts as regularization are not supported by enough statistical analysis, controlled decoding comparisons, or investigation of why full KV underperforms.",
+        "The evaluation is broad but not fully convincing. Some comparisons mix trained and untrained methods, use different assumptions from retrieval/offloading baselines, or rely on budget/frontier plots without sufficiently transparent numeric details in the main text.",
+        "The method fails badly on key incompressible retrieval settings such as SCBench Retr.KV and Code.RepoQA, yet the paper still frames the approach as broadly effective for long-context understanding.",
+        "Reproducibility is limited: code and checkpoints are only promised upon publication, and the paper lacks enough implementation detail to verify key claims such as custom kernels, exact baseline tuning, and end-to-end throughput fairness.",
+        "The qualitative interpretability claims are speculative. Visual patterns in selected heads are interesting, but the paper over-interprets them as functional specializations without causal validation or systematic analysis.",
+        "There are presentation and rigor issues, including typos, duplicated citations, awkward table formatting, and a visible source-code placeholder, which reduce confidence in the care of the submission."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "The paper addresses an important and timely problem: fixed-budget KV-cache management for long-context and long-generation LLM inference. The proposed retention-gate framing is intuitive and practically appealing because it predicts token utility at creation time rather than relying only on recent query attention.",
+        "The empirical scope is broad. The paper evaluates on math reasoning, LongProc, LongMemEvalS, SCBench, and LongBench/LongBench-V2, and includes multiple model families and budget regimes. The reported gains over common eviction baselines are often large, especially under tight KV budgets.",
+        "The method is lightweight and deployable in spirit: only small retention gates are trained while the base model is frozen, and inference uses a simple per-token score and argmin eviction. The throughput comparison suggests the approach can offer real wall-clock benefits, not just memory savings.",
+        "The ablations are useful, including objective components, gate architecture, training memory capacity, and training data transfer. The qualitative layer/head analyses are also interesting and may be valuable for understanding cache specialization."
+      ],
+      "weaknesses": [
+        "There is a significant technical ambiguity in the formulation of eviction and retention-gated attention. Equations place the binary/soft retention factor inside the attention logit as exp(alpha * qk) or exp(beta^(t-i) * qk); if alpha is 0, the term becomes exp(0), not a masked-out token. This does not faithfully model cache eviction unless additional masking is applied, and the paper does not clearly reconcile this with the inference-time hard removal policy.",
+        "The training-inference mismatch remains underexplained. Training uses soft retention-gated attention and a capacity loss based on summed decays, while inference performs hard eviction by ranking beta^(t-i). More evidence is needed that the soft surrogate reliably optimizes the hard cache policy rather than merely acting as a regularizer.",
+        "Some claims are stronger than the evidence. In particular, surpassing full KV is interpreted as regularization/noise suppression, but this could also arise from sampling variance, evaluation noise, prompt/template differences, or distributional effects from gate training. The paper should provide confidence intervals, repeated seeds, and more controlled analysis before making this conclusion.",
+        "Baseline coverage and fairness are not fully satisfying. The comparison includes important methods, but several related learned or adaptive KV approaches are only partially addressed or relegated to limited settings. Training data and tuning budgets for TRIM-KV versus learned baselines also need clearer normalization.",
+        "Reproducibility is incomplete at submission time: code and checkpoints are promised upon publication, but the review version lacks released artifacts. Given the complexity of long-context training kernels, cache implementations, and benchmark protocols, this limits independent verification.",
+        "Evaluation details leave some residual concerns: stochastic pass@1 results lack uncertainty estimates, LongMemEval uses an LLM judge from the same model family, and some long-context retrieval tasks collapse for all eviction methods, which narrows the demonstrated applicability of the method."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 6,
+      "strengths": [
+        "The paper proposes a simple and practically appealing learnable KV-cache eviction mechanism: per-layer/head retention gates assign token scores at creation time, then hard eviction keeps the highest-retention tokens under a fixed memory budget.",
+        "The method is well motivated relative to attention-based eviction heuristics, and the exponential-decay formulation gives a clean differentiable proxy for long-horizon token retention.",
+        "The experimental scope is broad, covering math reasoning, long procedural generation, long-memory chat, SCBench, LongBench, and LongBench-V2, with comparisons to several relevant eviction baselines and a learnable retrieval baseline.",
+        "Results are often strong in low-memory regimes, and the throughput/memory story is compelling because the inference policy is lightweight and avoids full-cache retrieval/offloading machinery.",
+        "The paper includes useful ablations on training losses, gate architecture, training budget, and data choice, plus qualitative analyses showing layer/head-specific retention patterns."
+      ],
+      "weaknesses": [
+        "The core novelty is somewhat incremental relative to recent learnable KV eviction/retention methods such as LocRet and related trained retaining-head approaches; the paper would benefit from a sharper conceptual and empirical separation from these methods beyond the chunk-prefill comparison.",
+        "There is a notable train-test mismatch: training uses soft retention-gated attention over the full sequence, while inference uses standard attention over a hard-evicted cache. The paper argues this is a proxy but does not deeply quantify when the proxy fails or compare against training with hard/straight-through eviction.",
+        "Some strong claims are under-supported, especially that TRIM-KV surpasses full-cache models as a regularizer. These improvements could reflect sampling variance, prompt/template differences, or evaluation noise; confidence intervals and repeated runs are largely missing.",
+        "Evaluation fairness is not always fully clear. Baseline implementation details, hyperparameter tuning effort, and whether all baselines receive comparable adaptation/training are insufficiently specified for several settings.",
+        "The comparison to retrieval methods such as SeerAttn-R mixes different resource models: TRIM-KV has a strict evicted cache, while retrieval methods preserve offloaded history. More complete end-to-end latency, memory, and quality tradeoff curves would make the conclusion stronger.",
+        "Reproducibility is incomplete at submission time: code/checkpoints are promised only upon publication, and several key details needed to reproduce large-scale training and evaluations are scattered or underspecified.",
+        "The interpretability discussion is interesting but mostly qualitative and speculative; claims about gist tokens, human-intuitive retention, and functional head roles are not validated with controlled interventions.",
+        "Several long-context tasks remain weak or near-zero for all eviction methods, and the paper does not sufficiently analyze failure modes on incompressible retrieval, code repository QA, or tasks requiring exact retention of sparse facts."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "The paper addresses an important practical problem: fixed-budget KV-cache management for long-context and long-generation LLM inference. This is clearly relevant and timely.",
+        "The proposed TRIM-KV mechanism is simple and appealing: learn lightweight per-layer/per-head token retention gates, train them with distillation plus a capacity loss, and use the learned decayed scores for hard eviction at inference.",
+        "The experimental scope is broader than many KV-cache papers, covering math reasoning, LongProc, LongMemEval, SCBench, LongBench, and LongBench-V2, with comparisons to several established eviction baselines such as StreamingLLM, H2O, SnapKV, and R-KV.",
+        "The paper includes useful ablations on loss components, gate architecture, training budget, and training data, and it reports some throughput measurements in the appendix.",
+        "The qualitative visualizations are potentially interesting, especially the observation that different heads learn different retention patterns such as recency windows, sink-token behavior, and sparse token-specific retention."
+      ],
+      "weaknesses": [
+        "The central technical idea is plausible but not deeply established. Training uses soft retention-gated attention, while inference uses standard attention over a hard-evicted cache. This train-inference mismatch is central to the method but is not analyzed rigorously enough.",
+        "The claim that TRIM-KV learns tokens' intrinsic long-term utility at creation time is stronger than the evidence supports. The score is trained through a heuristic surrogate objective, depends on hidden states that may shift under eviction, and is evaluated mostly through downstream performance rather than direct validation of long-term utility.",
+        "Some reported claims are overstated, especially the repeated claim that the method can surpass full-cache inference and therefore acts as regularization. This could reflect decoding variance, benchmark noise, prompt/template differences, or altered failure modes; the paper does not provide sufficient controlled analysis or statistical confidence.",
+        "The comparison to baselines is useful but not fully satisfying. Several baselines are training-free while TRIM-KV receives task/domain-specific gate training; stronger learned eviction baselines and more carefully matched training-data/settings comparisons are needed.",
+        "The results are sometimes hard to interpret because important numbers are in plots rather than tables, sample sizes and variance are limited or absent, and there is little discussion of statistical significance despite stochastic pass@1 evaluation.",
+        "Reproducibility is weaker than claimed. The manuscript says code and checkpoints will be released upon publication, but the current source-code field appears incomplete, and several implementation details are buried or missing, including exact prompts/templates, evaluation scripts, and the full cost of training gates for each model/task family.",
+        "The method's practical deployment story needs more scrutiny. It adds learned modules per layer/head and requires gate training for each backbone or setting; the cost-benefit tradeoff versus simpler heuristics, quantization, or retrieval/offloading systems is not fully characterized.",
+        "The evaluation highlights favorable settings but also shows severe degradation on some incompressible retrieval-style tasks such as Retr.KV and Code.RepoQA. The paper acknowledges this briefly but does not sufficiently delimit when the method should or should not be used.",
+        "The interpretability claims are speculative. Visual patterns are suggestive, but labeling heads as performing gist compression or functional roles requires stronger evidence than qualitative token-retention plots.",
+        "Overall, the work is coherent and has promising empirical signals, but the methodological novelty, fairness of comparisons, strength of evidence, and reproducibility are not yet strong enough for a confident top-tier acceptance."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "The paper proposes a clear and meaningful idea: learning token retention at creation time, per layer/head, as an alternative to attention-history heuristics for memory-bounded KV cache eviction. The method is conceptually simple, compatible with pretrained LLMs, and has low inference overhead.",
+        "The experimental coverage is strong. The paper evaluates long generation, math reasoning, procedural generation, long-memory dialogue, SCBench, LongBench, and chunked prefill, with comparisons to relevant heuristic and learnable baselines such as StreamingLLM, H2O, SnapKV, R-KV, SeerAttn-R, and LocRet.",
+        "Results are convincing overall, especially in low-budget regimes where TRIM-KV substantially outperforms eviction baselines and often remains close to full-cache performance. The LongMemEval results are particularly compelling for the claimed long-memory setting.",
+        "The method includes useful ablations on the training objective, gate architecture, training data, and memory capacity. The capacity-loss ablation is especially important and supports the central mechanism.",
+        "The qualitative analyses are a nice addition: the emergence of sink-token, sliding-window, and token-specialized retention patterns helps explain why the method works and suggests interpretability value beyond compression.",
+        "The paper is generally well positioned relative to KV compression, retrieval, and trainable sparse/forgetting mechanisms, and the method occupies a useful middle ground between heuristic eviction and more expensive retrieval/offloading approaches."
+      ],
+      "weaknesses": [
+        "The training/inference mismatch remains a notable concern: training uses soft retention-gated attention, while inference uses standard attention with hard eviction based on the learned scores. The empirical results suggest this works, but the paper could more directly quantify or analyze the mismatch.",
+        "Claims that TRIM-KV can surpass full-cache models are intriguing but not fully explained. Since the gates are trained on task-relevant data and the full-cache baseline appears not to receive comparable adaptation, some gains may reflect training/data effects or regularization rather than KV retention alone. Statistical confidence intervals would help here.",
+        "The strongest math results rely on training gates on OpenR1-MATH and evaluating on math benchmarks. Although cross-domain ablations are included, the paper could better separate domain adaptation from compression quality, especially for comparisons against untrained eviction methods.",
+        "Systems evaluation is useful but somewhat limited. Throughput is reported for a few settings, but broader memory measurements, implementation details for integration with production KV-cache kernels, and overhead under varied batch/context/budget regimes would strengthen the efficiency claims.",
+        "Some baselines may not be fully optimized for every setting, and several comparisons mix eviction, retrieval, and chunk-prefill methods with different assumptions. The paper mostly acknowledges this, but a more standardized comparison protocol would make the margins easier to interpret.",
+        "Reproducibility is promising but not complete at submission time: code/checkpoints are said to be released upon publication. Given the complexity of training gates, FlexAttention/Triton implementation, and benchmark protocols, availability of artifacts is important for verification."
+      ]
+    }
+  }
+}

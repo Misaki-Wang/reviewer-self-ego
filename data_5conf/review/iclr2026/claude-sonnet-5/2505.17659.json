@@ -1,4 +1,26 @@
 {
+  "v1": {
+    "exp1_quality": {
+      "oa": 6,
+      "strengths": [
+        "Novel and well-motivated reformulation of trajectory planning as a two-stage 'pretrain then RL-align' sequence generation problem, directly analogous to the LLM RLHF paradigm, which provides a clean way to decouple behavior learning from safety/rule alignment.",
+        "Avoids the need for costly preference annotation (used by concurrent works TrajHF/Gen-Drive) by designing interpretable, rule-based reward functions (collision, on-road, speed limit, comfort), improving reproducibility and transparency of the reward signal.",
+        "The dual-model rollout design (frozen world model for surrounding agents + trainable ego policy) is a sensible and practical way to enable stable multi-agent RL fine-tuning without destabilizing the joint rollout.",
+        "Strong empirical gains in the more challenging reactive closed-loop setting, outperforming the previous SOTA (Diffusion Planner) by +2.17 to +5.96 points across three benchmark splits.",
+        "Solid ablation studies: importance of the fine-tuning stage (large score gains in collision/TTC/drivable-area metrics), sensitivity analysis on the KL regularization weight, and a pass@k analysis showing fine-tuning improves the likelihood of generating safe trajectories across samples.",
+        "Concrete quantitative motivation for the problem (11.2% of nuPlan expert scenes contain speeding) and clear qualitative case studies (Fig. 2, Fig. 3) illustrating that IL-only planners inherit unsafe behaviors while Plan-R1 corrects them."
+      ],
+      "weaknesses": [
+        "In the non-reactive setting, Plan-R1 (without post-processing) actually underperforms Diffusion Planner on Val14 and Test14-hard (e.g., 87.99 vs 89.87 NR on Val14; 75.31 vs 75.99 NR on Test14-hard), which somewhat undercuts the abstract's broad claim of 'significantly improves planning safety and feasibility' and 'SOTA performance' without the reactive-setting caveat being foregrounded earlier.",
+        "The main SOTA comparison relies on an external rule-based post-processing/refinement module (from [30]) to reach top reported numbers, making it hard to disentangle how much of the improvement comes from the proposed RL fine-tuning versus this post-processing step.",
+        "No ablation isolating the contribution of individual reward terms (e.g., removing collision vs. speed vs. comfort rewards) to understand which components of the multiplicative/weighted-sum reward design drive the observed gains.",
+        "No analysis of computational overhead, training cost, or inference latency of the two-stage pretrain+GRPO-finetune pipeline relative to single-stage IL baselines, which is important for a safety-critical, real-time driving application.",
+        "Evaluation is limited to a single benchmark (nuPlan); no cross-dataset or cross-domain generalization experiments are provided to assess robustness of the learned reward-aligned policy beyond this simulator/dataset.",
+        "The slight degradation in comfort score (-0.16) after fine-tuning is noted but not analyzed further, leaving open whether the reward weighting systematically trades off comfort for other safety objectives.",
+        "Details on how GRPO's group sampling and KL term are computed over a joint multi-agent, multi-step trajectory action space (rather than a token-level LLM sequence) are somewhat brief in the main text, relegating important implementation specifics to the appendix."
+      ]
+    }
+  },
   "v3": {
     "exp1_quality": {
       "oa": 6,
@@ -19,6 +41,27 @@
         "Evaluation is limited to a single benchmark (nuPlan) with reactive agents modeled only via IDM, which is a known simplification; no cross-dataset or more diverse traffic-simulation validation is provided.",
         "Model scale is quite small (~5M parameters for the predictor), and RL fine-tuning is restricted to a reduced 100K-scenario subset for computational reasons; scalability to larger models/datasets is not demonstrated.",
         "Comparison table lacks some recent strong RL-based baselines (e.g., CarPlanner) in the ablation/ablation-adjacent analyses, limiting the ability to contextualize how much of the gain is attributable specifically to VD-GRPO vs. general two-stage RL fine-tuning approaches already explored in prior work."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Clearly motivated problem: identifies concrete evidence (>10% speeding scenes in nuPlan training data) that expert-only imitation learning inherits undesirable behaviors, well illustrated with qualitative trajectory comparisons (Fig. 2, 3).",
+        "The identified failure mode of standard GRPO in multi-objective, imbalanced-reward settings (per-group normalization erasing scale differences between rare safety-violation groups and abundant safe groups) is a genuine and well-illustrated insight, supported by advantage-distribution analysis (Fig. 4) and tracked unsafe-group ratios during training (Fig. 5).",
+        "VD-GRPO is a simple, easy-to-implement fix (centering + fixed scaling) that empirically improves collision avoidance without sacrificing much on secondary objectives, and the paper provides a reasonably thorough ablation of its effect versus vanilla GRPO (Table 2).",
+        "Strong empirical evaluation on the standard nuPlan benchmark across Val14/Test14-hard/Test14-random splits and both reactive/non-reactive settings, with especially strong gains in the more realistic reactive setting versus prior SOTA methods.",
+        "Extensive ablations covering reward component removal, group size, KL weight, scaling constant, dual-model vs. GT-replay vs. larger pretrained model, and pass@k analysis, which support the design choices reasonably well.",
+        "Reasonable reproducibility: architecture, training hyperparameters, and reward implementation details are described in the appendix."
+      ],
+      "weaknesses": [
+        "Core architectural/pretraining components (motion tokenization, factorized-attention transformer decoder, next-token prediction) are directly adapted from prior work (MotionLM, Trajeglish, SMART, Wayformer), limiting the novelty of the pre-training stage beyond straightforward application to planning.",
+        "VD-GRPO is conceptually very close to Dr.GRPO (removing the normalization/std term); while the paper argues the motivating problem (safety-critical rare events) differs, the technical modification itself is incremental and the analysis remains largely empirical (histograms, ratios) rather than a rigorous theoretical treatment of gradient/variance behavior.",
+        "The fixed scaling constant c introduces a new hyperparameter; the paper shows performance is fairly flat over a wide range (1e-4 to 1e-1), which somewhat undercuts the claimed importance of 'preserving absolute reward magnitude' as a precise mechanism, since the exact value doesn't seem to matter much.",
+        "In the learning-based-only comparison (no rule-based post-processing), Plan-R1 underperforms Diffusion Planner in NR-CLS on Val14 (88.98 vs 89.87) and on Test14-random NR-CLS is close/slightly behind other methods, so the 'SOTA' claim is only clearly true in the reactive setting and after applying an external post-processing refinement module, weakening the overall significance claim.",
+        "No direct empirical comparison against the most relevant prior hybrid/preference-based fine-tuning methods discussed in related work (Gen-Drive, TrajHF, BC-SAC) — these are only discussed qualitatively, not benchmarked head-to-head under the same experimental protocol.",
+        "Reward design (multiplicative safety indicators + weighted soft costs) closely follows the existing nuPlan/PDM closed-loop scoring formulation, so part of the 'principle alignment' contribution is largely reusing an existing metric as a training signal rather than a novel reward formulation.",
+        "No reported variance across multiple training seeds/runs, so it is unclear how robust the reported gains (some of which are modest, e.g., ~1-3 points in several ablation rows) are to training stochasticity, especially given the small model size (~5M params) and relatively small 100K fine-tuning scenario set.",
+        "The claim that VD-GRPO 'ensures safety-critical objectives remain dominant throughout training' is somewhat overstated relative to evidence — the unsafe-group ratio only drops from 6.7% to 4.7%, a meaningful but not dramatic improvement, and collision metric gains are moderate (+3.45) rather than transformative."
       ]
     }
   }

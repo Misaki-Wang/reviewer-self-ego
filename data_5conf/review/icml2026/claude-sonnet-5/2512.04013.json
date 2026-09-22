@@ -1,0 +1,43 @@
+{
+  "v3": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Strong empirical motivation: Section 3 provides clear, quantitative evidence (Figures 2-4, Table 1) that FCFS/SJF scheduling and fixed token budgets are suboptimal for augmented LLM serving, effectively justifying the paper's design choices before presenting the method.",
+        "Comprehensive and rigorous evaluation: experiments span four model/GPU configurations (GPT-J-6B/RTX4090, OPT-13B/H800, Vicuna-13B/2xA100, Llama-3-70B/4xA100), two datasets (INFERCEPT, ToolBench), and two workload types (Poisson, Gamma with varying burstiness), consistently showing large and consistent gains over vLLM, INFERCEPT, and SSJF baselines.",
+        "Thorough ablations and robustness analyses: the paper includes component-wise ablation (Table 2), sensitivity to hyperparameter β (Table 5, Appendix D.3), robustness to prediction error injection up to 50% (Figure 8), robustness to bursty arrivals (Table 7), scheduling overhead scaling with paused requests (Table 6), memory occupancy analysis (Figure 18), and comparison against a recent memory-based SJF baseline (MARS/Shahout et al., Appendix D.6), which collectively strengthen confidence in the claims.",
+        "Clear problem formalization: the request lifecycle modeling (Eq. 1, Figure 5) and space-time cost model (Eq. 5) provide a principled and interpretable way to capture heterogeneous, multi-stage resource consumption induced by external calls, which is a genuine conceptual contribution beyond simply combining known techniques.",
+        "Latency breakdown (Figure 9) and SLO attainment analysis (Appendix D.8) help attribute the goodput improvements specifically to reduced queuing delay, strengthening the causal story behind the reported gains."
+      ],
+      "weaknesses": [
+        "The theoretical approximation guarantee (Appendix E) applies only to a simplified, static, single-iteration 0-1 knapsack abstraction with fixed values/costs, and the authors themselves acknowledge it does not extend to the actual online, multi-stage, feedback-driven scheduling problem; its inclusion therefore adds limited rigor to the paper's core claims.",
+        "Reproducibility is not clearly addressed: there is no mention of code or artifact release, and several implementation details (e.g., exact BERT predictor training data/features, hardware-specific tuning of β_low/β_high, Tmax) are not fully specified, making independent replication difficult.",
+        "The output-length predictor achieves only 65% bucket accuracy on the INFERCEPT dataset (vs. 85% on ToolBench); while the paper argues robustness via feedback refinement (Section 6.3), this robustness is only validated with synthetic, symmetric noise injection rather than the actual (likely biased) prediction errors from the trained BERT model itself.",
+        "The ablation study (Table 2) is conducted under a single configuration (OPT-13B, H800, 3.0 req/s, INFERCEPT dataset), leaving open the question of whether the relative contributions of the two components (token budget vs. scheduling) generalize across other models/datasets/load levels.",
+        "The scheduling value formula V_i = 1 + β·w_i (Eq. 2) is a simple heuristic without deeper theoretical justification; while β sensitivity is empirically explored, there is no analysis of why this particular linear form is appropriate or optimal relative to alternative formulations.",
+        "The comparison with MARS relies on the authors' own re-implementation since the original prediction model is unavailable for the INFERCEPT workload, which, despite stated efforts at fairness, introduces potential risk of implementation bias favoring AugServe.",
+        "The core technical contribution is an evolutionary extension of INFERCEPT (adding state-aware scheduling and dynamic token budgeting on top of existing context-handling policies) rather than a fundamentally new paradigm, somewhat limiting originality, though the execution and empirical validation are strong."
+      ]
+    }
+  },
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "The paper is well motivated with a clear empirical characterization of the problem: Figures 2-6 and Tables 1-2 convincingly show that FCFS scheduling causes severe head-of-line blocking and that static batch token limits are suboptimal across hardware/load conditions, directly justifying the proposed design.",
+        "Proposition 1 provides a clean theoretical argument for why relying on total output length alone (as in prior SJF-style schedulers) is insufficient in augmented LLM serving, motivating the need to explicitly model API return length and context-handling policy in the scheduling value.",
+        "The two-stage scheduling design (prediction-based Stage I, runtime-corrected Stage II, plus an anti-starvation term) is a sensible engineering approach to the noted problem of prediction-error amplification in single-stage predictive schedulers.",
+        "Evaluation is fairly extensive: multiple GPUs (4090, H800, 2xA100), two models (GPT-J-6B, OPT-13B), two datasets (Merge, ToolBench), multiple workload types (Poisson, fixed-count, Gamma/bursty), and multiple metrics (goodput, TTFT, normalized latency, P95 tail latency, TPOT, SLO attainment), with a component-wise ablation (Figure 10) and time breakdown (Table 4) showing negligible prediction overhead.",
+        "The dynamic token-batching mechanism is simple, well motivated by the batch-token-limit sensitivity study in Table 1, and is shown via ablation to contribute a real, though smaller, portion of the overall improvement."
+      ],
+      "weaknesses": [
+        "The comparison baselines (vLLM, InferCept) both use plain FCFS scheduling; the related-work section explicitly cites several existing output-length or embedding-based predictive schedulers for LLM serving but the paper never empirically compares against any of them, only qualitatively dismissing them as unsuitable for augmented LLM inference. This leaves open whether a substantial fraction of AugServe's reported 4.7-33.1x gain over vLLM/InferCept is attributable to the novel API-aware scheduling versus simply adding any predictive or SJF-style reordering on top of FCFS.",
+        "The very large reported speedups (up to 33x throughput, 96% TTFT reduction) appear highly sensitive to the chosen SLO (TTFT below 1s), which the paper's own analysis suggests is extremely strict relative to typical external API latencies; under such a tight threshold nearly all FCFS-queued requests will trivially fail regardless of scheduling sophistication, which may inflate the apparent advantage rather than isolating the contribution of the proposed scheduler. No sensitivity analysis over a range of SLO thresholds is shown in the main text, only a single 5xSLO variant in the appendix that still shows similarly extreme gains without deeper analysis of the cause.",
+        "The output-length predictor achieves only 65 percent bucket accuracy on the Merge dataset and an API-duration MSE of about 5 seconds, yet the paper offers no sensitivity analysis of end-to-end performance to prediction quality to substantiate the claim that this accuracy is sufficient and that Stage II correction fully compensates for these errors.",
+        "No mention of code or artifact release, exact hyperparameter settings used in experiments, or repeated runs with variance or confidence intervals; results appear to be single-run point estimates, which limits reproducibility.",
+        "The many cost formulas rely on several simplifying assumptions such as uniform per-token memory footprint, deterministic forward time, and linear swap-cost models that are not empirically validated against measured system costs, leaving unclear how robust the scheduling value estimates are when these idealized cost models are violated in real deployments with variable batch compositions.",
+        "The core techniques largely combine existing ideas, namely context-handling policy selection following InferCept, output-length-bucket prediction following prior scheduling work, and iteration-level batching following Orca, so the novelty mainly lies in the specific two-stage value formulation for the augmented-LLM setting, which is a reasonable but somewhat incremental contribution."
+      ]
+    }
+  }
+}

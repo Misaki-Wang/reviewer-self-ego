@@ -1,0 +1,122 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "The paper targets an important and timely bottleneck: bandwidth-bound long-context autoregressive decoding caused by repeated KV-cache access. The core idea of sampling value rows from the post-softmax distribution is simple, well motivated, and orthogonal to KV quantization, cache eviction, and exact attention kernel work.",
+        "The manuscript gives a clear mathematical treatment of the basic SANTA estimator, including unbiasedness, 1/S variance scaling, concentration bounds, and a variance-reduction argument for independent stratified sampling. The distinction between iid, stratified, and systematic sampling is mostly well presented.",
+        "The systems section is a real strength: the authors implement decode kernels and compare against FlashInfer and FlashDecoding on Llama-3.1-8B-like tensor shapes. The reported 1.5x attention-kernel speedup at 32k tokens, combined with RULER-style accuracy checks, is a meaningful empirical result if reproducible.",
+        "The experimental coverage is broader than many kernel papers: GSM8K, MMLU, RULER-style long-context tasks, two model families in appendices, top-k comparisons, confidence intervals, prompting/grading details, and microbenchmark methodology are all provided.",
+        "The paper is unusually candid about some limitations: it explicitly notes that sparse V-memory benefits are mainly in decoding, that prefill does not get sparse unique V-row access, that GPU gains are kernel-level rather than end-to-end, and that multiplier-free arithmetic is more of a future hardware benefit than a current GPU benefit."
+      ],
+      "weaknesses": [
+        "The main implemented GPU method, especially S2ANTA-prop, does not appear to inherit the unbiasedness guarantees of the ideal SANTA/S2ANTA estimators. It allocates integer per-tile sample budgets via rounded proportional mass and can assign zero samples to low-mass tiles; in expectation this yields weights S_t/S rather than the exact tile probability mass. This makes the implemented fast kernel closer to a biased approximation, but the paper continues to lean heavily on the unbiased-estimator framing.",
+        "The headline speedup is only for the attention kernel at batch size 1 on a single RTX 6000 Ada GPU, not for end-to-end generation throughput. Since the method still computes the full qK^T score stage and softmax, and since model execution includes MLPs, projections, sampling, framework overhead, and prefill, the practical deployment gain remains uncertain. The paper should include tokens/s or decode-step wall-clock results in an actual generation stack.",
+        "Reproducibility is incomplete despite many details. The abstract says the kernels are open-sourced but the URL is blank in the extracted manuscript. Without code, reproducing custom CUDA kernels, benchmark harnesses, stochastic sampling details, and accuracy evaluations would be difficult.",
+        "The evaluation of the key-stage Bernoulli qK^T component is much weaker than the value-stage contribution. It has no reported optimized kernel speedup, only modest key-feature access savings under GQA in some settings, substantial score error, and mean-group-query machinery that reintroduces multiplications/divisions. This part feels speculative and less mature than SANTA.",
+        "Some efficiency comparisons are potentially misleading. Accuracy experiments applying SANTA in both prefill and decode report theoretical operation savings, but the appendices show prefill loses sparse unique V-row access. Average generated token lengths also vary dramatically for poor sample budgets, so cost/quality tradeoffs are harder to interpret than the tables suggest.",
+        "The baseline comparison to top-k is not fully iso-latency or iso-energy. The authors compare equal k and S while omitting sampling, sorting, memory coalescing, cache behavior, and kernel overheads, then make approximate energy arguments from generic operation costs. This is useful intuition but not sufficient evidence for energy claims.",
+        "The research ethics/impact statement is boilerplate and does not seriously discuss risks or deployment implications. Lower-cost long-context inference has dual-use implications through cheaper large-scale generation and surveillance-like document processing; these need at least brief treatment.",
+        "Presentation is generally clear, but the manuscript is overextended. The core value-sampling method and kernel results are promising, while Bernoulli qK^T, RL layer-budget allocation, Kubernetes details, and hardware-energy speculation dilute the central contribution and sometimes overstate what has actually been demonstrated."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The core value-stage idea is simple and technically sound: sampling indices from the post-softmax distribution gives an unbiased estimator of AV, and the paper provides clear unbiasedness, variance-scaling, and stratified-sampling arguments.",
+        "The work includes a nontrivial systems component. The S2ANTA-prop and S2ANTA-flash kernel designs address the real difficulty of parallelizing sampling over attention tiles, and the paper gives useful pseudocode and timing methodology details.",
+        "The empirical section covers several task types: GSM8K, MMLU, RULER-style long-context tasks, top-k comparisons, variance measurements, and some layer-wise ablations. The results suggest that stratified/systematic sampling can preserve accuracy at moderate budgets in some regimes."
+      ],
+      "weaknesses": [
+        "The headline efficiency claim is much narrower than the framing. The demonstrated speedups are decode-step attention-kernel only, batch size 1, one GPU, one Llama-style tensor shape, and mostly one 32k-context setting. There is no convincing end-to-end latency or throughput evaluation, so the practical significance for real serving remains unclear.",
+        "The method still computes dense qK^T for the main SANTA/S2ANTA results, so it does not avoid full key-cache access in the score stage. The claimed KV-cache relief is therefore mainly value-cache relief, while the paper often frames the contribution as broadly reducing KV access.",
+        "The Bernoulli qK^T component is underdeveloped relative to its prominence. It has no kernel speedup demonstration, the accuracy/access trade-offs are weak in places, and the GQA mean-query variant reintroduces multiplications and often saves little key access at accuracy-matching settings.",
+        "The empirical evidence for “matching baseline accuracy” is not fully persuasive. Many claims rely on overlapping confidence intervals on a small set of downstream tasks, with wide intervals for QA tasks. There is little analysis of stochastic decoding stability, output variance across seeds, failure modes, or degradation on broader long-context and generation benchmarks.",
+        "Comparisons are incomplete. The paper compares to top-k in task accuracy, but not to strong practical long-context inference methods such as SparQ, MagicPIG, Quest/H2O-style cache policies, or speculative/approximate decoding systems in matched latency, memory traffic, and accuracy settings.",
+        "Reproducibility is a serious concern: the abstract says the kernels are open-sourced but the URL is blank. Some implementation details are described, but without code, exact kernel implementations, benchmark harnesses, and task scripts, the central speed and accuracy claims would be difficult to independently verify.",
+        "The energy and multiplier-free claims are speculative. The paper uses old per-operation energy estimates and argues about future adder-centric hardware, but does not measure actual GPU energy, memory traffic, or accelerator energy. These claims should be presented much more cautiously.",
+        "The limitations and ethics discussion is thin. The impact statement is generic, and the paper does not adequately discuss deployment risks of stochastic approximation, reproducibility risks from random sampling, hardware dependence, or cases where approximation may silently change model behavior."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "The core idea is simple, technically sound, and well motivated for long-context decoding: sampling value rows from the post-softmax distribution gives an unbiased estimator of AV, directly targeting value-cache bandwidth rather than permanently pruning cache contents.",
+        "The paper provides useful theory for the main estimator, including unbiasedness, 1/S variance scaling, a concentration bound, and a clear variance-reduction argument for independent stratified sampling. The distinction between SANTA, S2ANTA-strat, and S2ANTA-sys is mostly well explained.",
+        "The systems contribution is meaningful: the authors identify the GPU bottleneck caused by global sampling dependencies and propose two concrete kernel designs. The reported 1.5x decode-step attention-kernel speedup over FlashInfer/FlashDecoding at 32k context, paired with accuracy-matching operating points, is a strong practical result.",
+        "The evaluation is broader than many kernel papers: it includes GSM8K, MMLU, RULER-style long-context tasks, top-k comparisons, variance measurements, unique-key statistics, and both Llama-3.1-8B-Instruct and DeepSeek-R1-Distill-Qwen-7B/BitNet settings.",
+        "The authors are fairly transparent about important limitations: the main speedups are kernel-level rather than end-to-end, benefits are clearest in decode rather than prefill, current GPUs mainly exploit reduced memory traffic rather than multiplier-free arithmetic, and S2ANTA-sys lacks a formal variance-dominance guarantee.",
+        "Reproducibility is relatively strong in the manuscript: hardware/software versions, tensor shapes, timing methodology, cache-thrashing protocol, prompts, parsing, grading, and benchmark sample sizes are described in useful detail."
+      ],
+      "weaknesses": [
+        "The central performance claim is still narrower than the framing sometimes suggests. The measured acceleration is for a single-step attention kernel at batch size 1 on one RTX 6000 Ada GPU and Llama-style tensor shapes; there is no end-to-end generation throughput, multi-batch serving, multi-GPU, or energy measurement demonstrating that the kernel gains survive in realistic deployments.",
+        "The method still computes the score stage exactly for the main S2ANTA kernels, including qK^T and softmax-related quantities. This substantially limits the overall savings, especially outside the value-memory-bound regime, and the paper could be more careful when emphasizing sparse KV access or multiplier-free inference as a broad property.",
+        "The open-source claim appears incomplete in the manuscript text: the abstract says kernels are open-sourced “at:” but no URL is visible. This is a material reproducibility issue for a systems paper whose strongest evidence depends on custom CUDA kernels.",
+        "The Bernoulli qK^T component is much less mature than SANTA. It lacks demonstrated kernel speedups, has large score approximation error, provides only modest grouped-key access savings in some settings, and the mean-group-query variant reintroduces multiplications/divisions and potential numerical edge cases. It reads more like a promising appendix-level direction than a fully supported contribution.",
+        "Several comparisons are not fully apples-to-apples. Top-k, sampling, softmax, CDF construction, and sparse gather overheads are sometimes omitted from theoretical cost discussions, while accuracy is compared at equal budgets rather than equal latency, bandwidth, or energy. The authors acknowledge some of this, but the claims about energy and arithmetic savings remain partly speculative.",
+        "The accuracy evidence is encouraging but limited: benchmark coverage is mostly small-to-medium models and selected tasks, with no perplexity analysis, no broad open-ended generation quality study, and no investigation of worst-case stochastic failures or variance across random seeds at deployment time.",
+        "Presentation is generally clear, but some claims are overstated or imprecise. For example, value-access reductions need careful qualification under GQA, repeated samples, tile-level sampling, score-stashing, and prefill; the manuscript sometimes moves between logical accesses, unique rows, and practical memory traffic too quickly.",
+        "The ethics/impact statement is generic and does not meaningfully discuss deployment risks such as stochastic output variability, reproducibility of model responses, or possible reliability degradation in high-stakes long-context inference. This is not a major blocker, but it is underdeveloped."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "The core SANTA idea is simple, technically sound, and well motivated for memory-bound long-context decoding: sample value rows from the post-softmax distribution to obtain an unbiased estimator of AV, with clear variance scaling and a useful stratified/systematic variance-reduction variant.",
+        "The paper provides a meaningful systems implementation rather than only an algorithmic sketch. The S2ANTA-prop and S2ANTA-flash kernels address the nontrivial parallel sampling/CDF issue, and the reported 1.5x decode attention-kernel speedup plus 1.23-1.25x batched decode latency speedup are practically relevant.",
+        "The evaluation is broader than many approximation papers: it includes 32k RULER-style tasks, LongBench v2, GSM8K, MMLU, HumanEval, top-k comparisons, variance/fidelity analyses, tile-size sensitivity, and end-to-end batched decoding.",
+        "The appendices give substantial reproducibility detail, including tensor shapes, software versions, timing protocol, cache-thrashing setup, prompts, parsing/grading, pseudocode, and dataset/model licenses.",
+        "The paper is generally honest about scope: it states that prefill is not the target regime, that score computation remains dense for the implemented speedups, that S2ANTA-flash wastes samples, and that datacenter GPU speedups are not directly measured."
+      ],
+      "weaknesses": [
+        "The central speedup evidence is still limited in hardware and deployment scope. The main kernel and end-to-end results are on a single RTX 6000 Ada setup, with only one primary model family and modest batch settings; claims about bandwidth-bound behavior on A100/H100 or production serving remain plausible but unverified.",
+        "The method still computes the full qK^T/softmax distribution before sampling values, so it does not reduce key-cache traffic in the implemented S2ANTA kernels. This makes the contribution narrower than the framing of sparse KV access sometimes suggests, and the benefit depends strongly on the value-stage share of decode cost.",
+        "The Bernoulli qK^T component is underdeveloped relative to its prominence. It lacks a comparable optimized kernel or latency/energy measurements, has substantial score error, and the grouped-query mean-query variant introduces extra multiplications and apparent bias/approximation that are not analyzed as rigorously as SANTA.",
+        "Some comparisons are not fully decisive. The top-k comparisons are mostly matched by k=S rather than by measured latency, memory traffic, or implementation quality, and the paper acknowledges this is not iso-compute; thus the empirical advantage over deterministic sparse attention remains suggestive rather than conclusive.",
+        "The accuracy evidence supports approximate parity within confidence intervals, but several intervals are wide, LongBench v2 absolute accuracy is low, and the evaluation does not deeply test long-form generation quality, accumulated stochastic error across long decoding, or sensitivity to random seeds beyond aggregate repeated runs.",
+        "The presentation is dense and occasionally overclaims hardware/energy implications. Energy benefits are argued mostly from operation counts and older per-operation estimates, while modern GPU performance/energy may be dominated by irregular gather behavior, cache effects, and kernel overheads."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "The paper identifies a real systems bottleneck in long-context autoregressive decoding and focuses on a concrete subproblem: reducing value-cache reads during the post-softmax value aggregation.",
+        "The core SANTA estimator is clearly described, and the unbiasedness and 1/S variance scaling arguments are straightforward and mostly sound. The stratified/systematic variants are reasonable variance-reduction ideas.",
+        "The manuscript includes useful implementation-oriented material: CUDA-kernel sketches, pseudocode, benchmark protocols, prompting/grading details, and comparisons to FlashInfer/FlashDecoding and top-k baselines.",
+        "The best reported results are potentially useful in a specialized regime: Llama-3.1-8B, 30k-32k contexts, dense prefill, decode-only replacement, RTX 6000 Ada, with reported 1.5x attention-kernel and 1.25x decode-latency speedups."
+      ],
+      "weaknesses": [
+        "The central contribution is much narrower than the framing suggests. SANTA does not sparsify the score computation and still requires dense qK and softmax over all keys; it only samples the value aggregation. Claims about sparse, multiplier-free, and energy-efficient inference are therefore overstated, especially since the dense score stage remains intact.",
+        "The empirical evidence for the headline systems claim is too limited. Kernel timing is on one GPU, mostly batch-size-1 synthetic Gaussian tensors, with no timing error bars, no A100/H100 evaluation, no serving-throughput study, and only one end-to-end latency setting. This is insufficient for a main-track systems claim about memory-bound inference.",
+        "Accuracy evidence is thin relative to the claimed generality. The main speed/accuracy operating points are validated mainly on Llama 8B with a small set of RULER tasks and an aggregate LongBench v2 score around 28%. The end-to-end generation experiment reports latency but not task quality for the generated 2048-token outputs.",
+        "The method’s novelty is modest. Sampling from the post-softmax attention distribution to obtain an unbiased Monte Carlo estimate of AV is conceptually simple, and the paper does not convincingly distinguish itself from prior Monte Carlo attention or deterministic truncation methods beyond engineering variants and limited benchmarks.",
+        "Several claims are misleadingly phrased. The paper repeatedly emphasizes eliminating multiplications and sparse memory access, but this applies only to the value stage; qK, softmax, sampling overhead, and in some variants score stashing/global synchronization remain. The Bernoulli qKT section even reintroduces multiplications for grouped-query correction.",
+        "The Bernoulli qKT component feels underdeveloped and not integrated into the main speedup story. It has high approximation error, weak memory savings under GQA, limited benchmarks, and no demonstrated kernel-level or end-to-end acceleration.",
+        "Reproducibility is inadequate despite detailed appendices: the abstract says the kernels are open-sourced but the URL is missing, and the custom CUDA kernels are essential to the main claims. Without code, the reported speedups are hard to verify.",
+        "Presentation is verbose and somewhat padded. Many appendices add auxiliary experiments, but the paper would be stronger with tighter treatment of limitations, clearer separation between mathematical estimator claims and measured systems claims, and more rigorous reporting of timing variance and hardware dependence.",
+        "The impact statement is generic and does not seriously discuss practical risks or limitations, such as stochastic nondeterminism in generation, reliability in high-stakes deployments, or evaluation gaps for long-form outputs."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Significant and timely contribution: the paper targets a real bottleneck in long-context autoregressive decoding, namely value-cache bandwidth, and proposes an estimator that can reduce value-stage memory reads while preserving the full softmax distribution in expectation.",
+        "The core SANTA estimator is technically sound: unbiasedness and 1/S variance scaling are straightforward and correctly formalized, and the stratified variant has an appropriate variance-reduction argument. The distinction between iid, stratified, and systematic sampling is clearly presented.",
+        "The systems contribution is meaningful. The paper goes beyond a mathematical approximation and implements GPU-oriented S2ANTA-prop and S2ANTA-flash kernels, with reported 1.5x decode-step attention-kernel speedups at 32k context and 1.23-1.25x end-to-end decode-latency speedups in a batched generation loop.",
+        "The evaluation is fairly broad for the main value-stage method: RULER-style long-context tasks, LongBench v2, GSM8K, MMLU, HumanEval, top-k comparisons, budget sweeps, same-state fidelity analyses, and confidence intervals are included.",
+        "The paper is careful about scope in several places: it states that SANTA is mainly beneficial for decode rather than prefill, analyzes prefill row coverage, discusses the limits of S2ANTA-flash due to sample waste, and notes that exact speedups depend on hardware, batching, and cache hierarchy.",
+        "Reproducibility is better than typical for a systems-ML submission: the appendix gives microbenchmark geometry, software versions, hardware, cache-thrashing protocol, timing iterations, prompting/parsing details, and pseudocode for the proposed kernels. The manuscript also states an intent to open-source kernels."
+      ],
+      "weaknesses": [
+        "The main speed evidence is still somewhat narrow: end-to-end latency is shown for Llama-3.1-8B-Instruct on a single RTX 6000 Ada setup, with batch size 6 and 30k-token prompts. The claimed relevance to datacenter GPUs such as A100/H100 is plausible but not experimentally demonstrated.",
+        "The strongest empirical claims depend on matching accuracy within relatively wide confidence intervals on a small set of long-context tasks. LongBench v2 accuracy is low overall and the reported intervals overlap, so it supports non-degradation but gives limited insight into task regimes where stochastic value aggregation may fail.",
+        "The Bernoulli qKT component is less mature than SANTA. It has large score approximation errors, modest key-access savings under grouped-query attention, limited speed evidence, and in the mean-group-query version reintroduces multiplications/normalization. It reads more like a promising extension than a fully validated second contribution.",
+        "The comparison to top-k is useful but not fully decisive. Equal k=S budgets do not establish iso-latency or iso-energy behavior on actual GPUs, and the energy discussion relies on approximate operation-level estimates rather than measured power or hardware counters.",
+        "Some claims around multiplier-free or energy-efficient inference are stronger than the demonstrated GPU implementation supports. The current kernels primarily exploit reduced value-memory traffic; the benefits of adder-centric or multiplier-free hardware remain speculative.",
+        "The paper would benefit from more explicit limitation and ethics discussion. The impact statement is generic, and limitations are distributed through the text rather than summarized clearly. This is not a major ethical concern, but a concise limitations section would make the deployment assumptions and failure modes easier to assess."
+      ]
+    }
+  }
+}

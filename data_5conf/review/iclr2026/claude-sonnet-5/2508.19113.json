@@ -19,6 +19,49 @@
         "Limited discussion of failure cases or scenarios where parallelization could hurt (e.g., redundant or lower-quality parallel queries increasing noise); the paper does not discuss any downsides or limitations of the hybrid approach explicitly, nor practical costs of running many search calls in parallel on latency in realistic deployment (API concurrency limits, cost).",
         "Novelty relative to concurrent works (RAG-R1, ParallelSearch, Multiverse) performing multi-query parallelism is claimed but not empirically disentangled well — the paper argues its distinction is 'explicit parallel/sequential decomposition supervision in the dataset,' but doesn't directly compare training RAG-R1's or DeepResearcher's method on HDS-QA to isolate whether the gain is from the data or the specific model/training recipe."
       ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Clear and well-motivated problem framing: the paper convincingly illustrates (via Fig. 1) the latency and coherence issues of purely sequential search-and-reason loops.",
+        "An automatic, human-annotation-free pipeline for constructing hybrid parallel/sequential-hop QA data (HDS-QA) from NQ, which is a reasonably novel and scalable data-construction contribution.",
+        "Broad empirical evaluation across five benchmarks (MuSiQue, FanOutQA, FRAMES, MedBrowseComp, BrowseComp-50) with multiple recent RL-trained and prompting-based baselines.",
+        "Useful auxiliary analyses beyond raw accuracy: AUC (accuracy-vs-turns trade-off), evidence-coverage metric, and generated-token scaling curves, which help explain why parallel querying helps.",
+        "Detailed qualitative case studies in the appendix that illustrate concrete failure modes of baselines (e.g., premature answering, repeated ineffective queries) versus the proposed method.",
+        "Test-time scaling experiments (varying turn/call budgets) provide some evidence that the model's advantage grows with larger search budgets, which is a practically relevant property."
+      ],
+      "weaknesses": [
+        "Confounded comparison: HybridDeepSearcher is built on Qwen3-8B, while most RL-trained baselines (Search-R1, R1-Searcher, DeepResearcher, RAG-R1) use Qwen2.5-7B-Instruct. This backbone mismatch (different pretraining, reasoning ability, and 'thinking mode') makes it very hard to attribute the reported gains specifically to the proposed hybrid-search training strategy versus a simply stronger base model; the paper only briefly acknowledges this via the evidence-coverage discussion but does not control for it experimentally (e.g., by fine-tuning at least one baseline method on the same Qwen3-8B backbone).",
+        "No ablation isolating the actual contribution of the 'parallel' supervision: there is no experiment comparing HybridDeepSearcher to a model SFT-tuned on the same amount of purely sequential (non-parallel) HDS-style trajectories, so it is unclear how much of the improvement comes from parallel-hop training per se versus simply additional high-quality multi-hop SFT data on a stronger backbone.",
+        "Very small training set (773 answerable questions, 2,111 trajectories from only 1,987 generated questions), raising concerns about overfitting to NQ-derived question patterns and limited generalization, especially given the ~27% trajectory success rate reported.",
+        "BrowseComp-50 subset construction (questions solvable by OpenAI o3 within 5 minutes) is a small (n=50), non-random, cherry-picked sample that likely biases toward easier/more tractable BrowseComp instances, limiting the reliability and generality of the large reported gains (+11.5 F1) on this benchmark.",
+        "Absolute performance remains low across the board (e.g., BrowseComp-50 F1 of 17.2, FanOutQA F1 of 44.1), making it unclear whether the reported improvements translate into practically useful deep-research capability.",
+        "Heavy reliance on an LLM-based judge (Qwen3-32B) for both MBE scoring and for document summarization used by the proposed method itself and some baselines, introducing potential self-consistency/judge bias that is not analyzed or controlled for (e.g., no human evaluation or judge-model ablation).",
+        "The AUC metric used to argue efficiency is defined and computed solely by the authors without comparison to standard efficiency metrics in prior work, and Table 2 shows the model does not always use fewer turns than the strongest baseline (RAG-R1), somewhat undercutting the 'reduced latency' narrative.",
+        "Limited technical novelty: the core method is essentially standard SFT on curated reasoning trajectories that includes multi-query emission; the primary novelty lies in dataset curation rather than a new training algorithm or architecture, and the paper itself notes concurrent work (RAG-R1, ParallelSearch) proposing similar multi-query generation.",
+        "No baselines trained via GRPO/RL directly on HDS-QA-style hybrid data are reported, so it remains unclear whether SFT alone (versus the RL recipes used by competitors) is the right ablation for a fair head-to-head comparison of the training paradigms.",
+        "No variance/error bars or repeated runs are reported for the main results, so the statistical robustness of the reported margins (especially on the small 50-example BrowseComp-50 set) is unclear.",
+        "Reproducibility details are thin regarding data-generation costs (e.g., how much filtering/manual verification was needed beyond automatic checks) and hyperparameter selection (learning rate, epochs) lacks justification or sensitivity analysis."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Addresses a well-motivated and practically important problem: sequential-only search reasoning in LRM-based deep research agents increases latency and can lead to incoherent reasoning; the paper's parallel+sequential hybrid framing is intuitive and clearly illustrated (Figure 1).",
+        "Introduces an automatic, scalable dataset construction pipeline (HDS-QA) that avoids reliance on costly human annotation (unlike FanOutQA), using NQ seed questions, Google's People Also Ask, and LLM-based question composition/verification to create hybrid-hop questions requiring both parallel and sequential retrieval.",
+        "Comprehensive evaluation across five diverse benchmarks (MuSiQue, FanOutQA, FRAMES, MedBrowseComp, BrowseComp-50) against seven baselines spanning non-iterative, single-query iterative, and multi-query iterative categories, with consistent and often substantial accuracy gains (e.g., +15.9 F1 on FanOutQA, +11.5 F1 on BrowseComp-50).",
+        "Goes beyond raw accuracy with thoughtful auxiliary metrics: AUC for accuracy-latency tradeoff, evidence-coverage rate to directly measure retrieval completeness against gold documents, and test-time scaling curves under controlled turn/API-call budgets, which meaningfully support the paper's efficiency and scalability claims.",
+        "Extensive appendix material (token-budget scaling, additional test-time scaling plots, full prompts, and detailed qualitative case studies) improves transparency and reproducibility, and the case studies clearly illustrate qualitative failure modes of sequential baselines versus the proposed model's parallel behavior."
+      ],
+      "weaknesses": [
+        "The training dataset is quite small (2,111 trajectories from only 773 unique questions, generated via 4 samples from Qwen3-32B with a ~27% success rate), raising concerns about the robustness and generalizability of the fine-tuned model beyond the specific benchmarks tested.",
+        "Backbone mismatch confounds comparisons: HybridDeepSearcher is built on Qwen3-8B while most GRPO-trained baselines (Search-R1, R1-Searcher, DeepResearcher, RAG-R1) use Qwen2.5-7B-Instruct. Although the paper argues (via evidence-coverage results) that gains stem from parallelization rather than backbone strength, no controlled ablation (e.g., fine-tuning HDS-QA on Qwen2.5-7B, or reproducing a baseline method on Qwen3-8B) is provided to fully isolate the effect of the proposed training data versus base model capability.",
+        "BrowseComp-50 is a small, non-random, cherry-picked subset (50 questions solvable by OpenAI o3 within 5 minutes), which could bias the evaluation toward questions particularly amenable to parallel search and limits the generalizability of the notably large BrowseComp gains.",
+        "Dataset quality is validated only via final-answer correctness (using an LLM judge/exact match), with no human evaluation of trajectory quality, reasoning validity, or potential answer leakage/spurious correctness in the synthetic reasoning traces.",
+        "The method is purely supervised fine-tuning on synthetic trajectories; no RL-based training or comparison to trained-with-RL versions of the same hybrid approach is provided, despite RL being the dominant paradigm among the strongest baselines (Search-R1, RAG-R1, DeepResearcher), leaving open whether hybrid parallel/sequential training could be further improved or is specifically advantaged by SFT vs RL.",
+        "No statistical significance testing or variance/multiple-seed reporting is included, which is a concern given some benchmark subsets are quite small (e.g., FanOutQA dev set of 310, BrowseComp-50 of 50).",
+        "The AUC metric, while a nice idea, is introduced ad hoc without strong justification of its formal properties or sensitivity to the specific turn range considered, and is self-defined without precedent in prior work, making cross-paper comparison difficult."
+      ]
     }
   },
   "v2": {

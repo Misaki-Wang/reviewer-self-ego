@@ -22,6 +22,26 @@
         "The comparison to LLaMA3 8B throughput, while interesting, does not control for hardware/batch-size/implementation differences in sufficient detail to be fully convincing as a fair apples-to-apples comparison."
       ]
     },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper tackles a timely and important problem: accelerating inference for diffusion LLMs, an area that is directly relevant to making non-autoregressive generation practical.",
+        "Experiments span two different backbone models (LLaDA 8B, Dream 7B) and eight benchmarks covering math, general knowledge, and code tasks, giving reasonably broad (if not deep) empirical coverage.",
+        "The method is shown to be compatible with an existing caching approach (dLLM-Cache), and the paper demonstrates that the two techniques compound, which is a useful practical observation.",
+        "Ablation studies over the key thresholds (τmin_conf, τhigh_conf, Kmax, Whist, σ²stable) are provided, giving some insight into sensitivity of the pipeline to hyperparameters."
+      ],
+      "weaknesses": [
+        "Limited conceptual novelty: the three 'golden principles' (certainty, convergence, positional clustering) are largely restatements of well-known properties already exploited by confidence-based/low-confidence remasking and semi-autoregressive block decoding cited in the related work; the paper does not clearly articulate what is fundamentally new beyond combining these observations into a heuristic two-stage schedule.",
+        "No code is released (the abstract literally has a placeholder 'Code:' with nothing after it), which is a serious reproducibility concern given the method depends on numerous carefully tuned hyperparameters (τmin_conf, τhigh_conf, Kmax, Whist, σ²stable, kslow, kfast).",
+        "The baseline throughput numbers look suspiciously low (e.g., LLaDA base at 1.60–5.14 TPS on a 4090), which inflates the reported speedup multipliers; without details on the baseline's step count/config or comparison to an already-optimized baseline implementation, the 15.63x/34.22x headline numbers are hard to trust.",
+        "Table 3's comparison across sampling strategies is confusing/inconsistent with the paper's core motivation: 'Diffusion Sampling' (4.55 TPS) is reported as slower than plain 'Autoregressive' (5.25 TPS), which undercuts the fundamental premise that dLLM parallel decoding should be faster than AR decoding, and no explanation is given for this counter-intuitive result.",
+        "Non-trivial accuracy degradations are glossed over as 'minimal' (e.g., GPQA drops from 31.47 to 28.79 with the most aggressive cache setting, MBPP drops 1.8 points, HumanEval drops 1.83 points for Dream), while some reported accuracy *increases* (e.g., MMLU +4.45, BBH's speedup+accuracy combination) seem unusually favorable and are not explained, raising questions about evaluation protocol consistency (e.g., varying number of few-shot examples, decoding length, or random seeds across runs).",
+        "No comparison against other recent/contemporary dLLM acceleration methods beyond the basic remasking/semi-AR/AR baselines and dLLM-Cache; stronger recent adaptive/dynamic sampling baselines for dLLMs are not discussed or compared, making it hard to assess the method's relative contribution.",
+        "The method introduces a large number of interacting hyperparameters that require task-specific tuning (as evidenced by the sensitivity plots), yet the paper offers no principled guidance for setting them on unseen tasks/datasets beyond empirically-found defaults, weakening claims of general applicability.",
+        "All experiments are run on a single consumer GPU (RTX 4090) with seemingly small-scale throughput measurements; there is no discussion of batching, memory overhead of the caching mechanism, or scaling behavior on larger/production-relevant hardware, limiting the practical significance of the throughput claims.",
+        "The writing in places overstates the contribution (e.g., calling well known confidence/locality behavior 'golden principles') without deeper theoretical analysis or formal justification for why these heuristics should generalize across models/architectures beyond LLaDA and Dream, both of which are mask-based diffusion LMs of similar design."
+      ]
+    },
     "exp3_positive": {
       "oa": 6,
       "strengths": [
@@ -40,6 +60,28 @@
         "Experiments are run only on a single consumer GPU (RTX 4090); throughput comparisons against LLaMA3 8B (an AR model with very different memory/compute characteristics, e.g., no KV-cache reuse advantage discussion) may not generalize to other hardware (e.g., A100/H100) or larger batch/production serving settings.",
         "The paper lacks a theoretical or more rigorous justification for why the stability/variance-based mechanism reliably predicts correct convergence regions; the reported convergence/stability could occasionally lock in incorrect high-confidence tokens, and there's no dedicated analysis of failure cases or error accumulation from the caching/parallel decoding for out-of-span tokens.",
         "Table 4's Kp/Kr parameters for the cache variant are not defined anywhere in the main text, hurting reproducibility/clarity, and it's unclear how much of the 34.22x speedup is attributable to SlowFast Sampling itself versus the underlying dLLM-Cache mechanism."
+      ]
+    }
+  },
+  "v3": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Clear articulation of three empirically motivated principles (certainty, convergence, positional) that provide an intuitive conceptual framework for understanding dLLM sampling dynamics.",
+        "Extensive experimental coverage: two backbone models (LLaDA, Dream), 8 diverse benchmarks spanning math, general knowledge, and code, plus integration with an external caching method (dLLM-Cache).",
+        "Demonstrates strong headline speedups (up to 15.63x alone, 34.22x with caching) with often minimal accuracy degradation, and shows dLLM throughput can exceed a comparable AR baseline (LLaMA3 8B) in at least one setting.",
+        "Reasonably thorough ablations on hyperparameters (Kmax, Whist, σ²_stable, τmin_conf, τhigh_conf) across multiple tasks and both backbones, supporting a claim of robustness without per-task retuning.",
+        "Provides algorithmic pseudocode, case studies with confidence-map visualizations, and states intent to release code, aiding interpretability and reproducibility."
+      ],
+      "weaknesses": [
+        "Novelty is incremental: the method largely combines existing ideas (confidence-based unmasking as in Fast-dLLM/MaskGIT, block/semi-autoregressive decoding, and simple caching) with a stability-triggered scheduler; the three 'principles' mostly restate well-known behaviors of confidence-based iterative decoders rather than offering fundamentally new theoretical insight.",
+        "Results are mixed rather than uniformly superior to the main baseline (Fast-dLLM): in several settings (e.g., GPQA with cache, some Dream tasks) Fast-dLLM achieves comparable or even higher speedups, undermining the paper's central efficiency claim.",
+        "Accuracy is not consistently 'lossless' as implied by the framing—Dream shows accuracy drops of several points on some tasks (e.g., GSM8K -4.92, BBH -3.59), and the headline 34.22x speedup on GPQA also corresponds to a 3-point accuracy drop, so the trade-off is understated in the abstract/intro.",
+        "The stability criterion (variance threshold σ²_stable=1.0 on token-position endpoints) lacks theoretical justification for why this scale is meaningful or how it generalizes to different sequence lengths/vocabularies beyond empirical tuning.",
+        "Discrepancies between the main text description and Algorithm 1 (e.g., how e_cycle/ecand is finalized, whether it's the mean of the history window or the last candidate) create confusion about the exact method being evaluated.",
+        "No comparison to other recent sampling-side or cache-side competitors mentioned in related work (dKV-Cache, Sparse-dLLM, GtR), so it's unclear how SlowFast stacks up against the current SOTA landscape beyond Fast-dLLM and vanilla dLLM-Cache.",
+        "Experiments are run on a single consumer GPU (RTX 4090) apparently with batch size 1/single-run reporting; no variance across seeds/runs is reported, and there's no discussion of behavior under batched/production-scale inference, limiting confidence in the practical significance of the throughput numbers.",
+        "The comparison to LLaMA3 8B throughput is somewhat cherry-picked (specific GPQA setting with tuned cache hyperparameters) and doesn't control for engineering optimizations (e.g., vLLM/paged attention, speculative decoding) that are standard for AR inference, making the 'dLLM beats AR in throughput' claim less rigorous than presented."
       ]
     }
   }

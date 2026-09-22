@@ -1,0 +1,44 @@
+{
+  "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Extremely thorough empirical evaluation: 6 preference datasets, 4 model families/scales (Llama 3B/8B, Qwen 0.6B/4B), plus additional experiments on OLMo-2 7B/13B open-source DPO models, giving good evidence of generalization across architectures and scales.",
+        "Multiple independent evaluation protocols (in-house oracle reward models, external off-the-shelf reward models for Skywork/Nectar, AlpacaEval with GPT-4/GPT-4-turbo judges, and a genuine human study with 502 pairwise judgments/40 raters) consistently support the paper's central claim, which mitigates concerns about reward-model gaming of a single oracle.",
+        "Reasonable theoretical motivation grounding the method in the Q-function/token-level MDP interpretation of DPO (Rafailov et al., 2024b), with a full derivation in the appendix explaining why the aligned policy can favor lower-reward completions and why the log-ratio can serve as a token-level advantage.",
+        "Careful and honest ablations: effect of the filtering threshold α, robustness to DPO's β regularization parameter, behavior under full fine-tuning vs LoRA, data-scarcity scaling (both LoRA and full fine-tuning), beam search interactions (including failure modes like beam collapse), and a forthright negative/mixed result when combining AAD with PPO-trained (rather than DPO-trained) policies.",
+        "The iterative-DPO application (using AAD-generated synthetic data to retrain via DPO) is a genuinely useful downstream contribution for data-scarce settings, supported by experiments on multiple datasets showing near-parity with full-data training using only 10% of labeled preference data.",
+        "Fixed hyperparameter (α = 0.1) transfers across all 6 datasets and 4 model families without per-task tuning, supporting practical usability."
+      ],
+      "weaknesses": [
+        "The core method is conceptually very close to existing inference-time alignment techniques, particularly emulated fine-tuning (EFT, Mitchell et al. 2024) and contrastive decoding (Li et al., 2023b): AAD is essentially contrastive decoding applied to a DPO/SFT model pair with min-α plausibility filtering drawn from the DPO model rather than a generic amateur model. The distinction from EFT (argmax over a token-level ratio vs. reweighted sampling from a combined distribution) is somewhat subtle, and the paper's differentiation from these closely related methods could be argued more rigorously rather than largely through the ablation in Table 3.",
+        "The theoretical justification (Appendix A.1) shows that log π*/πSFT relates to a KL-shaped instantaneous reward plus a difference of value functions, but does not rigorously establish that greedy token-level maximization of this ratio yields better *sequence-level* reward than sampling from π* itself; the argument that AAD is 'more direct' is intuitive rather than proven, and the myopic (non-lookahead) nature of greedy decoding is a known limitation only partially addressed via the beam-search ablation.",
+        "No variance/confidence intervals are reported for the main results in Table 1 and Table 2 (only Figure 3 and Figure 9 show variability across datasets), making it hard to assess the statistical significance of reported gains, especially for smaller models (e.g., Qwen 0.6B) where reward values are close to zero.",
+        "The oracle-reward-based evaluation, while partially validated with external reward models and human studies, still relies heavily on learned reward models trained on the same or related data distributions in most experiments (4 of 6 datasets), leaving residual risk of reward-model bias/overoptimization influencing the main quantitative claims in Table 1.",
+        "AAD requires access to both the DPO-aligned and the original SFT reference model at inference (2x forward passes), which is a genuine practical constraint the paper acknowledges but that materially limits applicability to settings where only the aligned model is available (e.g., many deployed/open-weight releases without a paired SFT checkpoint).",
+        "The method's inconsistency when applied to PPO-trained policies (Table 10) suggests the 'standard DPO setup' requirement is a real limitation rather than a minor caveat, since much production alignment still uses RLHF/PPO pipelines; this narrows the claimed scope of applicability to models trained specifically via SFT+DPO, and details on why AAD sometimes underperforms with PPO models are relatively brief.",
+        "Code repository link is left blank in the manuscript (placeholder text 'Code available at' / 'source code associated with this study can be accessed at:'), so reproducibility currently rests entirely on the appendix's hyperparameter tables rather than a verifiable implementation."
+      ]
+    }
+  },
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "The core idea is simple and practical: use the implicit token-level reward defined by the DPO/SFT log-ratio (as motivated by Rafailov et al., 2024b's Q-function interpretation) directly as a decoding-time objective, requiring no extra training or auxiliary models beyond the standard DPO pipeline.",
+        "Broad and reasonably systematic empirical evaluation: six preference datasets, four model/scale combinations (Llama 3B/8B, Qwen 0.6B/4B), and comparisons against greedy SFT/DPO, best-of-2, and an EFT variant, plus an external AlpacaEval evaluation.",
+        "Several useful auxiliary studies beyond the main comparison: robustness to the DPO regularization parameter β (Fig. 4), performance under data scarcity (Fig. 3), a BoN-vs-AAD compute-matched comparison (Fig. 2), an entropy-thresholding fix for beam-search collapse (Fig. 6), and an iterative-DPO pipeline that uses AAD-generated completions as high-quality synthetic preference data to close the gap to full-data training (Fig. 5).",
+        "The paper offers a clear (if simple) theoretical argument for why the exact optimal DPO policy π* can still favor a lower-reward completion because it inherits πSFT's biases (Eq. 6), motivating why re-introducing the SFT model at inference time is useful.",
+        "Qualitative examples (Figs. 1, 8-11) are provided that illustrate token-level behavior of AAD versus greedy/BoN decoding, aiding interpretability."
+      ],
+      "weaknesses": [
+        "Novelty is limited: AAD's token score (Eq. 7) is mathematically identical to the implicit token-level reward already used in emulated fine-tuning/contrastive-decoding-style methods (Mitchell et al. 2024; Li et al. 2023a), applied here to the same model's own SFT/DPO checkpoints rather than a separate base/aligned pair, plus min-α token filtering borrowed from min-p sampling (Minh et al. 2025). The paper does not clearly disentangle how much of the improvement over the EFT baseline comes from this self-referential setup versus the α-filtering mechanism, since the EFT baseline as configured (πSFT as both base and reference, β=4) is confusingly close to unfiltered AAD; no ablation isolates the filtering contribution on greedy decoding.",
+        "Reproducibility gap: Section A.6 promises a codebase link (\"the source code associated with this study can be accessed at:\") but no URL is actually provided in the manuscript, undermining the stated reproducibility support.",
+        "Presentation issues suggest incomplete editing: the related-work section ends mid-sentence (\"These approaches typically\"), and dense result tables lack any variance/confidence intervals or statistical significance testing across the many close numeric comparisons (e.g., R and W values that differ by small margins).",
+        "The BoN comparison (Fig. 2) shows AAD's advantage narrows or is matched by BoN at moderate N on Skywork, and computational cost claims (\"efficiency comparable to standard decoding\") are inconsistent with the method's actual requirement of two forward passes per token plus keeping the SFT model resident in memory, a real overhead only briefly acknowledged in the conclusion.",
+        "The iterative-DPO and beam-search stabilization experiments are conducted on a single model/dataset combination each (Llama3.2-3B on Skywork), limiting confidence that these secondary findings generalize across the broader set of models/datasets used in the main table.",
+        "The theoretical contribution (bias inheritance argument, Eq. 6) is a relatively straightforward restatement of known results (DPO not training a reward-maximizing policy, per Rafailov et al. 2024b) rather than a substantially new theoretical insight."
+      ]
+    }
+  }
+}

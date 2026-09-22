@@ -1,0 +1,48 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "The paper provides a clear theoretical motivation for the method: Theorem 3.2 formally shows that block-level joint modeling strictly reduces the achievable NELBO relative to token-wise independence, extending prior single-token results (Liu et al. 2025a; Kang et al. 2026) to arbitrary block sizes B>1 with an explicit expression for the gap.",
+        "Theorem 3.3 gives a compelling theoretical justification for the specific design choice of soft-conditioning (feeding full marginals rather than hard top-k tokens) to the auxiliary AR model, including a concrete counter-example showing that top-k truncation can exclude the true joint mode. This is directly validated empirically in the soft-vs-hard ablation (Table 1), where switching to top-1 conditioning causes a large accuracy drop, providing good internal consistency between theory and experiment.",
+        "The proposed architecture is practical and lightweight: it freezes the large DLM backbone and only finetunes a small (0.6B) auxiliary AR model, which is an efficient and reproducible design compared to alternatives (e.g., ADJUST) that require training an auxiliary model from scratch.",
+        "Empirical results show a consistent Pareto improvement (Pass@1 vs. throughput) over both the base Dream-Coder-Instruct-7B model and the ADJUST baseline across six code-generation benchmarks (HumanEval/+, MBPP/+, BigCodeBench full/hard), for both static and dynamic parallelism regimes.",
+        "The appendix provides substantial implementation detail (training hyperparameters, tokenizer alignment handling, decoding mechanism, hardware) that supports reproducibility.",
+        "The paper is transparent about design limitations, e.g., explicitly reporting the accuracy/throughput trade-off of the candidate-scoping heuristic (Table 2) rather than hiding it."
+      ],
+      "weaknesses": [
+        "Evaluation is restricted to a single base DLM (Dream-Coder-Instruct-7B) and a single domain (Python code generation); no experiments on general natural-language generation or other DLM backbones are provided, which limits confidence that the claimed 'new Pareto frontier' generalizes beyond this narrow setting.",
+        "All reported results appear to be single-run (n=1, fixed seed) with no variance/confidence intervals, which is a concern given that HumanEval has only 164 problems and Pass@1 differences between methods can be small at some throughput levels.",
+        "Only one prior coherence-enhancing baseline (ADJUST) is empirically compared, despite the related-work section discussing many other relevant methods (APD, FlashDLLM, TiDAR, discrete copula diffusion); while some architectural differences make head-to-head comparison harder, the lack of any quantitative comparison to these methods weakens the significance claims.",
+        "Throughput results are reported only at batch size 1; there is no analysis of how the two-model (DLM + AR) architecture scales under batched inference, which is important for assessing real-world deployment value of the claimed speedups.",
+        "The 'candidate scoping' heuristic that restricts unmasking to the nearest 10 blocks is somewhat ad hoc, is acknowledged to trade off accuracy for stability, and its interaction with the theoretical claims (e.g., full block independence) is not analyzed formally.",
+        "There is no scaling study of the auxiliary AR model size (only Qwen3-0.6B is used); it is unclear how sensitive the method is to AR capacity, or whether even smaller/larger AR models would change the accuracy-throughput trade-off substantially.",
+        "The theoretical contribution, while a useful generalization, builds incrementally on existing total-correlation/NELBO decomposition results (as the authors themselves note), so its novelty is more in the extension to blocks than a fundamentally new theoretical insight."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Well-motivated theoretical contribution: Theorem 3.2 formally quantifies the NELBO reduction from block-wise vs. token-wise conditional independence, extending prior related results (Huang et al. 2022; Liu et al. 2025a) to arbitrary block sizes with an explicit expression for the gap.",
+        "Theorem 3.3 (Frechet class restriction) provides a clean, non-trivial argument for why top-k truncated conditioning (used by prior AR-verifier baselines like APD/FlashDLLM) is theoretically insufficient to recover the true joint mode, directly motivating the paper's soft-conditioning design.",
+        "The proposed soft-conditioning interface (projecting DLM marginals into the AR embedding space via <think> boundary tokens) is a simple, cheap, and well-justified mechanism; ablations (Table 4, boundary-token NELBO comparison) support its necessity over top-k alternatives.",
+        "Strong empirical evidence that the small auxiliary AR model (0.6B) is not simply doing the coding task itself: standalone Qwen3-0.6B underperforms CoDiLA substantially, and scaling the AR model up (1.7B, 4B) gives no consistent gains, supporting the claim that it acts as a lightweight local coherence corrector rather than a strong generator.",
+        "Comprehensive empirical evaluation across static parallelism, dynamic (threshold-based) parallelism, and a separate AR-verification mode, spanning multiple code benchmarks (HumanEval/+, MBPP/+, BigCodeBench full/hard) plus non-causal tasks (infilling, ParallelBench, graph traversal), demonstrating that CoDiLA establishes a new accuracy-throughput Pareto frontier and substantially reduces syntax-error rates (Table 1).",
+        "Careful attention to preserving DLM-specific capabilities: the Spearman correlation analysis (Appendix B.5) meaningfully demonstrates that CoDiLA retains more any-order/non-causal generation behavior than the vanilla DLM, addressing a key concern about left-to-right coherence-enforcement methods stripping away bidirectional advantages.",
+        "Extensive ablations (candidate scope, multi-block generation, batch-size throughput, AR model size) that probe the robustness and design choices of the method rather than reporting only headline numbers.",
+        "Detailed reproducibility information in the appendix (training data, hyperparameters, tokenizer alignment details, decoding algorithm specifics)."
+      ],
+      "weaknesses": [
+        "All main experiments are built on a single base DLM (Dream-Coder-Instruct-7B); it is unclear how well the soft-conditioning AR interface and the theoretical gains generalize to other DLM architectures, vocabularies, or non-code domains, limiting the demonstrated generality of the claimed 'new Pareto frontier'.",
+        "The empirical comparison to prior coherence-enforcement work is limited essentially to one baseline (ADJUST); other cited left-to-right/self-speculative methods (APD, FlashDLLM, TiDAR, discrete copula diffusion) are discussed but not empirically compared, making it harder to assess CoDiLA's relative advantage against the broader competitive landscape.",
+        "The three generation strategies (static parallelism, dynamic parallelism, AR-as-verifier) are evaluated on different subsets of tasks/benchmarks (verification mode only shown on ParallelBench/graph traversal, not on the main code benchmarks), so it's unclear how these modes compare directly to each other or whether the verifier mode would also improve standard code-gen accuracy/throughput.",
+        "Latency results emphasize batch size 1; while an appendix ablation shows overhead is amortized by batch size 8, this analysis is limited to a single configuration/benchmark, leaving open questions about how the method behaves under more realistic serving conditions (varying batch sizes, sequence lengths, concurrent requests).",
+        "The AR model is finetuned on the same SFT dataset used to train the base DLM, which, combined with the block-masking training procedure, raises a (not fully addressed) question of how much of the coherence gain stems from the AR learning dataset-specific n-gram/local patterns versus a more general coherence-modeling capability that would transfer to out-of-distribution code styles.",
+        "The theoretical contribution, while a valid and useful extension, is incremental relative to acknowledged prior work (Huang et al. 2022; Liu et al. 2025a; Kang et al. 2026; Zhong et al. 2026), and the core practical innovation (soft-conditioning via embedding expectation) is a relatively straightforward engineering idea, so the paper's novelty rests more on integration and thorough empirical validation than on a fundamentally new mechanism.",
+        "Block size is restricted to B<=8 in the main throughput-accuracy experiments due to the AR component's sequential cost, meaning the theoretically motivated benefit of arbitrarily large blocks (Theorem 3.2) is not actually realized in the practical latency-accuracy trade-off shown in the main results."
+      ]
+    }
+  }
+}

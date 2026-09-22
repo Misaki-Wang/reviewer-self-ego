@@ -1,5 +1,42 @@
 {
   "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "The paper addresses a well-motivated problem (expressiveness vs. inference efficiency of generative policies in offline RL) and grounds it in a coherent ODE flow-map perspective that cleanly connects consistency models, CTMs, shortcut models, and mean flows.",
+        "Comprehensive empirical evaluation on D4RL Gym and AntMaze with 5 seeds, mean±std reporting, and code promised; the BC setting (Section 5.1) is a nice experimental design that isolates policy expressiveness from value guidance, and the AntMaze gains of GTP-BC (66.3 vs. 44.1 for C-BC) are substantial.",
+        "Ablations cover the two claimed contributions (score approximation and variational guidance) and go further, testing teacher-free alternatives (shortcut-style self-consistency, Mean Flow identity), which strengthens the design choices.",
+        "Theoretical support is provided: Theorem 1 bounds the gap between the surrogate-supervised and solver-supervised objectives by O(h^p), with a full proof in Appendix B.3, and the advantage-weighted objective derivation (Appendix B.5/B.6) is correct and connects properly to AWR-style variational RL.",
+        "Honest acknowledgment of limitations, e.g., remaining substantial training time and the impracticality of teacher-free JVP-based objectives under GPU settings."
+      ],
+      "weaknesses": [
+        "Originality is moderate: the 'unified ODE solution map' framework is essentially the CTM (Kim et al., 2024) reparameterization extended with a general (t,s) pair; the two losses (instantaneous flow + trajectory consistency) mirror CTM's denoising + consistency losses. The value-guidance component is exponential advantage weighting (AWR/CRR) applied to a generative loss, closely paralleling QGPO, D-QL, and C-AC. The contribution is a combination and adaptation rather than a fundamentally new mechanism.",
+        "There is a narrative-implementation gap: the paper sells 'learning the entire solution map of the underlying ODE,' but the practical training samples straight-line pairs a_t = a + t·z with a shared z, so supervision is on straight conditional paths (consistency-training style), not the marginal PF ODE trajectory. Theorem 1 justifies this asymptotically, but the headline claim overstates what is actually learned, and the theorem's h (solver step size) refers to a solver never used in practice, weakening the theory-practice link.",
+        "Some reported numbers are anomalously high relative to the D4RL literature, raising evaluation concerns: e.g., BC on hopper-m of 83.7 and hopper-mr of 100.5 (typical BC values are roughly 50 and 10-20), and Table 2 antmaze-u = 100±0 over 5 seeds. Combined with per-task hyperparameter tuning shown in Table 4 (per-task learning rate, η, gradient norm), this suggests heavy per-task tuning that may undermine the generality claim and invites re-verification.",
+        "The central 'efficiency' claim is only weakly supported: the inference-time ablation (Appendix D.1) is on a single task, and GTP with T=5 (0.94 ms) is only modestly faster than diffusion at the same step count (1.16 ms) while slower than consistency models (0.55 ms). The efficiency advantage over well-tuned one/two-step baselines remains arguable.",
+        "Several baseline entries are missing in Table 2 (BDM and C-AC on antmaze-lp/ld), average rows lack standard deviations, and Adroit/Kitchen appear in the hyperparameter table but with no reported results; the efficiency-vs-performance trade-off claim would benefit from a broader sweep over inference steps K.",
+        "Training cost remains high (~4.3 h on one task on an RTX 4090-class GPU), and the practical advantage over the strong λ=0.01 linear-Q baseline (111.4 vs. 112.2) is small on the one task where the baseline did not diverge, so the necessity of the variational machinery is demonstrated more by robustness across seeds/tasks than by average performance."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper frames generative policies for offline RL through the lens of learning an ODE flow map, and the attempt to connect diffusion, flow matching, consistency models, CTMs, shortcut models, and mean flows under one notation (Section 3, Appendix B.1) is pedagogically useful and mostly well written.",
+        "The empirical evaluation is broad: behavior-cloning (Table 1) and actor-critic (Table 2) results on D4RL Gym and AntMaze over 5 seeds, with GTP reporting strong averages (89.0 Gym, 80.6 AntMaze) against a good set of baselines including D-QL, QGPO, and Consistency-AC.",
+        "The ablations are thoughtfully designed beyond standard component removals: they test the score approximation against an actual ODE solver (Table 3), compare teacher-based versus teacher-free (shortcut / identity-based) actor losses (Table 6, Appendix D.2), and include a multi-goal visualization (Figure 5) that directly probes the multimodality claim.",
+        "The variational advantage-weighted objective (Section 4.2) is practically sensible, and the comparison to linear Q-terms with divergence analysis (Appendix B.6) gives useful engineering insight for combining critics with generative policies.",
+        "Implementation details (hardware, hyperparameters, dynamic timestep scheduling in Appendix C) and a claimed code release support reproducibility."
+      ],
+      "weaknesses": [
+        "The central theoretical result appears incorrect. In Theorem 1's proof chain, Lemma 2 bounds only the conditional *mean* of the one-step solver difference as O(|Δ|^p+1); the fluctuation term Δ(f̃ − f⋆) is a zero-mean random variable of size O(Δ) (since (x − E[x|x_t]) has variance independent of the step size). Proposition 1 (Eq. 46) then incorrectly asserts E‖S[f⋆](X̃) − S[f̃](X̃)‖ = O(|Δ|^p+1); the expectation of the *norm* of an O(Δ) zero-mean perturbation is O(Δ), and these perturbations accumulate to O(1) over the horizon. Consequently the claimed O(h^p) objective gap is not established, and the 'asymptotic equivalence to the ideal objective' claim is unsupported. This matters because the theory is presented as a headline contribution ('two key theoretically principled adaptations').",
+        "The theorem is also misaligned with the actual method: Theorem 1 justifies the surrogate in the limit h → 0, but in practice the intermediate points are sampled directly from the straight-line path (Eq. 11) with maximal jumps — precisely the regime where the bound is vacuous. Notably, the ablation shows the surrogate (112.2) *outperforms* the 'ideal' ODE-solver target (99.7), which contradicts the framing of the solver objective as the ideal and suggests the theory does not capture what actually drives performance.",
+        "Limited methodological novelty. Learning the full time-conditional flow map Φ(x_t, t, s) is exactly the Consistency Trajectory Model parameterization (Kim et al., 2024), and applying consistency/flow-map models as offline RL policies with a critic was done by Ding & Jin (2024). The two 'key adaptations' reduce to (i) straight-line consistency-training supervision (standard) and (ii) exponential advantage weighting (AWR, Peters et al. 2010). The paper is therefore best read as CTM + advantage-weighted BC, and the contribution rests mainly on empirical results.",
+        "The advantage-weighting theory is overextended: Theorem 2's derivation is valid only for log-likelihood losses, but the paper asserts the weighting 'directly applies to any generative training loss' (diffusion/flow-matching objectives), which does not follow — weighting a score-matching loss by exp(ηA) is not equivalent to matching π*. The practical truncation of negative advantages (Eq. 14) also deviates from the stated optimal solution without analysis.",
+        "Missing experimental details undermine reproducibility and trust in the results. How goal conditioning is handled for AntMaze — critical for interpreting the surprising GTP-BC scores of 85.0 on antmaze-md and 74.4 on antmaze-mp without any value guidance (Table 1) — is never explained in the main text. Baseline rows in Table 1 report no standard deviations despite the caption claiming 'mean and standard deviation'. Table 4 lists hyperparameters for 'Adroit and Kitchen tasks', yet no Adroit or Kitchen results appear anywhere in the paper.",
+        "The headline claims are inflated relative to the evidence: 'perfect scores on several notoriously hard AntMaze tasks' is supported by exactly one task (antmaze-u, 100±0); the efficiency-resolution claim is weakened by GTP using T=5 steps versus consistency's T=2 (0.94ms vs 0.55ms), which shifts rather than resolves the expressiveness–efficiency trade-off; and the efficiency ablation covers a single task (halfcheetah-medium-expert).",
+        "Several presentation and rigor issues: incomplete sentence at the end of the contributions ('will be released'); an indexing typo in Eq. (15); ablations for the variational guidance and score approximation confined largely to one task (hopper-medium-expert); and only a single-sentence limitations discussion (training time) in the conclusion."
+      ]
+    },
     "exp3_positive": {
       "oa": 4,
       "strengths": [
@@ -21,6 +58,26 @@
     }
   },
   "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "The paper is technically solid overall. The unified ODE flow-map framework (Section 3) is clearly articulated, and the connection of prior methods (CMs, CTMs, Shortcut Models, Mean Flows) as instances/limits of the flow map Φ is well explained, including a genuinely useful derivation of a continuous-time identity-based alternative in Appendix B.2.",
+        "Theorem 4.1 (surrogate score approximation) is supported by a complete proof in Appendix B.3 (Lemmas B.1–B.2, Propositions B.3–B.5), and the assumptions (Lipschitz fields, zero-stable p-th order solvers, bounded moments) are standard and stated explicitly.",
+        "Empirical evaluation is comprehensive: D4RL Gym and AntMaze with 5 seeds (Tables 1–2), comparisons against recent generative-policy baselines (Table 5), OGBench and visual-observation tasks (Table 6), sampling-step and scheduling ablations (Tables 7–8), sensitivity analyses for T and η (Figure 6), and a matched compute comparison (Table 9). This is well above the typical ablation depth for this area.",
+        "The ablation on teacher-free objectives (Appendix D.7, Table 10) is honest and informative: the authors report that Shortcut-style and Mean-Flow-style losses diverged or degraded under PyTorch/GPU, and candidly attribute part of this to implementation constraints rather than overclaiming superiority of their teacher-based design.",
+        "Reproducibility is reasonably well supported: hyperparameters per task (Table 4), timestep schedule formula (Eq. 76), hardware details, and a public code link are provided.",
+        "A thoughtful impact statement discusses dataset bias and safety considerations for offline-learned policies."
+      ],
+      "weaknesses": [
+        "Originality is moderate. The core technical ingredients are largely assembled from existing components: the flow-map parameterization and surrogate ϕ is explicitly adopted from CTMs (Kim et al., 2024); the score/teacher approximation reduces supervision to straight-line paths, closely mirroring Consistency Training; and the value-driven objective (Theorem 4.4 / Eq. 14) is standard exponential advantage-weighted BC (cf. AWR, AWAC, and Q-weighted variational objectives of Ding et al., 2024). The novelty lies mainly in the specific combination and the stability analysis, not in fundamentally new principles.",
+        "The headline claim in the abstract that GTP achieves 'perfect scores on several notoriously hard AntMaze tasks' is an overclaim: Table 2 shows a perfect score only on antmaze-umaze (100±0), which FQL also attains (Table 5), and performance on the harder large-maze tasks (53.5, 71.0) still trails some baselines. The paper would be stronger with more precise claims.",
+        "The practical relevance of Theorem 4.1 to the actual algorithm is somewhat indirect: the proved objective (Eqs. 8–9) uses multi-step solver propagation, whereas the implemented consistency loss (Eq. 17) samples intermediate points directly as a_u = a + u·z (Eq. 11), i.e., straight-line segments. The theorem therefore justifies an idealization of the training loss rather than the loss itself; the gap between the two is acknowledged qualitatively but not bounded.",
+        "Some experimental details are thin or borrowed: several baseline numbers in Tables 1, 2, and 5 are taken from prior papers (including some FQL results taken from the SSCQL paper), so compute and tuning budgets across methods are not fully controlled; SSCQL results are missing for all AntMaze tasks.",
+        "GTP does not resolve the expressiveness–efficiency trade-off as decisively as claimed: it remains slower to train than lightweight consistency methods (CAC: 3.7h vs GTP: 4.3h) and slower at inference than FQL (0.67–0.94 ms vs 0.36 ms), so its advantage is confined to policy quality (the paper does acknowledge this in D.6, but the framing elsewhere is stronger).",
+        "Several design choices (λ_Flow, dynamic timestep schedule s0/s1, per-task gradient-norm clipping values in Table 4) appear hand-tuned per task, which slightly weakens the claim of robustness without per-task tuning.",
+        "The unifying framework, while elegant, is presented with a large amount of expository material (Section 3, Appendix B.1) that largely re-derives known relationships, at the expense of a sharper statement of what is genuinely new."
+      ]
+    },
     "exp3_negative": {
       "oa": 3,
       "strengths": [

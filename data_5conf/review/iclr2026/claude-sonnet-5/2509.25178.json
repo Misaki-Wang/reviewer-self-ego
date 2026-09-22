@@ -1,4 +1,27 @@
 {
+  "v1": {
+    "exp1_quality": {
+      "oa": 6,
+      "strengths": [
+        "Addresses an important, timely problem: automatically discovering model-specific hallucination vulnerabilities in MLLMs rather than relying on static, curated benchmarks.",
+        "The decoupled design (CLIP-space optimization + a lightweight MLP mapper bridging CLIP and target-model vision spaces + guided diffusion) is a sensible and efficient alternative to prior resource-intensive, fully-differentiable pipelines like DASH, and is empirically shown to be far more sample-efficient (29% vs 0.1% success rate on COCO).",
+        "Broad and fairly rigorous empirical evaluation: three source MLLMs (including a reasoning model, GLM-4.1V-Thinking), transfer evaluation to five additional models including closed-source GPT-4o and Gemini2.5-Flash, FID-based image-quality analysis, human evaluation with a calibrated annotation protocol and control images, and multiple ablations (threshold τ, λ_clip, λ_reg, noise level, CLIP-sorting).",
+        "Interesting and useful finding that hallucination cues generated for one model transfer substantially to other models/architectures, suggesting shared, systemic vulnerabilities rather than isolated quirks.",
+        "Demonstrates a plausible downstream use case (fine-tuning mitigation) showing that training on GHOST-generated counterfactual images improves robustness to hallucinations from other models' generated images and on POPE, without major degradation on VQA/captioning.",
+        "Reasonably detailed appendix supporting reproducibility (hyperparameters, prompt templates, mapper architecture and training details, per-class statistics)."
+      ],
+      "weaknesses": [
+        "The human evaluation, while a nice addition, still shows a non-trivial 11-13.7% 'yes' rate on GHOST images (vs 91.2% on controls), meaning a meaningful fraction of images may actually contain perceptible object cues, partially undermining the 'object-free' framing central to the paper's claims; sample sizes per condition and annotator agreement/variance are not deeply analyzed.",
+        "The mapper Π used to bridge CLIP and target-model embedding spaces has substantial reconstruction loss (relative GPT-4 fidelity scores of 54.5-76%), meaning the optimization target used during the attack is a fairly lossy proxy for the real model's perception; the paper does not thoroughly analyze how this approximation error affects the reliability or ceiling of the reported success rates.",
+        "The comparison with DASH on COCO may not be entirely fair, since DASH was designed and tuned for large-scale web corpora (ReLAION-5B) rather than the small, curated COCO pool used here; the 'orders of magnitude' improvement claim should be interpreted cautiously given this mismatch in intended operating regime, even though the authors partially acknowledge this.",
+        "The mitigation experiment (Section 6.2) is explicitly called a 'toy setup', limited to a single source/target model (Qwen2.5-VL), 10 object classes, and images generated entirely via the same Diffusion unCLIP pipeline for both positive and negative samples; this raises a risk that improvements reflect adaptation to the specific synthetic image distribution/style rather than genuine robustness, and the claim is not validated against broader hallucination benchmarks (e.g., CHAIR, MME-Hallucination) or additional source models.",
+        "Correctness of the 'object-free' filtering relies on OWLv2 as an oracle, but the detector's own false-negative rate is not independently quantified, so some fraction of 'successful' hallucination-inducing images flagged as object-free could still contain faint/borderline object evidence that the detector misses.",
+        "The method requires white-box access to output-token probabilities of the source MLLM for the optimization loop, limiting direct applicability to fully closed models (mitigated only by transfer, which is itself imperfect and highly variable across object classes, e.g., Table 3/19-21 show wide swings from ~35% to ~85%).",
+        "Limited discussion of why certain object classes (e.g., bottle, knife) are consistently more susceptible than others (e.g., toilet, traffic light) across models — the finding is reported empirically but not explained mechanistically, reducing insight into root causes.",
+        "Results are reported as single-run point estimates without variance/confidence intervals, and the technical novelty is largely a combination of established techniques (CLIP-embedding optimization, unCLIP-guided diffusion editing, compositional text regularization), which somewhat limits the paper's methodological novelty despite its strong engineering execution."
+      ]
+    }
+  },
   "v2": {
     "exp1_quality": {
       "oa": 6,
@@ -18,6 +41,46 @@
         "Success rates, while much higher than DASH, are still modest in absolute terms (roughly 28-32% on COCO/ObjectNet, and highly variable per-class, e.g., 12-57%), and the paper does not compare against other plausible baselines (e.g., simple pixel-space adversarial perturbations, random image edits, or naive prompt-based text-to-image generation with targeted negative prompts) beyond DASH.",
         "Evaluation is restricted to a fixed set of 10 COCO/ObjectNet object classes per experiment; broader coverage of object diversity or more MLLM architectures (beyond the three primary open-source models) would strengthen claims of generality.",
         "The core technical contribution (embedding-space optimization + diffusion conditioning as an adversarial generation strategy) is an incremental extension of existing adversarial-attack and systematic-failure-discovery literature (DASH, AnyAttack, AttackVLM) rather than a fundamentally new paradigm, which somewhat limits novelty."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 6,
+      "strengths": [
+        "Introduces a well-motivated, fully-automatic pipeline (GHOST) for actively generating hallucination-inducing images by optimizing in CLIP embedding space and decoding with an unCLIP diffusion model, decoupling the attack from expensive end-to-end backpropagation through the MLLM and diffusion model.",
+        "Extensive empirical validation: quantitative comparison against the most relevant prior work (DASH) showing much higher discovery rate on a far smaller image pool, FID/SSIM analyses of image quality, and a careful human evaluation (with control images and annotator training) confirming that generated images remain largely object-free while still inducing hallucination.",
+        "Demonstrates transferability of hallucination-inducing images across open- and closed-source models (including GPT-4o and Gemini), which is a meaningful and somewhat surprising finding suggesting shared failure modes across architectures.",
+        "Reasonably thorough ablations (τ, λ_clip, λ_reg, mapper hidden/context dims, ensemble object detector filtering, resolution scaling, CLIP-sorting removal) that support the design choices and show robustness of the core method.",
+        "Shows a plausible downstream application (LoRA fine-tuning on GHOST images improves POPE/CHAIR scores while roughly preserving VQA/captioning performance), extends to attribute/relation hallucinations, and tests a reasoning-oriented model (GLM-4.1V-Thinking), broadening the scope of contributions."
+      ],
+      "weaknesses": [
+        "The method's practical applicability is fundamentally constrained by its reliance on unCLIP-style diffusion models that accept CLIP-embedding conditioning; the authors acknowledge that most modern diffusion architectures do not support this interface, which limits generality and future extensibility.",
+        "Success rates, while much higher than DASH, are still modest in absolute terms (roughly 28-32% on the main experiments, and lower for many individual classes/attributes), and the DASH comparison may not be entirely apples-to-apples given DASH was designed for a different goal (searching a massive web-scale corpus rather than maximizing yield on a small curated pool), which the authors themselves partly concede.",
+        "Evaluation is limited to a small set of object classes (10 COCO categories, plus 10 ObjectNet categories and 5 attribute/relation queries), and only three open-source victim models are used for the core method; broader coverage of object types, scenes, and architectures would strengthen generality claims.",
+        "FID scores show GHOST is not clearly better and sometimes worse than simple baselines (e.g., SD unCLIP) in \"distributional realism,\" and is noticeably worse for GLM-generated images, indicating the visual naturalness/quality trade-off is not fully resolved; human naturalness ratings are only \"comparable\" rather than superior to baseline diffusion outputs.",
+        "Human evaluation still finds 11-14% of GHOST images where annotators perceive the target object as present, meaning a non-trivial fraction of \"successful hallucinations\" may actually reflect genuine (if subtle) object insertion rather than pure hallucination, which could inflate reported success rates.",
+        "The mitigation experiment (Section 6.2) is explicitly framed as a \"small toy setup\" with a single model (Qwen2.5-VL), limited fine-tuning scale, and modest metric improvements (e.g., CHAIR barely changes, captioning score slightly decreases), so the claimed corrective utility of GHOST is only weakly substantiated.",
+        "The extension to reasoning models and to attribute/relation hallucinations is presented only as small, preliminary experiments (a single reasoning model, five attribute/relation queries), which is insufficient to support the broader generalization claims made in the abstract and introduction."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Introduces a novel, fully automated pipeline (GHOST) for stress-testing object hallucination in MLLMs by optimizing directly in CLIP embedding space and decoding with a diffusion model, decoupling target-model feedback from the costly generative process — a clear improvement in efficiency and scalability over prior pixel/latent-space methods like DASH.",
+        "Strong empirical gains over the most comparable baseline (DASH): success rates of ~28-32% vs ~0.1%, with orders of magnitude more discovered hallucination-inducing images despite operating on a much smaller candidate pool; the paper is careful to caveat the comparison (different search spaces/goals).",
+        "Extensive and well-designed ablation studies (confidence threshold τ, λ_clip, λ_reg, noise level t, CLIP-sorting removal, object-detector ensemble filtering, hidden/context dimension for the mapper) that support the claimed mechanisms and improve confidence in robustness of findings.",
+        "Careful human evaluation protocol (calibration/training phase, control images, ~3000+ votes) confirming that GHOST images are largely perceived as object-free (86-89%) and rated comparably natural to standard diffusion outputs — addressing a key validity concern for this type of method.",
+        "Demonstrates broader significance via (a) cross-model transferability, including to closed-source models (GPT-4o, Gemini2.5-Flash) at high success rates, (b) applicability to a reasoning-centric MLLM (GLM-4.1V-Thinking) by targeting the post-<think> token, and (c) extension beyond object-existence to attribute/relation hallucinations, showing the framework generalizes beyond the primary object-hallucination setting.",
+        "Includes a mitigation experiment (LoRA fine-tuning on GHOST-generated positives/negatives) showing consistent gains on POPE/CHAIR without degrading general VQA/captioning performance, positioning the method as both diagnostic and corrective.",
+        "High level of reproducibility effort: detailed hyperparameters, prompts/templates, mapper architecture and training details, runtime benchmarking, and resolution-scalability experiments are all provided in the appendix, along with code submission."
+      ],
+      "weaknesses": [
+        "The method fundamentally depends on diffusion architectures that support embedding-level (unCLIP-style) conditioning; this is explicitly acknowledged as a limitation but meaningfully restricts applicability to the broader, more common text-to-image diffusion ecosystem.",
+        "The mitigation experiment (Section 6.2) is a small-scale proof-of-concept: only one victim model (Qwen2.5-VL), a single fine-tuning configuration selected via limited hyperparameter search, and no comparison against alternative mitigation baselines beyond DASH's protocol — the claim that GHOST is a \"corrective tool\" is only weakly substantiated.",
+        "FID results are somewhat mixed: for GLM-4.1V, GHOST's distributional-realism FID (51.70) is actually worse than both diffusion baselines, and the paper's explanation (misalignment from optimizing a reasoning token) is plausible but not empirically verified.",
+        "Reliance on OWLv2 (and later an ensemble of 4 detectors) as a hard filter to certify object-absence is a potential confound; although mitigated by human evaluation, residual detector blind spots could still bias reported success rates upward.",
+        "The core object classes evaluated are relatively limited (10 COCO classes, plus 10 ObjectNet classes as a secondary check); it remains unclear how well GHOST generalizes to a much larger and more diverse object/attribute vocabulary or to non-object visual concepts.",
+        "No dedicated discussion of dual-use/ethical considerations, despite the method being explicitly framed as generating adversarial-style hallucination-inducing content that transfers to production closed-source systems (GPT-4o, Gemini); a broader impact statement would strengthen the submission.",
+        "The main paper often defers essential methodological details (e.g., the compositional text-embedding regularizer, mapper architecture specifics, hyperparameter choices) to the appendix, making the core method section somewhat underspecified on first read."
       ]
     }
   }

@@ -19,6 +19,25 @@
         "Some claims (e.g., 'no additional time cost') are strong relative to the evidence, since the method still requires nontrivial one-time training and search overhead that is not fully decomposed or compared against the cumulative cost of baselines at a matched number of configurations."
       ]
     },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a practically important problem: enabling a single fine-tuned adapter to serve heterogeneous quantization configurations across edge devices, avoiding the linear scaling cost of per-configuration LoRA fine-tuning.",
+        "The idea of factorizing the mapping to only adjust L2 via a lightweight r×r matrix (based on the empirical observation that quantization-specific information concentrates in L2) is a reasonable design choice that keeps the configuration-aware model compact.",
+        "Fairly extensive empirical evaluation spanning multiple model sizes (RoBERTa-Large, Qwen2.5-1.5B/3B, LLaMA-2-7B), multiple task types (GLUE classification, C4 language modeling, zero-shot downstream tasks), and several ablations (rank, number of Pareto segments, presence/absence of configuration search).",
+        "Reports concrete time savings compared to per-configuration fine-tuning baselines (Q-LoRA, LQ-LoRA), which is a relevant practical metric for the motivating use case."
+      ],
+      "weaknesses": [
+        "The headline hypervolume (HV) comparisons are not apples-to-apples: CoA-LoRA is evaluated on 50 configurations spanning 2.5–6.25 bits, whereas Q-LoRA/LQ-LoRA are only evaluated at 4 discrete bit-widths (2.5, 3, 3.5, 4 bits) due to cost. Since HV integrates over a wider objective space when more points/higher bit-widths are included, CoA-LoRA's HV advantage may largely reflect this broader coverage rather than genuinely stronger per-point performance, which the paper does not disentangle.",
+        "The paper's own tables partially contradict its central claim of consistent superiority: e.g., in Table 3 at r=64, CoA-LoRA's accuracy gap on MNLI is -0.63% while LQ-LoRA achieves +2.73%; LQ-LoRA outperforms CoA-LoRA in several rank/task combinations. The abstract/conclusion's framing ('comparable or superior', gains up to 10.37%) overstates the consistency of the results.",
+        "QA-LoRA (Xu et al., 2024), a directly relevant quantization-aware LoRA method cited in related work, is never used as an experimental baseline despite being arguably the closest prior method to this paper's problem setting.",
+        "The finite-difference gradient approximation over learned, jointly-optimized layer embeddings (Eq. 7-8) is presented with minimal justification or analysis; it is unclear why treating a moving, learned embedding space with unit-step finite differences constitutes a meaningful or stable gradient signal for a discrete configuration space, and no convergence or sensitivity study for this component is given beyond varying the number of Pareto segments U.",
+        "No variance/multiple-seed reporting is provided anywhere in the paper; all reported accuracy gains (2.36%–10.37%) and HV numbers are single-run point estimates, which is insufficient to support claims of consistent, significant improvement over baselines.",
+        "The method is tightly coupled to the NormalFloat (NF) quantization scheme and its specific five-parameter layer configuration; generalization to other widely-used quantization schemes (RTN, GPTQ, AWQ) is only lightly touched via a GPTQ-LoRA baseline comparison and not integrated into the core configuration-aware framework, limiting the claimed generality of 'arbitrary quantization configurations.'",
+        "The initial configuration-set construction (Appendix A.1) relies on solving a mixed 0-1 integer program per configuration via a commercial solver (Gurobi), adding a non-trivial and somewhat externally dependent component to the pipeline whose cost/impact on reproducibility is not fully discussed.",
+        "The scalability claims in Observation 2 are supported only by qualitative visual comparison of curves (Fig. 6) without a corresponding quantitative HV/gap table analogous to Table 2, making it hard to verify how the benefits scale (or shrink) with model size."
+      ]
+    },
     "exp3_positive": {
       "oa": 5,
       "strengths": [
@@ -60,6 +79,45 @@
         "Reproducibility is hindered by an apparently broken reference to the code repository ('Our implementation is available a' with no actual link), and the paper lacks variance/multiple-seed reporting for its accuracy numbers, making it hard to assess statistical significance of the reported (often small) improvements.",
         "The generalization claim to 'unseen configurations' (Fig. 7) is only tested within the same average-bit-width range used during training/search (2.25-7.25 bits); extrapolation behavior outside this range, which is plausible in real heterogeneous-device deployment, is not evaluated.",
         "The paper's presentation has some rough edges (e.g., unclear/incomplete sentences, dense notation overload with many symbols Q, C, f1, f2, z, m, b overloaded across sections), which somewhat hurts clarity and could be tightened."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a practically relevant problem: adapting LoRA to heterogeneous per-layer quantization configurations without repeated fine-tuning, which is meaningful for edge deployment.",
+        "Reasonably comprehensive experimental suite covering multiple models (RoBERTa-Large, Qwen2.5-1.5B/3B, LLaMA-2-7B/13B), multiple ranks, multiple bit budgets, and both NF and integer quantization formats.",
+        "Several ablations are provided (configuration search vs. random extension vs. frozen set, segment number U, unseen-configuration generalization, low-rank matrix similarity analysis) that at least partially support the design choices.",
+        "The idea of factorizing the adaptation into a lightweight per-layer r×r adjustment matrix rather than predicting full LoRA weights is a sensible way to control the output dimensionality of the hypernetwork."
+      ],
+      "weaknesses": [
+        "A central and unexplained anomaly undermines the paper's core claims: a single shared configuration-aware model (CoA-LoRA) consistently outperforms QLoRA, which fine-tunes a dedicated adapter for each individual configuration (e.g., Table 3 shows CoA-LoRA beats QLoRA's per-configuration fine-tuning in 11/12 rank-task combinations, and Table 2 shows similar trends). It is highly counter-intuitive that a model amortized across dozens of configurations would systematically beat models specifically optimized for a single configuration; this raises concerns about whether baselines (QLoRA/LQ-LoRA) were fairly tuned (same epochs, learning rates, calibration data) or under-trained relative to CoA-LoRA, which is not adequately addressed in the paper.",
+        "The claim of 'no additional time cost' is overstated: the reported CoA-LoRA times (52-91 minutes) already dominate the entire training budget and do not clearly separate/include the cost of the Gaussian-process-based Pareto search, EHVI optimization, and iterative finite-difference coordinate search, which could be non-trivial as the number of layers/configurations grows; scalability of the search procedure itself is not analyzed.",
+        "Novelty is incremental: the paper mainly stitches together known components (a small hypernetwork/mapper conditioned on configuration embeddings, similar in spirit to prior LoRA-generation works cited in Sec 2.3; and Bayesian/Pareto multi-objective optimization for configuration selection) without a strong new theoretical or algorithmic contribution distinguishing it from this related line of work; no direct empirical comparison is made against ICM-LoRA, LoRA-Gen, or CONDP-DIFF despite discussing them as directly relevant.",
+        "Evaluation scope is narrow: experiments are limited to GLUE classification tasks and C4 perplexity/zero-shot accuracy on a handful of commonsense benchmarks; there is no evaluation on generative instruction-following, long-context, or chat-style tasks that are more representative of modern LLM deployment scenarios that motivate the paper (privacy-preserving edge LLM assistants).",
+        "No statistical robustness reporting (no multiple seeds, no variance/error bars) across any of the tables, making it hard to assess whether the (often small, e.g., 0.5-2%) reported gains are meaningful or within noise, especially given how close many HV/accuracy numbers are between methods.",
+        "The finite-difference gradient approximation over a discrete, non-differentiable, high-dimensional layer-embedding space (Eq. 7-8) is heuristic and its validity/convergence properties are not analyzed theoretically or empirically (e.g., sensitivity to step size δ beyond the fixed value of 1).",
+        "Several implementation and reproducibility details are thin or missing (e.g., GP kernel hyperparameters, calibration batch size sensitivity, exact stopping criteria for the alternating optimization in Algorithm 1, and how conflicts/duplicates in merged configuration sets are handled), which limits reproducibility despite an implementation link being mentioned but not detailed in the text."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Addresses a practical and timely problem: deploying quantized LLMs across heterogeneous edge devices with varying bit-width budgets without incurring the linear scaling cost of per-configuration LoRA fine-tuning.",
+        "The core design choice (mapping quantization configurations only to a lightweight r x r adjustment on L2, rather than the full LoRA parameter space) is motivated by an empirical observation (Appendix C.1/C.2) that adaptation-specific signal concentrates in L2, which is a reasonable and somewhat elegant way to make the mapping tractable.",
+        "Extensive empirical evaluation across multiple backbones (RoBERTa-Large, Qwen2.5-1.5B/3B, LLaMA-2-7B/13B), multiple GLUE tasks, multiple LoRA ranks (32/64/128), and both NormalFloat and integer mixed-precision quantization schemes.",
+        "Good set of ablations: effect of configuration search vs. random extension vs. frozen set, effect of number of Pareto segments U, seen vs. unseen configuration generalization, and zero-shot downstream task evaluation.",
+        "The reported efficiency gains (single ~1 hour training run covering 50 configurations vs. 20-40 minutes per configuration for one-to-one fine-tuning baselines) are a compelling practical advantage if the comparison is fair.",
+        "Reasonably detailed appendix with algorithmic pseudocode, architecture details, and parameter breakdowns that aid reproducibility."
+      ],
+      "weaknesses": [
+        "The technical novelty is somewhat incremental: it largely combines existing ideas (hypernetwork/config-conditioned parameter generation, Bayesian optimization with expected hypervolume improvement, finite-difference gradient approximation, Pareto filtering) rather than introducing a fundamentally new technique.",
+        "Baselines are relatively dated (QLoRA 2023, LQ-LoRA 2024); more recent and directly relevant quantization-aware LoRA methods such as QA-LoRA (cited in related work but never empirically compared) are omitted, weakening the strength of the 'state-of-the-art' claims.",
+        "The main comparison in Table 2 covers only 4-5 configurations for QLoRA/LQ-LoRA versus 50 for CoA-LoRA; while this favors demonstrating CoA-LoRA's amortization benefit, it also makes the head-to-head time/accuracy comparison somewhat asymmetric and could benefit from a controlled comparison at matched configuration counts.",
+        "No error bars or multi-seed variance reported; all results appear to be single-run, making it hard to assess the statistical significance of the reported accuracy gains (some of which, e.g. MNLI r=64 gap of -0.63%, are quite small).",
+        "Evaluation is restricted to relatively small/older benchmarks (GLUE tasks and C4 perplexity); no evaluation on more modern or larger-scale LLM benchmarks (e.g., MMLU, instruction-following tasks) that would better demonstrate significance for current LLM deployment scenarios.",
+        "Several hyperparameters of the search procedure (finite-difference step size δ=1, number of iterations T2, choice of GP kernel) are fixed without sensitivity analysis, raising concerns about robustness/generalization of the specific configuration search design.",
+        "Minor but notable presentation issues, e.g., an incomplete sentence 'Our implementation is available a' suggesting a broken/missing code link, which raises reproducibility concerns.",
+        "The overall pipeline (alternating configuration-aware model training, GP surrogate fitting, coordinate-wise finite-difference search, and segmented Pareto filtering) is fairly complex with many moving parts, which may hinder reproducibility and practical adoption without released code."
       ]
     }
   }

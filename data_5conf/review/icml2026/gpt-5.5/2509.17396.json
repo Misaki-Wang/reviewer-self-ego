@@ -1,0 +1,118 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Addresses an important and practical bottleneck for long conversational QA: KV-cache memory under fixed GPU budgets, including peak prefill memory rather than only decoding-time cache size.",
+        "The central idea is well motivated: clustering dialogue history into topical episodes and using medoid segments as patched prompts is a plausible way to make block-prefill eviction less query-myopic while retaining bounded memory.",
+        "Evaluation is reasonably broad, covering three LongConvQA benchmarks, four open-weight LLMs, multiple KV budgets, and several recent cache-compression baselines adapted to block prefill.",
+        "The paper includes useful efficiency measurements and ablations, including latency/memory breakdowns, context-length scaling to 100K tokens, clustering hyperparameters, encoder choice, number of episodes, and layer-wise budget allocation alternatives.",
+        "Presentation is mostly clear, with good diagrams and detailed appendix tables that make the empirical trends easy to inspect."
+      ],
+      "weaknesses": [
+        "The evaluation relies on small long-conversation benchmarks, some with only 10 conversations, and the paper does not report confidence intervals, significance tests, or variance over conversation splits; the claimed large gains may be sensitive to dataset composition and GPT-based scoring noise.",
+        "The method assumes an offline conversation history from which episodic caches can be built. This is a strong deployment assumption for live assistants with continuously growing histories, yet online cache update costs and episode reclustering behavior are not sufficiently analyzed.",
+        "The memory story is somewhat incomplete: GPU memory is bounded, but EPICACHE stores multiple episodic caches and repeats prefill for each episode. Total CPU/offline storage, preprocessing time, and scaling with the number of episodes are discussed only lightly, despite being central trade-offs.",
+        "Baseline adaptation may disadvantage some prior methods originally designed for post-prefill or query-specific settings. The paper compares adapted block-prefill versions, but does not fully separate gains from the episodic idea versus differences in patched-prompt design and offline access to the whole conversation.",
+        "Reproducibility is only partial. The manuscript gives many settings, but lacks code, exact generation parameters, exact GPT evaluator prompts for Realtalk, full prompt templates, hardware/software stack details beyond the efficiency section, and clear handling of fractional per-layer budgets.",
+        "The sensitivity-aware budget allocation is promising but under-justified: it is calibrated from a single BookSum sample, uses model-specific alpha values, and its robustness across calibration data, domains, and changing context lengths is not convincingly established.",
+        "The approach routes each query to a single episode cache, which may be brittle for multi-topic or multi-hop questions requiring evidence spread across several clusters; this limitation is not deeply evaluated even though multi-hop QA is part of the benchmark suite.",
+        "Limitations and ethics treatment are thin. Long-term conversational memory raises privacy and data retention concerns, and the paper does not meaningfully discuss risks from storing episodic caches or handling sensitive personal conversation histories."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper targets an important deployment problem: KV-cache management for long multi-turn conversational QA under bounded GPU memory, where post-prefill compression is not sufficient because peak memory still scales with context length.",
+        "The proposed combination of block-wise prefill, episode-level patched prompts, query-to-episode routing, and layer-wise budget allocation is coherent and reasonably motivated by the analyses in Figures 1-4.",
+        "The evaluation covers several open-source model families and three LongConvQA-style benchmarks, with detailed appendix tables showing consistent gains over adapted block-prefill baselines across many budgets and subtasks.",
+        "The paper includes useful ablations for block size, embedding window, encoder choice, number of clusters, medoid count, and a RAG-like alternative, plus some latency and memory measurements."
+      ],
+      "weaknesses": [
+        "The central empirical claims are not fully convincing because the evaluation setting is narrow and partly fragile: Realtalk and LoCoMo contain only 10 conversations each, LongMemEval is reassembled via custom session stacking, and there are no confidence intervals, significance tests, or seed variability for clustering/evaluation.",
+        "The comparison to baselines is potentially unfair or underexplained. Several baselines are substantially adapted to the block-prefill setting, and their patched prompts may be weaker than what those methods could use with better tuning. The paper does not clearly establish that the baselines receive comparable hyperparameter search effort.",
+        "The memory accounting is incomplete. EPICACHE builds and stores one cache per episode, repeats prefill for each episode, and offloads caches to CPU/offline memory, but headline claims focus on GPU peak memory. Total memory, preprocessing time, CPU-GPU transfer costs, and scaling with the number of episodes are not sufficiently characterized.",
+        "The efficiency analysis is limited: decoding latency is measured for up to 10 generated tokens per turn and largely excludes offline construction costs, repeated episode prefill, and realistic long-answer generation. This weakens the practical claim of 2.4x latency improvement.",
+        "The method relies on a fixed number of episodes and embedding-based K-means segmentation, but the paper provides only shallow qualitative evidence that these clusters are robust. The reported silhouette score is modest, and failure cases for ambiguous, cross-episode, or multi-topic queries are not analyzed.",
+        "Reproducibility is only moderate. The paper gives many implementation details, but I did not see a code release, exact prompts for all generation/evaluation settings, complete hardware/software configuration for main accuracy experiments, or enough detail to reproduce GPT-based scoring reliably.",
+        "The presentation is readable overall but contains many typographical and formatting issues, and some claims are overstated relative to the evidence, especially the broad deployment-oriented conclusions and “near-full KV” framing when some subtasks remain substantially below full KV."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "The paper addresses an important and practical bottleneck for long conversational agents: KV-cache memory under strict peak-memory constraints. The distinction between post-prefill and block-prefill eviction is well motivated, and the method targets the harder setting where peak memory must remain bounded.",
+        "The proposed EPICACHE framework is technically sensible: clustering conversation history into episodes gives query-reusable, topic-specific caches; medoid segments provide a plausible patched prompt for attention-guided eviction; and the sensitivity-aware layer budget allocation is motivated by clear empirical analysis.",
+        "The empirical evaluation is broad and convincing overall. Results cover three LongConvQA benchmarks, four open-source LLMs, multiple cache budgets, 100K-token scaling experiments, and detailed subtask tables. EPICACHE consistently improves over adapted block-prefill baselines and often approaches full-KV accuracy at 6K-8K budgets.",
+        "The paper includes useful ablations and implementation details: episode count, embedding window, encoder choice, block size, medoid count, RAG-like alternatives, runtime breakdowns, and pseudo-code. This makes the core method reasonably reproducible from the manuscript.",
+        "The efficiency analysis is valuable: the paper reports peak GPU memory, decode latency, embedding/matching overhead, retrieval overhead, and hardware details, supporting the claim that the method can reduce GPU memory and latency in the online path."
+      ],
+      "weaknesses": [
+        "The memory accounting is somewhat under-specified. EPICACHE constructs one M-token KV cache per episode, so total offline/CPU KV storage and precomputation cost scale with E. The paper emphasizes fixed GPU memory, but its formal budget and some tables could be read as if total cache storage is only M rather than E*M. This matters for deployment comparisons and should be made explicit throughout.",
+        "The evaluation lacks uncertainty estimates or statistical testing despite small benchmark sizes for Realtalk and LoCoMo. Some gains are large, but near-full-KV claims and small differences, including cases where compressed caches slightly exceed full KV, would be more convincing with confidence intervals, paired tests, or repeated sampling details.",
+        "The baseline comparison is mostly fair for the strict block-prefill setting, but several baselines are adaptations of methods originally designed for different regimes. The paper should more carefully separate conclusions about block-prefill suitability from conclusions about the inherent quality of those methods.",
+        "Reproducibility is good at the algorithmic level but incomplete at the artifact level: I did not see a code-release statement, exact decoding prompts, random seeds, K-means initialization/repetition details, or full evaluator configuration beyond naming GPT-4o-mini for Realtalk.",
+        "The limitations and ethics discussion is thin. The future-work section mentions clustering, adaptive episode count, and quantization, but the paper does not deeply discuss failure modes such as misrouting queries to the wrong episode, privacy/security implications of storing episodic KV caches, or reliability concerns from GPT-based evaluation.",
+        "Presentation is generally clear, but there are several typos and formatting issues in the extracted manuscript, and some claims such as 'up to 40%' improvements would benefit from clearer anchoring to the exact benchmark/model/budget where they occur."
+      ]
+    }
+  },
+  "v4": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Addresses an important and practical problem: long conversational QA under bounded KV-cache memory, where post-prefill compression does not actually bound peak memory.",
+        "The core idea of constructing episode-specific compressed KV caches from clustered conversation segments is well motivated by the patched-prompt analysis and fits the structure of long conversations.",
+        "Empirical evaluation is broad: three LongConvQA benchmarks, multiple model families and sizes, several cache budgets, additional LongBench document QA experiments, ablations, robustness checks, and an efficiency table.",
+        "The reported gains are substantial, especially at small budgets: EpiCache often approaches full-KV performance while outperforming adapted block-prefill baselines by large margins.",
+        "The paper gives useful implementation detail in the appendix, including baseline adaptations, pseudocode, segmentation choices, calibration procedure, and block-size settings."
+      ],
+      "weaknesses": [
+        "The memory claim is somewhat underspecified. Each episode has its own cache, so total stored KV state scales with the number of episodes even if only one cache is resident on GPU; the paper should separate GPU peak memory, CPU/off-device storage, transfer cost, and total persistent cache footprint more explicitly.",
+        "The comparison to prior KV compression methods may be unfavorable because several baselines are originally post-prefill or query-dependent methods adapted to a block-prefill setting. The paper argues this is the relevant constrained setting, but the resulting baselines may not reflect the best possible constrained implementations.",
+        "The evidence for multi-episode reasoning is not fully convincing. At inference, the method retrieves one episodic cache, yet the paper claims robustness to evidence distributed across episodes because each cache was compressed after processing the whole history. This mechanism needs sharper validation, such as routing to multiple caches, oracle episode selection, or examples showing retained cross-episode evidence.",
+        "Several evaluations rely on small long-conversation datasets and GPT-based scoring, especially Realtalk with only 10 conversations. The paper would be stronger with confidence intervals or significance tests for main tables, not only limited robustness plots.",
+        "Reproducibility is only moderate: many details are provided, but there is no explicit code release statement, exact generation prompts/scoring prompts are not fully specified, and some hyperparameters appear selected via ablations on evaluation benchmarks.",
+        "The efficiency analysis depends on assumptions such as a 30% topic-change rate, single-batch inference, repeated full-KV decoding over 300 turns, and offline preprocessing amortization. These assumptions are plausible but should be stress-tested, since they materially affect the latency advantage.",
+        "The limitations and ethics discussion are thin. The paper notes future work on episode construction and harder memory phenomena, but the impact statement is generic and does not discuss privacy risks from persistent conversational KV caches or failure modes such as stale/incorrect user memories."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Addresses an important deployment problem: long conversational QA with bounded KV-cache memory, where post-prefill compression is not sufficient for resource-constrained settings.",
+        "The method combines several sensible components: block-wise prefill eviction, episode-level semantic clustering, medoid-based patched prompts, query-to-episode routing, and layer-wise budget allocation based on key-state sensitivity.",
+        "Empirical coverage is broad: results are reported on LongMemEval, Realtalk, LoCoMo, additional LongBench-style document QA tasks, multiple Qwen/LLaMA models, several cache budgets, and a reasonable set of KV-compression baselines.",
+        "The reported gains are often large under tight cache budgets, and the paper includes useful ablations for segmentation unit, embedding model, number of episodes, and layer-wise allocation sharpness.",
+        "The efficiency analysis usefully separates offline clustering/prefill, retrieval/write-back, decoding latency, and peak GPU memory, which helps clarify where the proposed system obtains speed and memory savings."
+      ],
+      "weaknesses": [
+        "The central memory-budget claim is not fully clean. EpiCache stores one cache of size M per episode, with E=4 in most experiments, while many comparisons are labeled as using cache budget M against single-cache baselines. Even if only one cache is resident on GPU, the total KV storage, CPU memory, transfer cost, and cache-management overhead are materially different and should be accounted for more explicitly.",
+        "The method’s originality is moderate. The main contribution is a system-level combination of semantic clustering, patched-prompt attention scoring, block-wise prefill, and layer-wise allocation; each ingredient is close to prior work, and the paper does not provide a deep new theoretical or algorithmic principle.",
+        "The evaluation of cross-episode reasoning is not fully convincing. The method routes each query to a single episodic cache, yet claims robustness to multi-episode evidence. The supporting analysis partly uses source-segment counts or similarity-derived categories rather than direct ground-truth episode coverage, so it does not conclusively show that evidence spread across independently compressed episodes is preserved.",
+        "Several experimental choices appear tuned or underspecified: the number of episodes is fixed to 4 for most main results, LoCoMo adversarial questions are excluded, GPT-based scoring is used for Realtalk, and there is limited discussion of evaluator variance, prompts, statistical significance, or whether all baselines received comparable hyperparameter search under the block-prefill adaptation.",
+        "The efficiency comparison is somewhat favorable to the proposed setup. EpiCache pays repeated prefill once per episode and assumes a 30% topic-change retrieval/write-back rate, while the full-KV baselines are simplified. More realistic end-to-end measurements on actual constrained devices, including CPU memory pressure and KV transfer overhead, are needed to support the on-device claims.",
+        "Limitations and ethics are weakly treated. The impact statement is generic, and the future-work paragraph only lightly acknowledges important failure modes such as stale memories, user preference updates, deletion/forgetting, privacy risks of long-term conversational storage, and errors caused by wrong episode routing.",
+        "Reproducibility is only partial. The paper gives useful algorithmic and hyperparameter details, but there is no clear code release statement, exact evaluation prompts for GPT scoring are not surfaced in the main text, and some implementation details needed to reproduce latency/memory numbers are missing."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "The paper targets an important and timely problem: long-term conversational QA under fixed inference-memory budgets, where post-prefill KV compression is insufficient because peak memory still scales with context length.",
+        "The proposed method is technically coherent: block-wise prefill bounds peak cache growth, episodic clustering gives query-relevant patched prompts without future-query access, and sensitivity-aware layer-wise allocation is motivated by empirical layer-sensitivity measurements.",
+        "The empirical evaluation is broad and convincing overall, covering three LongConvQA benchmarks, multiple model families and sizes, several cache budgets, and both accuracy and efficiency. The reported gains over block-prefill adaptations of SnapKV, InfiniPot, KeyDiff, KVzip, and retrieval baselines are large, especially at 2K-4K budgets.",
+        "The paper includes useful ablations on segmentation units, embedding models, number of episodes, and allocation sharpness, plus robustness checks for clustering initialization, generation sampling, and calibration data. These analyses make the central design choices more credible.",
+        "The efficiency study is practically relevant: it separates offline clustering/prefill and online decoding costs, and shows substantial peak-memory and latency reductions relative to full KV and prefix caching in a long multi-turn setting."
+      ],
+      "weaknesses": [
+        "The memory-budget framing is somewhat ambiguous because EPICACHE stores multiple episodic caches, each of size M, while only one appears to be loaded for decoding. This supports a bounded GPU footprint, but the total cache storage scales with the number of episodes; the paper should state this tradeoff more explicitly and compare total CPU/device memory, not only peak GPU memory.",
+        "The method is a composition of relatively natural ingredients: semantic clustering, patched-prompt attention scoring, block prefill, and layer-wise budget allocation. The contribution is useful, but the originality is more in system integration and analysis than in a fundamentally new algorithmic principle.",
+        "Some claims about multi-episode reasoning are not fully established. The explanation that each episodic cache preserves cross-episode dependencies because it is built by processing the full conversation is plausible, but the method still retrieves a single episode cache at query time; stronger diagnostics would be needed to show when evidence outside the matched episode is actually retained and used.",
+        "The evaluation is strong but has a few caveats. Several baselines are adapted to the block-prefill setting, which is fair for the claimed constrained-memory regime but may understate what post-prefill methods can do when peak memory is available. LoCoMo adversarial questions are omitted for a reasonable reason, but this reduces coverage of abstention/unanswerability behavior under compression.",
+        "Reproducibility is only partially addressed. The paper provides pseudocode, dataset details, and many settings, but does not clearly state code release, exact prompts for all GPT-based evaluation, all generation parameters, hardware/software details beyond selected efficiency experiments, or enough information to fully reproduce baseline adaptations.",
+        "The limitations and ethics discussion is too thin. The impact statement says no societal consequences need highlighting, but long-term conversational memory involves privacy, retention, deletion, and potential leakage risks; these should be discussed directly, especially because the method is intended for persistent assistants on constrained devices."
+      ]
+    }
+  }
+}

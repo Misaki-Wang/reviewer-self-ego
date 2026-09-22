@@ -20,6 +20,26 @@
         "Interpretability claims, while illustrative, remain largely qualitative/anecdotal (single-example visualizations) rather than systematically validated across many examples or quantified with a formal interpretability metric."
       ]
     },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Extensive and diverse empirical evaluation spanning math reasoning (GSM8K, MATH-500, AIME24), long procedural generation (LongProc), long-term chat memory (LongMemEval), and long-context understanding (SCBench, LongBench, LongBench-V2), across multiple model families/sizes (Qwen3-1.7B/4B/8B/14B, DeepSeek-R1-Distill variants, Phi-3-mini).",
+        "The exponential-decay retention-score formulation is a reasonably elegant, differentiable relaxation of the discrete eviction indicator, with a clear (if somewhat decorative) connection to the Ebbinghaus forgetting curve, and integrates cleanly into standard attention computation.",
+        "Thorough ablation studies (loss components, gate architecture, training memory capacity M, training data domain) that help isolate the contribution of individual design choices.",
+        "Efficiency claims are backed by concrete throughput/decode-time measurements (Table 5) showing the method is competitive with or faster than heuristic eviction baselines while requiring only a small per-token scalar overhead.",
+        "Interesting qualitative/interpretability analysis showing that known heuristics (attention sinks, sliding windows, gist tokens) emerge naturally from the learned policy without being hard-coded, and that retention scores vary systematically by layer/head."
+      ],
+      "weaknesses": [
+        "The core idea of learning a per-token importance/eviction score via a lightweight trained gate is not fundamentally new; it overlaps substantially with prior learnable eviction work the paper itself cites (e.g., Zeng et al. 2024 'in-context KV-cache eviction via attention-gate', LocRet/Huang et al. 2024, Chen et al. 2024). The main claimed novelty (exponential decay formulation applied jointly across layers, forgetting-curve framing) is an incremental refinement rather than a conceptually new approach.",
+        "TRIM-KV requires a nontrivial distillation/fine-tuning stage on curated datasets (OpenR1-Math-220k, SynthLong, BookSum, Buddhi, LongAlpaca) per base model, whereas several baselines it is compared against (StreamingLLM, H2O, SnapKV, R-KV) are entirely training-free. This creates an uneven comparison: the method effectively trades extra training compute/data and domain-specific tuning for accuracy gains, which is not clearly disentangled in the results.",
+        "No statistical significance testing or variance/error bars are reported, despite several benchmarks (e.g., AIME24 with only 30 problems, 64 samples) being known to be high-variance; reported gains of a few percentage points, and even the headline '58.4% pass@1 gain' claim, could be sensitive to noise or cherry-picked operating points.",
+        "Cross-domain/cross-architecture generalization is only lightly explored: virtually all main results are on the Qwen3 family (plus limited DeepSeek-R1-Distill and Phi-3-mini appendix results), leaving open how well the approach transfers to other model families, and the ablation on general vs. reasoning training data (Fig. 8) shows the method's performance is training-data-dependent and degrades at tight budgets when trained off-domain.",
+        "The retention score is computed solely from the token's own representation at creation time and is context-independent going forward (it cannot be revised as new context arrives), which is a real limitation relative to dynamic attention-based eviction; the paper does not empirically probe failure cases where this static/one-shot decision is clearly suboptimal (e.g., adversarial or topic-shifting sequences).",
+        "The comparison excludes an entire major category of memory-bounded methods (KV quantization/vector-compression approaches like KIVI, KVQuant, mentioned only in related work), so the empirical positioning of TRIM-KV within the full space of memory-bounded inference techniques is incomplete.",
+        "Several results (Table 6/7 and SCBench) show that on 'incompressible' or retrieval-heavy tasks (Retr.KV, Code.RepoQA), all eviction methods including TRIM-KV fail outright, suggesting the fundamental eviction paradigm—not just the specific heuristic—has clear applicability limits that are somewhat glossed over in the framing of the contribution.",
+        "Code/checkpoints are not yet released (promised 'upon publication'), limiting current reproducibility despite detailed hyperparameter descriptions in the text."
+      ]
+    },
     "exp3_positive": {
       "oa": 8,
       "strengths": [
@@ -61,6 +81,28 @@
         "Training cost (compute, wall-clock time, GPU-hours) for the distillation-based gate training is not clearly quantified or compared to baseline learnable methods, despite training being conducted at up to 128K context with full model forward/backward passes on 4-8 H100/H200 GPUs.",
         "The claim that selective retention acts as a 'regularizer' surpassing full-cache performance is intriguing but only anecdotally supported (a few benchmark instances) without deeper analysis of why or how consistently this effect occurs.",
         "Main paper results are concentrated on Qwen3 models, with broader model families (DeepSeek-R1-Distill variants, Phi3-mini) relegated to the appendix, somewhat limiting the demonstrated generality of the main claims within the primary text."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Presents a technically clean reformulation of KV eviction as a smooth, differentiable retention-gated attention (exponential decay β^(t-i)) that can be trained end-to-end via distillation, replacing the discrete/non-differentiable eviction indicator with a tractable surrogate.",
+        "Broad empirical coverage: math reasoning (GSM8K, MATH-500, AIME24), long procedural generation (LongProc), conversational long-memory (LongMemEval), and long-context understanding (SCBench, LongBench, LongBench-V2), across multiple base models (Qwen3 family, DeepSeek-R1-Distill, Phi3-mini-128K).",
+        "Consistent and often large improvements over representative eviction (StreamingLLM, H2O, SnapKV, R-KV, LocRet) and learnable retrieval (SeerAttn-R, KeyDiff) baselines, particularly in low KV-budget regimes.",
+        "Reasonable efficiency story: only lightweight gate parameters are trained (backbone frozen), implementation uses FlexAttention/custom Triton kernels, and decoding throughput is measured against baselines (Table 6).",
+        "Interesting qualitative/interpretability analysis showing that learned retention scores recover known heuristics (attention sinks, sliding windows, gist/period tokens) without being hard-coded, and vary systematically by layer/head.",
+        "Fairly extensive ablations (loss components, training memory capacity M, gate architecture, training-data domain) that probe design choices, plus a reproducibility statement and promised code release."
+      ],
+      "weaknesses": [
+        "Train-test mismatch is not rigorously addressed: training only ever softly re-weights attention via continuous β and a hinge-style capacity loss on the cumulative score sum, but inference performs hard top-M eviction via argmin; there is no formal argument or empirical stress test connecting the two, beyond intuition.",
+        "The retention score β_i = g(x_i) is computed purely from the token's own embedding at creation time and is never updated afterward based on subsequent context, evictions, or query relevance — this is in tension with the paper's own framing of retention as capturing 'intrinsic long-term utility' that should generalize across very long, evolving contexts, and is not discussed as a limitation.",
+        "The eviction rule argmin_j β_j^{t-j} inherently favors more recently created tokens when β values are comparable, i.e., it embeds a strong implicit recency bias — yet Appendix A.1 claims the mechanism is 'positional-encoding agnostic' and free of extra recency bias; this internal tension is not reconciled.",
+        "Practical generality is unclear: different retention gates appear to be trained per task family (OpenR1-Math for math benchmarks, SynthLong/BookSum/Buddhi for long-context decoding, LongAlpaca for chunk-prefill), which undercuts the 'plug-in' framing and raises the question of whether a single trained gate generalizes across domains (the one cross-domain generalization ablation in Fig. 8 shows degraded performance under tight budgets).",
+        "Training cost/overhead of the proposed method (full-sequence distillation with KL/NTP losses over sequences up to 128K tokens, on 4 H100s) is not directly compared in wall-clock/FLOPs terms against the training-free heuristic baselines (SnapKV, H2O, StreamingLLM) it is compared against, making the efficiency comparison somewhat one-sided in the main results.",
+        "Several headline claims (e.g., TRIM-KV surpassing full-KV cache on AIME24/LongProc/LongBench-V2, framed as 'regularization') rely on small evaluation sets (e.g., 8-64 samples for GSM8K/MATH/AIME) without reported variance across seeds or statistical significance testing, making it hard to assess whether the reported gains are robust or noise.",
+        "Comparisons to SeerAttn-R (a retrieval method that retains the full cache off-GPU) versus pure eviction baselines are somewhat apples-to-oranges given very different systems assumptions and memory footprints, yet results are presented together as if directly comparable in a single 'low-memory regime' narrative.",
+        "Some ablation conclusions are admittedly inconclusive or hedged (e.g., cross-domain generalization ablation explicitly says results are only 'promising' and degrade under tighter budgets), weakening confidence in the robustness of the proposed training recipe.",
+        "The paper does not discuss numerical stability of β^(t-i) for long sequences (t-i large, β<1), nor how heterogeneous per-head/per-layer cache sizes implied by the learned sparsity (Section 5.1.2, 'Budget Allocation') are actually realized given that current FlashAttention/eviction implementations assume uniform sequence length across heads — this is deferred entirely to future work despite being central to the claimed head/layer-specific budget allocation benefits."
       ]
     },
     "exp3_positive": {

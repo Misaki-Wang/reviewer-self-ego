@@ -1,0 +1,47 @@
+{
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Well-motivated and novel core insight: modeling LLM output length as a distribution (log-t) rather than a point estimate, directly addressing the mismatch between stochastic autoregressive decoding and existing scheduling predictors.",
+        "Solid theoretical contribution (Theorem 3.2 and its proof in Appendix A) showing that under a mild assumption on termination-rate heterogeneity across trajectories, output length exhibits power-law tail decay, providing principled justification for the heavy-tailed log-t choice rather than relying solely on empirical curve-fitting.",
+        "Rigorous empirical distribution-fitting study: comparison of six distribution families via KS tests on 1,000 prompts x 100 generations, with log-t achieving markedly higher pass rates (93.1%) than log-normal, gamma, Weibull, and exponential alternatives, and a principled selection of a fixed ν=3.5 via sensitivity analysis.",
+        "Comprehensive and convincing experimental evaluation across both online (chatbot) and offline (SDG) scenarios, multiple datasets (LMSYS-Chat-1M, ShareGPT, Alpaca), and multiple model families/sizes (8B/70B Llama, plus 7 additional models including 3 MoE architectures in the appendix), consistently showing TIE outperforming strong baselines (SSJF, LTR) and FCFS.",
+        "Thorough ablation studies isolating the contribution of each design choice (distribution family, CVaR term, adaptive β vs. fixed β, training data scale, temperature sensitivity, robustness to σ prediction noise), which convincingly support the necessity of each component.",
+        "Practical systems contribution: an asynchronous prediction and dynamic batching mechanism that resolves a real engineering bottleneck (synchronous per-request prediction blocking continuous batching), with reported negligible scheduling overhead (4.26ms) relative to gains.",
+        "Comparison against a preemptive iterative-prediction baseline (TRAIL) demonstrates TIE's favorable latency-overhead tradeoff at moderate-to-high load, strengthening the argument against the alternative preemption-based paradigm.",
+        "Honest discussion of limitations (training data cost of multiple generations per prompt) and a coherent theoretical framing via the learning-augmented algorithms consistency-robustness lens that ties the design of Eq. 11 together."
+      ],
+      "weaknesses": [
+        "The core theoretical assumption (Assumption 3.1) reduces to treating each trajectory's termination behavior as governed by a single effective rate p̃, a simplification of what is actually a highly context-dependent, time-varying process; while empirically supported by the fitting results, the assumption itself is not independently validated beyond the KS goodness-of-fit outcome.",
+        "Training the distribution predictor requires substantially more generations per prompt (45K x 20 = 900K total, i.e., repeated sampling of the same prompt) than point-estimate baselines need, which is a real deployment friction that cannot easily leverage naturally occurring single-shot production logs, somewhat undercutting claimed data efficiency despite the appendix's amortization argument.",
+        "All experiments are conducted on a single 8xA6000 node; there is no evaluation at larger production-relevant scales (e.g., larger models, higher parallelism configurations, multi-node serving, or real production traffic traces with bursty/time-varying arrival patterns), leaving open questions about scalability of the asynchronous predictor and heap-based scheduler under such conditions.",
+        "Main results (Figures 4, Tables 2-3) appear to be reported as single-run point values without confidence intervals or variance across repeated experiments, making it hard to assess statistical significance of the reported speedups, especially given the inherently stochastic nature of the workloads being scheduled.",
+        "The system introduces a fairly large number of hyperparameters (α, β range [0.1,0.5], γ=0.9, τ=30s, batch timeout=3ms, max batch size=32) whose joint sensitivity and interaction are not comprehensively studied together, even though individual sensitivities are explored in isolation.",
+        "Fairness/starvation-prevention mechanism (waiting-time decay) is introduced but not evaluated with dedicated fairness metrics (e.g., tail waiting-time distribution for long requests specifically), so it is unclear how well starvation is actually mitigated in practice versus merely asserted."
+      ]
+    }
+  },
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Novel and well-motivated core insight: modeling LLM output length as a distribution (log-t) rather than a point estimate more faithfully captures the stochastic EOS-sampling process, and this is supported both empirically (KS tests, skewness/CV statistics on 1K prompts x 100 generations) and theoretically (Theorem 3.2 deriving power-law tail decay from a termination-rate assumption).",
+        "Comprehensive and rigorous empirical evaluation: three datasets (LMSYS-Chat-1M, ShareGPT, Alpaca), two main model sizes (8B/70B) plus six additional models (including three MoE architectures) and an industry model (OpenPanGu-7B) in the appendix, covering both online chatbot and offline SDG scenarios.",
+        "Strong, consistent quantitative gains over solid baselines (FCFS, SSJF, LTR): up to 2.31x lower per-token latency online and 1.42x higher throughput offline versus the best baseline, with good cross-dataset/cross-model generalization despite training only on LMSYS-Chat-1M/8B.",
+        "Practical systems contribution beyond the statistical modeling: the asynchronous prediction + dynamic batching + min-heap scheduling design directly addresses a real deployment bottleneck (synchronous prediction blocking under continuous batching), with complexity analysis (O(log n) updates) and measured negligible scheduling overhead (4.26 ms/request).",
+        "Thorough ablations isolating the contribution of distribution choice (log-t vs log-normal) and score design (E[X] vs E[X]+β·CVaR), plus sensitivity studies on sample size and fixed ν, which support the specific design choices made.",
+        "Clear derivations (Appendix A, B) for the censored expectation/CVaR formulas needed to handle max_tokens truncation, adding rigor to the practical scoring metric."
+      ],
+      "weaknesses": [
+        "The core theoretical assumption (Assumption 3.1 on termination-rate density near zero, and treating each trajectory as having a fixed effective rate p̃) is a heuristic simplification rather than a rigorous derivation from actual autoregressive dynamics; it establishes plausibility of heavy tails in general but does not uniquely justify log-t over other heavy-tailed families with similar power-law tails (e.g., Pareto), somewhat weakening the tightness of the theory-to-method connection.",
+        "No empirical comparison against preemptive/iterative prediction baselines (TRAIL, ELIS) that are discussed at length in the related work as key competitors; the claim that these incur \"high overhead\" is asserted but never quantified against TIE in the experiments, leaving an important comparison gap.",
+        "The training data protocol differs qualitatively between TIE (45K unique prompts x 20 generations = 900K total) and baselines (900K unique prompts); while total token/sample budgets are matched, prompt diversity is not, which is a potential confound not thoroughly analyzed beyond the sample-size sensitivity study in Appendix D.2.",
+        "No variance/confidence intervals or repeated-trial results are reported for the main latency/throughput experiments (Figures 4-5, Tables 2-3), despite the paper's own emphasis on the inherent stochasticity of LLM serving workloads — this makes it hard to assess the statistical significance of the reported speedups.",
+        "The practical requirement of generating multiple (20) responses per prompt to fit the distribution is a real deployment limitation, acknowledged only briefly in the Limitations section without a concrete alternative demonstrated (only proposed as future work).",
+        "Experiments are conducted on a single 8xA6000 node; scalability to larger-scale, multi-tenant, higher-RPS production settings (where the asynchronous scheduler's queue/heap and batching parameters might behave differently) is not explored.",
+        "Several scheduling hyperparameters (α=0.9, β range [0.1,0.5], γ=0.9, τ=30s, prediction batch timeout=3ms/size=32) are fixed by apparent default choice without sensitivity analysis or justification, raising questions about robustness to different workload regimes."
+      ]
+    }
+  }
+}

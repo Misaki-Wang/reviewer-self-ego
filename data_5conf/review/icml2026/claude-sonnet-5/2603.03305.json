@@ -1,4 +1,26 @@
 {
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Provides a clean and intuitive theoretical framing (KL-projection / 'projection tax' view) that explains why token-level masking and renormalization in constrained decoding can distort generation toward locally valid but semantically incorrect trajectories, grounded in the feasible-mass quantity α(h_t).",
+        "Extremely thorough empirical evaluation: 6 model scales (1B-14B), 4 diverse benchmarks (GSM8K, MATH500, GSM-Symbolic, FOLIO) with 3 different constraint types (JSON schema, expression grammar, FOL grammar), and multiple baselines (CP, CF, CD).",
+        "The method is simple, training-free, and model-agnostic, making it easy to adopt in practice; it is compatible with existing constrained-decoding engines (XGrammar) without modification.",
+        "Additional analyses are informative and largely consistent with the central hypothesis: parameter-efficiency comparisons (accuracy/billion parameters), test-time scaling curves, token-level confidence/feasible-mass visualizations, and a non-verifiable summarization win-rate study using LLM-as-judge.",
+        "Detailed and transparent appendix with case studies, exact prompts, grammars, and schemas used, supporting reproducibility.",
+        "Consistent direction of improvement across nearly all model/dataset combinations strengthens the claim that the effect is not overfit to one setting."
+      ],
+      "weaknesses": [
+        "The core idea (generate free-form reasoning, then convert/re-express it into a required format) is conceptually similar to already-common practice (e.g., chain-of-thought followed by answer extraction, or two-stage plan-then-format pipelines) and to cited related work (e.g., CRANE-style interleaved reasoning); the paper's theoretical contribution mainly re-derives well-known KL-projection facts about token masking, and the practical novelty is largely the specific instantiation/evaluation rather than a fundamentally new mechanism.",
+        "A crucial baseline is missing: unconstrained generation followed by simple/regex-based answer extraction (without a second constrained decoding pass). Since DCCD's second stage still requires a full model call plus masking, it is unclear how much of DCCD's benefit over CD is really attributable to the 'draft-conditioning' insight versus simply avoiding forced low-entropy formatting from the first token; comparing against naive post-hoc parsing of an unconstrained draft would clarify how essential Stage 2's hard constraint enforcement really is for accuracy (as opposed to for guaranteeing well-formedness in edge cases).",
+        "No analysis of inference cost/latency overhead: DCCD requires generating a full unconstrained draft plus a full constrained pass (and K drafts for best-of-K), roughly doubling or multiplying token generation cost relative to single-pass CD; the parameter-efficiency argument (accuracy per parameter) does not capture this added compute/latency cost, which is an important practical trade-off for deployment scenarios that motivate constrained decoding in the first place.",
+        "Gains are quite uneven across tasks: FOLIO improvements are often marginal (e.g., 1B: 19.70% CD vs 21.67% DCCD; 8B: 23.15% vs 27.09%) and overall FOLIO accuracy remains very low across all methods, which weakens the claim of 'consistent' large gains across heterogeneous constraint types highlighted in the abstract (which foregrounds the most favorable GSM8K 1B result of +24pp).",
+        "No variance/repeated-trial reporting or statistical significance testing is provided for the main results, despite decoding being stochastic (especially relevant for the test-time scaling and best-of-K experiments).",
+        "The non-verifiable summarization evaluation relies solely on LLM-as-judge (same model family, Qwen2.5-14B) without human validation, and the CD baseline in that setting is a single hard-budget-constrained generation rather than a strong length-controlled alternative, potentially favoring DCCD's more natural compression pipeline.",
+        "The draft-selection criterion (cumulative log feasible mass) is not ablated against simpler or alternative criteria (e.g., raw draft likelihood, majority voting) despite the framework being pitched as flexible in this respect, leaving the practical value of the specific choice underexplored."
+      ]
+    }
+  },
   "v2": {
     "exp1_quality": {
       "oa": 4,
@@ -17,6 +39,23 @@
         "Appendix Table 9 shows that even when the stage-1 draft is correct, the final DCCD structured output is only correct 73-84% of the time, indicating that stage 2 (structural realization) still introduces meaningful new errors, an issue that is not thoroughly analyzed or explained.",
         "No error bars, variance estimates, or multiple-seed reporting are provided for the main results, making it hard to assess the statistical robustness of the reported point-estimate accuracy differences.",
         "Despite motivating the work with tool-calling and API-call use cases, the evaluation is limited to math/logic reasoning benchmarks with relatively simple JSON/grammar schemas; no evaluation on realistic tool-calling or multi-field API-schema tasks is included to substantiate the motivating claims."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The empirical evaluation is broad in scope: 6 model scales (1B-14B), 4 benchmarks spanning numerical math, symbolic math, and first-order logic, and a large appendix of ablations (draft-length, budget-matched comparison, feasible-mass correlation, multi-draft selection, schema-tightness, latency/adherence tradeoff, and a comparison with thinking-token generation).",
+        "The KL-projection / 'feasible mass' framing gives a clean, if simple, mechanistic explanation for why constrained decoding can distort semantics, and the paper backs this narrative with a concrete case study (Appendix J) and token-wise confidence plots.",
+        "The method is training-free and easy to implement on top of any existing grammar-constrained decoding engine (e.g., XGrammar), which lowers the barrier to adoption.",
+        "Several targeted robustness checks (budget-matched tokens in Table 7, draft-length ablation in Table 8, schema-tightness ablation in Table 12) attempt to isolate the mechanism from confounds such as simply using more tokens."
+      ],
+      "weaknesses": [
+        "The core idea—generate free-form reasoning first, then produce/convert to a structured output—is very close to already-common practice (chain-of-thought followed by answer extraction, or 'thought-then-action' patterns in ReAct-style agents) and to the interleaved-reasoning line of work (Banerjee et al., CRANE) that the paper explicitly discusses as the closest related method. Despite this, the paper provides no direct empirical comparison against CRANE/interleaved reasoning, which undermines the significance and originality claims; the distinction drawn in Related Works (that such methods 'reduce to standard CD' when structure is needed from the first token) is asserted but never empirically substantiated against the actual competing method.",
+        "DCCD requires two full generation passes (an unconstrained draft plus a constrained realization), effectively doubling token generation per query. The efficiency analysis in the main text (accuracy per billion parameters) does not report total compute/FLOPs or generated-token counts, which would be the more meaningful efficiency metric than parameter count alone; the wall-clock latency table in the appendix covers only up to 7B models and modest draft lengths, leaving open how overhead scales with longer, more complex reasoning traces.",
+        "The magnitude of degradation attributed to standard constrained decoding is unusually large in places (e.g., CD scoring 0.00% on GSM-Symbolic for the 1B model, and up to -30.6 points versus a plain prompt baseline in Table 3), substantially exceeding the 10-30% degradation range the paper itself cites from prior literature. This raises a question of whether the chosen schemas/grammars are artificially tight (a concern partially corroborated by the schema-tightness ablation in Appendix L.5) relative to schemas used in typical production settings, which would inflate the paper's headline improvement numbers and limit external validity of the 'hidden cost' framing.",
+        "The non-verifiable summarization experiment (Section 5.3, Figure 8) relies on a single LLM judge (Qwen2.5-14B) with no human validation, no inter-rater/robustness check, and no control for potential length or verbosity bias that could systematically favor DCCD's compressed-from-a-longer-draft outputs over single-pass CD outputs.",
+        "No variance/error bars or multiple-seed results are reported for any of the main accuracy tables, making it difficult to assess whether the reported gains (some quite large, e.g., +24 points) are stable versus sampling noise, especially for smaller datasets like FOLIO (fewer than a few hundred examples) and GSM-Symbolic.",
+        "The appendix analysis (Table 9) shows that stage 2 essentially never recovers from an incorrect draft (0.2-3.3%) and mostly just preserves draft correctness (73-84%), which somewhat undercuts the framing that DCCD is doing something more sophisticated than 'CoT then answer extraction'; the added value beyond a simple generate-then-parse pipeline is not clearly isolated."
       ]
     },
     "exp3_positive": {

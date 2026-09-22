@@ -24,6 +24,28 @@
         "Reproducibility depends on a large number of per-model, per-sparsity hyperparameters (learning rate, penalty, schedule) shown in Table 5, suggesting the method may require substantial tuning effort per setting, which is not discussed as a limitation."
       ]
     },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The problem framing—critiquing sequential layer-wise reconstruction error minimization as a surrogate that can propagate compounding error and enforce unnecessarily restrictive local objectives—is a reasonable and well-motivated observation.",
+        "The ADMM-based formulation directly targeting the constrained problem (cross-entropy/NTP subject to sparsity) is a clean, principled alternative to layer-wise heuristics.",
+        "The objective-aware projection step, which replaces the Euclidean projection with an OBS-like Hessian/Fisher-weighted projection using Adam's second-moment estimates at negligible extra cost, is a nice practical touch.",
+        "Convergence results are provided for both the full-precision (ELSA) and quantized (ELSA-L) variants, which is a positive addition of theoretical grounding uncommon in this literature.",
+        "The empirical study spans many model families and scales (125M to 27B) and includes ablations on data efficiency, objective choice, and the projection step, as well as extensions to N:M and non-uniform sparsity patterns."
+      ],
+      "weaknesses": [
+        "The comparison between ELSA and baselines is not compute/data-matched: baselines (Wanda, SparseGPT, ALPS, etc.) are one-shot methods calibrated on 128 sequences, while ELSA trains for 4096 steps with batch size 8 (implying orders of magnitude more data/gradient computation and multiple GPUs even for 7B models). No wall-clock time, FLOPs, or compute-normalized comparison is reported, which is a critical omission for a pruning paper whose central motivation is efficiency.",
+        "The claim of being 'surrogate-free' is overstated: ELSA still optimizes a proxy (next-token prediction loss on calibration/C4 data) rather than the true deployment objective, and its advantage over reconstruction-based surrogates may simply reflect using a better-aligned (and far more expensive) surrogate rather than solving problem (1) directly.",
+        "There is a gap between the theoretical convergence analysis (which assumes an x-update solved to near-stationarity with deterministic gradients) and the actual practical algorithm (stochastic minibatch Adam updates over thousands of steps); the paper does not establish that the practical instantiation satisfies the assumptions used in the proofs.",
+        "The convergence guarantee only ensures a λ-stationary point, a fairly weak first-order condition for the non-convex sparsity-constrained problem; this does not substantiate the introduction's rhetorical framing of finding 'more globally optimal solutions.'",
+        "At moderate sparsity levels (50-60%), where practitioners often operate, ELSA is frequently worse than existing methods (e.g., LLaMA-2-7B zero-shot avg at 50% sparsity: ELSA 53.35 vs. ALPS 57.14 and L-ADMM 57.73; similar pattern at 60%), undermining the generality of the claimed improvement and suggesting the method trades off performance in the regime most commonly used in practice.",
+        "No baseline is included that uses comparable additional compute/data to ELSA (e.g., gradual magnitude pruning with fine-tuning, or continued pretraining with sparsity masks), so it is unclear whether the ADMM machinery itself—rather than simply the much larger training budget—is responsible for the reported gains.",
+        "Some baseline behaviors seem unusually poor (e.g., L-ADMM producing NaN at high sparsity for LLaMA-2-7B, SAFE perplexity exploding to 1.6e4 at 90% while claiming to be a flatness-aware method), raising questions about whether baselines were adequately tuned for the high-sparsity regime, which could inflate the apparent gap.",
+        "Reproducibility is incomplete: the code repository link is left blank in the submission, and full hyperparameter search details/compute budgets for baselines are not reported alongside ELSA's extensive tuning tables.",
+        "The abstract's headline statistic ('7.8x less perplexity') and other superlative claims ('unseen frontier', 'nearly impossible') are cherry-picked or rhetorically inflated relative to the more mixed picture in the full results tables.",
+        "Comparisons to more sophisticated non-uniform allocation methods (OWL, EvoPress) are limited to a single sparsity level (70%) and a single model, which is insufficient to support the paper's broader claims about superiority in extreme sparsity regimes (80-90%) where non-uniform methods might close the gap."
+      ]
+    },
     "exp3_positive": {
       "oa": 6,
       "strengths": [
@@ -65,6 +87,26 @@
         "No reported variance across seeds/runs; all perplexity and accuracy numbers appear to be single-run point estimates, making it hard to assess the statistical significance of the (sometimes small) differences at moderate sparsity.",
         "The discussion section's claims about memory advantages of the surrogate-free approach over layer-wise methods (e.g., regarding offloading and calibration-data memory scaling) are speculative and not backed by controlled empirical measurements in the paper.",
         "Reliance on an external, third-party sparse kernel (MACKO) for the reported speedup/memory numbers means the practical deployment benefits are not a direct contribution of this work and depend on kernel maturity/support for the sparsity patterns produced by ELSA."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 6,
+      "strengths": [
+        "The core motivation is well-articulated: existing LLM pruning methods rely on sequential layer-wise reconstruction error minimization, a surrogate objective that induces compounding errors and solution suboptimality; the paper diagnoses this clearly with a formal problem statement (Eq. 1-3).",
+        "The proposed ADMM formulation directly targets the true constrained sparsity problem, and the objective-aware projection step (using diagonal Fisher/Gauss-Newton approximation, obtainable essentially for free from Adam's second moment) is a sensible and practically cheap enhancement over naive magnitude-based projection.",
+        "Non-trivial convergence proofs are provided for both the standard ADMM variant (ELSA) and the quantized variant (ELSA-L), extending known ADMM-for-quantization analysis to this problem's noisy/quantized subproblem setting.",
+        "Extensive empirical evaluation: six model families/scales (125M to 27B), multiple sparsity levels (50-99%), zero-shot downstream tasks, N:M and non-uniform sparsity patterns, real end-to-end inference latency/throughput/memory measurements with a sparse kernel (MACKO), and a cost-quality analysis (GPU-hours vs. perplexity) that adds credibility to the practical claims.",
+        "The paper is reasonably transparent about limitations/costs of its own approach in the discussion section (e.g., re-examining memory-efficiency assumptions of layer-wise methods), which is a positive sign of scientific rigor rather than pure salesmanship.",
+        "Results at high sparsity (70-99%) show large, consistent improvements over strong recent baselines (SparseGPT, Wanda, ALPS, SAFE, L-ADMM, SparseLLM) across essentially all tested models, which is the paper's central claim and is well supported."
+      ],
+      "weaknesses": [
+        "At low-to-moderate sparsity (50-60%), ELSA is frequently worse than several baselines (e.g., SAFE, ALPS, L-ADMM) in both perplexity (Table 10) and zero-shot accuracy (Table 11/12), which somewhat undercuts the framing that ELSA is uniformly superior 'across a wide range of settings' — the advantage is really confined to the high-sparsity regime.",
+        "ELSA is not truly a 'one-shot' or lightweight pruning method: it requires many gradient/training steps (up to 4096 steps, 32,768 calibration sequences of length 2048) and multiple GPUs, effectively turning pruning into a sparse fine-tuning procedure. This substantially changes the problem setting relative to the one-shot baselines it is compared against, yet the paper does not compare against established sparse-training / pruning-with-retraining literature (e.g., dynamic sparse training methods such as RigL, gradual magnitude pruning with retraining, lottery-ticket-style retraining) that operate in a similar compute regime.",
+        "The curvature-aware projection is a fairly incremental contribution relative to existing OBS/Fisher-based pruning criteria (e.g., WoodFisher-style, SparseGPT's Hessian usage); the paper's positioning as a fundamentally new 'surrogate-free' paradigm somewhat overstates the novelty of this specific technical piece.",
+        "The framing that NTP loss constitutes a 'true' objective (as opposed to layer-wise reconstruction being a 'surrogate') is rhetorically convenient but NTP loss on generic corpora (C4) is itself an approximation of the actual deployment objective (task-specific generation quality); this nuance is glossed over in the abstract/intro despite being implicitly acknowledged in the discussion.",
+        "No variance/error bars or multiple-seed results are reported for perplexity or accuracy numbers, making it hard to assess whether reported gaps (especially at moderate sparsity where margins are small) are statistically robust.",
+        "The writing in the abstract and introduction is notably promotional in tone ('breaks through the current impasse', 'Unseen Frontier', rhetorical questions) which is somewhat unusual and reduces the perceived rigor/neutrality expected in a top-tier submission, even though the technical content is largely sound.",
+        "Hyperparameter tuning (Table 5) shows per-model, per-sparsity-level tuned learning rates and penalty schedules, raising concerns about the practical usability/robustness of the method and the fairness of comparison against baselines that may use more standardized configurations."
       ]
     },
     "exp3_positive": {

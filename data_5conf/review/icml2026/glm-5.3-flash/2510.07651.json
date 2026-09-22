@@ -1,0 +1,120 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "The paper grounds KV cache eviction in a principled layer-wise structured pruning framework derived from Optimal Brain Damage, with complete, largely correct closed-form derivations for value-, key-, and joint-pruning scores provided in Appendix B (including careful handling of the Gauss-Newton-style Hessian evaluated at the unperturbed point).",
+        "Section 3.4 and Appendix B.5 cleanly recover existing attention-based scoring methods (H2O, TOVA, SnapKV) as special cases defined by different perturbation windows and objectives, which is a genuinely useful unifying perspective and clarifies why attention-only heuristics are limited.",
+        "The empirical study is broad and well-structured: three baselines, three score variants, two model families (LLaMA-3.1-8B, Qwen-2.5-7B), NIAH at 4K–32K contexts under 16 budget settings, 16 LongBench datasets, and PG19 perplexity for decoding-phase eviction. Improvements are consistent, particularly at tight budgets (e.g., +13 points average NIAH accuracy for H2O at 80-token budgets).",
+        "The oracle-recall analysis (Figure 2) directly validates the core proxy assumption — that historical output perturbation predicts true eviction error — and shows closed-form scores nearly match the exact proxy, an evaluation practice beyond simple end-task metrics.",
+        "Pseudo-code for score computation and eviction (Algorithms 1–2) demonstrates the scores are cheap closed-form computations and supports reproducibility of the core method."
+      ],
+      "weaknesses": [
+        "The central approximation — that pruning-induced perturbations in *historical* attention outputs approximate the *true* eviction error on future outputs — is validated only on a single passkey retrieval task with one 3B model (Figure 2). No validation of this surrogate on LongBench, perplexity, or the main 8B/7B backbones, leaving a gap between the motivating claim and its evidence.",
+        "The analysis evicts one token at a time (diagonal Hessian assumption), but in practice many tokens are evicted simultaneously; interactions between jointly evicted tokens are ignored and never empirically assessed. The joint score also only captures key–value interaction at the same position, not token–token interactions, yet the paper markets it as 'the most comprehensive estimate.'",
+        "Computational overhead of OBCache scores is only qualitatively claimed ('low computational overhead', 'nearly as efficient as baseline attention scores'). No wall-clock latency, throughput, or memory measurements are reported, and computing |Z_i,p|, v_p−o_i, and per-position scores requires materializing/recomputing attention quantities that baselines (e.g., FlashAttention-based H2O) avoid — this cost is not quantified.",
+        "GQA creates an implementation ambiguity: the pseudo-code computes per-head saliency scores, but with grouped-query attention multiple query heads share one KV head, so per-head eviction would break cache consistency. How scores are aggregated across heads in a group is not stated, undermining reproducibility of the reported results.",
+        "Gains on the most realistic benchmark (LongBench) are modest — often fractions of a point, and occasionally negative (e.g., OBCache-Joint below SnapKV baseline on several Qwen datasets) — with no variance estimates or significance testing across the 250-sample NIAH runs or LongBench subsets.",
+        "Evaluation scope is narrow in model scale (only 7–8B models) and does not compare against several strong recent alternatives (e.g., PyramidKV, D2O, Quest) or report end-to-end decoding speedup, making the practical significance harder to judge.",
+        "Minor presentation issues: Figure 1 contains illustrative (presumably fabricated) numeric values that could be mistaken for real data; the notation and claims around the 'first theoretical formulation' of cache eviction as pruning are asserted without a direct survey of closely related second-order cache-scoring work."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "The paper provides a coherent theoretical framing of KV cache eviction as layer-wise structured pruning under the OBD framework, with complete closed-form derivations for three saliency scores (isolated value, isolated key, joint key–value) in Appendix B. The derivations are checkable and the connection back to Equations 5–7 in the main text is consistent.",
+        "Section 3.4 usefully unifies existing attention-based eviction methods (H2O, TOVA, SnapKV) as special cases of a perturbation-window objective with L1 norm on attention columns, which gives a clearer conceptual account of why these heuristics work and where they fall short (no value/output information).",
+        "The oracle-based recall analysis in Figure 2 is a good methodological addition: it validates the pruning-induced eviction error as a proxy against a measurable ground truth and shows the closed-form scores nearly match the exact proxy, which supports the Taylor-approximation step empirically rather than only theoretically.",
+        "The empirical evaluation is broad for this line of work: NIAH across four context lengths and four cache budgets with 250 samples each, 16 LongBench datasets at three compression rates on two model families, plus PG19 perplexity for decoding-phase eviction. The ablation over the three score variants (VALUE/KEY/JOINT) is informative, e.g., confirming that key-sensitive scores outperform value-only scores.",
+        "Pseudo-code (Algorithms 1–2) and fairly detailed setup descriptions (perturbation windows, sink token handling, pooling parameters) support reproducibility of the method itself."
+      ],
+      "weaknesses": [
+        "The central approximation — that the true eviction error on future outputs (o_{s+1}, o_{s+2}, ...) can be proxied by perturbations in historical outputs within a window — is the load-bearing assumption of the whole framework, yet it is justified only empirically and on a single narrow setting (passkey retrieval with LLaMA-3.2-3B, Figure 2). No analysis, theoretical or otherwise, characterizes when this surrogate is faithful (e.g., how attention distribution shift between prefill and later decoding steps affects it), and recall degrades substantially as the window grows (Figure 2a), which the paper acknowledges but does not resolve.",
+        "The efficiency claims are not backed by measurements. The method requires materializing attention weights and recomputing attention for selected query positions because FlashAttention does not return weights (Appendix C); the extra cost of computing the KEY and JOINT scores (including ||v_p - o_i|| terms) relative to attention-only baselines is never quantified in wall-clock time or FLOPs. For a paper motivated by inference efficiency, this is a significant omission.",
+        "Key implementation details are under-specified for models with Grouped Query Attention: how per-head scores are aggregated over the shared KV groups is not described anywhere in the main text or appendix, yet it can materially affect results and reproducibility.",
+        "Gains on the more realistic LongBench benchmark are modest and mixed: several baseline–variant comparisons favor the baseline (e.g., TOVA+OBCACHE-JOINT underperforms TOVA at 10% and 20% KV on LLaMA; SnapKV+OBCACHE-VALUE is below SnapKV in multiple settings), and no statistical significance or variance is reported for any experiment.",
+        "The claim of providing 'the first theoretical formulation of KV cache eviction as a structured pruning problem' is overstated; layer-wise perturbation-based analyses of KV compression exist in adjacent work, and the contribution is more accurately a new application of classical OBD machinery to cache eviction rather than a new pruning theory.",
+        "No code release is stated, and the decoding-phase evaluation is limited to perplexity on PG19 with a single model and a single budget; there is no evidence on generative quality for dynamic eviction, where the proxy-vs-true-error gap is likely largest.",
+        "The limitations discussion (Appendix A) is honest about the recency bias and the additive joint-score shortcoming, but it mostly defers these to future work rather than analyzing their impact on the reported results."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "The paper provides a genuinely principled formulation of KV cache eviction as layer-wise structured pruning, grounded in classical OBD theory, with full second-order Taylor derivations for three closed-form saliency scores (isolated value, isolated key, joint key–value) provided in detail in Appendix B.",
+        "Section 3.4 offers a clean theoretical unification: prior attention-based scoring methods (H2O, TOVA, SnapKV) are recovered as special cases by varying the perturbation window, which clarifies their limitations (no value-state/output information) and positions OBCache as a generalization.",
+        "The oracle-based validation in Figure 2 is a good experimental design: it shows the pruning-induced proxy error achieves up to 85% recall of the true (unobservable) eviction error, and that the Taylor-derived scores nearly match the exact proxy ranking, directly supporting the core approximation.",
+        "Evaluation is reasonably comprehensive: three baselines (H2O, TOVA, SnapKV) enhanced with three score variants, two model families (LLaMA-3.1-8B, Qwen-2.5-7B), NIAH across four context lengths and budgets, 16 LongBench datasets at three compression rates (full tables in Appendix E), and PG19 perplexity for dynamic eviction, with mostly consistent improvements.",
+        "Reproducibility support is decent: pseudo-PyTorch implementations (Algorithms 1–2), detailed baseline re-implementations, perturbation-window sizes, and dataset/metric specifications in Appendix C.",
+        "Honest limitations discussion in Appendix A (structural bias toward earlier tokens, additive joint-score suboptimality, diagonal Hessian assumption) and candid reporting of cases where OBCache-JOINT does not beat OBCache-KEY."
+      ],
+      "weaknesses": [
+        "There is an inconsistency between the claimed reduction and the implementation: Equation 9/31 derives the attention-based score as an L1 norm (sum of |A_i,p|), and the text presents this as the H2O-style score, but Algorithm 1 line 13 computes A.pow(2).sum (L2, squared attention), which is not what H2O/TOVA actually use. This discrepancy between theory and code weakens the claimed exact reduction to prior methods and raises questions about baseline fidelity.",
+        "The central efficiency claim ('maintaining low computational overhead') is never quantified: no wall-clock latency, scoring overhead, or end-to-end speedup measurements are reported. The key/joint scores require attention outputs and pre-softmax logits over the perturbation window (recomputed since FlashAttention does not materialize them), and it is unclear whether the accuracy gains come at a meaningful throughput/memory cost — critical for a paper motivated by inference efficiency.",
+        "The proxy (pruning-induced) error's fidelity to the true eviction error is validated only on one synthetic task (passkey retrieval) with one smaller model (LLaMA-3.2-3B); generalization of this surrogate to realistic tasks is asserted rather than demonstrated.",
+        "Gains on LongBench (Figure 3b, Tables 2–3) are modest and mixed: several OBCache variants regress on individual datasets (e.g., TOVA+OBCache on Musique, SnapKV+VALUE on TREC), and OBCache-JOINT underperforms OBCache-KEY in the dynamic setting; the paper offers only hypotheses rather than analysis for these cases.",
+        "Scope is limited to two ~7–8B instruction models; no scaling behavior, no comparison against newer cache-compression methods discussed as related work (CaM, D2O, Quest) empirically, and no code release is stated, which limits both significance and reproducibility in practice.",
+        "The claim of being 'the first theoretical formulation of KV cache eviction as a structured pruning problem' is somewhat overstated, and minor issues (undefined S_attn in Algorithm 1, inconsistent norm notation) suggest the manuscript would benefit from another careful pass."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "The paper provides a clean, principled connection between classical Optimal Brain Damage pruning theory and KV cache eviction, deriving closed-form saliency scores for three pruning units (isolated values, isolated keys, joint key-value pairs) with full derivations in the appendix.",
+        "The unifying view of prior attention-based methods (H2O, TOVA, SnapKV) as special cases via the perturbation window parameter w (Section 4.3) is a genuine conceptual contribution that clarifies the design space, and it correctly recovers VATP/CriticalKV-style value-aware scores as the isolated-value case.",
+        "Experiments are unusually thorough: two model families (LLaMA-3.1-8B, Qwen-2.5-7B), RULER (4K/32K) and LongBench under both query-aware and query-agnostic settings, four baselines, ablation over the three score variants, comparison with value-aware baselines, decoding-stage evaluation on PG19, and an efficiency study (Tables 2, Figures 6-7).",
+        "The oracle-recall analysis (Figure 2) directly probes the core surrogate assumption (pruning-induced eviction error vs. true eviction error), and the score-complexity trade-off is analyzed honestly (OBCache-K chosen over V&K for efficiency).",
+        "Good reproducibility: code availability, pseudo-PyTorch algorithms (Algorithms 1-2), a limitations appendix that candidly discusses the structural bias toward earlier tokens, window choice, and evaluation gaps."
+      ],
+      "weaknesses": [
+        "The core approximation is heuristic and only loosely validated: the 'pruning-induced eviction error' (perturbations on historical outputs) is a proxy for the true future-output error, and its fidelity is assessed only qualitatively on a single 4K-context passkey task with a 3B model (Figure 2, up to 85% recall). No direct measurement of how well this proxy transfers to real downstream tasks or to the 32K regime is given.",
+        "The contribution is somewhat incremental relative to CriticalKV (Feng et al., 2025), which already takes an output-perturbation perspective; OBCache-V essentially reproduces existing value-aware scores, so the main novelty rests on the key-pruning and joint scores derived under the diagonal-Hessian assumption.",
+        "The diagonal (OBD-style) Hessian assumption ignores cross-token and cross-feature interactions in the softmax attention map, and the remainder terms O(||(deltaV, deltaK)||^3) are uncontrolled; no analysis is given of when the second-order Taylor approximation breaks down (e.g., highly peaked attention distributions).",
+        "The formulation operates layer-wise on attention outputs rather than a task loss, and errors compound across layers; the paper does not quantify cross-layer error accumulation or its correlation with final task degradation.",
+        "Some baseline setups deviate from original implementations (e.g., H2O adapted via SnapKV's recent window, per-head TOVA), which limits strict comparability with the published baselines, although these choices are disclosed.",
+        "The joint score's cross-term can be non-monotone (the factor Z_i,p can be negative), so S^joint may not be interpretable as a squared error; the paper notes V&K does not always beat K (Figure 5) but offers no explanation beyond speculating about a better combination.",
+        "Statistical significance and variance are not reported; several reported gains (e.g., LongBench improvements of ~1 point) are small relative to typical benchmark noise."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "The paper provides a principled, unified OBD-based formulation of KV cache eviction, deriving closed-form saliency scores for value-, key-, and joint-pruning units (Propositions 4.3–4.5), and convincingly shows that prior attention-based scores (H2O, TOVA, SnapKV accumulation windows) and value-aware scores (VATP, CriticalKV) arise as special cases — this unification is a genuine conceptual contribution.",
+        "The evaluation is extensive: RULER-4K/32K and LongBench under both query-aware and query-agnostic settings, multiple cache budgets (10–40%), two model families (LLaMA-3.1-8B, Qwen-2.5-7B), full per-task tables in the appendix, plus decoding-stage PG19 perplexity and an efficiency/latency analysis (Table 2, Figures 6–7).",
+        "The ablations are informative: OBCache-K consistently outperforms OBCache-V (isolated-value case, which recovers VATP/CriticalKV), and Figure 4 directly compares against those value-aware baselines, supporting the claim that the key-aware terms add value beyond rederiving known scores.",
+        "The oracle-recall analysis (Figure 2, Section 4.4) empirically validates the pruning-induced eviction error surrogate against the true eviction error, addressing the main theoretical leap of the method.",
+        "Complete derivations are provided (Appendix A, including GQA handling), pseudo-code for implementation is given (Appendix E), and the paper builds on the public KVPress library with code released, supporting reproducibility.",
+        "The limitations section (Appendix B) honestly discusses structural bias toward earlier tokens, the ad-hoc nature of the recency-window mitigation, the diagonal-Hessian assumption, and restricted evaluation scope."
+      ],
+      "weaknesses": [
+        "The core contribution is incremental relative to closely related work. The value-pruning score reduces exactly to VATP/CriticalKV, and CriticalKV (Feng et al., 2025) already performs output-perturbation-based KV saliency analysis; the genuinely new element is essentially the key-pruning score (Eq. 5) and its cross-term. The paper's novelty claim rests heavily on this one additional term.",
+        "The theoretical treatment relies on several approximations whose justification is largely empirical: the second-order Taylor expansion with the OBD diagonal-Hessian assumption, and crucially the surrogate objective itself — minimizing perturbations on recent historical outputs as a proxy for unobservable future outputs. No theory bounds the gap between the surrogate and the true eviction error; only the 85%-recall experiment in Section 4.4 supports it.",
+        "Evidence of gains is uneven. Improvements over SnapKV in query-aware settings are small or even negative in places (e.g., Table 1: SnapKV+OBCache-K 73.9 vs. SnapKV 72.4 at 4K; CWE drops from 40.96 to 36.24 at 10% budget), and in decoding, OBCache-V&K does not outperform OBCache-K, undermining the joint-pruning formulation. The strongest gains are concentrated on AdaKV.",
+        "Dynamic eviction is evaluated only via language-modeling perplexity on PG19 with a single budget (1024 tokens); no downstream task evaluation for the decoding stage, and no agentic/multi-round settings, so practical usefulness of the dynamic variant remains under-supported.",
+        "The recency-window mitigation for structural bias (fixed 20/64-token windows, SnapKV-style pooling retained) means some reported gains may partially come from inherited heuristics rather than the OBD scores themselves; the interaction is acknowledged but not disentangled.",
+        "Presentation issues: the score derivations, while complete, are heavy (4th-order Hessians, outer-product notation) and the connection between Equation 3 and the diagonal simplification is asserted rather than intuitively explained in the main text; several results (e.g., Figure 4) require careful reading to distinguish norm choices."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Principled theoretical framing: deriving closed-form token saliency scores for KV cache eviction from second-order Taylor expansion (OBD) is clean and well executed. The derivations for isolated-value, isolated-key, and joint key-value pruning units are complete and correct as far as verifiable from Appendix A, including a GQA-specific extension.",
+        "The unifying perspective is genuinely useful: showing that attention-based heuristics (H2O with w=1, TOVA with w=s, SnapKV with a short window) and value-aware scores (VATP, CriticalKV) arise as special cases of a perturbation-minimization objective over different pruning units and windows provides real conceptual clarification of a crowded literature.",
+        "Comprehensive and convincing evaluation: four baselines (H2O, TOVA, SnapKV, AdaKV) x three score variants x two models x two compression settings (query-aware/query-agnostic) across RULER-4K/32K, LongBench, and PG19 decoding perplexity. Gains are consistent, with largest improvements on the strongest baseline (AdaKV, e.g., ~15% on q-agnostic RULER-4K at 30% budget).",
+        "The oracle-recall analysis (Figure 2) directly validates the pruning-induced eviction error as a proxy for the true eviction error, addressing the key assumption behind the whole formulation rather than leaving it untested.",
+        "Good treatment of efficiency: complexity analysis (Table 2) plus measured TTFT and per-token decoding latency at multiple context lengths and batch sizes, showing negligible overhead. Implementation details, full per-task results, and pseudo-code (Algorithms 1-2) support reproducibility; code is released.",
+        "Honest limitations section (structural bias toward earlier tokens, static window choice, unexplored decoding-centric/agentic evaluation, diagonal-Hessian restriction) that correctly identifies the true boundaries of the work."
+      ],
+      "weaknesses": [
+        "Novelty is moderate rather than groundbreaking: the isolated-value score essentially recovers VATP/CriticalKV, and CriticalKV (Feng et al., 2025) already pursued an output-perturbation perspective on KV cache saliency. The genuinely new material is the key-pruning and joint scores plus the unification, so the claim of being the 'first theoretical formulation' should be softened. That said, Section 5.2.4 does demonstrate the gains do not merely rederive the known value-aware score.",
+        "The diagonal/off-diagonal Hessian approximation and the locality assumption of the perturbation window (recent historical outputs as a proxy for future eviction error) are only empirically justified via one 4K passkey example on one model; no analysis of when the second-order approximation degrades (e.g., very long contexts or high compression).",
+        "Dynamic eviction evaluation is comparatively thin: only PG19 perplexity with H2O-style accumulation under a single 1024-token budget, and no decoding-stage experiments on task-level benchmarks (e.g., reasoning), which the limitations section acknowledges.",
+        "Evaluation uses only two models (LLaMA-3.1-8B, Qwen2.5-7B), both GQA-based; no MHA model, no variance/seeds reported for the large RULER/LongBench tables, making it hard to gauge statistical significance of the smaller gains (e.g., 0.2-0.5 point LongBench improvements).",
+        "Minor inconsistencies: Algorithm 1 uses A.pow(2) for the attention-based baseline while Equation 8 uses |A|; the joint score does not always beat the key score (observed in both Table 1 and PG19), and the paper's explanation for this ('plain additive formulation') is speculative; Figure 1's illustrative numbers appear partly inconsistent with the notation used elsewhere.",
+        "The SnapKV integration gains are notably small in query-aware settings and occasionally regress (e.g., some RULER-4K entries), suggesting interaction effects between output-aware scores and pooling-based pipelines that are only briefly discussed."
+      ]
+    }
+  }
+}

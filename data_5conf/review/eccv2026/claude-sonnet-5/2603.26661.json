@@ -19,6 +19,49 @@
         "No runtime/efficiency comparison against diffusion-based baselines is given despite motivating the approach partly via avoiding iterative diffusion sampling; the only timing numbers provided are for the proposed method itself in the appendix.",
         "Given the alternating position/feature vocabulary design and chunk-based training, it is unclear how well the approach scales to significantly larger context sizes or denser real scenes, and no analysis of failure modes (e.g., discontinuities across chunk boundaries, mode collapse under low temperature) is presented quantitatively."
       ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Introduces a genuinely novel formulation for 3D Gaussian scene synthesis: instead of diffusion/flow-matching, it tokenizes Gaussian primitives via a sparse 3D conv autoencoder + LFQ vector quantization and models them with a causal transformer, enabling a single model to handle unconditional generation, completion, outpainting, and controllable sampling.",
+        "Careful architectural design choices are well-motivated: separate position/feature vocabularies to decouple geometry from appearance modeling, and an extended 3D RoPE (with a 4th token-type dimension) to inject spatial locality independent of an arbitrary 1D serialization.",
+        "On object-level unconditional generation (PhotoShape chairs), the method achieves the best FID/KID/COV among compared methods, and produces visually cleaner Gaussian allocations than L3DG in the qualitative comparison.",
+        "The sequence-ordering ablation (xyz vs. Z-order/Hilbert variants) is a useful, non-trivial analysis showing that with 3D RoPE, elaborate locality-preserving curves are unnecessary, which is an informative negative result for the community.",
+        "The paper demonstrates versatile capabilities beyond generation quality alone: scene completion with meaningful sample diversity, large-scale (12m×12m) outpainting beyond the training horizon via sliding-window sampling with tree-search-like resampling, and even a real-world feasibility study on ScanNet++ in the appendix.",
+        "Extensive implementation/training details (optimizer hyperparameters, chunk/camera sampling strategies, loss design) are provided, aiding reproducibility."
+      ],
+      "weaknesses": [
+        "The paper's central claimed contribution—full 3D scene generation—is only evaluated qualitatively (Fig. 4, Fig. 9-11); no quantitative metrics (FID/KID, layout/physical-plausibility scores, or a user study) are reported for scene-level unconditional generation, completion, or large-scale outpainting, despite these being the primary selling points of the work.",
+        "The scene comparison against L3DG is not apples-to-oranges controlled: L3DG generates full normalized scenes while GaussianGPT generates local chunks, and no quantitative measure reconciles this difference in output scope, making the qualitative comparison in Fig. 4 hard to interpret.",
+        "The object-level SOTA improvement over L3DG may be confounded by the switch from the baseline's original VQ scheme to lookup-free quantization (LFQ) rather than solely attributable to the autoregressive modeling paradigm; no ablation isolates the effect of the autoencoder change from the effect of AR vs. diffusion modeling.",
+        "Baselines used for object-level comparison (π-GAN, EG3D, DiffRF, L3DG) are relatively dated (2021–2024); more recent Gaussian/latent 3D generative SOTA methods cited in the related work (e.g., GaussianAnything, TRELLIS-style structured latents) are not quantitatively compared.",
+        "No comparison, even qualitative, against other indoor scene generation baselines explicitly cited in related work (ATISS, DiffuScene, SceneFormer, WorldGrow), despite the paper positioning itself against the broader scene-generation literature.",
+        "No runtime/efficiency comparison against diffusion-based scene generators, despite one of the paper's motivating claims being that AR avoids \"iterative sampling procedures characteristic of diffusion-based methods\"; the reported generation times (~6000s for a 12m×12m scene) are not contextualized against any diffusion baseline.",
+        "The sequence-ordering ablation is evaluated only via training/validation cross-entropy, with very small differences between orderings (2.444 vs 2.493), and no downstream generation-quality metric confirms that these CE differences translate into perceptually meaningful improvements.",
+        "Practical heuristics used for large-scene generation (column resampling to avoid empty predictions, specific chunk-window positioning) are not ablated for their effect on diversity/fidelity, raising concerns that reported large-scene coherence may be partly an artifact of these hand-tuned sampling heuristics rather than the underlying model's learned distribution.",
+        "Limited demonstration of genuine multi-room/global layout coherence; most qualitative figures show single-room or single-object chunks, and the claim of \"large-scale scene synthesis\" rests on a small number of curated top-down renders without any consistency metric across chunk boundaries."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Introduces a genuinely novel formulation for the domain: full autoregressive next-token generation over vector-quantized 3D Gaussian scene primitives, contrasting with the dominant diffusion/flow-based paradigm for 3D scene synthesis.",
+        "Technically sound pipeline: sparse 3D CNN autoencoder with lookup-free quantization for compact discretization, combined with a causal transformer using separate position/feature vocabularies and an extended 3D RoPE (with a 4th token-type dimension) to inject spatial locality into a serialized 1D sequence.",
+        "A single model naturally and elegantly unifies unconditional generation, scene completion/outpainting, and large-scale scene extension via prefix conditioning and sliding-window context, avoiding the need for specialized inpainting mechanisms required by diffusion baselines (e.g., RePaint).",
+        "Strong empirical results on object-level generation (PhotoShape chairs), beating prior methods (DiffRF, L3DG) on FID/KID/COV, and favorable appearance/layout metrics at scene level, especially in the completion setting where more context is available.",
+        "Extensive and informative ablation studies (serialization ordering, vocabulary sharing, RoPE variants, autoencoder downsampling/codebook size) and thorough appendices covering inference efficiency, large-scene degradation analysis, and preliminary real-world (ScanNet++) generalization, supporting reproducibility and giving a candid account of limitations.",
+        "Honest discussion of trade-offs (geometric diversity vs. appearance/layout fidelity, slower unconditional sampling, degradation in extended scene generation) rather than overclaiming uniform superiority."
+      ],
+      "weaknesses": [
+        "Scene-level comparisons rely on a single baseline (L3DG); no comparison against other relevant scene-generation approaches (e.g., DiffuScene, ATISS-style layout methods, or other autoregressive 3D generation works cited in related work), limiting confidence in how well the method generalizes relative to the broader state of the art.",
+        "Table 2 shows a coverage (COV) drop for unconditional scene generation relative to L3DG (0.548 vs. 0.692), suggesting a meaningful loss of sample diversity/mode coverage under the autoregressive formulation that is not fully explained beyond being noted as a trade-off.",
+        "Unconditional inference is substantially slower than the diffusion baseline (about 3x wall-clock in Table 5), which is a practical limitation for use cases without partial context, even though the method compensates in completion settings.",
+        "Real-world validation (ScanNet++) is qualitative only, with acknowledged autoencoder fidelity limitations (missing high-frequency detail, inability to model unobserved regions); no quantitative metrics are reported for this more realistic setting.",
+        "Large-scale outpainting shows notable quality degradation with distance from the initial context, particularly along one axis due to the chosen serialization; the proposed resampling heuristic mitigates but does not solve this, and the paper offers no principled fix, only future-work suggestions.",
+        "The technical novelty is largely a careful combination of existing components (sparse 3D CNN encoders, LFQ, GPT-style transformers, RoPE extensions) rather than a fundamentally new algorithmic idea; the contribution is more of a strong systems/engineering integration than a new theoretical insight, which should temper expectations of high novelty impact."
+      ]
     }
   }
 }

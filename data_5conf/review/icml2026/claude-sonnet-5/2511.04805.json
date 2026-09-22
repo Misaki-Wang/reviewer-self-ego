@@ -1,0 +1,45 @@
+{
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Introduces a well-motivated fine-grained, element-wise expert merging strategy (dual-mask: similarity + activation-weight saliency) that moves beyond coarse-grained expert dropping/clustering/low-rank merging, addressing the well-documented failure mode of prior methods (large accuracy drops at high compression).",
+        "Provides a theoretical justification (Lemma 3.1, derived under a Gaussian/independence assumption) for element-wise weight similarity across experts, and validates it empirically against real MoE weight distributions (Figure 2, Appendix A.5/A.6), lending some principled grounding to the approach.",
+        "The bit-packing scheme that reuses underutilized BFloat16 exponent bits to embed masks and signs is a clever systems contribution that avoids the metadata overhead that typically negates fine-grained sparsity gains; this is paired with a custom decode-GEMM Triton kernel showing consistent ~2x kernel-level speedup and up to 1.80x end-to-end throughput gains, backed by kernel benchmarks on two GPU architectures (Appendix A.1, A.2).",
+        "Extensive empirical evaluation: 4 MoE models, 9 benchmarks (general + math + coding), multiple compression ratios, 16 random seeds for variance analysis, ablations on calibration data, similarity threshold, saliency metric variants, expert grouping strategy, and compatibility with quantization — this is a thorough and largely reproducible experimental protocol with algorithmic details (Algorithm 1) and hyperparameters (τsim, calibration set size) explicitly reported.",
+        "Results show substantial and consistent improvements over multiple strong baselines (HC-SMoE, D2, Sub-MoE, NAEE, STUN, Wanda 2:4) especially at high sparsity (50%, and extended to 66.7%/75% in appendix), with dramatic gaps in some domain-specific/reasoning settings (e.g., HC-SMoE collapsing to near-zero accuracy on AIME/HumanEval while PuzzleMoE retains most performance)."
+      ],
+      "weaknesses": [
+        "The efficient bit-packed inference scheme is inherently tied to pairwise (2-to-1) merging; the paper acknowledges (A.8.4) that higher-ratio merging without explicit mask storage is not directly supported by the packing scheme, which somewhat limits the generality of the efficient-inference contribution beyond 50% sparsity granularity.",
+        "The definitions and mechanics of achieving 25% (vs. 50%) sparsity via pairwise merging are not clearly explained in the main text — it is unclear how partial expert reduction is realized when the core operation merges pairs into one, which could confuse reproducibility of that specific setting.",
+        "The theoretical model (Lemma 3.1) assumes independent Gaussian weight elements across experts, but the paper's own analysis (Table 7) shows non-negligible correlation (0.26) for Mixtral-8x7B, one of the four evaluated models, somewhat undercutting the generality of the theoretical justification even though empirical curves still roughly track predictions.",
+        "Several baseline numbers in Table 1 are directly taken from prior papers with dashes for missing metrics/settings (e.g., D2, Sub-MoE rows), raising potential concerns about exact comparability of evaluation protocols (e.g., differing calibration set, exact sparsity level such as 20% vs 25%) across methods.",
+        "The saliency mask still relies on calibration activations (input samples), meaning the method is not entirely training/calibration-free as implied by some framing, though robustness to calibration choice is demonstrated (Table 4).",
+        "The throughput evaluation section focuses on comparison against the uncompressed baseline only; a more complete efficiency picture would benefit from comparing decode-GEMM throughput/memory against other compression baselines (e.g., a quantized or CSR-sparse baseline) rather than only cuBLAS dense GEMM."
+      ]
+    }
+  },
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Comprehensive empirical evaluation across four diverse MoE models (Mixtral-8x7B, DeepSeek-MoE-16B, Qwen1.5-MoE-A2.7B, Qwen3-MoE-30B-A3B) and seven general benchmarks plus math reasoning tasks (GSM8K, Math-500, AIME24/25), consistently showing PuzzleMoE preserves accuracy far better than prior expert-dropping/merging baselines (NAEE, STUN, D2, HC-SMoE, Sub-MoE) at 25% and 50% sparsity.",
+        "The dual-mask (similarity + saliency) formulation is intuitive and well-motivated, and the authors provide a theoretical derivation (Appendix B.2) explaining why entry-wise weight similarity arises across experts under a normal-weight-distribution assumption, with empirical validation against three of the four models.",
+        "The bit-packing scheme that repurposes underused exponent bits in Bfloat16 to store masks/signs without extra memory is a clever systems contribution, backed by a custom CUDA decode kernel and demonstrated to incur no perplexity loss from the shift/pack transformation (Table 1).",
+        "Thorough ablations covering calibration dataset choice, number of experts merged, grouping strategy (random vs. search-based), similarity threshold sensitivity, importance-scoring function choice, and compatibility with quantization, plus 16-seed robustness studies with reported means/stds.",
+        "Efficiency analysis is convincing: large reductions in offline compression time (2–10 minutes vs. tens of minutes or intractable exhaustive search for NAEE) and demonstrated GPU-count reduction for inference deployment, alongside measured speedups.",
+        "Notably strong preservation of reasoning capability under compression (e.g., retaining ~84–99% of baseline accuracy on Math-500/AIME) compared to catastrophic collapse of HC-SMoE, which is a meaningful practical result given the difficulty of preserving reasoning under compression."
+      ],
+      "weaknesses": [
+        "The pairwise merging design fundamentally caps compression at 50% (halving expert count); the paper shows that extending to 3-expert groups both hurts accuracy and breaks the bit-packing scheme (insufficient free bits), limiting the method's flexibility relative to approaches offering a continuum of compression ratios.",
+        "The exponent-shift bit-packing procedure clips/rounds exponents below 112 and only allocates a 5-bit range; it is unclear how weights with exponents above the observed range (outliers) are handled, and only a single perplexity comparison (Table 1) is used to justify \"no degradation,\" which may not capture rarer failure cases or accumulated error across layers.",
+        "Reported inference speedups (1.19–1.28×) are relatively modest given the 50% parameter reduction, and the GEMV kernel description strongly suggests optimization for decode (batch-size-1) settings; the paper does not clearly address how prefill (matrix-matrix) computation handles the packed/masked format or whether overhead from on-the-fly decoding is fully amortized in that regime.",
+        "Baseline comparisons partially rely on numbers copied from other papers with differing sparsity levels (e.g., D2 evaluated at 20%/40% instead of 25%/50%) and incomplete metrics (missing entries in Sub-MoE rows), which weakens the strict comparability of the accuracy tables despite the authors' acknowledgment of this discrepancy.",
+        "Some large baseline degradations (e.g., HC-SMoE perplexity exploding to 78–175 at 50% sparsity) seem unusually severe compared to typical literature reports, raising a question of whether baseline reproduction settings (e.g., calibration, hyperparameters) were tuned as carefully as PuzzleMoE's, which could inflate the apparent margin of improvement.",
+        "The random and search-based expert grouping strategies are described only briefly (e.g., \"evolutionary search-based grouping\") without full algorithmic detail, and it is unclear whether pairing is consistent across layers or independently randomized per layer, limiting reproducibility of this component.",
+        "The core techniques build closely on established ideas (Wanda-style activation-weighted saliency, sparse task-arithmetic merging as in Localize-and-Stitch, exponent-bit reuse observed in prior storage-compressibility work), so novelty lies primarily in combining these ideas for MoE experts rather than introducing fundamentally new mechanisms.",
+        "No public code link is provided in the manuscript (placeholder appears empty), so full reproducibility depends on future code release that cannot be verified at review time."
+      ]
+    }
+  }
+}

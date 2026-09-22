@@ -21,6 +21,26 @@
         "Results sections are verbose and repeat similar relative-percentage phrasing extensively without deeper analysis of failure cases or qualitative examples of what the excess score actually selects."
       ]
     },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper addresses a practical problem (cross-backbone LoRA transfer) and proposes a lightweight alternative to TransLoRA that avoids training an extra discriminator model, which is a reasonable simplification.",
+        "Experiments span a fairly broad set of transfer scenarios (same-model, cross-family, cross-size, cross-version) and two benchmark types (multi-choice reasoning and open-ended personalization generation), which is commendable in scope.",
+        "The paper includes several useful auxiliary analyses: an ablation isolating sample filtering vs. token selection, a study of query-generation source, sensitivity to the selection ratio k%, and a tokenizer-alignment mechanism for cross-vocabulary transfer.",
+        "The additional external-data experiments (other-user, mixed-user, cross-task) and the 5-shot KD control in the appendix show some effort to rule out trivial explanations (e.g., pure few-shot effect)."
+      ],
+      "weaknesses": [
+        "Limited technical novelty: the core 'contrastive excess' score is essentially a contrastive-decoding-style log-probability difference between a model with and without an adapter, and the token-selection idea closely mirrors existing selective-token-training work (e.g., Rho-1) cited in the related work; the paper mainly recombines these known ideas rather than introducing a fundamentally new mechanism.",
+        "No variance/robustness reporting: all results appear to be single-run point estimates with no standard deviations, confidence intervals, or multiple seeds, despite differences between methods in several table cells being very small (e.g., MMLU accuracy gaps of ~0.005-0.01), making it hard to assess whether reported gains are statistically meaningful.",
+        "Some reported gains are marginal or inconsistent: in several settings (e.g., Llama3 3B→Llama3 8B MMLU, Mistral→Mistral MMLU) TITOK's advantage over KD/TransLoRA is tiny or a tie, and some baselines (TransLoRA, KD) occasionally underperform the vanilla model, raising questions about baseline tuning fairness and whether the pipeline (including hyperparameters, decoding, and discriminator training for TransLoRA) was optimized comparably.",
+        "Absolute performance on the LaMP generation tasks is low (ROUGE scores mostly 0.10-0.16 for News Headline), and the evaluation set is small (30 users), limiting confidence in the generalizability of the personalization results.",
+        "The method requires task/setting-specific tuning of the token-selection ratio k% (70% generally, but 30% for one specific transfer setting), which somewhat undercuts the claimed simplicity/no-extra-overhead advantage over TransLoRA, since practitioners must still tune this hyperparameter per scenario.",
+        "Potential circularity in the filtering signal: both the synthetic data and the excess-score filter are derived from the same source expert model, so the selection criterion may reinforce the source model's own biases/errors rather than objectively identifying high-quality, task-relevant content; this is not discussed or empirically probed (e.g., via qualitative error analysis).",
+        "No quantitative efficiency/cost comparison (e.g., wall-clock time, memory, FLOPs) against TransLoRA is provided despite the paper's central claim of being 'lightweight' and avoiding 'additional overhead'; this claim is only argued qualitatively.",
+        "Only two base model families (Mistral, Llama) are tested, and no comparison against other recent selective-token or contrastive-decoding-based filtering baselines (e.g., a Rho-1-style baseline) is included, despite the related-work section explicitly invoking this line of work as inspiration.",
+        "The practical significance of the overall problem (cross-backbone LoRA transplantation via synthetic data) is somewhat narrow; the paper does not clearly establish when this is preferable to simply retraining a small LoRA adapter directly on the target backbone with modest compute, nor does it quantify the actual cost savings achieved."
+      ]
+    },
     "exp3_positive": {
       "oa": 6,
       "strengths": [
@@ -39,6 +59,28 @@
         "Baseline implementations (TransLoRA, KD+MinED) are reproduced by the authors rather than using official released checkpoints/code, and details of how faithfully these were tuned/matched to the original papers are not fully transparent, raising some concern about baseline strength and fairness of comparison.",
         "The synthetic data pipeline is entirely self-referential (source model generates both queries and labels used to supervise itself via the target), which risks compounding biases or hallucinations from the source model without any external validity check beyond ROUGE-based deduplication; no human or independent-model quality assessment of the synthetic data is provided.",
         "The related work and framing slightly overstate the distinction from KD/selective-token literature; a more rigorous theoretical or empirical analysis of why the token-level excess signal specifically captures 'LoRA-injected' knowledge (versus just difficulty/perplexity) would strengthen the core claim."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 6,
+      "strengths": [
+        "Addresses a practically important and timely problem: transferring LoRA adapter knowledge across different base models without access to original training data, which is increasingly relevant given rapid model turnover.",
+        "The proposed token-wise contrastive excess score is simple and lightweight, avoiding the extra discriminator model required by TransLoRA, and is shown empirically to reduce end-to-end compute by ~1.5-2.5x.",
+        "Very extensive experimental coverage: four transfer settings (same-model, cross-family, cross-size, cross-version), three benchmark families (BBH, MMLU, LaMP), and additional large-scale/cross-architecture experiments (Mixtral-8x7B, Llama-3.3-70B).",
+        "Thorough ablations and robustness checks in the appendix (sensitivity to k%, weaker source LoRA, low-quality/biased synthetic data, alternative prompts, external/cross-task/cross-user data, self-refinement iteration, tokenizer alignment correctness) that proactively address many likely reviewer concerns.",
+        "The tokenizer alignment algorithm for cross-vocabulary transfer is a useful practical contribution with reasonable empirical validation (Table 6/7).",
+        "Reasonably consistent improvements over Vanilla, KD, and TransLoRA baselines across most settings and metrics."
+      ],
+      "weaknesses": [
+        "Limited methodological novelty: the core idea (contrasting adapter-augmented vs. base-model log-likelihoods to identify informative tokens) closely resembles existing contrastive/selective-token training ideas already cited in the paper (e.g., Rho-1, contrastive decoding-style excess scores); the contribution is largely a combination/application of known techniques to a new pipeline rather than a fundamentally new mechanism.",
+        "The theoretical justification invoking the Neyman-Pearson lemma is somewhat superficial/overclaimed — optimality of the likelihood ratio for hypothesis testing does not rigorously establish that high-LLR tokens are the correct signal for knowledge transfer; this reads more as post-hoc motivation than a real theoretical contribution.",
+        "Reported gains are often framed as large relative percentages (e.g., \"+4-10%\") that can overstate practical significance, since many absolute accuracy/ROUGE improvements are modest (e.g., MMLU accuracy differences of ~1-2 points, BBH differences of a few points in several settings).",
+        "Evaluation datasets are relatively small-scale (e.g., MMLU subsampled to 100 instances per task, ~90/225 training examples for source LoRA per task), raising questions about how well findings generalize to larger, more realistic training regimes.",
+        "Baseline comparisons are somewhat narrow: only vanilla, KD(+MinED), and TransLoRA are compared; no comparison against other more modern knowledge-transfer, model-merging, or adapter-stitching techniques that could contextualize the significance of the improvements.",
+        "Main experiments average over only 3 seeds, and most of the extensive appendix analyses (which constitute a large fraction of the paper's evidentiary support) are run with a single fixed seed, weakening confidence in many secondary claims.",
+        "Minor writing/proofreading issues (e.g., typos such as \"algortihm,\" \"tat tokens\") and some notational ambiguity (e.g., \"2M synthetic samples\" vs. \"2×M\") reduce polish and could cause confusion for readers."
       ]
     }
   }

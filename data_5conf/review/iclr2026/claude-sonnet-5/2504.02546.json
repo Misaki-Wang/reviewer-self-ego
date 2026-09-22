@@ -21,6 +21,46 @@
         "Some passages in Sections 3.2 and 5 use promotional, hand-wavy language (e.g., \"breakthrough,\" \"innovative step forward,\" \"fosters more open exploration\") without corresponding rigorous justification, which detracts from technical precision expected at a top-tier venue.",
         "Evaluation is limited to models up to 7B parameters, and the paper itself acknowledges (Broader Impact) that scalability to much larger models remains untested, limiting confidence in the claimed benefits for state-of-the-art large-scale RFT pipelines."
       ]
+    },
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Broad empirical evaluation spanning both unimodal (mathematical reasoning) and four multimodal task categories (visual reasoning, geometry reasoning, classification, reasoning grounding), across multiple base models (DeepSeek-R1-Distill-Qwen-1.5B, Qwen2.5-Math-7B, Qwen2-VL-2B, Qwen2.5-VL-3B).",
+        "Clear practical motivation: reducing memory/compute by removing critic and reference models is valuable for the community, and the method is simple to implement (Algorithm 1 is a few lines).",
+        "Reasonably thorough set of ablations (group size, reward normalization strategy, effect of re-adding KL constraint) that support some of the design choices.",
+        "The comparison table (Table 11) juxtaposing loss/advantage formulations of PPO/GRPO/Dr.GRPO/DAPO/GPG is a useful summary for readers unfamiliar with the design space."
+      ],
+      "weaknesses": [
+        "Limited technical novelty: GPG is essentially the group-normalized REINFORCE estimator already implicit in GRPO once the PPO-style clipping term is removed (which is inactive when ratio=1, i.e., a single gradient step per rollout, as is common practice). The paper's central claim of \"directly optimizing the original RL objective instead of a surrogate\" is not rigorously established — in the single-update, on-policy regime the GRPO surrogate gradient coincides with the plain policy-gradient estimator, so the distinction claimed in the introduction is overstated. Several existing works already remove KL (DAPO), remove the critic (ReMax, REINFORCE++, Dr.GRPO) or study reward normalization (Dr. GRPO); GPG largely recombines these known simplifications rather than introducing a new mechanism.",
+        "No importance-sampling ratio or old-policy reuse is included, and the paper does not discuss what happens when multiple gradient updates are taken per rollout batch (a common practical setting); the theoretical justification for omitting the ratio term entirely (rather than only in the single-update, on-policy limit) is missing or hand-waved.",
+        "The advantage formula (Eq. 6, group mean/std normalization) is essentially identical to GRPO's advantage — the paper's own Table 11 confirms A is the same as GRPO's; the actual algorithmic delta versus GRPO is therefore only \"drop clip term, drop KL term,\" which is a fairly small and already partially explored modification.",
+        "Several benchmarks (AIME24 with likely only ~30 problems, LISA grounding trained on 239 images, few-shot classification) are very small, so reported gains (e.g., +10 points on AMC23, +10+ points on LISA metrics) could plausibly reflect high-variance single-run noise rather than a robust algorithmic improvement; no variance/multiple-seed results, confidence intervals, or statistical significance tests are reported anywhere in the paper.",
+        "Missing important baselines given the related work discussed: REINFORCE++ and ReMax are extensively discussed in the introduction as directly relevant simplification approaches but are never empirically compared against GPG; only Dr. GRPO is compared, and only on one table.",
+        "The writing is often vague and repetitive with generic claims (\"these results underscore the robustness and efficacy,\" \"represents an innovative step forward,\" \"breakthrough\") that are not well substantiated by rigorous analysis; the paper reads as engineering-report style rather than providing deep methodological insight into why removing these components helps.",
+        "No discussion of training stability/robustness across seeds, nor of failure cases where removing KL/critic could hurt (e.g., larger-scale or longer training runs where policy collapse or reward hacking is more likely without any regularization) — this is a notable gap for a method to be positioned as a general \"baseline.\"",
+        "Table 9 shows performance still increasing at group size 16 without an evaluation at larger sizes or discussion of compute-performance tradeoff limits, and the choice of 8 is only weakly justified as a compute/performance tradeoff without a rigorous cost analysis."
+      ]
+    }
+  },
+  "v4": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Extensive empirical evaluation spanning unimodal math reasoning (1.5B and 7B models) and four multimodal task categories (visual reasoning, geometry, classification, grounding), with GPG consistently outperforming GRPO baselines across nearly all benchmarks.",
+        "The method is conceptually simple and practically appealing: it removes the critic model, reference model, KL constraint, and surrogate clipped loss, which reduces memory and computational cost (e.g., lower GPU memory and training cost than DAPO in Table 9).",
+        "Reasonably thorough ablation studies (group size, threshold βth, reward normalization choices, comparison with Dr. GRPO/DAPO) help isolate the contribution of individual design choices.",
+        "Additional robustness checks are included, such as evaluation on general-purpose benchmarks (MMLU, C-Eval) to show no degradation in general capability, and pass@k with multiple seeds/standard deviations for the 7B model.",
+        "The identification of gradient bias from all-correct/all-incorrect groups (zero-gradient samples) is a reasonable and interpretable observation, and the proposed rescaling (AGE) is simple to implement (Algorithm 1) and integrates well with distributed training without extra communication overhead."
+      ],
+      "weaknesses": [
+        "The core technical novelty is relatively thin: the method largely amounts to (i) stripping known components from GRPO/PPO (critic, reference model, KL, clipping) and (ii) rescaling the loss by a simple batch-composition factor (B/(B-M)), which is a fairly mechanical normalization rather than a deep methodological advance, yet it is framed as a significant contribution (\"breakthrough\").",
+        "The theoretical justification for removing the reference model and KL constraint is thin; the paper does not discuss potential risks (e.g., reward hacking, policy collapse, distributional drift) over longer training horizons beyond the reported ~1100 steps, nor provide stability guarantees analogous to TRPO/PPO's monotonic improvement arguments.",
+        "Fairness of comparisons is questionable: many baseline numbers in Tables 3-4 are taken directly from other papers under different reported settings (marked with symbols) rather than uniformly reproduced, and the authors state they \"closely adhere to the hyperparameters employed by GRPO,\" which are acknowledged to be suboptimal for GRPO itself, potentially biasing comparisons in GPG's favor.",
+        "Some reported improvements are surprisingly large for a mostly \"subtractive\" simplification (e.g., LISA grounding mIoU jump from 34.4 to 51.8, CV-Bench jump of ~17 points), raising concern about whether gains stem from the proposed mechanism versus other confounds (e.g., different effective learning dynamics from removing KL/clipping, hyperparameter differences, or limited-seed variance for these multimodal results, which are not accompanied by error bars).",
+        "The derivation of the \"accurate gradient estimation\" (AGE) correction is more of an algebraic identity than a rigorous debiasing proof; it does not address whether the correction introduces its own biases (e.g., correlation between the number of valid samples in a batch and reward informativeness/gradient magnitude across training).",
+        "The paper overclaims significance in several places (e.g., \"This breakthrough provides...\", \"SOTA results\"), which is not fully warranted given the relatively narrow scale of experiments (max 7B models) and the incremental nature of the core algorithmic change.",
+        "Presentation issues: inconsistent naming (GRPO is sometimes typo'd as \"GPRO\" in Table 1/15), dense notation, and some claims (e.g., about Dr. GRPO's performance) are stated without careful quantitative context, slightly hurting clarity and rigor of the writing."
+      ]
     }
   }
 }

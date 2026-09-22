@@ -21,6 +21,45 @@
         "Limitations section is very brief (single sentence) and does not discuss potential downsides such as sensitivity to the penalty coefficient α, behavior when constraints are contradictory/infeasible, or the added training cost (2 weeks on 8 H100s) relative to baselines.",
         "No comparison against other plausible hard-constraint techniques mentioned in related work (e.g., manifold-based diffusion, ADMM-style projections) to justify why Gauss-Seidel is preferable beyond a qualitative convergence-speed comparison against gradient descent alone."
       ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Addresses a practically important problem: current all-atom diffusion-based structure predictors frequently violate physical validity (steric clashes, chirality errors, etc.), and the paper proposes to treat validity as a hard constraint rather than a soft training/inference bias.",
+        "The differentiable Gauss-Seidel projection combined with implicit differentiation is a reasonable and well-engineered way to embed a large, sparse constraint-satisfaction problem into an end-to-end trainable pipeline, with convergence/optimality arguments provided in the appendix (Theorems D.1, E.1, F.1).",
+        "The method achieves 100% physical validity on all six benchmarks tested, in contrast to soft steering baselines (Boltz-1-Steering, Boltz-2) which still show non-trivial violation rates, and does so with only 2 denoising steps versus 200 for most baselines, yielding a reported ~10x wall-clock speedup.",
+        "Reasonably thorough empirical protocol: six benchmarks spanning protein complexes, protein-ligand, protein-DNA, and protein-RNA settings, plus an ablation study isolating the contributions of Gauss-Seidel projection vs. gradient-descent guidance vs. finetuning.",
+        "Good documentation of implementation details (GPU implementation via WARP, CG backward solve, hyperparameters) that aids reproducibility, along with pseudo-code for training/inference algorithms."
+      ],
+      "weaknesses": [
+        "The claim that the method 'achieves the same structural accuracy as state-of-the-art 200-step diffusion baselines' is not well supported across all benchmarks: Table 2 (relegated to the appendix) shows the method trails Boltz-2 substantially on AF3-AB (0.79 vs 0.87 Complex LDDT), dsDNA (0.78 vs 0.94 Complex LDDT, 0.70 vs 0.89 DNA-Prot LDDT), and RNA-Protein (0.32 vs 0.88 RNA-Prot LDDT). This meaningfully undercuts the paper's central accuracy claim and appears to be downplayed by moving these results out of the main text.",
+        "The core algorithmic idea (constraint projection via Gauss-Seidel sweeps, akin to position-based dynamics from computer graphics) is largely adapted from prior physics-simulation literature; the main novelty is the integration into a biomolecular diffusion pipeline via implicit differentiation rather than a fundamentally new algorithmic idea.",
+        "The physical validity constraints themselves are directly inherited from Boltz-1-Steering's energy terms, so the paper's contribution is primarily how the constraint is enforced (hard projection) rather than what is enforced, limiting the scope of the conceptual contribution.",
+        "Evaluation is built entirely on finetuning a single backbone (Boltz-1); there is no demonstration that the projection module generalizes to other architectures (e.g., AlphaFold3, Protenix, Boltz-2), leaving open whether the approach is broadly applicable or specific to this one pipeline.",
+        "Training cost (8 H100 GPUs for two weeks) is substantial, and no code/checkpoint release is mentioned, which combined with the complexity of the GPU-based Gauss-Seidel/CG implementation raises reproducibility concerns despite the algorithmic pseudo-code provided.",
+        "Runtime comparisons mix training hardware (H100) and evaluation hardware (A6000) without clear justification, and no variance/error bars are reported for the wall-clock speedup claims.",
+        "The ablation study is conducted on a single benchmark (CASP15) only, limiting confidence that the reported necessity of finetuning + Gauss-Seidel projection generalizes across the other five benchmarks.",
+        "Several reported LDDT/accuracy differences between the proposed method and baselines are within one standard deviation of each other (e.g., many Table 1 entries), raising questions about the statistical significance of the claimed 'competitive accuracy' results."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Introduces a well-motivated and technically grounded approach that elevates physical validity from a soft inference-time bias (as in prior steering methods) to a hard, differentiable constraint enforced during both training and inference via a Gauss-Seidel projection.",
+        "Solid theoretical foundation: the paper provides convergence proofs for the linearized Newton system (Thm D.1), for the Gauss-Seidel sweep as cyclic coordinate descent on a strongly convex quadratic (Thm E.1), and for conjugate-gradient convergence of the implicit-differentiation backward pass (Thm F.1), giving confidence that the module behaves as claimed.",
+        "Strong, broad empirical validation across six diverse benchmarks (CASP15, Test, PoseBusters, AF3-AB, dsDNA, RNA-Protein) spanning protein-protein, protein-ligand, protein-DNA and protein-RNA modeling, with consistent 100% physical validity and competitive-to-state-of-the-art LDDT/DockQ using only 2 denoising steps versus 200-step baselines.",
+        "Practically significant efficiency gains (~9-10x wall-clock speedup over 200-step baselines and 23-46x over steering-based methods) that could meaningfully improve usability of all-atom biomolecular predictors.",
+        "Careful ablation study (Table in Sec 5.5) isolating the contributions of GS-projection-as-post-processing vs. GS-projection-with-finetuning vs. gradient-descent guidance, clearly demonstrating that both the differentiable projection and the finetuning are necessary for the reported accuracy/validity trade-off.",
+        "Good reproducibility support: detailed forward/backward algorithms (Algorithms 1-4), explicit constraint formulations (Appendix G), GPU implementation details (WARP library, batching, CG solver), and a reproducibility statement."
+      ],
+      "weaknesses": [
+        "The method is only instantiated and finetuned on a single backbone (Boltz-1); despite claims of being a 'drop-in' or 'plug-and-play' module for arbitrary biomolecular frameworks, no experiments demonstrate integration with a second backbone (e.g., Protenix or AlphaFold3-style models), leaving generality largely unverified.",
+        "On some benchmarks (e.g., AF3-AB and dsDNA in Table 2), the 200-step Boltz-2 baseline clearly outperforms the proposed 2-step method in raw LDDT (e.g., 0.87 vs 0.79 on AF3-AB), which somewhat undercuts the paper's framing that the accuracy gap to 200-step SOTA is 'largely closed'; a more calibrated discussion of this trade-off would strengthen the claims.",
+        "Physical validity is evaluated using exactly the same constraint set that the projection module is trained/inferred to satisfy, which risks circularity — 100% validity is close to guaranteed by construction rather than an independent confirmation of realism; validation against external or orthogonal structural-quality checks (e.g., MolProbity-style or knowledge-based potentials) would make the validity claims more convincing.",
+        "Limited analysis of the projection module's own scalability/overhead for very large complexes (constraint count m can reach ~13M for a single example); while runtime totals are reported, a breakdown of projection-only cost vs. denoising cost across atom-count bins would clarify how the method scales to larger assemblies.",
+        "The convergence/runtime ablation (Fig. 5) and the main ablation study (Sec. 5.5) are conducted on a single structure/benchmark (PDB 8X51 and CASP15, respectively) rather than across all six evaluation datasets, so the generality of these specific findings is not fully established.",
+        "Training the finetuned model requires substantial compute (8 H100 GPUs for two weeks), which, combined with reliance on Boltz-1 pretrained weights, may limit reproducibility for groups without comparable resources, despite the detailed pseudocode provided."
+      ]
     }
   }
 }

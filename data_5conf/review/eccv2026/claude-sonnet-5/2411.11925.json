@@ -20,6 +20,25 @@
         "Presentation clarity could be improved: notation is dense (e.g., overloaded p(x), several intermediate equations across main text and appendix) and some figures (e.g. Figure 15 rejection-times plot) lack thorough discussion; the paper would benefit from a clearer high-level algorithm summary in the main text (Algorithm 1 is relegated to supplementary)."
       ]
     },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a genuinely unexplored problem: extending speculative decoding to continuous-valued (diffusion-head) autoregressive image generators, where discrete-token speculative decoding tricks (direct PDF ratio, discrete resampling) do not apply.",
+        "The core technical trick — avoiding the intractable normalizing constant Z of the rejection-modified distribution by setting the acceptance-rejection upper bound M=1/Z and expressing the acceptance threshold purely in terms of pointwise p(x) and q(x) — is a clean and correct reformulation, and the appendix provides a reasonably complete correctness proof that the marginal output distribution equals the target model's distribution.",
+        "The proposed denoising trajectory alignment (sharing the same standard Gaussian noise across draft/target reverse diffusion steps) and token pre-filling are sensible, well-motivated engineering solutions to the practical problem of low acceptance rates caused by mismatched draft/target denoising trajectories and cold-start prefix embeddings, and are validated with ablations (Table 3, Table 4, Figures 8/10/11/12).",
+        "Reasonably thorough set of ablations (draft length, batch size, CFG, temperature, pre-filling ratio) and qualitative visualizations (including per-token acceptance heatmaps) that make the mechanism relatively transparent.",
+        "No retraining, architecture changes, or modification to the output distribution is required, which is attractive for practical deployment as a drop-in accelerator."
+      ],
+      "weaknesses": [
+        "All experiments are conducted on a single model family (MAR) with only two/three checkpoint sizes (208M/479M/943M) on ImageNet 256×256; no other continuous-valued AR image models (e.g., Fluid, DisCo-Diff, GIVT, HART) or text-to-image / higher-resolution settings are evaluated, despite several being cited as directly relevant. This substantially limits the evidence for generality of the claimed 2.33× speedup and the broader claim of adapting speculative decoding to \"continuous-valued autoregressive models\" as a class.",
+        "The headline 2.33× speedup is only achieved at the most favorable configuration (MAR-H target / MAR-B draft, γ=32, batch size 256); at batch size 1, which is the practically relevant regime for interactive image generation, speedups are much more modest (as low as 1.0–1.44×), and the paper does not clearly foreground this limitation in the abstract/introduction.",
+        "No comparison against any alternative acceleration baseline for continuous AR/diffusion-head image generation (e.g., simple caching, step-skipping, distillation-based speedups, or naive relaxed-acceptance heuristics) — the only comparison is against the unaccelerated target model itself, making it hard to judge the relative merit of the proposed method versus simpler alternatives.",
+        "Despite the theoretical claim of exactness (marginal output distribution equals that of the target model alone), the empirical FID/IS numbers in Table 2 consistently differ from the vanilla target model's numbers (e.g., FID 1.78 vs 1.81, 1.55 vs 1.60), and the paper explains this away as \"within an acceptable range\" without a rigorous statistical analysis (e.g., confidence intervals versus the theoretical zero-gap prediction, or quantification of the practical impact of the Gaussian-approximation assumption on true losslessness).",
+        "The acceptance rate is often quite low (roughly 0.1–0.4 in Table 3, decaying further with draft length in Figure 8), and the practical efficiency of the acceptance-rejection resampling step (expected number of trials tied to 1/Z) is only characterized empirically for a narrow set of configurations (Figure 15), leaving open questions about behavior in harder regimes (e.g., very low acceptance rate, high CFG scale, where Figure 13 shows acceptance can drop sharply).",
+        "The method's benefit is explicitly acknowledged by the authors to be constrained by the limited scale disparity between available open-sourced draft/target checkpoints (208M vs 943M), so the paper's claims about scaling to 7B/13B-parameter regimes are speculative and untested, undermining the strength of the central efficiency claim for realistically large models where the technique would matter most.",
+        "Presentation of some derivations (e.g., the shared-noise trajectory alignment justification, exact role of M and Z) is dense and could be clearer for readers unfamiliar with diffusion reparameterization; the main paper leans heavily on the supplementary material for rigor, which somewhat weakens self-containment."
+      ]
+    },
     "exp3_positive": {
       "oa": 5,
       "strengths": [
@@ -58,6 +77,24 @@
         "The correctness proof and trajectory-alignment analysis rely on idealized assumptions (shared noise across steps, Gaussian reverse process with matching functional form) that hold for the specific DDPM/DDIM instantiations tested; applicability to more complex continuous output heads (e.g., GMM-based GIVT/DiCoDe) is discussed only conceptually in the appendix without empirical validation.",
         "Quality metrics show some degradation in a few configurations (e.g., slightly worse FID/IS under certain CFG/draft settings in Table 3), and the paper does not deeply analyze when/why acceptance-rejection sampling might degrade fine-grained detail versus background regions beyond a qualitative heatmap illustration.",
         "The pre-filling strategy, while effective, partially reduces the scope of genuine speculative parallelism during early AR steps, and its interaction with overall wall-clock gains (versus just running target steps for that prefix) could be discussed more quantitatively in the main text rather than only via acceptance-rate curves."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "First systematic extension of speculative decoding theory to continuous (diffusion-based) autoregressive visual generation, addressing two well-motivated technical obstacles: distributional inconsistency between draft/target diffusion trajectories and the lack of an analytic form for the modified (residual) distribution.",
+        "The 'proximity in the reparameterization' theorem and the derivation of an easy-to-compute rejection threshold (Corollary 1) that reuses cached denoising quantities to avoid extra diffusion forward passes are reasonably rigorous and clearly derived (Appendix A).",
+        "A formal proof (Appendix A.3) that the proposed acceptance-rejection scheme preserves the original target distribution, mirroring the discrete speculative-decoding correctness guarantee.",
+        "Broad empirical validation across three different continuous AR backbones (MAR, xAR, Harmon) and two resolutions, with FID/IS quality checks, ablations on draft length, pre-filling ratio, temperature, and CFG scale, plus qualitative visualizations (including token-level acceptance heatmaps) that make the method's mechanics interpretable.",
+        "The paper is transparent about a key limitation (draft/target inference-cost ratio is far less favorable than in LLM speculative decoding), which is a mark of honest self-assessment rather than overclaiming."
+      ],
+      "weaknesses": [
+        "The reported speedups are heavily batch-size dependent: at bs=1 (the most practically relevant single-sample generation setting) speedups are modest (1.1x–1.63x), while the headline >2x figures only materialize at large batch sizes (128–256), which somewhat undercuts the paper's central efficiency claim.",
+        "The paper itself acknowledges that current open-source draft/target pairs (e.g., MAR-B 208M vs MAR-H 943M) have a much larger relative inference-cost ratio than typical LLM draft/target pairs, meaning the method's practical benefit is contingent on future availability of much smaller, well-matched draft models that do not yet exist for these backbones — this weakens the immediate real-world impact of the empirical results.",
+        "No comparison against simpler efficiency baselines for continuous AR/diffusion models (e.g., reduced-step DDIM/faster samplers, distillation, or step-skipping schedules) that could achieve similar wall-clock savings without the added complexity of speculative decoding machinery, making it hard to judge the relative cost-benefit of the proposed approach.",
+        "Quality metrics after acceleration are described as being maintained 'within a reasonable interval,' but Table 3 shows non-trivial deltas (e.g., IS 296.0 vs 303.7 with CFG), and no significance testing or user study is provided to substantiate that these differences are perceptually negligible.",
+        "The denoising trajectory alignment technique (sharing the same reparameterization noise ε across draft and target) is a somewhat ad hoc engineering trick; while correctness of the final sampling procedure is preserved, the paper offers limited discussion of whether this coupling could bias which tokens tend to be accepted (e.g., favoring simple/low-detail regions, as shown in the acceptance heatmap in Fig. 11), which could subtly affect the diversity or texture quality of generated content in ways not captured by FID/IS alone.",
+        "Wall-clock timing evidence is somewhat sparse; most results report only speedup ratios rather than absolute latency figures across the full range of settings, and the promised 'over 2x speedup' framing in the abstract is not representative of the more common lower-batch operating regime."
       ]
     }
   }

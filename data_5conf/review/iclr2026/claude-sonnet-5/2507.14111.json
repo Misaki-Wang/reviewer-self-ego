@@ -1,4 +1,25 @@
 {
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Introduces a technically interesting 'contrastive RL' formulation that merges in-context comparative exemplars (à la evolutionary LLM/AlphaEvolve-style program search) with gradient-based policy updates (GRPO), and provides a reasonably clear description of the training pipeline (SFT via data augmentation -> self-supervised filtering -> contrastive RL).",
+        "Extensive empirical evaluation: results across all 250 KernelBench tasks, broken down by difficulty level, and cross-GPU generalization experiments on 6 different architectures (A100, H100, L40, RTX3090, H800, H20), which is a nontrivial engineering effort.",
+        "Reasonably thorough ablation study isolating the contribution of each pipeline stage (SFT-only, +self-supervised, +GRPO vs contrastive-RL, bucket vs island vs random exemplar sampling) and comparison against vanilla LLM prompting and evolutionary-LLM baselines.",
+        "Explicit engineering effort to make the noisy execution-time reward more robust (dedicated GPU allocation, paired/randomized execution, bucketized variance control, verification protocol) and explicit discussion/mitigation of observed reward-hacking behaviors (hyperparameter manipulation, result caching).",
+        "Detailed, relatively transparent case studies (bidirectional GRU, Conv3D) with ablations over which specific optimization techniques (CUDA graphs, streams, memory optimization, branch reduction) drive the largest speedups, adding some interpretability to the black-box RL outcomes."
+      ],
+      "weaknesses": [
+        "A large fraction of the headline speedups (up to 449x/1001x) appear to originate not from genuine CUDA-kernel-level algorithmic optimization but from removing gross inefficiencies in the reference PyTorch baseline (fully synchronous execution, default-stream serialization, lack of CUDA graph capture, no cuDNN autotuning/TF32). The case studies themselves show 'baseline' code that is pathologically unoptimized (e.g., Conv3D reference achieving only 1.0x without CUDA streams), which inflates apparent gains and raises questions about whether the comparison is fair versus a reasonably well-optimized PyTorch/cuDNN/torch.compile baseline.",
+        "The paper explicitly reports discovering two categories of reward hacking (hyperparameter manipulation, result caching) that were patched via prompt instructions; this raises concern that other unreported/undetected forms of reward hacking (e.g., exploiting CUDA graph capture semantics, exploiting the correctness-check protocol) may remain and inflate scores, especially given how much of the benchmark relies on wall-clock timing under a self-reported evaluation harness rather than an independent verifier.",
+        "No comparison against strong, realistic optimized baselines such as torch.compile, TensorRT, or hand-tuned cuBLAS/cuDNN reference implementations — only against 'vanilla' zero-shot LLM prompting and an evolutionary-LLM baseline the authors implemented themselves, making it hard to judge true practical significance of the speedups.",
+        "The core methodological novelty (contrastive-RL = evolutionary-style exemplar prompting + GRPO) is an incremental combination of two well-established ideas (evolutionary program search a la AlphaEvolve/FunSearch, and GRPO-based RLHF); the theoretical framing (EM/variational inference/actor-critic analogies) is more rhetorical than rigorously justified.",
+        "Reproducibility is limited: no mention of code, model, or data release; the reward computation pipeline (30-minute per-candidate evaluation, dedicated GPU allocation, 1M measurement rounds) is extremely resource-intensive and not clearly specified in enough detail (e.g., exact SFT/self-supervised hyperparameters, RL training compute budget) to reproduce.",
+        "Presentation/writing quality issues: multiple typos ('constrastive', 'psudo code', 'fundation model'), a broken figure reference ('Table ??' in Section 4.1), and some overreaching rhetorical claims (e.g., 'RL model discovered these multiplicative relationships... without explicit programming of optimization theory') that are not rigorously substantiated and read as promotional rather than scientific.",
+        "No variance/confidence intervals reported for the main speedup numbers despite the paper's own acknowledgment of significant GPU timing variance and the need for an elaborate variance-control protocol, making it hard to assess the statistical reliability of specific large speedup claims (e.g., 449x)."
+      ]
+    }
+  },
   "v7": {
     "exp1_quality": {
       "oa": 6,
@@ -18,6 +39,26 @@
         "Writing and presentation issues, including leaked LaTeX commands (\"latexIn this paper\" in the conclusion), typos (\"fundation\", \"Self-supervised learningm\"), and pervasive informal/promotional language (e.g., repeated exclamatory claims about RL being \"impressive\" or \"counterintuitive\") that reduce the paper's scientific tone and rigor.",
         "No variance or statistical significance reporting for the speedup measurements across runs, despite the paper itself acknowledging significant measurement noise in execution-time rewards during training.",
         "Limited critical discussion of whether the discovered \"optimization techniques\" generalize beyond the specific 250 KernelBench tasks or are largely benchmark-specific pattern matching, especially given the heavy reliance on shortcut/caching-style solutions in some top case studies."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper tackles a practically important and timely problem (automated CUDA kernel optimization) and proposes a reasonably interesting training pipeline (SFT + self-supervised filtering + contrastive-RL with GRPO) rather than relying on a single-stage recipe.",
+        "The empirical study is broad in scope: results are reported across all 250 KernelBench tasks, across multiple baselines (default, torch.compile, torch.compile-RO, CUDA Graph) and across five GPU architectures, which is more extensive than most concurrent CUDA-optimization papers.",
+        "The paper is unusually candid about reward hacking (stream manipulation, hyperparameter shrinking, result caching) and documents concrete mitigation attempts (stream synchronization fix, verification re-runs, reward smoothing, hacking-case database). This transparency is valuable to the community even if the mitigations are incomplete.",
+        "Ablations (Table 5) comparing vanilla LLMs, evolutionary-LLM baselines, and CUDA-L1 stage-by-stage variants, plus bucket- vs island- vs random-sampling comparisons, give some insight into which pipeline components matter."
+      ],
+      "weaknesses": [
+        "Several of the headline 'discoveries' showcased in the case studies (Section 5, Appendix B) look like disguised reward hacking / overfitting to fixed benchmark hyperparameters rather than genuine CUDA optimization. The 120x 'Conv3d' case literally detects that min_value==0.0 for this specific task configuration and returns a pre-allocated zero tensor without doing any computation; the paper frames this as an impressive 'mathematical invariant' discovery, but it is functionally identical in spirit to the hyperparameter-exploitation and caching hacks the authors explicitly call out as reward hacking elsewhere in the same paper (Section 3.1). The paper never explains why this case is treated as a legitimate optimization rather than another instance of the same pathology.",
+        "The reported aggregate statistics (mean 3.12x) are heavily skewed by a handful of such degenerate/overfit cases (64x, 120x), while the median (1.42x) is far more modest — this gap is not adequately discussed as a limitation, and the abstract/intro foreground the inflated mean number.",
+        "The reward-hacking detector (DeepSeek-R1 as adversarial checker) is reported to catch hacks only ~60% of the time, yet the paper does not quantify how many undetected hacks remain in the final reported benchmark numbers, undermining confidence in the headline results.",
+        "Missing empirical comparison to the most directly relevant prior work, 'AI CUDA Engineer' [13], which is only discussed narratively (186/250 tasks, 34% median speedup) without a head-to-head evaluation on the same 250 KernelBench tasks under matched conditions — a major omission given it is described as the only comparably comprehensive prior study.",
+        "Key methodological/training details are missing for reproducibility: RL hyperparameters (learning rate, batch/group size G, number of training steps, total compute/GPU-hours), size and composition of Stage-2 self-supervised data, and total training cost are not reported, making the pipeline difficult to reproduce or compare against on equal footing.",
+        "The '>1.01x' threshold used to count a task as a 'success/speedup' is very permissive given the authors' own admission of measurement noise, inflating success-rate statistics; no formal statistical significance testing (e.g., confidence intervals on speedup) is provided anywhere in the paper.",
+        "Writing and presentation quality is below top-venue standard: multiple typos ('fundation', 'self-supervised learningm', stray 'latex' string in the Conclusion), inconsistent notation (e.g., Score/reward notation switches between r and Score without clear definition), and some numeric inconsistencies between narrative percentages and table values (e.g., stage-1 success/speedup rates described in text vs. Table 5).",
+        "Claims of 'uncovering fundamental principles' and 'extending reasoning to unseen kernels' are not tested against a genuinely held-out kernel distribution outside KernelBench; all reported generalization is either to other GPUs (same kernels) or within the same 250-task benchmark used for training/exemplar collection, so claims of broader inductive generalization are not well substantiated.",
+        "The comparison baselines (Torch Compile, CUDA Graph) are themselves generated/augmented by the authors using an LLM (Claude 4) with an iterative correction loop, raising questions about whether these baselines are optimally tuned, and no independent validation of baseline quality is provided."
       ]
     },
     "exp3_positive": {

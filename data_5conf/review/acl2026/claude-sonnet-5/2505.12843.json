@@ -20,6 +20,27 @@
         "Reproducibility is only partially supported: exact code/model release is not mentioned, and some pipeline details (e.g., exact ResNet architecture, multi-GPU aggregation specifics for Pearson computation, LR/scheduler for the fitting model) are described somewhat tersely, which could hinder faithful reproduction.",
         "The DPO setup (reannotating a held-out set using different RMs, then training DPO on the relabeled data) is somewhat unconventional and could introduce confounds (e.g., relabeling noise, dataset size effects) that are not analyzed separately from the RM's inherent quality."
       ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "Addresses a well-motivated and practically important problem in RLHF: the failure of linear-relation assumptions in existing length-debiasing methods.",
+        "The proposed three-stage pipeline (warm-up, bias fitting with length encoding + ResNet, decorrelation-based debiasing) is clearly described with explicit loss formulations.",
+        "Multiple complementary analyses are presented (subset accuracy, length-reward scatter plots, downstream DPO/BoN win rates, length distribution histograms, training-curve visualization of the fitted bias), giving a reasonably broad (if shallow) empirical picture.",
+        "The qualitative finding of a multi-phase (linear/sublinear/noisy) length-reward relationship is an interesting observation that could motivate future non-linear debiasing work."
+      ],
+      "weaknesses": [
+        "Critically weak baseline comparison: the paper's central claim is that non-linear fitting is superior to linear-relation assumptions used in prior work (length penalty [41], Product-of-Experts [40], Huang et al. regression-based calibration [19]), yet none of these directly relevant linear baselines are actually implemented or compared against—only ODIN (a different, two-head architecture) is used as a baseline, leaving the paper's core comparative claim empirically unsupported.",
+        "Single dataset (Anthropic HH-rlhf static split) and only two closely related model scales (Qwen2.5-7B/1.5B) are used; there is no evidence the method generalizes to other preference datasets (e.g., summarization, UltraFeedback) or larger/other model families.",
+        "No error bars, variance estimates, multiple seeds, or significance testing are reported anywhere; several reported improvements (e.g., Table 3 DPO LC-WR for Qwen2.5-1.5B: 73.84 vs 73.68/73.22) are small enough to plausibly fall within noise, undermining confidence that the method's benefits are real rather than incidental.",
+        "No ablation studies isolating the contributions of individual design choices (length encoding vs. raw scalar input, ResNet vs. simpler MLP, Pearson+MSE combined loss vs. either alone, alternating-training schedule with step size a=8), so it is unclear which components actually drive the reported gains.",
+        "Key hyperparameters (embedding dimension d=32, alternation interval a=8) are stated without justification or sensitivity analysis, weakening reproducibility and interpretability.",
+        "PPO, the canonical RLHF optimization algorithm, is explicitly excluded from evaluation, so the method is validated only on BoN and DPO (the latter requiring an unusual re-annotation procedure whose validity as a faithful proxy for standard DPO/RLHF is not established).",
+        "Evaluation relies solely on GPT-4-as-judge via length-controlled Alpaca-Eval with no human evaluation, and no details are given on the number of trials or judge consistency, raising reliability concerns given known instability of automated LLM judges.",
+        "The claimed accuracy trade-off (Table 1: overall accuracy drops from 70.83% to 69.00%) is rationalized narratively but not quantitatively justified as an acceptable cost, and the reduction could partly reflect degraded general preference-modeling capability rather than pure debiasing.",
+        "The theoretical justification for using Pearson-correlation minimization as a debiasing objective is weak: removing linear correlation does not guarantee removal of non-linear or causal length dependence, which is somewhat in tension with the paper's own emphasis on non-linearity.",
+        "No code or training artifacts are indicated as released, and given the intricate multi-stage alternating training procedure, reproducibility solely from the paper's description is uncertain."
+      ]
     }
   },
   "v2": {
@@ -42,6 +63,24 @@
         "Results are reported as single-run point estimates without variance or significance testing across seeds, making it hard to assess how robust the reported improvements (often a few points in LC-WR) are to run-to-run variability.",
         "Comparison baselines are limited to Vanilla RM, Length Penalty, and ODIN; several other more recent length-debiasing methods discussed in related work (e.g., RRM, ALBM, SamPO, Park et al.) are not empirically compared despite being readily available, weakening the claim of state-of-the-art performance.",
         "The interpretation of the accuracy trade-off in Table 1 (drop in C-longer accuracy framed as removal of a length 'shortcut' rather than capability loss) is argued qualitatively rather than being verified with an independent, length-controlled ground-truth quality measure."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2.5,
+      "strengths": [
+        "The problem (length bias / reward hacking in RLHF reward models) is well-motivated and clearly situated within existing literature, with a reasonably thorough related-work discussion distinguishing linear-assumption approaches (ODIN, length penalty) from bias-form-agnostic approaches (RRM, KL regularization).",
+        "The experimental protocol is fairly broad: two base models (Qwen2.5-7B, Gemma2-9B), two primary alignment algorithms (DPO, BoN), and additional appendix experiments across SimPO, GRPO, and a second dataset (RLHFlow), which helps demonstrate some generality of the proposed effect.",
+        "Extensive ablations are provided (joint vs. multi-stage training, alternating schedule, fitting-model architecture choices) along with a computational cost analysis showing the added fitting model incurs negligible overhead.",
+        "The paper includes multiple complementary diagnostics beyond win-rate numbers (length-reward scatter plots, BoN selection length distributions, chosen/rejected length gaps in DPO annotation), which together paint a consistent qualitative picture of reduced length bias."
+      ],
+      "weaknesses": [
+        "Central methodological tension: the paper's core claim is that length bias is non-linear and previous linear-correlation-based methods are inadequate, yet the actual debiasing objective (Eq. 5–6) minimizes the Pearson correlation |ρ(r, r̂_sg)| between the reward and the fitting model's output — a strictly linear correlation measure. Minimizing linear correlation between r and a nonlinear function of length does not guarantee removal of the nonlinear length dependence in r itself; the paper does not provide theoretical or empirical justification (e.g., mutual information, HSIC, or distance correlation analysis) that this objective actually achieves the claimed nonlinear decoupling, undermining the central contribution.",
+        "The reward-model accuracy results (Table 1) show an overall accuracy drop for FiMi-RM relative to baselines on both models, explained post hoc via the C-longer/R-longer subset argument. This explanation, while plausible, is not independently validated (e.g., via synthetic length-bias injection with known ground truth, or human-labeled quality-controlled subsets), leaving the interpretation partly speculative.",
+        "Evaluation relies heavily on GPT-4-as-judge (AlpacaEval, length-controlled win rate) and MT-Bench (also LLM-judged), which are themselves documented to carry stylistic/length biases; no human evaluation is included to corroborate that the debiased model's outputs are genuinely higher quality rather than differently styled. No confidence intervals or significance tests are reported for the win-rate differences, which are typically noisy metrics, making it hard to assess whether reported gains (often a few points) are robust.",
+        "Ablation results for the fitting-model architecture (Table 5) show only marginal differences between Linear (71.67), MLP (71.35), 1D-CNN (71.15), and ResNet (72.59), which weakens the claim that explicitly modeling non-linearity is critical to the method's success, since a simple linear fit performs nearly as well.",
+        "Main experiments rely on a single, relatively small preference dataset (Anthropic HH static split, 30k RM training pairs); broader validation is relegated to a brief appendix result on one additional dataset, limiting confidence in generalizability across more diverse and realistic RLHF preference distributions.",
+        "Baseline implementation details (e.g., the length-penalty coefficient, ODIN hyperparameters) are not reported, making it difficult to assess whether baselines were adequately tuned for a fair comparison.",
+        "The rise in Bradley-Terry loss during Stage 3 (0.530→0.566) is interpreted as evidence the length shortcut was removed, but this argument is circular without an independent measure of preference-modeling quality (e.g., a length-balanced held-out human-labeled test set) to confirm the model still tracks genuine preferences rather than simply becoming a worse discriminator."
       ]
     },
     "exp3_positive": {

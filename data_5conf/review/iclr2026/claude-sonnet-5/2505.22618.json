@@ -1,4 +1,27 @@
 {
+  "v1": {
+    "exp1_quality": {
+      "oa": 8,
+      "strengths": [
+        "The paper addresses a practical and timely problem: closing the inference-speed gap between diffusion LLMs and autoregressive models, which is critical for real-world deployment.",
+        "The proposed approximate block-wise KV Cache (with DualCache variant) is a simple, training-free, and generally applicable idea that is well motivated by empirical cosine-similarity analysis of KV activations across adjacent decoding steps (Figure 3).",
+        "The confidence-aware parallel decoding strategy is intuitive, easy to implement, and is backed by a theoretical justification (Theorem 1) showing conditions under which greedy parallel decoding matches greedy sequential decoding, along with bounds on TV distance and KL divergence between the joint and product-of-marginals distributions.",
+        "Extensive empirical evaluation across two backbone models (LLaDA, Dream), four benchmarks (GSM8K, MATH, HumanEval, MBPP), and multiple generation lengths, demonstrating consistent speedups (up to 27.6x) with minimal accuracy loss.",
+        "Thorough ablation studies covering cache block size, prefix vs. dual cache, prefill/generation length effects, and threshold vs. fixed-token-count baselines, which help isolate the contribution of each component.",
+        "The method is training-free, making it easily applicable to existing pretrained diffusion LLMs without additional fine-tuning cost, increasing its practical value and adoption potential.",
+        "Code and project page are provided, supporting reproducibility."
+      ],
+      "weaknesses": [
+        "The theoretical analysis (Theorem 1) is a worst-case bound under a high-confidence assumption; the practical relevance of this bound to the actual confidence threshold values used (0.9) is not empirically validated (e.g., no measurement of actual epsilon values or how tight the bounds are in practice).",
+        "The approximate KV cache introduces a systematic approximation (full attention approximated by staged prefix/suffix caching) whose error accumulation over many blocks/steps is not rigorously bounded, only qualitatively justified via similarity heatmaps on a single example (LLaDA-Instruct) and few benchmarks; broader analysis on error compounding over long generations would strengthen soundness.",
+        "The case study in Appendix B uses only a single, very simple arithmetic prompt to demonstrate qualitative equivalence, which is not a rigorous or representative test of output quality preservation across the method's design space (cache variants, block size, threshold).",
+        "Missing comparisons to other recent diffusion LLM acceleration baselines beyond the vanilla LLaDA/Dream models (e.g., Block Diffusion mentioned in related work is not empirically compared), limiting the ability to contextualize the proposed speedups against alternative caching/parallel decoding schemes.",
+        "The paper reports throughput/speedup numbers primarily on a single GPU (A100) and single batch size; scalability to batched inference or other hardware is not studied, which is relevant to practical deployment claims made in the abstract/introduction.",
+        "Some minor writing issues remain (e.g., typo 'hgiher' in the contributions list), and notation in the theoretical section is dense, potentially reducing accessibility for a broader audience.",
+        "The accuracy trade-off, while generally small, is not statistically characterized (no variance/significance testing across multiple runs), making it hard to assess whether the reported 1-2 point differences are within noise."
+      ]
+    }
+  },
   "v2": {
     "exp1_quality": {
       "oa": 8,
@@ -18,6 +41,26 @@
         "Accuracy is not uniformly preserved (e.g., some benchmarks show >1-2 point drops such as MBPP at length 512, or fluctuations on HumanEval), and results are reported as single runs without variance/error bars despite the stochastic nature of confidence-based decoding.",
         "Section C.5 reveals that diffusion LLMs (even with the proposed caching) still scale worse than AR baselines at larger batch sizes, an important practical limitation that is somewhat underexplored/underemphasized relative to the paper's strong headline speedup claims.",
         "Minor presentation issues (typos, e.g., 'hgiher' in the introduction) suggest incomplete proofreading."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Addresses a real and timely practical bottleneck: open-source diffusion LLMs lack KV caching and degrade under parallel decoding, both of which limit real-world throughput relative to AR models.",
+        "Training-free, plug-and-play design makes the method easy to apply to existing checkpoints (LLaDA, Dream, LLaDA-1.5, LLaDA-V), and the paper demonstrates broad applicability across text and multimodal tasks.",
+        "Reasonably extensive empirical study: multiple benchmarks (GSM8K, MATH, HumanEval, MBPP, MathVista, MathVerse), multiple generation lengths, and several ablations (cache block size, threshold vs. factor decoding, prefill/generation length scaling, batch-size scaling vs. AR baselines).",
+        "Attempts a theoretical grounding (Theorem 1) for when parallel decoding under conditional independence is safe, giving some principled motivation for the confidence-threshold heuristic rather than a purely empirical rule.",
+        "Visualization of KV activation cosine similarity provides some empirical justification for why block-wise cache reuse is a reasonable approximation."
+      ],
+      "weaknesses": [
+        "Core technical novelty is limited: block-wise KV caching for diffusion LMs has already been explored (e.g., Block Diffusion), and confidence-based token selection is a fairly direct extension of the top-k confidence strategy already used in LLaDA; the paper largely combines and tunes existing ideas rather than introducing a fundamentally new mechanism.",
+        "The approximate KV cache (especially DualCache, which caches fully-masked suffix tokens) has no formal error bound; justification rests solely on qualitative cosine-similarity heatmaps for a couple of examples, without analysis of how approximation error compounds over many blocks/steps or degrades on harder/longer tasks.",
+        "Theorem 1 is an idealized result (assumes a well-behaved, consistent joint PMF that the authors themselves admit MDMs don't strictly satisfy) and its high-confidence regime bound is not actually used to set the deployed threshold (τ) in the main experiments—undermining the claimed tightness between theory and the practical algorithm; the more \"theoretically grounded\" factor-based strategy is relegated to secondary/appendix results.",
+        "Reported accuracy is not uniformly preserved—several settings show non-trivial accuracy drops or noisy non-monotonic behavior (e.g., MBPP at length 512 drops from 14.8 to 13.8 with Fast-dLLM on LLaDA; various HumanEval/MATH entries fluctuate up and down by 1-3 points across cache/parallel variants), which weakens the paper's central claim of \"negligible\" performance loss; no variance/multiple-seed reporting is given to assess whether these are noise or real effects.",
+        "Baselines are largely internal ablations (no cache/no parallel vs. combined) rather than external strong baselines (e.g., no comparison to Block Diffusion's caching method, other diffusion LLM speedup techniques, or auxiliary-model dependency-aware decoding mentioned in related work); this makes it hard to assess how much of the gain is genuinely novel versus attributable to previously known ideas.",
+        "Single-batch, single-GPU (A100) throughput numbers dominate the main results, while the more realistic batched-inference comparison (Appendix C.5) reveals that the method's advantage over AR models erodes substantially at larger batch sizes—this important caveat is understated relative to the headline 27.6× claim.",
+        "Presentation issues suggest a rushed technical-report style rather than a polished paper: an abstract containing GitHub/project links, a typo (\"hgiher\"), and case studies with very simple, unrepresentative prompts (a single arithmetic word problem) used to argue quality preservation.",
+        "The paper does not deeply investigate failure modes or scenarios where the approximate cache/parallel decoding breaks down more seriously (e.g., on longer chains of reasoning, higher block sizes, or tasks more sensitive to token-level dependencies), leaving the generality of the claims unclear beyond the tested benchmarks."
       ]
     }
   }

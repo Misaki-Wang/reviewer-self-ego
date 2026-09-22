@@ -1,0 +1,42 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Clear and well-supported motivation: Figure 2 provides concrete empirical evidence (layer-wise top-k overlap, head-wise ranking divergence) that token importance is dynamic across layers and heads, directly justifying the design choice to avoid permanent eviction.",
+        "The core compress-then-decompress mechanism is a genuinely useful idea: by scattering compressed attention outputs back to the full sequence via the residual path, the method allows tokens deemed unimportant in one layer to be reconsidered in later layers/heads, addressing a real shortcoming of prior eviction-based token-sparse methods (FastKV, GemFilter).",
+        "Strong practical compatibility story: because compression yields dense, contiguous Q/K/V, the method can be dropped into FlashAttention or composed with block-sparse methods (Minference, FlexPrefill) without kernel modification, which is demonstrated empirically as a complementary speed boost on top of these baselines.",
+        "Reasonably comprehensive empirical evaluation spanning RULER, InfiniteBench, LongBench, and Needle-in-a-Haystack across two model families, plus targeted ablations (dynamic vs. fixed sparsity budget, layer-selection via representation drift, latency/overhead breakdown) that support the individual design choices.",
+        "The representation-drift-based layer selection criterion (Section 2.4) is an interesting and reasonably validated heuristic (Figure 4b correlation study) for deciding where sparsification is safe to apply."
+      ],
+      "weaknesses": [
+        "The measured speedups are attention-only, not end-to-end inference latency; especially when composed with already-fast baselines like FlexPrefill (×2.44→×2.76) the incremental relative gain is modest (~13%), and it's unclear how this translates to whole-model wall-clock benefits, particularly for context lengths where attention doesn't dominate.",
+        "Some accuracy deltas presented as \"negligible\" are non-trivial in absolute terms (e.g., Minference+Token Sparse drops RULER avg from 86.49 to 86.05 and InfiniteBench avg from 50.16 to 49.70 for LLaMA; several individual InfiniteBench sub-tasks like En.Dia drop by 2-5 points), and the paper does not report variance/multiple seeds to assess whether these differences are statistically meaningful.",
+        "The layer-selection threshold δ=0.5 and coverage parameters τ are chosen per model via what appears to be limited manual tuning/heuristics; no ablation shows sensitivity of results to δ or provides principled guidance for selecting these hyperparameters on new models or tasks, raising reproducibility and generalization concerns.",
+        "Evaluation is limited to two mid-sized decoder-only models (LLaMA-3.1-8B, Mistral-Nemo-12B); it remains unclear whether the head-wise/layer-wise dynamics and resulting benefits generalize to other architectures (e.g., GQA variants with fewer KV heads, MoE models, or larger models) or to multimodal/long-generation settings.",
+        "Decoding-phase acceleration is entirely out of scope (explicitly listed as future work), which limits the practical significance of the contribution since decoding latency often dominates in many deployment scenarios for long-context LLMs.",
+        "No code/artifact release is mentioned, and several implementation details (e.g., exact recent-query window size for the scoring proxy, pooling operation specifics in Algorithm 1) are underspecified, which could hinder independent reproduction."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Clear and convincing motivational analysis (Figure 2) empirically demonstrating layer-wise and head-wise dynamics of token importance during prefill, which directly motivates the reversible 'compress-then-decompress' design as opposed to permanent eviction.",
+        "Strong compatibility story: because the method operates on dense, contiguous compressed Q/K/V tensors, it can be layered on top of FlashAttention as well as multiple existing sparse-attention kernels (Minference, FlexPrefill, SeerAttention, X-Attention), and the paper empirically demonstrates complementary speedups across all of them (Table 1, Table 12).",
+        "Broad and fairly rigorous experimental evaluation across two model sizes (8B/12B) and multiple long-context benchmarks (RULER, InfiniteBench, LongBench, NIAH), plus a good set of ablations (scoring method choice, drift-based layer selection validation, dynamic vs. fixed sparsity, comparisons to eviction-based methods FastKV/GemFilter/PyramidInfer and non-eviction OrthoRank).",
+        "Latency/overhead breakdown (Fig 6b) and end-to-end TTFT measurements on two GPU types in the appendix lend some credibility to the practicality claims beyond just attention-level FLOP speedups.",
+        "The Inter-Layer Representation Drift metric for selecting which layers to sparsify is a reasonably novel and simple diagnostic, supported by a correlational experiment (Fig 4b) and an ablation grouping layers by drift tercile (Table 8)."
+      ],
+      "weaknesses": [
+        "The core method (mask/select top tokens per head, scatter zeros back before the residual) is conceptually a fairly incremental combination of known ideas (per-head top-k selection + zero-masking un-selected positions), and the compress/decompress operation is functionally similar to applying a binary mask to the attention output before the residual — the novelty claim over standard token-dropping-with-residual approaches could be articulated more sharply.",
+        "Headline claims are somewhat inconsistent: the abstract advertises '3.23x speedup with <1% accuracy degradation,' but this figure corresponds to an aggressive tau=0.02 setting shown only in Figure 1/5(b), while the main quantitative tables (Table 1, 2) use smaller tau values with more modest speedups (1.22x-2.76x) and some cells show larger than 1% accuracy drops (e.g., FlexPrefill+TS on InfiniteBench Retr.KV: 50.80→46.80, a ~4-point drop; Minference 128K RULER: 73.63→72.18).",
+        "The layer-selection threshold (delta=0.5) and the drift-based layer eligibility criterion are calibrated once per model using a fairly narrow experimental setup (random 3-layer sparsification at only 4K context on RULER), and it's unclear how robust/transferable this choice is across different context lengths, tasks, or model families beyond the two tested.",
+        "The token-scoring step still requires an O(L) proxy attention computation (recent queries against all keys) at every applicable layer; while claimed to be lightweight via a custom Triton kernel, the paper provides limited quantitative analysis of how scoring cost scales at extreme context lengths (e.g., 1M) or with alternative proxy designs beyond the single ablation in Table 7.",
+        "Evaluation is limited to two model families (Llama-3.1-8B, Mistral-Nemo-12B) of similar scale; no results on larger models, different attention variants (e.g., GQA ratios), or substantially longer contexts (>256K) are shown, limiting confidence in generalization.",
+        "No public code/artifact release is mentioned, and several implementation details (e.g., the exact fused Triton kernel, pooling operator used for token scores, number of 'recent queries') are not fully specified in the main text, which could hinder exact reproducibility."
+      ]
+    }
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Identifies a real and important efficiency problem in DLLM inference (90% wasted compute) with clear empirical evidence (Figure 2). The shift from memory-bound to compute-bound execution is well-articulated.",
+        "Discovers a strong correlation between early-layer attention importance deltas and token decodability, demonstrated consistently across multiple models (SDAR, LLaDA2.0) and diverse benchmarks (mathematical reasoning, code generation, instruction following).",
+        "Comprehensive empirical evaluation including multiple benchmarks, careful ablations (Tables 3, 6, Figure 8), and comparison against production-grade baseline (LMDeploy), demonstrating 2.32-3.52× throughput improvement while maintaining or improving generation quality.",
+        "Solid system implementation with custom Triton kernels for sparse operations, careful memory management, and ~1% overhead, suggesting good engineering quality and practical feasibility.",
+        "Extensive supplementary materials including theoretical analysis (Appendix D), implementation details (Appendix E), and cross-paradigm validation (Appendix B), supporting reproducibility and understanding."
+      ],
+      "weaknesses": [
+        "Core contribution is incremental: token eviction/sparsification is not novel (acknowledged prior work H2O, SnapKV), and the importance delta metric is domain-specific. The claim of being 'first to reveal' the attention-decodability relationship overstates novelty given extensive prior attention analysis literature.",
+        "Multiple arbitrary design choices lack justification: (1) Why Layer 0-1 specifically for delta rather than other layer pairs? (2) MaxPool1D kernel size=3 with no ablation? (3) Why σ threshold in Eq. 5 vs other statistical measures? (4) Sum vs mean/max for attention aggregation (Eq. 2)? These choices appear unmotivated and sensitivity-tested.",
+        "Theoretical justification (Appendix D) is problematic: assumes Gaussian distributions (Eqs. 6-7) despite Figure 14 showing non-Gaussian behavior; conservative modeling of non-decodable distribution may not reflect actual safety; Chernoff bound validity questionable for observed signal strengths; remark about heavy-tailed distributions lacks rigorous justification.",
+        "Engineering limitations undermine core claims: (1) Multi-loop optimization disabled due to per-step state dependencies suggests approach fragility; (2) CUDA Graphs disabled for benchmarks due to overhead contradicts '~1% overhead' claim; (3) Neighbor-Aware Stability Criterion appears as a patch—standard delayed cache causes catastrophic failure (Table 6: 84.92 vs 89.20 GSM8K), indicating fundamental issues with the approach.",
+        "Insufficient statistical rigor: only 'average over two runs' reported with no error bars, confidence intervals, or significance testing, making it difficult to assess reliability of claimed improvements.",
+        "Limited scope: evaluation restricted to Block-Diffusion paradigm and recent models (SDAR, LLaDA2.0); appendix shows one full-diffusion model; applicability to other DLLM architectures, paradigms, or generation tasks unclear; specific to CPT-pretrained models.",
+        "Dynamic budgeting (Eq. 4) lacks ablation: combines two terms (α·N̄_decoded and Nσ) without separate component analysis; no sensitivity analysis on α beyond Table 4; exponential moving average window length unspecified; unclear contribution of each term.",
+        "Structural constraints reduce effective sparsity but aren't quantified: AR-Context Preservation forces i-1 retention; Placeholder Integrity forces retention up to max(S); unclear how much these constraints reduce the claimed 65-80% token reduction.",
+        "Significant overhead issues not fully addressed: CUDA Graphs disabled for throughput experiments; multi-loop optimization disabled; overhead analysis (E.5) sketchy; LMDeploy baseline has optimizations disabled for FOCUS, yet paper claims FOCUS is at an 'engineering disadvantage'—seemingly contradictory.",
+        "Limited failure analysis: no discussion of when importance delta prediction fails; no examples of misclassified tokens or edge cases; Section 5.2 frames threshold robustness as benefit without analyzing mechanism."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Clear problem identification with compelling empirical demonstration (Figure 2) showing only ~10% of block computation yields decoded tokens, motivating the need for efficiency improvements",
+        "Novel empirical insight connecting attention importance deltas (ΔI = I^Layer1 - I^Layer0) to token decodability, with strong validation across multiple models, datasets, and architectures (Figures 3-4, Appendices A-B)",
+        "Comprehensive system engineering including 4000+ LOC, custom Triton kernels, hybrid CUDA graph execution, careful scheduler state management, and sophisticated KV cache handling with Neighbor-Aware Stability Criterion",
+        "Extensive experimental validation across multiple dimensions: models (SDAR, LLaDA2.0), diverse benchmarks (math, code, instructions, real chat), batch sizes (32-256), and hardware (A100, H100) with thorough ablations and sensitivity analyses",
+        "Training-free approach requiring no model modifications, facilitating practical deployment; achieves 2.32-3.52× throughput improvements at scale while preserving generation quality",
+        "Transparent overhead analysis (~1% of step latency) demonstrating that theoretical FLOPs reductions translate to wall-clock performance gains; good treatment of limitations and tradeoffs"
+      ],
+      "weaknesses": [
+        "Incomplete theoretical foundation: core observation is post-hoc and empirical. Why Layer 1-0 delta specifically correlates with decodability lacks principled explanation. Appendix D's signal detection theory assumes Gaussianity (Eqs. 6-7) but Figure 14 shows visible skewness; claims of conservatism are not fully validated",
+        "Design choices lack rigorous justification: dual-criteria dynamic budgeting (Eq. 4) combining historical (α × N̄_decoded) and variance-based (Nσ) terms appears ad-hoc; why this specific combination? Structural constraints (AR-Context Preservation, Placeholder Integrity) add complexity without thorough ablation on their individual necessity",
+        "Significant performance tradeoffs inadequately emphasized: batch-size-1 throughput regression of 5-27% (Table 7) on practical low-concurrency scenarios; forced disabling of multi-loop optimization (Section E.3.4) places FOCUS at engineering disadvantage against full LMDeploy, but impact on claimed speedups not fully quantified",
+        "Limited failure mode analysis: when does importance delta metric degrade or fail? No investigation of token sequences or domains where correlation breaks down. Figure 4 shows non-negligible false positives in high-delta percentiles but impact on generation quality not analyzed",
+        "Narrow scope: evaluation limited to block-diffusion paradigm (primary results on SDAR/LLaDA2.0); full-diffusion generalization relegated to appendix. Specific to LMDeploy framework; adaptation effort for other inference engines (vLLM, SGLang) unknown. Single-GPU evaluation; distributed inference not explored",
+        "Experimental limitations: no confidence intervals for throughput results; non-standard 'excessive repetition detection' for termination (F.1) may bias results; maximum sequence length 2048 may not reflect production workloads; comparisons primarily against LMDeploy and vanilla Fast-dLLM, not cutting-edge recent approaches"
+      ]
+    }
+  }
+}

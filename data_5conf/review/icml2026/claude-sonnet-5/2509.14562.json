@@ -1,0 +1,43 @@
+{
+  "v3": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Novel combination of STORM-style momentum-based variance reduction with randomized SVD for the Muon optimizer, achieving simultaneous improvements in both memory footprint and sample complexity — a nontrivial result since one might expect a memory/accuracy tradeoff.",
+        "Comprehensive theoretical treatment: convergence proofs are provided for both exact SVD and Newton-Schulz approximations, under both standard Lipschitz smoothness and generalized (L0,L1)-smoothness, and for both full-memory (Option #1) and low-rank (Option #2) gradient estimators, yielding a consistent O(epsilon^-3) (or O(chi_q^3 epsilon^-3) with Newton-Schulz) rate that improves on the O(epsilon^-4) rates of prior Muon analyses while using (m+n)r-hat memory instead of mn.",
+        "Empirical validation spans three distinct architectures/domains (Mamba-130M SSM on WikiText-103, Qwen2.5-0.5B transformer LLM on MiniPile, ViT on Tiny-ImageNet), showing the full-rank LiMuon variant consistently outperforms Muon and Muon++ on perplexity/accuracy, and moderate-rank variants (e.g., rank=16) achieve competitive quality with reduced memory.",
+        "Runtime/wall-clock analysis (Table 5) is included, going beyond just sample complexity and memory numbers to give a more complete efficiency picture.",
+        "The algorithmic framework and options (Option #1 vs Option #2) are clearly presented with detailed pseudocode, and appendix proofs are extensive and self-contained."
+      ],
+      "weaknesses": [
+        "A key comparison baseline, 'Kim & Oh, 2026' (arXiv:2601.19156), is dated in the future relative to the paper's writing and cannot be independently verified at this time; large portions of the Newton-Schulz theoretical contribution (Table 1's second block, Theorems 4.17-4.23) are framed as improvements specifically over this unverifiable reference, which undermines the reader's ability to assess the claimed improvement.",
+        "At aggressive low-rank settings (rank=4, sometimes rank=8), LiMuon underperforms plain Muon and even other baselines in absolute quality (e.g., Table 2: LiMuon(rank=4) validation PPL 79.12 vs Muon 71.27; Table 3: LiMuon(rank=4) validation PPL 92.06, worse than Muon's 67.60), indicating that the 'light' memory-saving regime comes with a real, sometimes substantial, quality cost that is understated in the narrative.",
+        "The randomized SVD approximation guarantee (Lemma A.4) and the resulting contraction condition (γ ≤ β/(3√r(1-β)) etc. in Theorems 4.11/4.13/4.21/4.23) rely on an assumed bounded tail-singular-value ratio τ that is not empirically verified, and this condition becomes increasingly restrictive as the matrix dimension r grows, creating a tension with the paper's motivation of applying low-rank compression precisely to very large (high-r) matrices.",
+        "The per-iteration computational overhead of the RSVD step (Option #2) is acknowledged qualitatively but not incorporated into the complexity or convergence bounds, nor rigorously quantified against the exact-SVD or Newton-Schulz baselines beyond the empirical wall-clock table for one model (ViT).",
+        "Training runs are relatively short (2,000-10,000 iterations, small-to-mid-size models up to ~0.5B parameters) which limits confidence that the reported trends (especially memory/perplexity tradeoffs at various ranks) generalize to realistic large-scale pretraining regimes where Muon-style optimizers are actually deployed.",
+        "Hyperparameter tuning ranges differ substantially across optimizer families (Table 9), and no code release or artifact is mentioned, which somewhat limits reproducibility verification despite detailed hyperparameter tables being provided."
+      ]
+    }
+  },
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "The paper addresses a well-motivated and topical gap: existing Muon convergence analyses either achieve O(ε^-4) with standard memory, or O(ε^-3) with a large batch size (Muon++), or reduced memory with O(ε^-4) (SUMO); LiMuon is the first in this line to target both a lower memory footprint and O(ε^-3) sample complexity with batch size 1 simultaneously, which is a meaningful algorithmic combination.",
+        "The convergence analysis is carried out under both standard Frobenius-Lipschitz smoothness and the more realistic (L0,L1) generalized smoothness condition, which is relevant to LLM training where the gradient-norm-dependent smoothness better matches empirical behavior; this dual treatment (four theorems/settings) is thorough in scope.",
+        "The core algorithmic idea—combining STORM-style momentum variance reduction with randomized SVD to compress the momentum state to (m+n)r̂ instead of mn—is simple, practical, and clearly explained with a supporting error-propagation lemma (Lemma 8) tying RSVD approximation error to the true gradient norm.",
+        "Experiments span two different architectures/tasks (DistilGPT2 language modeling and ViT image classification) and compare against a reasonably comprehensive set of baselines (Adam, AdamW, Lion, Muon, Muon++, SUMO), with both memory and quality metrics reported."
+      ],
+      "weaknesses": [
+        "There is an apparent internal inconsistency between the algorithmic description and the reported experiments: the text explicitly states that 'LiMuon algorithm with Option #1 cannot reduce state memory' (relative to standard Muon), yet Table 2 and Table 3 report LiMuon(#1) using noticeably less memory than Muon and Muon++ (e.g., 6.30GB vs 7.20GB/7.35GB in Table 2). This is not explained and undermines confidence in the memory measurements/methodology.",
+        "Assumption 5, needed for the Option #2 (memory-reduced) convergence guarantee, requires that the tail singular-value energy of the momentum matrix is controlled by the true gradient norm — a strong, largely unverifiable structural assumption. The paper criticizes SUMO for relying on 'a strict condition,' but its own low-memory variant rests on a comparably strong and unvalidated assumption, weakening the claimed advantage over SUMO.",
+        "The purported benefit of extending the analysis to (L0,L1)-generalized smoothness is undercut by the step-size restriction η ≤ min(1/(2L1 r), β/(8L1 r^{3/2}(1-β))), which forces a small fixed step similar in spirit to the standard Lipschitz case; the analysis does not leverage adaptive/normalized/clipped updates that typically justify studying generalized smoothness, so the practical gain of this extension over Assumption 1 is unclear.",
+        "All theoretical rates hide the dependence on r = min(m,n) inside O(·) notation (e.g., rLη/2 terms), yet r can be very large for real weight matrices; the paper does not discuss how this dimension dependence affects the practical iteration/sample complexity, which is important for models with large matrix parameters.",
+        "Experimental results are based on single runs without repeated seeds or variance/error bars, despite training curves that are visibly noisy (e.g., Figure 2 test loss spikes). Given that the core selling point is a variance-reduction technique whose benefit is precisely about smoothing stochastic noise, the lack of statistical rigor in the comparison is a notable gap.",
+        "No ablation studies are provided for key new hyperparameters introduced by the method (rank r̂, oversampling parameter s, momentum coefficient β) to show sensitivity or memory/performance trade-offs; only one configuration per task is reported.",
+        "The experiments are conducted at small scale and low iteration budgets (5000-8000 iterations), and the paper itself acknowledges results are far from state-of-the-art (e.g., PPL ~142-170 vs. the ~18.25 reported elsewhere for DistilGPT2), which limits the strength of the empirical validation of practical usefulness for large-model training, the paper's stated motivation.",
+        "The theoretical contribution, while technically executed, is largely a combination of two well-established techniques (STORM variance reduction and randomized SVD) applied to the Muon/nuclear-norm setting rather than a fundamentally new algorithmic or analytical insight; novelty is moderate rather than substantial."
+      ]
+    }
+  }
+}

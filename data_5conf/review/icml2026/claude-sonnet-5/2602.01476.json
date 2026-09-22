@@ -1,0 +1,43 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Original and practically useful idea: rather than accelerating the proof of optimality (as in most ML-for-MIP work), the paper learns to exploit the well-known gap between finding and proving optimal solutions, using conformal prediction to give a statistical stopping rule with finite-sample guarantees. This reframing (Section 3, Figure 1) is a clean and compelling motivation.",
+        "The theoretical development is fairly complete: precise problem formalization (parametric MIPs, true vs. algorithmic gap, deterministic vs. probabilistic stopping times), a conformal calibration procedure (Theorem 4.1) with a full proof via exchangeability, and additional sample-conditional guarantees (Theorems 5.1, 5.2) that go beyond marginal coverage, which is a nice extra layer of rigor connecting to recent conformal-prediction theory (Duchi, 2025; Vovk, 2012).",
+        "Reasonably broad empirical validation across six problem families from Distributional MIPLIB, two different solvers (Gurobi and COPT), and several naive baselines (stopping at 1st/3rd incumbent). Reported speedups are large (60-95%) in most families, and the paper transparently reports a family (GISP) where the method offers little benefit, along with a forthright discussion of limitations (training cost, distribution-shift assumption, problem-dependent gains).",
+        "The paper is generally clearly written, with a good diagram (Figure 2) and figure (Figure 1) that intuitively convey the mechanism, and the pipeline (train/calibrate/deploy) is described in enough detail to be conceptually reproducible."
+      ],
+      "weaknesses": [
+        "Internal inconsistency in the central theoretical result: Theorem 4.1 as stated concludes P[gθc+1(τ̂κ(θc+1)) ≤ ϵ] ≥ n/(c+1), but the proof (via Lemma 4.2, applied with parameter n) actually derives ≥ (n+1)/(c+1), and the subsequent 'apply the theorem' paragraph and Theorem 5.2's proof both use (n+1)/(c+1). This off-by-one discrepancy between the theorem statement and its own proof is not reconciled anywhere and undermines confidence in the precise correctness of the flagship guarantee.",
+        "The empirical coverage substantially violates the claimed 95% guarantee in several settings (e.g., OTS/CP-COPT: 78.6% correct, MMCN/CP-COPT: 80.0%, GISP/CP-COPT: 85.0%, MVC/CP-GRB: 88.0%, MIS/CP-COPT: 91.0%; see Table in Appendix A), yet the paper never explicitly discusses these shortfalls in the main text, nor connects them quantitatively to the finite-sample slack allowed by Theorem 5.2 (which could explain but does not obviously fully justify gaps of 15-20 percentage points, especially for larger calibration sets like c=100). This is a serious gap for a paper whose central selling point is a 'rigorous probabilistic guarantee.'",
+        "Experimental protocol choices may inflate the apparent benefit: presolve is disabled and only a single thread is used for both the baseline and the proposed method. Disabling presolve is atypical for practical MIP solving and can substantially slow down baseline solvers, potentially exaggerating relative speedups; this choice is not justified or ablated.",
+        "Minor but noticeable inconsistencies: the abstract states results are from 'five problem families,' while Section 6 and Table 1 present six (CFLP, GISP, OTS, MMCNDP, MIS, MVC); the MMCN family is also referred to inconsistently ('MMCNDP' in Table 1 vs. 'MMCN-medium-BI' in Table 2/text).",
+        "Limited baselines: comparisons are only against exact-solver default termination and two trivial stop-at-k-solutions heuristics; there is no comparison to other plausible early-stopping or ML-guided termination strategies (e.g., simple gap-extrapolation rules, other predictors besides LSTM, or non-conformal calibration baselines), making it hard to assess how much of the benefit comes from conformal calibration per se versus the predictor architecture.",
+        "Practical overhead of running the LSTM predictor as part of a solver callback (inference cost per callback, frequency of calls) is not discussed or included in reported solve times, and the substantial upfront cost of generating training data (solving 800 instances per family, some to the 600s cap) is only qualitatively acknowledged as a limitation rather than quantified."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Clear and well-motivated problem framing: exploits the well-known gap between finding an optimal solution and proving its optimality in branch-and-bound, illustrated concretely in Figure 1.",
+        "Rigorous theoretical contribution: Theorem 4.1 correctly adapts split conformal prediction (via left-inverse functions and a rolling-minimum trick to enforce monotonicity) to the time-indexed stopping problem, with a clean proof building on a standard exchangeability lemma.",
+        "Goes beyond marginal coverage to provide sample-conditional guarantees (Theorem 5.2), expected suboptimality/runtime bounds via VC-dimension arguments (Theorem 5.1), and robustness to distribution shift in TV distance (Theorem 5.3), which meaningfully strengthens the practical relevance of the guarantee.",
+        "Comprehensive empirical evaluation across six diverse problem families (including two real-world datasets, OTS and MMCN) with two different solvers (Gurobi, COPT), showing consistent, often large (60-95%) speedups while empirically respecting the stated coverage target.",
+        "Thorough appendix experiments: ablations against simpler predictors (linear model, upper-bound-rate heuristic), standalone SCIP primal heuristics, additional Gurobi tolerance levels, and sensitivity analyses to distribution shift and calibration set size, which substantiate that the LSTM predictor is learning nontrivial, useful signal rather than a trivial pattern.",
+        "The remark on avoiding multiple-testing issues by calibrating a single threshold prior to deployment is a nice, clearly explained methodological point that distinguishes the approach from a naive repeated-testing scheme.",
+        "Honest discussion of limitations (added training/data-generation cost, problem-dependent speedup, reliance on distributional assumption) without overselling the method."
+      ],
+      "weaknesses": [
+        "The core theoretical machinery is essentially a direct, if careful, application of standard split conformal prediction (quantile-based calibration and finite-sample marginal coverage); the technical novelty lies mainly in adapting it to a time-indexed stopping rule rather than in fundamentally new conformal theory.",
+        "Some baselines (GRB1/GRB3/COPT1/COPT3, terminating after 1 or 3 incumbents) are weak strawmen with extremely poor suboptimality (often >50-200%), which may inflate the apparent advantage of the proposed method relative to the main text figures; the more informative comparison against Gurobi/COPT at looser MIPGap tolerances is relegated to an appendix.",
+        "For the real-world families (OTS-medium, MMCN-medium-BI), the calibration and test sets are small (e.g., c=28, l=72 for OTS) because only 100 real instances exist, which limits the statistical reliability of the empirical coverage estimates on exactly the datasets meant to demonstrate practical applicability.",
+        "The method requires solving hundreds of full instances from the target distribution merely to generate training trajectories (state, gap over time), which is a substantial offline cost that is acknowledged but not deeply quantified (e.g., total wall-clock overhead of data generation and training is not clearly reported relative to the deployment-time savings).",
+        "No direct empirical comparison to other closely related learned-early-termination/predict-and-search approaches mentioned in related work (e.g., Apollo-MILP), only a conceptual distinction is provided, making it hard to gauge relative practical benefit against the most relevant recent learning-based baselines.",
+        "The predictor architecture (2-layer LSTM + MLP) and covariate choices are reasonable but fairly simple; the paper acknowledges this is swappable, but no evidence is given for how a stronger architecture (e.g., incorporating problem structure via GNNs) would change results, leaving open whether reported gains are near a ceiling or could be substantially improved."
+      ]
+    }
+  }
+}

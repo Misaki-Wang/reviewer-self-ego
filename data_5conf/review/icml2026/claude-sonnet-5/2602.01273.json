@@ -19,6 +19,47 @@
         "Hardware/setup for latency profiling (RTX 4090) differs from the main calibration/evaluation hardware (RTX A6000) without justification, and no statistical variance (e.g., multiple seeds/crops) is reported for quantitative results, limiting reproducibility confidence.",
         "Code and models are stated as \"will be available\" rather than released, so reproducibility cannot be currently verified by reviewers."
       ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Addresses a well-motivated and practically relevant problem: PTQ for DiT-based Real-ISR models, which is underexplored compared to U-Net quantization or generic DiT quantization for text-to-image tasks. The paper convincingly demonstrates (via Fig. 2 and 4) that existing generic DiT quantization methods degrade local texture in SR-specific ways, motivating the need for a tailored approach.",
+        "The technical components are reasonably well-motivated: H-SVD is grounded in the empirical observation (Fig. 4) that top PCs dominate SR quality but standard SVD-G alone doesn't capture fine local structure; VaSMP is derived from a clean rate-distortion argument with empirical support (Fig. 5 showing stable within-layer, diverse across-layer variance); VaTMP is similarly grounded in a variance-based distortion model and solved efficiently via DP.",
+        "Extensive empirical evaluation across four real-world benchmarks, two bit-width settings (W4A6/W4A4), and comparisons against a large and current set of baselines (including ICML/ICCV/CVPR 2025 methods), with consistent SOTA results in both quantitative metrics and qualitative visual comparisons (Fig. 7).",
+        "Thorough ablation studies isolating the contribution of each component (H-SVD rank, VaSMP vs naive MP, VaTMP), plus additional analyses of practical runtime/memory, generalization to a second DiT backbone (DreamClear), calibration robustness, and an ROI-based artifact analysis — this depth of validation is notable and strengthens confidence in the claims.",
+        "Honest treatment of limitations, including the gap between theoretical and measured speedup, lack of native arbitrary-precision kernels, and residual artifacts on thin/repetitive/high-contrast textures under W4A4.",
+        "The paper acknowledges a metric-quality mismatch (e.g., Q-Diffusion/EfficientDM scoring highly on MANIQA despite visibly poor quality) rather than cherry-picking favorable metrics, which reflects intellectual honesty."
+      ],
+      "weaknesses": [
+        "The VaSMP and VaTMP derivations rely on strong simplifying assumptions (per-token/per-channel Gaussianity after Hadamard transform, high-rate quantization approximation, independence across layers/timesteps for additive distortion). While empirically supported to a degree (Figs. 5-6), the paper does not rigorously validate the Gaussianity assumption itself or discuss failure modes when it breaks down (e.g., for outlier-heavy layers).",
+        "Several MUSIQ/MANIQA/ClipIQA gains over FP (e.g., DrealSR/RealSR W4A6, Table 1a) are counterintuitive (quantized model outperforming FP), which the paper attributes post hoc to quantization acting as a 'perceptual regularizer' — this explanation is plausible but not rigorously tested, and raises questions about whether some reported 'SOTA' gains reflect genuine detail preservation or metric artifacts.",
+        "The comparison baselines, while numerous, are all generic PTQ methods retrofitted to this backbone; it is unclear how much of the H-SVD/VaSMP/VaTMP benefit is specific to DiT4SR's particular architecture versus a broader class of DiT-SR models — the single additional backbone (DreamClear) generalization test is useful but limited, and only reports W4A6/W4A4 aggregate numbers without ablating why gains might differ.",
+        "The end-to-end speedup (4.51x) falls noticeably short of the theoretical operation reduction (6.14x) due to non-quantized components becoming the bottleneck, and no native low-bit kernel support exists yet — this practical gap somewhat undercuts the efficiency motivation central to the paper's framing.",
+        "Reproducibility is not fully verifiable from the text alone: exact hyperparameters (Btarget, block sizes so/si search space and final selection, DP segment discretization bounds) are described at a high level in the method but concrete values used in the main experiments (beyond SVD-L rank=8) are not clearly consolidated in one place, and code is only promised ('will be available'), not yet released.",
+        "The paper's H-SVD forward computation (Eq. 11) adds a quantized correction term as well as FP local/global branches, increasing implementation complexity; the runtime/memory analysis (Table 5, 6) shows the SVD-L Triton kernel overhead is modest, but no ablation is given for how sensitive results are to the block size search procedure across different backbones/layers, making it hard to judge robustness of the H-SVD design choices in general."
+      ]
+    }
+  },
+  "v3": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Identifies and addresses a well-motivated, underexplored problem: existing PTQ methods for diffusion models are largely designed for U-Net or generic text-to-image DiTs, and the paper shows convincingly (Fig. 1, 2, Table 1) that naively applying them to DiT-based Real-ISR causes severe texture degradation.",
+        "The three proposed components are individually well-motivated with clear theoretical grounding: H-SVD is justified by a PCA analysis showing that a small number of principal components dominate SR quality (Fig. 4); VaSMP is derived from a rate-distortion argument (Eq. 12-16) connecting output-channel variance to layer-wise quantization distortion; VaTMP extends this idea temporally with a DP-based scheduling formulation (Eq. 17-23).",
+        "Strong and consistent empirical results across four real-world benchmarks (DrealSR, RealSR, RealLR200, RealLQ250) and two aggressive bit-width settings (W4A6, W4A4), outperforming ten competitive baselines spanning diffusion PTQ, DiT-specific PTQ, and SR-specific PTQ methods.",
+        "Thorough ablation studies (Tables 2-4, Fig. 8-9) isolate the contribution of each component (SVD-L rank, VaSMP vs. naive MSE-based mixed precision, VaTMP scheduling), providing good evidence that each piece contributes non-trivially and that a naive alternative (global MSE-based mixed precision) underperforms the variance-aware design.",
+        "Notably efficient calibration requirements: VaSMP is entirely data-free/offline, and VaTMP needs only 32 LR calibration images, making the approach attractive relative to methods requiring extensive calibration data or iterative optimization.",
+        "Reports concrete efficiency gains (5.8x model size reduction, 6.14x operation reduction under W4A4) alongside quality metrics, situating the compression-quality trade-off clearly."
+      ],
+      "weaknesses": [
+        "No actual wall-clock inference latency or throughput measurements are reported; only parameter counts and FLOPs are given. Since the method uses fine-grained, irregular per-layer and per-timestep bit-widths (e.g., 3/4/5-bit mixes shown in Fig. 3, 6, 9), it is unclear whether these theoretical FLOP savings translate into real hardware speedups given the lack of efficient low-bit kernels supporting such heterogeneous configurations. This is an important gap for a paper motivated by \"real-world deployment.\"",
+        "All experiments use a single backbone (DiT4SR); no results are shown on other DiT-based SR architectures (e.g., DreamClear) to demonstrate that H-SVD/VaSMP/VaTMP generalize beyond one specific model, which is important given the framework's claim of being broadly tailored to \"DiT-based Real-ISR.\"",
+        "Some baseline numbers look implausibly poor and are not scrutinized (e.g., QueST attains LIQE scores near 1.0-1.15, far below even the naive Q-Diffusion baseline, across essentially all datasets and both bit-width settings), raising a question about whether baselines were properly tuned/reproduced for this specific SR setting versus their original text-to-image use cases; this could inflate the apparent margin of improvement.",
+        "No variance/standard deviation or multiple-run statistics are reported for any quantitative result, making it hard to assess the statistical significance of the (often modest, e.g., MUSIQ 67.51→67.72) improvements over the second-best method (SVDQuant) under W4A6.",
+        "The interaction between VaSMP (weight bit allocation) and VaTMP (activation bit allocation) is handled sequentially/greedily (weights fixed first, then activations optimized), with no analysis of whether joint optimization would yield further gains, nor a discussion of why sequential greedy allocation is near-optimal.",
+        "Sensitivity to the size/composition of the 32-image calibration set for VaTMP is not studied; given that timestep-wise activation variance statistics are collected from this small set, it would strengthen the paper to show robustness across different calibration set choices/sizes.",
+        "Limited discussion of failure cases or scenarios where H-SVD/VaSMP/VaTMP might not help (e.g., extremely low bit-widths beyond W4A4, or content types with atypical high-frequency statistics), and no explicit limitations section despite space likely being available."
+      ]
     }
   }
 }

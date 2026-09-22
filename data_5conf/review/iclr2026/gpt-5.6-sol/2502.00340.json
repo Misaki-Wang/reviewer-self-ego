@@ -1,0 +1,120 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a practically important problem: existing backward token filtering improves data utility but provides almost no training speedup because sparsity disappears through attention and moderate unstructured sparsity is poorly supported by current GPU kernels.",
+        "The dimension-reduced dense-GEMM idea is intuitive and potentially useful: exploiting structured token-wise sparsity through compaction allows the system to reuse highly optimized dense kernels.",
+        "The paper identifies concrete implementation challenges in dynamically generated autograd graphs and proposes an automated, model-specific graph-rewriting workflow rather than requiring extensive manual model modifications.",
+        "Efficiency measurements cover three approximately 1–1.5B-parameter model families, multiple context lengths and filtering ratios, and provide a useful stage-level runtime breakdown. The reported maximum reductions of 35.1% in backward time and 22.0% end-to-end are substantial.",
+        "Collider retains a utility advantage over ordinary full-token training on the reported TinyLlama mathematical-reasoning experiment while shortening training time."
+      ],
+      "weaknesses": [
+        "The central transformation lacks a convincing correctness argument. Filtering attention activations removes gradient paths from retained tokens to filtered earlier tokens, so Collider is not merely an efficient implementation of RHO-style loss filtering but a materially different training algorithm. The paper provides neither a formal definition of the resulting gradient estimator nor numerical gradient-equivalence tests against a clear reference implementation.",
+        "The utility evidence is inadequate for the altered optimization algorithm. It consists of one model, one domain, apparently one run per condition, and no uncertainty or training curves. Collider's average score is 20.7 versus RHO's 24.8—a 16.5% relative reduction—despite the paper describing this as a slight decrease and speculating, without experiments, that hyperparameter tuning would remove it.",
+        "There is no ablation separating the effects of loss filtering, activation filtering, and graph compaction. In particular, an activation-filtered but uncompacted reference is needed to verify that graph rewriting preserves the intended gradients and utility.",
+        "The systems evaluation is narrow: all experiments use one eight-RTX-3090 node and small models. Claims about tensor, sequence, pipeline, and expert parallelism, communication reduction, activation offloading, other frameworks, and broad architectural compatibility are not experimentally demonstrated.",
+        "Collider directly mutates private autograd-node state and generates code from Torchgen internals, but the paper does not adequately evaluate robustness across PyTorch versions, variable sequence lengths or batch shapes, gradient checkpointing, dynamic control flow, or model changes. Testing only three related decoder-only architectures does not substantiate the broad compatibility claims.",
+        "Reproducibility is limited. No accessible artifact is identified, and important details are missing, including the exact filtering-mask compaction procedure, handling of different numbers and positions of retained tokens across batch elements, timing synchronization and warm-up protocol, evaluation decoding settings, random seeds, and offline operator-generation cost.",
+        "The end-to-end cost comparison excludes training and inference of the same-sized reference model because reference losses are assumed to be precomputed. This is disclosed, but it makes the broader cost-efficiency claim incomplete; the proposed n-gram alternative is only a preliminary discussion with insufficient methodology and no downstream utility or end-to-end cost evaluation.",
+        "Several headline numbers are internally inconsistent: the abstract reports reducing training from 4.7 to 3.5 days, whereas the introduction, evaluation, and Table 2 report approximately 4.5 to 3.7 days. Such discrepancies weaken confidence in the experimental reporting.",
+        "The paper reports no memory measurements, statistical variation, scaling efficiency, or comparisons with compiler-based/fused alternatives. These omissions make it difficult to determine whether the benefits generalize beyond the specific implementation and testbed."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper identifies a relevant systems problem: conventional backward token filtering creates too little exploitable sparsity, while generic sparse GEMM is inefficient at the moderate filtering ratios used in practice.",
+        "Transforming structured token sparsity into smaller dense operations is intuitive and potentially useful. The automatic graph-rewriting workflow is an interesting engineering contribution, and the paper explains its high-level design reasonably clearly.",
+        "The reported efficiency gains are meaningful on the tested setup: at 40% filtering, backward time decreases by 25.7–35.1% and end-to-end iteration time by 15.0–22.0% across three 1.1B–1.5B models. The context-length and filtering-ratio studies provide some useful sensitivity analysis."
+      ],
+      "weaknesses": [
+        "Collider is not merely a more efficient implementation of the original filtered-loss objective. It removes attention-mediated gradient paths through filtered tokens and therefore changes the optimization rule. This is a central algorithmic approximation, but the paper provides neither a formal characterization nor a careful gradient-error or convergence analysis.",
+        "The utility evidence is inadequate. It covers only TinyLlama, apparently one run without uncertainty estimates, and Collider's average score is substantially below Rho filtering (20.7 versus 24.8). The claim that parameter tuning would make this gap minimal is unsupported because the required tuning experiment is not performed.",
+        "The evaluation does not establish a convincing quality-efficiency Pareto advantage. It lacks equal-wall-clock and equal-compute comparisons, results over multiple filtering ratios for downstream quality, ablations isolating activation filtering from graph transformation, and comparisons with alternative structured packing or custom-kernel approaches.",
+        "Systems generality is overstated. Experiments are restricted to small models on one eight-RTX-3090 server. There are no large-model or modern datacenter-GPU results, scaling studies, memory measurements, or evaluations of tensor, pipeline, sequence, or expert parallelism, despite extensive claims about reduced distributed communication.",
+        "The automatic graph mutation relies on strong runtime-stability assumptions and invasive changes to saved autograd state. Correctness and robustness are not tested under variable batch or sequence lengths, activation checkpointing, dynamic control flow, compilation, stochastic MoE routing, or framework-version changes. No systematic numerical equivalence tests or failure-detection mechanism are reported.",
+        "Reproducibility is weak: the manuscript provides no accessible artifact, detailed reference-model recipe, precise dataset mixture, complete training configuration, or sufficient implementation detail for independently reproducing the graph rewriting. Timing results averaged over only ten iterations also omit variance and measurement protocol details.",
+        "Several claims and presentation details undermine confidence. Training times conflict between the abstract and main text (4.7 to 3.5 days versus 4.5 to 3.7 days), the claimed one-line integration depends on an offline model-specific code-generation workflow, and reference-model preparation/inference costs are excluded from end-to-end cost.",
+        "The related-work discussion is unusually narrow for a systems contribution and does not adequately position Collider against compiler-based graph transformations, packed-sequence execution, structured sparsity kernels, selective-backpropagation systems, or other efficient-training techniques. Overall, the promising systems idea is not supported by sufficiently rigorous correctness, utility, generality, or reproducibility evidence for a top-tier acceptance."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "The paper identifies a concrete and important systems bottleneck: conventional backward token filtering creates too little exploitable sparsity, while generic sparse GEMM is inefficient at realistic filtering ratios.",
+        "Collider presents a coherent solution combining activation filtering, dimension-reduced dense GEMM, and automatic backward-graph rewriting. The special-marker workflow for identifying sequence dimensions is technically interesting.",
+        "The efficiency results are meaningful: at 40% filtering, Collider reduces backward time by 25.7–35.1% and end-to-end iteration time by 15.0–22.0% across three model families.",
+        "The evaluation includes relevant baselines, component-level timing, multiple context lengths, multiple filtering ratios, and measurements of graph-rewriting overhead.",
+        "The utility experiment is relatively substantial in training scale (15B tokens) and shows that Collider remains better on average than ordinary training while reducing training time.",
+        "The implementation targets PyTorch and supports FlashAttention, making the work practically relevant."
+      ],
+      "weaknesses": [
+        "Collider changes the training algorithm rather than merely accelerating the original token-filtering objective: removing attention activations eliminates gradient paths from retained tokens to filtered preceding tokens. The paper acknowledges this but provides limited analysis of the resulting gradient approximation.",
+        "The utility cost relative to Rho is substantial rather than 'slight': average performance falls from 24.8 to 20.7, and Collider trails ordinary training on several tasks. The claim that parameter tuning would make this drop minimal is speculative because no tuning study or utility-efficiency frontier is presented.",
+        "Utility is evaluated for only TinyLlama, apparently with a single run and without variance, significance testing, learning curves, or controlled hyperparameter sweeps. This is insufficient to establish robust utility preservation.",
+        "Systems generality is under-validated. All experiments use 1.1–1.5B models, one eight-RTX-3090 node, and ZeRO-1. Claims concerning tensor, sequence, pipeline, and MoE parallelism, communication reduction, larger models, and other frameworks are not experimentally tested.",
+        "The automatic graph-rewriting approach relies on runtime graph stability and manipulation of internal autograd state, but the paper does not adequately test variable shapes, dynamic control flow, gradient checkpointing, compilation, mixed model components, PyTorch-version changes, or failure detection. The assertion that cached rules are 'guaranteed' correct is too strong.",
+        "Reproducibility is limited: no public code or artifact is identified, and important implementation details about graph mutation, supported operators, correctness validation, preprocessing overhead, and offline code-generation cost are missing.",
+        "The reference-model inference and storage costs are excluded by assuming losses are prepared offline. Consequently, the reported end-to-end training savings do not represent the complete token-filtering pipeline.",
+        "The presentation contains material inconsistencies, including 4.7-to-3.5 days in the abstract versus 4.5-to-3.7 days in the evaluation, and several overstatements and proofreading issues. Overall, the promising efficiency contribution is not yet supported by sufficiently broad and rigorous evidence for acceptance."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Addresses an important practical gap: existing backward token filtering improves data utility but does not translate naturally into wall-clock training gains.",
+        "The proposed co-design is conceptually interesting, combining an attention-backward modification with conversion of structured token sparsity into smaller dense GEMMs.",
+        "The efficiency evaluation is broad in model scale (1.1B–40B) and covers data parallelism, tensor parallelism, and LoRA. Reported end-to-end reductions of 17.9%–34.7% at 50% filtering are substantial.",
+        "The paper clearly motivates why conventional sparse GEMM is unsuitable at the moderate sparsity levels produced by token filtering and includes useful studies of context length and filtering ratio."
+      ],
+      "weaknesses": [
+        "The modified backward pass is not equivalent to the stated token-filtered objective. Even when a token's own loss is removed, its key/value representations can affect retained tokens; setting its K/V gradients to zero discards legitimate gradient paths. The paper presents no formal characterization of this approximation or numerical gradient-correctness analysis.",
+        "The central claim that CENTRIFUGE 'fully preserves' token-filtering utility is inadequately supported. Figure 4 compares training-loss curves, but the downstream results compare CENTRIFUGE only with regular training—not with the original loss-only token-filtering method. Thus, there is no direct downstream evidence that the proposed approximate gradients preserve the baseline method's gains.",
+        "Utility evaluation is limited to one 1.1B model, one math-oriented training setting, apparently one run, and lacks error bars, significance tests, and essential evaluation details such as prompting and decoding. This is too narrow to support general utility claims across the many model scales used in the timing experiments.",
+        "Efficiency measurements use only ten iterations after two warm-up iterations, report no variance, and omit several important controls. In particular, there is no measured end-to-end comparison against the actual loss-only filtering baseline, and the cost or storage required to obtain reference-model losses appears excluded.",
+        "The dynamic autograd-graph mutation relies on undocumented framework internals and a strong 'runtime stability' assumption. The paper does not adequately test varying sequence lengths or batch shapes, activation checkpointing, different attention implementations, dynamic control flow, or framework-version robustness, despite broad compatibility claims.",
+        "Reproducibility is presently poor: key implementation details for arbitrary causal masks and packed token indices are unclear, and the appendix's GitHub hosting section ends with a blank link. No accessible code or complete artifact is provided in the reviewed manuscript. :codex-file-citation{path=\"/fsx/homes/Yaochen.Wang@mbzuai.ac.ae/AI-reviewer/res/review_iclr2026_yao_medium_20260919T2254Z/scratch/8bb295201d1f4949860fbd566e015eed/work/manuscript.pdf\" purpose=\"source\"}"
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper identifies a practically relevant mismatch between moderate token sparsity (roughly 30–50%) and conventional sparse-GEMM implementations, which generally require much higher sparsity to outperform dense kernels.",
+        "The proposed combination of attention-backward modification and structured sequence-dimension reduction is a plausible systems contribution, with an appealing goal of reusing optimized dense GEMM libraries.",
+        "The efficiency experiments cover several model sizes, context lengths, filtering ratios, and training configurations, including data parallelism, tensor parallelism, and LoRA. The reported end-to-end improvements of 17.9–34.7% at 50% filtering are potentially substantial.",
+        "The paper is organized around clear observations, and it reports operator overhead separately from forward and backward execution time."
+      ],
+      "weaknesses": [
+        "The modified backward pass is not mathematically equivalent to ordinary loss-only token filtering. A filtered token can still receive legitimate gradients through its key/value contribution to retained tokens at later positions. CENTRIFUGE explicitly removes these dK and dV pathways, thereby changing the optimization objective. The paper neither formally characterizes this approximation nor measures gradient error.",
+        "The central utility-preservation claim is inadequately supported. Figure 4 only compares short training-loss trajectories, while Table 1 omits the crucial loss-only token-filtering baseline and evaluates only TinyLlama-1.1B. Consequently, the paper does not establish that CENTRIFUGE preserves the downstream utility of the method whose gradients it modifies.",
+        "The utility evaluation appears to use a single run without seeds, error bars, confidence intervals, or significance tests, despite repeatedly describing improvements as significant. Important details—including exact training-token budgets, checkpoint selection, evaluation prompting/decoding, and contamination controls—are missing.",
+        "The systems evaluation lacks strong competing implementations and ablations. It mainly compares against regular dense training and does not isolate the gains from the modified attention kernel, graph compaction, reduced communication, or other implementation effects. Comparisons with compiled/fused alternatives and relevant structured-compaction baselines are absent.",
+        "The automatic graph-rewriting mechanism relies on private PyTorch autograd-node structure, synthetic inputs, stable graph shapes, and generated model-specific C++ code. These are fragile assumptions, yet compatibility is claimed broadly without tests involving variable sequence lengths, padding/packing changes, activation checkpointing, dynamic control flow, or framework/version changes.",
+        "Reproducibility is poor: the manuscript claims that the system is open sourced, but the repository link is blank. There are also insufficient implementation details to reconstruct the custom FlashAttention/cuDNN composition or the graph-mutating operator independently.",
+        "Several generalization claims are speculative. Benefits for sequence, pipeline, and mixture-of-experts parallelism are discussed analytically but not evaluated, and the claim of seamless support for other frameworks such as TensorFlow is unsupported.",
+        "The presentation contains overstatements and inconsistencies, including describing the evaluation as involving four models when substantially more appear in the timing table, switching hardware for the largest models, and claiming utility gains up to 26.6% without distinguishing percentage points from relative percentage improvement. Overall, the idea is promising, but the missing correctness analysis and insufficient utility validation make the evidence inadequate for acceptance."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "The paper identifies a concrete and practically important systems gap: moderate token sparsity (roughly 30–50%) is poorly served by standard sparse-GEMM implementations, while conventional backward token filtering leaves most computation dense.",
+        "The algorithm–system co-design is technically interesting. Separating the attention-backward treatment of Q from K/V and converting structured token sparsity into dimension-reduced dense operations is a sensible way to exploit mature dense kernels.",
+        "The efficiency results are substantial: reported backward-time reductions reach 40.0–49.9%, with end-to-end target-model training reductions of 17.9–34.7% at 50% filtering.",
+        "The systems evaluation covers a notably broad range of model sizes (1.1B–40B), context lengths, filtering ratios, hardware, and training configurations, including data parallelism, tensor parallelism, and LoRA.",
+        "The paper is generally well organized, clearly motivates why naive approaches fail, and includes useful implementation detail about automatic graph transformation."
+      ],
+      "weaknesses": [
+        "The central claim that CENTRIFUGE “fully preserves” the utility of ordinary loss-only token filtering is not convincingly established. Filtering K/V gradients at discarded token positions changes the true gradient of the filtered loss because discarded tokens can still contribute as context for retained queries. The paper should explicitly characterize this approximation and directly compare downstream utility against the exact loss-only-filtering baseline.",
+        "The utility evaluation is narrow and under-controlled: downstream results are reported only for TinyLlama-1.1B on math tasks, without multiple seeds, uncertainty estimates, or a loss-only-filtering row. Convergence curves alone do not demonstrate equivalent downstream utility, and some tasks such as MMLU regress relative to regular fine-tuning.",
+        "The meaning of “end-to-end” efficiency is insufficiently clear. The measurements appear to exclude the cost of producing reference-model losses/token scores, and the main timing table compares primarily against regular training rather than an implemented loss-only token-filtering pipeline. Memory consumption is also not evaluated.",
+        "Reproducibility is currently inadequate: the paper says the system is open-sourced, but the GitHub link is blank. Important kernel and graph-rewriting details therefore cannot be independently verified.",
+        "The graph-rewriting mechanism relies on PyTorch internals, generated model-specific C++ code, and a runtime-stability assumption. Robustness to variable sequence lengths, changing batch shapes, activation checkpointing, graph changes, compilation, and arbitrary masking patterns is not demonstrated, weakening the broad claims of seamless generality.",
+        "Several distributed-setting benefits, including pipeline, sequence, and mixture-of-experts parallelism, are argued analytically but not experimentally validated. Overall, the efficiency contribution is promising, but the missing utility controls and reproducibility evidence place the submission slightly below the acceptance threshold."
+      ]
+    }
+  }
+}

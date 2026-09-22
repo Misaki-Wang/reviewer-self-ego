@@ -1,4 +1,26 @@
 {
+  "v1": {
+    "exp1_quality": {
+      "oa": 6,
+      "strengths": [
+        "Addresses a practically important problem: enabling multi-modal reasoning to scale with newer/stronger text-only LLM reasoners without costly vision-language re-alignment, which is a real pain point given how fast LLMs are evolving.",
+        "The core idea (Caption Reward Optimization) is simple, well-motivated, and clearly explained -- using RLVR-style rewards computed from a downstream text reasoner's correctness to directly optimize captioning quality is a sensible way to close the perception-reasoning loop.",
+        "Extensive empirical evaluation across 7 benchmarks (MathVista, MathVision, MathVerse, MMMU, WeMath, DynaMath, LogicVista) and multiple base MLLM sizes (3B/7B/32B), with consistent and often substantial gains over base models and over a strong test-time-scaling baseline (VisualPRM/BoN).",
+        "Good ablation studies isolating the contribution of the tentative solution, captions, and CRO (Table 2), as well as reward-computation design choices (reasoner type, reasoner input) in Table 3, which support the specific design decisions made.",
+        "Demonstrates a compelling plug-and-play scalability property: models trained with CRO using only R1-7B as reward reasoner generalize to unseen/larger reasoners (Qwen3-8B, R1-32B, QwQ-32B) at inference time without retraining, supporting the paper's central claim.",
+        "Thorough analysis section including complementarity with GRPO, automatic (GPT-4o) and human evaluation of caption quality with reasonable inter-rater consistency, and detailed case studies/training dynamics in the appendix, which adds credibility to the qualitative claims about hallucination reduction."
+      ],
+      "weaknesses": [
+        "The perceptual decoupling premise itself is questionable for many benchmarks: tasks requiring fine-grained spatial/geometric reasoning (e.g., precise diagram geometry, dense charts) may be fundamentally lossy when converted to text captions, and the paper does not analyze failure modes where decoupling itself (rather than caption quality) is the bottleneck.",
+        "Table 2 ablations reveal an important caveat undermining the flexibility claim -- using captions alone without the tentative solution actually hurts performance substantially (e.g., 3B AVG drops from 34.6 to 32.8), and the final RACRO pipeline still depends on the original MLLM's tentative solution generated without CRO; this reliance on a non-optimized 'solution' component is not fully addressed or ablated for CRO-only variants.",
+        "The reward computation for CRO uses R1-Distilled-7B as reasoner during training for all model sizes (3B/7B/32B extractors), but it is unclear how sensitive final performance is to this specific reasoner choice being fixed across all extractor sizes rather than scaling with extractor size; the ablation in Table 3 only tests this for smaller models.",
+        "Comparisons to baselines such as VL-Rethinker-72B and other 72B-scale reasoning models are somewhat incomplete/inconsistent (missing several benchmark columns with '-'), making some claimed SOTA comparisons only partially verifiable in Table 1.",
+        "The method requires 2x MLLM forward passes (caption + tentative solution) plus a separate LLM reasoning call at inference time, and training requires running the reasoner G times per rollout for reward computation; the paper doesn't provide a clear computational/latency cost comparison against the retraining-based baselines it argues against, despite efficiency being a central selling point.",
+        "The extensive case-study appendix (many pages of qualitative caption comparisons) is somewhat redundant and could have been condensed in favor of more quantitative analysis, e.g., a systematic breakdown of hallucination rate reduction or caption length vs. accuracy correlation instead of only illustrative examples.",
+        "The claim of 'eliminating the necessity for costly vision-language re-alignment' is slightly overstated, since the underlying MLLM extractor still must be reasonably capable to begin with (i.e., RACRO improves but does not replace the need for a decent pretrained MLLM), and the paper does not test how RACRO performs with much weaker/smaller base extractors below 3B."
+      ]
+    }
+  },
   "v2": {
     "exp1_quality": {
       "oa": 6,
@@ -20,6 +42,28 @@
         "Including a 'tentative solution' as part of the perceptual output partially blurs the claimed clean separation between perception and reasoning, since the MLLM is still performing some reasoning — this weakens the conceptual clarity of the 'decoupling' framing even though it is empirically beneficial.",
         "The approach and evaluation are restricted to multi-modal math/science reasoning; the general title's implication of broader 'scalable multi-modal reasoning' is not substantiated beyond this narrow domain, and the paper's own limitations section acknowledges this.",
         "No baseline comparison against alternative lightweight adaptation strategies (e.g., fine-tuning a small connector/adapter to bridge a frozen vision encoder with a new LLM) as a cheaper alternative to both full retraining and the proposed decoupling+VPO pipeline."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "The core idea of decoupling perception (MLLM) from reasoning (LLM) so that a frozen, one-time-trained captioner can be paired with any future/stronger LLM reasoner without redoing vision-language alignment is practical and addresses a real, timely pain point (rapid churn of SOTA text reasoners).",
+        "Extensive empirical evaluation across 7 multi-modal reasoning benchmarks and multiple MLLM scales (3B-72B), with RAPID-enhanced smaller models matching or beating much larger baselines, giving a favorable accuracy-vs-size trade-off (Fig. 1, Table 1).",
+        "Reasonably thorough ablations isolating the contribution of decoupling, GRPO, VPO, and the caption penalty (Table 2 and its 3B counterpart in the appendix), including a reward-hacking analysis (Fig. 7) and a clear mechanistic explanation of why the caption penalty is needed.",
+        "Generalization/scaling analysis (Sec. 4.3) showing the VPO-trained MLLM transfers to unseen LLM reasoners at inference time, which is the central practical claim of the paper and is directly tested rather than just asserted.",
+        "Reasonably transparent reporting of training/inference compute costs versus end-to-end retrained models (Keye-VL, InternVL3.5), which candidly shows RAPID trades off some accuracy for large compute savings rather than claiming free superiority.",
+        "Caption-quality improvements from VPO are checked with both an LLM-judge pairwise comparison and a (small) human study, plus qualitative case studies showing more comprehensive, better-structured captions after VPO."
+      ],
+      "weaknesses": [
+        "The core algorithmic novelty is limited: VPO is essentially GRPO with the reward computed by feeding rollouts through an external frozen LLM, which is a fairly direct extension of established RLVR/GRPO recipes rather than a fundamentally new algorithm.",
+        "The pipeline requires a heuristic, few-shot-prompted 'hasCap' classifier to penalize reward hacking (Eq. 3); this ad hoc component is central to preventing collapse but is not rigorously validated for robustness across models/domains.",
+        "RAPID clearly underperforms genuinely retrained same-backbone models (Keye-VL-8B, InternVL3.5-8B) by several points (Table 6), so the practical value rests entirely on the compute-savings argument, and no experiment directly quantifies the accuracy ceiling if the LLM reasoner itself were fine-tuned end-to-end.",
+        "Decomposing Table 2, the largest single jump in performance comes from simply adding perception-reasoning decoupling with a stronger off-the-shelf LLM (+5.5%), while VPO itself contributes a comparatively modest additional 2.7%, raising the question of how much of the headline improvement is really attributable to the proposed RL method versus just swapping in a better reasoner.",
+        "The optimization pipeline is fragile and inconsistent across scales: the 3B model needs an extra GRPO stage after VPO to 'recover' reasoning ability lost during VPO, and best checkpoints are cherry-picked per model size via evaluation on the test-adjacent benchmarks, raising reproducibility and generalization concerns.",
+        "The mismatch between the LLM used for training reward computation (R1-7B) and the LLM used at inference (Qwen3-8B) is justified only post hoc/empirically (Table 3 vs Fig. 10) without a principled explanation, weakening confidence in how this choice would generalize to new reasoner pairs.",
+        "The approach is explicitly restricted to math/science reasoning with verifiable answers (needed for the RL reward); the paper's own limitations section acknowledges domain-specificity and that general-benchmark experiments do not exercise the full reasoning pipeline, so real breadth of applicability is unverified.",
+        "Human evaluation of caption quality is small-scale (100 samples, one model, one dataset, 4 annotators) with only 85% inter-annotator consistency, which is a fairly thin basis for the broader claim that VPO reliably improves caption faithfulness across settings.",
+        "Inference-time cost is non-trivial (two-stage MLLM+LLM pipeline plus multiple caption rollouts during training with G rollouts per query), and while an efficiency analysis is provided, the reported gains are sensitive to exactly which LLM reasoner size is paired at inference, making apples-to-apples comparisons with single end-to-end MLLMs somewhat muddled in Fig. 1/Table 1's total-size framing."
       ]
     }
   }
