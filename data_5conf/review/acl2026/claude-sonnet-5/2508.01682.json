@@ -18,6 +18,25 @@
         "The 'bidirectional' framing (analogy to BiLSTM) is somewhat of a stretch: the underlying model remains autoregressive/causal in each direction, so this is more accurately described as a dual-pass ensembling scheme over reversed step order rather than a jointly bidirectional architecture.",
         "Comparisons to simpler alternative baselines (e.g., self-consistency, majority voting, or straightforward two-sample ensembling of standard L2R PRMs) are absent, limiting the ability to judge whether the specific 'reversed reasoning' mechanism is necessary for the observed gains."
       ]
+    },
+    "exp3_positive": {
+      "oa": 3,
+      "strengths": [
+        "The proposed idea (adding a parallel right-to-left evaluation stream via prompt reversal, with no extra parameters and no additional inference latency) is simple, lightweight, and easy to integrate into existing PRM pipelines.",
+        "Experimental coverage is broad: 3 backbones (Qwen2.5-Math-1.5B, Rho-Math-1B, Deepseek-Math-7B) x 3 training objectives (BCE, MSE, Q-value ranking) x 2 benchmarks (MATH500, GSM-Plus) x 3 sampling policies, totaling 54 configurations, with consistent improvements in every setting reported, which suggests the effect is not a fluke of one setup.",
+        "Ablation studies (w/o L2R, w/o R2L, full BiPRM) show both directions individually underperform the fused model, supporting the claim that combining both directions is useful.",
+        "The paper is clearly written, with a reasonable motivating example (mathematical induction case) and a qualitative case study illustrating differing reward trajectories between BiPRM and L2R-only scoring.",
+        "Full per-n results are reported in appendices, aiding transparency of the numeric claims."
+      ],
+      "weaknesses": [
+        "The exact training procedure for BiPRM is underspecified: Section 3.2 presents the fused reward only as an inference-time formula (Eq. 4), while Section 3.3 describes the loss functions generically without clarifying whether the shared parameters fθ are trained on both forward and reversed trajectories jointly, or whether BiPRM is simply a standard L2R-trained model applied post hoc to reversed sequences at test time. This ambiguity is central to interpreting why the shared reward head generalizes to the R2L direction and needs to be resolved for reproducibility.",
+        "No control baseline is provided to rule out a simple ensembling/variance-reduction explanation for the gains: averaging two scores from the same forward-direction model (e.g., via dropout or multiple forward passes) could plausibly also improve Best-of-N accuracy by reducing noise, independent of any genuine 'backward verification' effect. Without such a control, the causal claim that bidirectional context (rather than generic score averaging) drives the improvement is not fully substantiated.",
+        "The theoretical justification (Eqs. 2 and 6) is essentially a restatement that a causal model's gradient w.r.t. future tokens is zero and that averaging with a reversed pass makes it nonzero; this is definitionally true by construction and does not provide additional insight into why or when backward evaluation is informative.",
+        "All reported results appear to come from a single training run/seed (seed=1106 per Appendix A) with no variance or significance reporting across seeds or sampling runs, which is a concern for a paper making many fine-grained numerical claims (e.g., a single headline '31.9%' improvement is highlighted, which appears to be the best-case configuration rather than representative of the average gain, which is more modest, e.g., ~3-6 points absolute in several configurations).",
+        "The evaluation relies solely on downstream Best-of-N accuracy as the metric for PRM quality; no direct step-level classification metrics (e.g., accuracy/F1/AUC against gold step labels) are reported to directly validate the claim of improved verification quality, making it harder to disentangle PRM calibration improvements from artifacts of the BoN selection procedure.",
+        "The case study in Section 4.4 is a single qualitative example and offers only illustrative, not statistically rigorous, support for the claimed interpretability benefits.",
+        "No comparison to alternative or stronger external baselines beyond the paper's own L2R counterpart (e.g., other published PRM/verifier methods, or simple multi-sample self-consistency baselines) is provided, limiting the ability to contextualize the magnitude of improvement relative to the broader literature."
+      ]
     }
   },
   "v2": {
@@ -38,6 +57,23 @@
         "Experimental scope is limited to mathematical reasoning tasks only (acknowledged as a limitation), so generalization to other domains such as code generation or open-ended reasoning is untested.",
         "Case studies (Tables 5, 11, 12) are hand-picked qualitative illustrations rather than systematic quantitative error-type analysis, limiting how representative the discussed failure mode (arithmetic/algebraic skip errors) is of the model's overall weaknesses.",
         "No code/artifact release is mentioned, which combined with underspecified R2L training details, may hinder full reproducibility despite detailed hyperparameter tables."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3.5,
+      "strengths": [
+        "The core idea—adding a parallel R2L evaluation stream via simple prompt/step reversal, fused with a lightweight dynamic gating module—is simple, architecture-agnostic, and easy to adopt without modifying the underlying LLM.",
+        "Very extensive empirical coverage: 3 backbones of varying scale, 3 training objectives, 3 sampling policies, and 2 solution-level benchmarks plus a step-level diagnostic benchmark (54 + 12 configurations), with consistent gains throughout, which is strong evidence of robustness across settings.",
+        "Careful ablations isolate the source of improvement: removing either stream, replacing dynamic gating with static averaging, and comparing against homogeneous 2×L2R/2×R2L ensembles with matched compute budget to rule out the possibility that gains merely reflect doubled computation rather than genuine bidirectional complementarity.",
+        "Practical efficiency claims are well supported: parallel execution of the two streams keeps wall-clock latency increase to ~5% despite ~2× theoretical FLOPs, and the gating module adds negligible parameters (0.3%), making the method practically deployable.",
+        "Interpretability analysis (step-wise MAE trends and evolution of learned gating weights) provides a coherent mechanistic story for why and where L2R vs. R2L contribute differently, corroborated by qualitative case studies (including an honest failure case discussed in the appendix)."
+      ],
+      "weaknesses": [
+        "The paper explicitly discusses BiRM (Chen et al., 2025) as the most closely related prior bidirectional PRM work but does not include it as an experimental baseline; given the strong conceptual overlap, omitting a direct empirical comparison weakens the claimed contribution and the 'first bidirectional PRM paradigm' framing seems overstated relative to this existing work.",
+        "Implementation details of the R2L stream are under-specified: since the underlying LLM was pretrained purely autoregressively in the forward direction, it is unclear how reliably 'prompt reversal' produces meaningful representations for reversed step order (e.g., whether individual step text remains forward while only step ordering is reversed), and no sanity check/ablation validates that the reversed stream is not exploiting degenerate or spurious signals.",
+        "No variance/statistical significance reporting (e.g., across random seeds) is given for the main results despite many closely-spaced configurations, making it hard to assess whether individual comparisons (some of which show fairly small absolute gains) are reliably distinguishable from noise; the ensemble-based robustness argument partially but not fully substitutes for this.",
+        "Experimental validation is confined entirely to mathematical reasoning (as acknowledged in Limitations), so the generality of the bidirectional paradigm to other reasoning domains (code, commonsense, etc.) remains unverified.",
+        "The true training cost (need to train/host effectively two evaluation passes through the base PRM, even if weights are shared) and any additional data/compute overhead during training are not clearly quantified, only inference-time efficiency is emphasized."
       ]
     }
   }

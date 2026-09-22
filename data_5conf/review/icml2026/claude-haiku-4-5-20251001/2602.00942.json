@@ -1,0 +1,81 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Well-motivated problem addressing practical challenges of elastic LLM deployment across diverse hardware budgets",
+        "Principled ADMM formulation with clever two-stage procedure (guided learning + structured adaptation) that preserves training stability",
+        "Novel I-controller mechanism that adaptively regulates rank and sparsity at block-level, eliminating manual per-block tuning",
+        "Comprehensive empirical evaluation across 60M-1B parameter scales with strong baselines (LoRA, GaLore, LORO, CoLA, SLTrain, LOST)",
+        "Elastic deployment capability (Figure 2) showing smooth capacity scaling without retraining, significantly outperforming post-hoc RPCA on vanilla models",
+        "Novel empirical characterization of embedding layer behavior under adaptive SLR induction, showing benign and stable structure that previous work couldn't achieve",
+        "Extensive ablation studies and detailed analysis of learning dynamics (Figure 7) across multiple scales demonstrate scalability and robustness",
+        "Practical design reducing SALAAD-specific hyperparameters to single coefficient ρ with empirical scaling law (Eq. 7)",
+        "Thorough discussion of limitations (Appendix A demonstrates post-hoc SLR decomposition inadequacy; memory/computational cost analysis in Appendix B)"
+      ],
+      "weaknesses": [
+        "Lack of theoretical convergence analysis: Algorithm 1 combines non-convex SGD with convex ADMM updates, but no guarantees provided on convergence or interaction between these phases during training",
+        "Approximation error |X − X̂|_F claimed bounded (Appendix E) but not rigorously proven; coupling loss provides only soft constraint without quantified error bounds",
+        "Experimental setup complicates fair comparison: SALAAD trained in float32 while all baselines in bfloat16; Appendix D results show moderate degradation, making Table 1 comparison potentially biased toward SALAAD",
+        "Marginal improvements over LOST in some settings: 350M model requires 48% more parameters (276M vs 185M) for comparable perplexity; narrow margins after HPA compression",
+        "Limited evaluation scope: (1) Only perplexity on C4 evaluated, no downstream task fine-tuning; (2) No inference efficiency metrics (wall-clock time, actual memory usage, speedup); (3) No direct comparison with other elastic deployment methods (Flextron, MatFormer)",
+        "HPA strategy relatively simplistic: Greedy magnitude-based truncation assuming I(u) ∝ |u| without rigorous justification; 'structural homomorphism' assumption (uniform reduction ratios) likely suboptimal; Figure 3 shows strong κ-sensitivity",
+        "I-controller equilibrium not analyzed: No proof that adaptive updates converge to targets; Tables 2-3 demonstrate significant ρ-sensitivity suggesting data-dependent convergence behavior",
+        "Memory overhead during training not empirically validated: Theoretical analysis provided (Appendix B) but no actual measurements on real hardware with realistic training setups",
+        "Hyperparameter choices appear arbitrary: Γ̂ = 0.15, Ȳ = 0.05 used universally with limited sensitivity analysis; Δα, Δβ chosen at different orders of magnitude without clear justification",
+        "Scaling law for ρ lacks theoretical motivation: Equation (7) empirically motivated; tuned on 60M/130M models, generalization to different architectures uncertain; requires per-scale tuning",
+        "Reconstruction error uncontrolled during training: Figure 7 shows δ̄ growing throughout training; no mechanism to enforce |X − X̂|_F < ε for specified tolerance"
+      ]
+    }
+  },
+  "v3": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Principled framework: Formulates SLR decomposition as augmented Lagrangian optimization, moving beyond heuristic approaches like SLTrain/LOST through theoretically grounded ADMM",
+        "Elegant adaptive I-controller design: Reduces hyperparameters to single penalty coefficient ρ with scaling law, handles block-wise heterogeneity without manual tuning, enabling inclusion of embedding layers",
+        "Continuous elastic deployment: HPA enables fine-grained, architecture-preserving capacity control at deployment time without retraining—clear advantage over discrete approaches like MatFormer/Flextron",
+        "Novel empirical findings: Discovery that embedding layers naturally exhibit benign, stable SLR behavior under adaptive induction is interesting and well-documented; reveals previously unexplored structural asymmetry across LLM components",
+        "Comprehensive experimental evaluation: Multiple model scales (60M-1B), 8 baseline comparisons, thorough ablation studies, downstream evaluation, detailed learning dynamics analysis across appendices",
+        "Practical two-stage optimization: Clever reformulation of classical ADMM into guided learning phase (X update) and SLR adaptation phase (L, S updates) that enables scalable LLM pretraining",
+        "Strong reproducibility: Hyperparameters fully specified, algorithm clearly described, extensive appendices, code availability promised"
+      ],
+      "weaknesses": [
+        "Limited algorithmic novelty: Core technique (ADMM for SLR via RPCA) is well-established; contributions are primarily in training-time application and practical engineering rather than novel methodology",
+        "Missing convergence analysis: X-update (Eq. 2) is only approximated via gradient descent, violating ADMM's closed-form requirement and breaking theoretical convergence guarantees; only empirical evidence of bounded reconstruction error provided",
+        "Unfair training efficiency comparison: SALAAD trained in float32 while all baselines use bfloat16; claimed justification of 'numerical stability' is unconvincing; ~20-30% training overhead not directly comparable to baselines; Appendix E shows moderate degradation in bfloat16, suggesting precision difference was necessary",
+        "Incomplete characterization of training memory overhead: Each block stores L, S, Y in addition to X (3x auxiliary memory); analysis assumes distributed training on P≥560 GPUs; for 70B models, 0.4-1.0 GB per GPU overhead could require batch size reductions; no direct peak memory comparison with baselines",
+        "HPA strategy relies on unvalidated simplifying assumptions: Assumes unit importance I(u)∝|u| as greedy approximation; applies uniform global ratios despite block-specific heterogeneity learned during training; no empirical validation against optimal solutions or alternative approximations; acknowledged intractability of problem (8) without exploring alternatives",
+        "Mixed empirical results with incomplete comparisons: LOST sometimes outperforms SALAAD (e.g., 1B: 15.02 vs 14.72 PPL at similar parameters); improvements over SLTrain modest in several cases; paper downplays LOST's advantages without transparently acknowledging performance gaps",
+        "Limited experimental scope: Only LLaMA models (60M-1B); no evaluation on other architectures (GPT, Gemma, Mistral); downstream evaluation minimal (6 zero-shot tasks only, no fine-tuning); no evaluation on models >1B parameters typical for modern deployment",
+        "Embedding layer findings lack mechanistic explanation: Empirical observation that embeddings exhibit benign SLR structure is interesting but unexplained; why embeddings naturally compress while LM heads don't remains unclear; no theoretical analysis or intuition provided",
+        "Hyperparameter complexity overstated as simplicity: Claims 'single hyperparameter ρ' but multiple others remain: target rank Γ̄, target density Ῡ, controller step sizes Δα/Δβ, allocation ratio κ; empirical scaling law for ρ lacks theoretical justification",
+        "Comparison fairness issues: SALAAD includes embedding layer (excluded by baselines) providing additional compression; different training precision (float32 vs bfloat16); makes Table 1 comparisons not entirely apples-to-apples without ablating embedding layer impact separately",
+        "Design choices lack principled justification: Coupled loss form in Eq. (6) appears ad-hoc without exploring alternatives; J=1 ADMM update choice motivated empirically; many decisions appear engineered rather than principled",
+        "Limited failure mode analysis: When does SALAAD not work? LM head requires special handling but no systematic investigation of other problematic components; no discussion of models where SLR structure may not emerge naturally"
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Well-motivated practical problem addressing deployment flexibility across heterogeneous hardware without retraining",
+        "Principled ADMM formulation with clever two-stage adaptation (Algorithm 1) that decouples dense weight updates from SLR decomposition",
+        "Novel I-controller mechanism that eliminates hand-crafted per-block structural schedules by adaptively regulating rank/sparsity with a single global parameter",
+        "Comprehensive experiments across multiple model scales (60M-1B) with consistent improvements and extensive ablation studies on key hyperparameters",
+        "Novel empirical insight that embedding layers exhibit benign SLR behavior under SALAAD while LM heads do not—noted as unexplored in prior work",
+        "Practical deployment benefits: single training produces continuous spectrum of model capacities via HPA without retraining or architectural modification",
+        "Excellent documentation with clear algorithm presentation, extensive appendices, learning dynamics analysis, and thorough ablations supporting reproducibility"
+      ],
+      "weaknesses": [
+        "Significant training overhead (25-35% from Figure 2) with per-GPU memory costs of 0.4-1.0GB somewhat contradicts the 'plug-and-play' characterization and may limit practical adoption",
+        "Unfair comparison to baselines: SALAAD trained in float32 while baselines use bfloat16; Appendix E shows substantial performance degradation when SALAAD uses bfloat16, undermining headline results in Table 1",
+        "Core algorithmic novelty is incremental: ADMM for matrix decomposition via RPCA is well-established; main contribution is the I-controller and two-stage adaptation, which are engineering improvements rather than fundamental advances",
+        "HPA strategy rests on unvalidated assumptions (unit importance ∝ magnitude, structural homomorphism) that contradict SALAAD's learned block-wise heterogeneity; Remark 4.2 claims it preserves heterogeneity while applying uniform reduction ratios",
+        "Incomplete understanding of component asymmetry: the LM head's non-benign SLR behavior lacks theoretical explanation, and the distinction from embedding layers suggests limited generality",
+        "Limited scalability demonstration: experiments only extend to 1B parameters; claims about 70B models are theoretical; real experiments on 7B-70B scale would significantly strengthen scalability claims",
+        "Theoretical analysis gaps: Algorithm 1's gradient-step X-update breaks standard ADMM convergence guarantees without formal justification; no convergence proof for the two-stage variant; reconstruction error implications not theoretically analyzed",
+        "Hyperparameter burden not fully eliminated despite 'single hyperparameter ρ' claims: users must still specify Γ̂, Ŷ, ∆α, ∆β, K, J, κ; the scaling law (Eq. 7) is validated empirically but not theoretically justified for scaling to 7B+ models"
+      ]
+    }
+  }
+}

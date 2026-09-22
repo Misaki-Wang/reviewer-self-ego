@@ -1,0 +1,64 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "First systematic study of quantization-aware training for the attention operation itself, addressing a timely problem given native FP4 support on Blackwell GPUs.",
+        "Clear technical insight: the paper identifies two concrete precision mismatches in FlashAttention-style backward passes (low-precision recomputation of P, and the broken identity P_i^T dP_i = dO_i^T O_i when O is computed in FP4) and provides principled fixes, well-motivated by Equations 8-9 and Algorithms 1-3.",
+        "Comprehensive evaluation across modalities and scales (Wan 2.1 1.3B/14B video diffusion, Qwen3-14B and Llama 3.1-70B LLMs), with ablations isolating the contribution of K smoothing, two-level P quantization, and the two backward-pass design choices.",
+        "Useful negative/ablation findings: outlier-mitigation heuristics from SageAttention3 become redundant under QAT, and the high-precision auxiliary output O' is shown to be essential (Exp. 7 collapses), while fake-quantizing P affects stability rather than final quality.",
+        "Practical engineering: Triton training kernels with inline PTX for NVFP4, portability via bitwise emulation on non-Blackwell GPUs, and a 1.1x-1.5x inference speedup over SageAttention3 on RTX 5090; kernels promised open-source.",
+        "Honest limitations discussion (RTX 5090-only inference kernels, limited hyperparameter tuning at 70B, gradient checkpointing needed due to extra buffers), and human evaluation corroborates VBench results."
+      ],
+      "weaknesses": [
+        "Internal inconsistencies raise reproducibility concerns: the main text and Table 4 refer to Qwen3-14B for continued training, but Appendix B.2 describes Qwen3-8B experiments; Table 2's caption incorrectly labels Experiment 3 as Attn-QAT; the appendix claims SageAttention3 explored 'native 8-bit training' for attention, contradicting its own description elsewhere as FP4 inference.",
+        "Quality recovery is not complete: on Wan 2.1 14B, Dynamic Degree drops from 0.5193 (BF16) to 0.3646 (Attn-QAT), which is worse than SageAttention3 (0.4751), contradicting the blanket claim that Attn-QAT 'outperforms SageAttention3' and 'matches BF16'; the Llama 3.1-70B results also fall short of BF16, and the explanation (limited training budget, no hyperparameter tuning) is asserted rather than demonstrated.",
+        "Training cost and overhead of Attn-QAT are not quantified: the extra high-precision O' and fake-quantized buffers necessitate full gradient checkpointing, but no training-throughput or memory numbers relative to BF16 training are reported, so the total cost of adopting the method is unclear.",
+        "SageAttention3 is excluded from all LLM experiments due to claimed numerical errors in its kernels; while plausibly fair, this weakens baseline coverage on the LLM side, leaving only untrained FP4 as the comparator.",
+        "Evidence for train-test (fake-quant vs real-quant) consistency is purely visual (Figure 4); a quantitative numerical comparison (e.g., max/mean output deviation) would substantiate this important claim.",
+        "No variance reporting (multiple seeds or prompts) for any benchmark, and some evaluation details (e.g., how the 'Overall Quality' aggregate is computed, number of raters/agreement in the human study) are thin.",
+        "The claim of being the 'first' systematic QAT study of attention is plausible but stated confidently; given the fast-moving literature on FP8/FP4 attention training, the related-work boundary should be more carefully argued."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper addresses a genuinely novel and practically important problem: applying quantization-aware training to the attention operator itself, which prior FP4 attention work (SageAttention series) treats only with training-free heuristics. The identification of two concrete precision-mismatch issues in FlashAttention-style backward passes (low-precision recomputation of P, and the P^T dP_i = dO_i^T O_i identity breaking under mixed-precision forward/backward) is a real technical insight with clear derivations (Eqs. 8-9) and supporting ablations (Table 2 Exps. 7-8, Figure 3a-b).",
+        "The evaluation spans two modalities (video diffusion Wan 2.1 1.3B/14B and LLMs Qwen3-14B/Llama 3.1-70B) with standard benchmarks (VBench, lm-eval-harness, MMLU-Redux, GPQA, etc.), includes an ablation isolating SageAttention3's outlier-mitigation heuristics (Table 2 Exps. 5-6), and verifies train-time fake-quant vs. inference real-quant consistency (Figure 4).",
+        "Real kernel engineering: fused Triton training kernels with inline PTX for NVFP4 on Blackwell, plus a portability fallback via bitwise emulation, and CUDA inference kernels adapted from SageAttention3 with measured 1.1x-1.5x speedup (Figure 5).",
+        "Reproducibility is reasonably supported: algorithms 1-3 are fully specified, and Appendix B gives detailed training configurations, hardware, and optimizer settings. The authors promise open-sourcing all kernels."
+      ],
+      "weaknesses": [
+        "The headline claim that Attn-QAT 'fully recovers' BF16 quality without outlier mitigation is not supported by the paper's own numbers. On Wan 2.1 14B, Dynamic Degree drops from 0.5193 (BF16) to 0.3646 (Attn-QAT) - notably worse than SageAttention3's 0.4751 - and the same pattern holds on 1.3B (0.3923 -> 0.3039). Motion fidelity is a well-known failure mode of quantized video attention, and the paper does not discuss or explain this regression.",
+        "The human evaluation does not support 'Attn-QAT matches BF16 in perceived visual quality': the reported 16-64-19 win-tie-lose split (Figure 2) has more losses than wins, based on only 99 prompts with no statistical significance analysis. VBench deltas are also small (e.g., overall 0.8335 vs. 0.8279 on 14B) and no variance, seeds, or repeated runs are reported for any experiment.",
+        "The LLM results are only partial recoveries: for Llama 3.1-70B, Attn-QAT (0.7773 MMLU, 0.3076 WikiText) remains clearly below BF16 (0.7881, 0.2838), attributed vaguely to 'limited training budget and lack of hyperparameter tuning.' The continued-training budget is small (2000-4000 steps on a 10% C4 shard, ~6 hours), so the central claim that QAT alone suffices for FP4 attention in LLMs is demonstrated only at 14B scale.",
+        "Internal inconsistencies undermine confidence: Section 3.1 and Tables 3-4 describe Qwen3-14B, but Appendix B.2 states experiments were conducted on 'Qwen3-8B' with different sequence lengths; the model naming (Wan-2.1 vs. Wan 2.1) is inconsistent; Eq. (5) defines b as involving gamma(Q_i)k_bar^T while the preceding text suggests a broadcast scalar term; and the 'first systematic study' claim is asserted repeatedly without a careful survey of adjacent low-bit attention training work.",
+        "The claimed 1.1x-1.5x speedup over SageAttention3 is confounded: the benchmark setup explicitly differs (footnote 2 includes preprocessing latency for the baseline), the comparison is limited to a single GPU (RTX 5090) and non-causal attention, and FlashAttention2 is the only other reference point. No end-to-end model latency or wall-clock training cost of QAT itself (which adds extra buffers, forces full gradient checkpointing, and required 64 H200s for 14B) is reported, so the practical cost-benefit is unclear.",
+        "The 'naive baseline' (FP4 forward + FA BF16 backward) that motivates the whole paper is omitted from all quantitative tables ('we therefore omit it from Table 2') and is only characterized anecdotally via exploding gradients and an appendix OOM anecdote at step 200; this weakens the central instability narrative.",
+        "Some results are left unexplained: Attn-QAT exceeding BF16 on WinoGrande, ARC-c, and MMLU-Redux after SFT (Table 3) is presented without analysis, and the claim that it can be a 'drop-in replacement' during SFT rests on a single run per model."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "The paper addresses a timely and practically important problem: enabling reliable 4-bit (NVFP4) attention on FP4-capable GPUs, which is a genuine prerequisite for end-to-end FP4 inference on Blackwell-class hardware.",
+        "The core technical contribution is well-motivated and clearly articulated: identifying two subtle precision-consistency issues in FlashAttention-style fused kernels under QAT — (i) recomputing attention probabilities P in the backward pass at the same low precision as the forward pass, and (ii) the breakdown of the identity P⊤dP = dO⊤O when forward and backward precisions differ, solved by maintaining a high-precision auxiliary output O′. The derivation of Eq. (9) and the algorithmic detail (Algorithms 1–3) are precise and reproducible in principle.",
+        "Broad empirical coverage: experiments span video diffusion (Wan 2.1 at 1.3B and 14B) and LLMs (Qwen3-14B, Llama-3.1-70B), with both continued pretraining and SFT settings, plus VBench metrics, a blind human evaluation, and kernel-level throughput benchmarks.",
+        "The ablation that QAT makes SageAttention3's outlier-mitigation heuristics (K smoothing, two-level P quantization) largely redundant is an interesting and useful negative result, suggesting a simpler inference path.",
+        "Kernel engineering is substantial: custom Triton training kernels with inline PTX for NVFP4 conversion on Blackwell plus emulation on other GPUs, an adapted CUDA inference kernel, and verification (Figure 4) that fake-quant training and real-quant inference outputs agree numerically.",
+        "The paper is generally well written, with training configurations and hardware budgets disclosed in the appendix, and an honest discussion of limitations (e.g., no hyperparameter tuning for the 70B model, hardware constraints)."
+      ],
+      "weaknesses": [
+        "The central claim that Attn-QAT 'fully recovers' BF16-level quality is overstated by the paper's own results. On Wan 2.1 14B (Table 1), Attn-QAT's overall quality (0.8279) remains below BF16 (0.8335), and Dynamic Degree collapses relative to BF16 (0.3646 vs 0.5193). On Llama-3.1-70B (Table 4), clear gaps remain on MMLU (0.7773 vs 0.7881) and WinoGrande (0.7940 vs 0.8161). The claims should be softened to 'substantially recovers' or 'matches within noise'.",
+        "The support for the first 'key principle' (low-precision recomputation of P in the backward pass) is weak: the paper itself reports that omitting fake quantization of P yields essentially identical final VBench score (0.8254 vs 0.8252) and comparable loss, with only noisier gradient norms. Thus one of the two headline insights is not strictly required for the method to work, which undercuts the framing of two 'critical' mismatches.",
+        "Internal inconsistencies raise reproducibility concerns: Section 3.1 states LLM experiments use Qwen-3 14B, while Appendix B.2 describes 'Qwen3-8B' continued training; the claimed 14B evaluation setup does not match the appendix's training description. These must be reconciled.",
+        "The claim that SageAttention3 'exhibits significant numerical errors in causal attention' and is therefore excluded from all LLM experiments is asserted without evidence or quantification; this removes the strongest training-free baseline from half the evaluation, weakening the comparative claims.",
+        "Kernel speedups (1.1x–1.5x over SageAttention3) are measured only on RTX 5090, and no end-to-end model-level latency or memory results are reported, even though attention is only part of the compute; the practical deployment benefit at model scale is not directly demonstrated.",
+        "Human evaluation is limited to 99 prompts with no statistical significance testing, rater count, or inter-rater agreement reported; the win/tie/lose result (16/64/19) is essentially at chance, which supports 'comparable' but not 'superior' quality, and the abstract's phrasing overstates this.",
+        "Some evidence is qualitative only: training-stability claims rest on visual inspection of gradient-norm plots (Figure 3) rather than quantitative statistics (e.g., gradient-norm variance, spike frequency), and the naive FP4-forward/BF16-backward baseline was dropped from Table 2 due to OOM, so its final quality is never actually measured.",
+        "Code and kernels are only promised ('will be open-sourced') rather than released with the submission, which limits reproducibility at review time.",
+        "Minor presentation issues: typos ('graidents', 'The first equality replies on'), and checkpoint selection at 3000 of 4000 steps based on validation quality is mentioned only in passing but could affect reported numbers."
+      ]
+    }
+  }
+}

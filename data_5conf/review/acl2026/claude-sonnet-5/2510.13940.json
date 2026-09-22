@@ -17,6 +17,23 @@
         "The empirical comparison is limited to only two baselines (Direct Inference and Vanilla CFG) on a single model family (Qwen3); there is no comparison to other test-time intervention or entropy-guided methods mentioned in the related work (e.g., high-entropy RL token selection, token pruning/skipping approaches), nor to other model families, limiting evidence for generality of the claims.",
         "The practical simplicity claimed by the method ('minimal intervention') is undercut by the need to tune both τ and ω per model/task for good performance, which is not trivial to do without test-set access, and the paper does not provide clear guidance or a default recipe for new models/tasks."
       ]
+    },
+    "exp3_positive": {
+      "oa": 3.5,
+      "strengths": [
+        "Clear, well-motivated central observation: reasoning uncertainty is concentrated in a small subset of high-entropy tokens, supported by both entropy-histogram evidence (Fig.1) and a direct empirical study of when vanilla CFG actually changes a prediction (Fig.5), giving a principled reason to intervene selectively rather than uniformly.",
+        "The proposed KV-cache-reuse negative-prompt mechanism is a genuinely useful practical contribution: it removes the need for a second unconditional KV cache that standard CFG requires, addressing a real deployment bottleneck (compatibility with modern serving stacks such as vLLM) while adding negligible token overhead (as low as 0.3–4% of positions).",
+        "Experimental breadth is commendable: three model scales (8B/14B/32B), base and reasoning variants, and eight benchmarks spanning general, code, and math/STEM domains, plus a dedicated 8-run stochastic-sampling evaluation on AIME2024 to check robustness beyond greedy decoding.",
+        "Useful qualitative/interpretive analyses (word-cloud comparison, case study, entropy-conditioned success/failure breakdown of vanilla CFG) that help build an intuitive, plausible causal story for why the method works, going beyond a pure leaderboard-style contribution.",
+        "The method is training-free and simple to implement, which increases its practical relevance and ease of adoption for practitioners seeking low-overhead inference-time gains."
+      ],
+      "weaknesses": [
+        "The entropy threshold τ (and to a lesser extent ω) that yields the best result varies substantially and non-monotonically across models and tasks (e.g., optimal τ is 1.0 for Qwen3-8B-Reasoning but 1.5 for Qwen3-8B-Base and 0.5 for Qwen3-32B on AIME2024), yet the paper gives no principled or automatic procedure for selecting τ at deployment time on a new model/task; all reported 'best' numbers appear to be selected post hoc from a sweep, which inflates the apparent gains and undermines the 'minimal intervention, plug-and-play' framing.",
+        "Baselines are limited to Direct Inference and one variant of Vanilla CFG; no comparison to other lightweight test-time uncertainty-mitigation techniques (e.g., entropy-based resampling/temperature control, contrastive decoding, other minimal-intervention or calibration methods) is provided, making it hard to judge whether the selective-CFG idea is uniquely responsible for the gains versus simpler alternatives.",
+        "Most benchmark results in Table 2 (WinoGrande, MMLU-Pro, GPQA-Diamond, MATH500, HumanEval(+), LiveCodeBench) appear to be single-run, greedy-decoded numbers with no variance/significance reporting, while gains at some settings are small (e.g., sub-1-point) and occasionally negative for individual tasks (e.g., WinoGrande drops at low τ); only AIME2024 uses repeated runs, so the robustness of the headline improvements elsewhere is unclear.",
+        "The theoretical grounding for why 'OUTPUT ERROR' constitutes a good approximation to an 'unconditional'/negative space is largely asserted rather than rigorously justified; the negative-prompt ablation covers only four short phrases, limiting confidence that the chosen cue is robust or near-optimal rather than a lucky heuristic.",
+        "No code/artifact release is explicitly promised, and while OpenCompass config names are listed, the specific per-model/per-task hyperparameters (τ, ω, prompt) used to produce the headline numbers are not fully itemized in the main text, which somewhat limits exact reproducibility of the best-reported results."
+      ]
     }
   },
   "v2": {
@@ -36,6 +53,25 @@
         "The core empirical motivation (a few high-entropy tokens drive errors) substantially overlaps with existing high-entropy-token literature already cited (e.g., Wang et al. 2025's 'high-entropy minority tokens drive RL'), and the paper does not clearly delineate what is conceptually new versus applying a known observation to a new training-free intervention.",
         "Absolute token entropy (unnormalized, vocabulary/temperature dependent) is used as the intervention trigger with a fixed threshold τ that varies substantially in optimal value across models/datasets/decoding settings (e.g., different best τ for DeepSeek-R1-7B vs. Qwen3-32B vs. VLM setting), raising doubts about the claimed robustness/insensitivity to τ and about practical deployment without per-task tuning.",
         "Some counterintuitive results are underexplained, e.g., vanilla CFG (VC) with the same negative prompt sometimes underperforms direct inference by a large margin (e.g., Qwen3-32B DI 88.67 vs VC 86.02, AIME2024 Qwen3-32B DI 79.58 vs VC 72.92), which is attributed to blanket intervention harming low-entropy tokens, but this explanation is not independently verified against alternative causes such as suboptimal ω for VC specifically."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3.5,
+      "strengths": [
+        "A clear, well-motivated empirical observation (Fig. 1/Fig. 4) that reasoning-failure entropy is concentrated in a small subset of high-entropy tokens, which is used to justify a training-free, low-overhead intervention.",
+        "The proposed method (selective CFG + KV-cache-reusing negative-prompt guidance) is simple to implement, requires no additional training or auxiliary model, and is shown to add negligible latency (Table 3), sometimes even reducing total inference time by shortening outputs.",
+        "Broad empirical coverage: five model families/sizes (Qwen3-8B/14B/32B, DeepSeek-R1-7B, Ling-mini-2.0), three task categories (general, coding, STEM), both greedy and stochastic decoding settings, and an extension to a vision-language setting (Table 4), all showing consistent improvements over Direct Inference and Vanilla CFG.",
+        "Reasonably thorough ablations: entropy threshold τ, CFG strength ω, choice/semantics of the negative prompt, and comparison against a contrastive-decoding variant, which help isolate why the method works.",
+        "Additional analyses (word-cloud shift, entropy-vs.-CFG-effectiveness plot, qualitative case study) provide some mechanistic insight into how the intervention changes generation behavior, beyond a single aggregate accuracy number.",
+        "Comparison against several recent efficiency/test-time-scaling baselines (TALE, NoThinking, Dynasor, DEER, CGRS) situates the contribution relative to prior work."
+      ],
+      "weaknesses": [
+        "The entropy threshold τ, the paper's single free hyperparameter, is presented as robust/insensitive, but the tables show the optimal τ varies considerably across model/dataset combinations (e.g., 0.1 to 1.5), and the headline numbers in the abstract and Table 1/2 appear to be the best τ chosen after seeing results on the same evaluation sets. This raises a reproducibility/test-set-tuning concern: it's unclear what τ a practitioner would use a priori, and the suggested \"cross-validation on held-out data\" fix is never actually demonstrated in the experiments, so the reported gains may partly reflect post-hoc selection rather than a truly hyperparameter-free method.",
+        "The comparison with Vanilla CFG uses a fixed ω=1.5 \"following vanilla CFG,\" while the paper's own ablation (Fig. 3b) shows ω is tuned to its optimum for MTI; it is unclear whether VC was given equivalent tuning effort, making the baseline comparison potentially less than fully fair.",
+        "The core mechanism—injecting the literal phrase \"OUTPUT ERROR\" as a stand-in negative prompt to approximate an unconditional branch—is empirically motivated but lacks a rigorous theoretical justification for why this heuristic reliably steers logits toward correctness rather than merely perturbing them; the explanation offered (semantic negativity vs. meaningless tokens) is plausible but not rigorously established.",
+        "Missing comparison to simpler, very strong baselines commonly used in this space, such as self-consistency/majority voting or straightforward temperature/top-p tuning, which would help calibrate how much of the gain is attributable to the specific CFG-based mechanism versus generic decoding-time variance reduction.",
+        "Most main results (Table 1) are based on a single greedy-decoding run per configuration (justified by determinism of greedy decoding, but this also means the reported per-cell gains, especially small ones, are not accompanied by variance/significance information), and only the AIME2024 stochastic-decoding experiments (8 runs) report averaging, limiting confidence in the statistical robustness of some individual benchmark improvements (e.g., some GPQA-D and coding sub-scores fluctuate non-monotonically with τ).",
+        "The framing of \"minimal intervention\" and \"no tuning needed\" in the abstract/limitations is somewhat in tension with the practical need to sweep τ per model/task, which is a real cost not clearly quantified (e.g., how much held-out data and how many τ values are needed to reliably select a good threshold in a genuinely unseen deployment scenario)."
       ]
     }
   }

@@ -19,6 +19,28 @@
         "Technology-library generalization is untested: all synthesis/KD experiments use a single PDK (SkyWater 130nm), so it's unclear whether the learned structural representations and distillation benefits transfer to other libraries or technology nodes.",
         "Limited discussion of failure modes, scalability to very large designs (up to 19k nodes CDFGs), or cases where structural pretraining might not help (e.g., very small or highly regular designs), despite dataset statistics suggesting a long tail in design size."
       ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Addresses a well-motivated gap: prior LLM-based RTL quality estimators operate on token sequences and largely discard explicit structural information, whereas CDFGs expose control/data dependencies directly; the paper provides a clear, intuitive rationale for why this should help, particularly for delay prediction which depends heavily on structural path length.",
+        "The two pretraining tasks are thoughtfully adapted to the peculiarities of computational graphs: masking is applied at the level of post-GNN context-aware embeddings rather than raw node/edge features, explicitly avoiding the ambiguity problem that would arise from masking, e.g., an arithmetic operator in a CDFG. This is a sensible and non-trivial adaptation of GraphMAE/MaskGAE ideas to a domain with strict functional semantics.",
+        "The paper identifies and handles a genuine practical challenge (severe class imbalance across 32 CDFG node types) with two concrete mechanisms (stratified masking, class-balanced focal loss), and validates their necessity via ablation (removing either pretraining loss degrades performance in both the w/o KD and w/ KD settings).",
+        "Dataset scale (13,200 designs) is substantially larger than earlier hand-crafted-feature works (<100 designs) and comparable to the VeriDistill-scale evaluation, improving credibility of the reported trends.",
+        "Reasonably comprehensive baseline suite: hand-crafted-feature (Graph-XGBoost), end-to-end GNN without pretraining (Graph-GNN), and three LLM-embedding variants (CodeV-DS/CL/QW), plus a knowledge-distillation study showing consistent gains from cross-stage (PM netlist) supervision across all methods, not just StructRTL, which strengthens the case that KD contributes a real, generalizable signal.",
+        "Clear architectural motivation for structural (Laplacian-based) positional embeddings when flattening a graph into a Transformer sequence, together with a sign-flip augmentation to address eigenvector sign ambiguity."
+      ],
+      "weaknesses": [
+        "No variance/uncertainty reporting: all results appear to be single-run point estimates (Tables 1 and 2) with no standard deviations, multiple seeds, or significance tests, making it hard to assess whether the reported margins (e.g., 0.02–0.05 R^2 differences between StructRTL and best baselines with KD) are robust or within noise.",
+        "The core motivation of the paper is faster feedback than full logic synthesis, yet no wall-clock/runtime comparison is provided between StructRTL inference (including CDFG construction via Yosys + Stagira parsing) versus token-based LLM embedding extraction versus full synthesis. Without this, the practical 'speed' claim central to the introduction is not empirically substantiated.",
+        "Key design choices and hyperparameters (k=16 eigenvectors, mask ratio 20%, alpha=0.5, tau=0.7, mu=0.5, focal-loss beta/gamma) are fixed without sensitivity analysis or ablation, so it is unclear how much of the performance depends on careful tuning versus the proposed mechanisms themselves.",
+        "The claim that global positional embeddings are 'vital' and their absence causes 'training collapse' is asserted but not empirically demonstrated with an ablation removing them, unlike the two pretraining losses which are ablated.",
+        "Reproducibility artifact is incomplete: the anonymous GitHub link in the Appendix is blank, so the implementation and dataset cannot currently be verified or accessed by reviewers/readers.",
+        "Train/validation split is a simple random 80/20 split of GitHub/textbook-sourced designs; there is no discussion of potential near-duplicate or template-similar designs leaking across the split (a known issue with GitHub-scraped HDL corpora such as VeriGen/DeepCircuitX), which could inflate reported performance.",
+        "Only one technology library (SkyWater 130nm) and one synthesis toolchain (Yosys+ABC) are used for the KD teacher and ground-truth area/delay labels; generalization of the approach to other PDKs or commercial synthesis flows is unverified.",
+        "MasterRTL and PRIMAL, discussed at length in Related Work, are excluded from quantitative comparison (justified for MasterRTL due to its synthesis-dependent SOG, but PRIMAL is not addressed at all), leaving some prior structural-feature approaches uncompared.",
+        "The paper only evaluates area and delay; other commonly-relevant PPA metrics (e.g., power, as suggested by PRIMAL) are not considered despite being mentioned as motivation in the related work."
+      ]
     }
   },
   "v2": {
@@ -40,6 +62,26 @@
         "No variance/uncertainty is reported across multiple training seeds or dataset splits for the main results (Tables 1-2), making it hard to assess the statistical significance of the reported R^2/RRSE improvements, particularly given some deltas versus the strongest CodeV baseline could be modest relative to potential run-to-run variance.",
         "Industrial validation, while a nice addition, is limited to pairwise ranking accuracy on only 51 design pairs; absolute area/delay prediction errors on industrial designs (which are more relevant for early feedback use-cases) are not reported.",
         "Reproducibility of CDFG construction relies on a specific toolchain (Yosys, Stagira Verilog parser) and undocumented implementation choices (e.g., exact node-type taxonomy of 32 classes, handling of parameterized/generate constructs), which may complicate independent replication despite the stated code release."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Addresses a clear and well-motivated gap: prior LLM-based RTL quality estimators rely on token-based representations that only implicitly encode structural semantics, whereas CDFGs explicitly capture control and data dependencies relevant to area/delay prediction.",
+        "The two pretraining objectives (structure-aware masked node modeling and edge prediction) are thoughtfully adapted to the computational semantics of CDFGs by masking post-GNN context-aware embeddings rather than raw node/edge attributes, avoiding the ambiguity issue that would arise from masking, e.g., an arithmetic operator directly.",
+        "Technically sound handling of graph structure: use of directed-graph Laplacian eigenvectors for global positional embeddings, sign-flipping augmentation, stratified masking, and class-balanced focal loss to address severe node-type imbalance are well-justified engineering choices with supporting ablations (Table 13, Appendix D/E/F).",
+        "Extensive and convincing empirical validation: comparisons against both hand-crafted-feature and LLM-based baselines (three CodeV variants) on a sizable dataset (13,200 designs), consistent ~0.1 R2 gains, and a broad set of appendix studies (functional-shift generalization, size-based generalization, LLM-on-CDFG, fine-tuned-LLM overfitting analysis, combinational vs. sequential breakdown).",
+        "Knowledge distillation from PM netlists is a sensible cross-stage supervision strategy and is shown to consistently improve all methods, with StructRTL still leading after KD.",
+        "Real-world relevance is demonstrated via evaluation on 51 industrial design pairs (102 modules) with meaningful ranking accuracy (82–88%) and a 145x inference speedup over synthesis, plus a runtime/memory scaling study and a preliminary but useful register-boundary partitioning strategy for scalability.",
+        "Reasonably transparent limitations section (Appendix O) that honestly discusses degraded performance on sequential circuits, scalability constraints for very large designs, and open challenges in cross-technology-node generalization, without overstating claims."
+      ],
+      "weaknesses": [
+        "Absolute node-level R2 for the core (non-distilled) area/delay prediction task remains moderate (~0.75), and no error bars/multiple-seed variance are reported for the main comparisons, making it hard to assess the statistical robustness of the reported gains.",
+        "The industrial evaluation, while a valuable addition, is limited to only 51 design pairs (102 modules), which is a fairly small sample on which to base strong claims of industrial applicability, especially for the ranking-accuracy numbers.",
+        "Performance is noticeably weaker on sequential circuits (Appendix G), which are a substantial and important fraction of real RTL designs; the paper does not attempt any architectural remedy (e.g., temporal-aware pretraining) within the main method, only flags it as future work.",
+        "MasterRTL, a directly relevant prior SOTA method using bit-level graph representations, is excluded from comparison on the grounds that it requires synthesis-adjacent SOG construction; while a reasonable scoping decision, this leaves an important comparison point unaddressed, and other recent RTL-representation baselines (e.g., DeepRTL/DeepRTL2, cited but not benchmarked) are also omitted.",
+        "The register-boundary partitioning strategy for scalability to very large designs (>20K nodes) is explicitly described as a preliminary pilot study without validation on the largest designs of practical interest (e.g., >100K nodes), so scalability claims beyond the tested range remain speculative.",
+        "The CDFG construction pipeline depends on several external tools (Yosys, Stagira Verilog parser) and there is limited discussion of how parsing failures or unsupported RTL constructs are handled beyond simple filtering, which could affect reproducibility/robustness in more diverse industrial codebases."
       ]
     }
   }
