@@ -1,0 +1,45 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Clear and well-motivated problem framing: the paper identifies via roofline analysis that VLA inference is compute-bound and that the LLM backbone dominates latency, providing a solid empirical basis for targeting token pruning.",
+        "The core insight—that global attention information from previous action-generation steps can complement local per-step attention for more reliable token selection—is intuitive, supported by an illustrative hit-rate study (Figure 5) and qualitative visualizations (Figure 4, Figure 10, Figure 11).",
+        "The proposed two-level (action-level static + layer-level dynamic) pruning combined with an action-granularity-aware controller is a reasonably novel combination which directly ties pruning aggressiveness to task-relevant motion phases (coarse vs. fine-grained), an interesting VLA-specific design choice not present in prior generic VLM pruning work.",
+        "Reasonably comprehensive empirical evaluation: four LIBERO task suites, comparison against three competitive recent baselines (SparseVLM, VLA-Cache, EfficientVLA), ablations isolating each of the three techniques, a design-space exploration over pruning ratio, and cross-hardware validation (A800 and RTX 3090) showing consistent speedups.",
+        "Reasonably transparent about limitations (simulation-only evaluation) and provides implementation/reproducibility details (thresholds, α values, re-implementation notes for baselines) in the appendix."
+      ],
+      "weaknesses": [
+        "The method involves numerous heuristically chosen hyperparameters (τ, v_th_t, v_th_r, k in rank-weighting, β=0.2 for EMA, K_G, K_D, K_base for coarse/fine modes, layer sets L_update/L_prune, pruning ratio α) that are manually tuned per LIBERO suite (e.g., α = 1.0/0.8/0.6 for different datasets). This undermines the \"training-free\" and general-purpose framing and raises concerns about how much re-tuning would be needed for new tasks or real robots, which is not discussed.",
+        "Evaluation is restricted entirely to the LIBERO simulation benchmark; no real-robot experiments are provided, so claims about practical deployment speedup/accuracy trade-offs remain unvalidated in more realistic, noisy settings (acknowledged only briefly as a limitation).",
+        "There are internal inconsistencies between the main text and Algorithm 1 (e.g., the frame-selection interval formula T differs in form between Section 4.2 and Algorithm 1 line 10), and some redundant/duplicated text (e.g., the \"Experiment Visualization\" paragraph appears twice, near-identically, once in Section 7.6 and once in the Appendix). These reduce confidence in the manuscript's polish and reproducibility of exact formulas.",
+        "EfficientVLA, one of the main baselines, is not open-sourced and was reimplemented by the authors themselves, which could introduce implementation bias favoring the proposed method; no independent verification or sensitivity check is offered.",
+        "No variance/error bars or statistical significance testing are reported despite averaging over 40–50 repeated trials, making it hard to assess whether the small SR differences (e.g., 98.2% vs. 97.6%) are meaningful versus noise.",
+        "The reported FLOPs reduction (43%) versus the achieved speedup (1.46×) suggests a fairly modest translation of theoretical compute savings into wall-clock speedup, and the paper does not analyze why the gap exists (e.g., overhead of the controller, attention-score computation, or memory movement), limiting insight into practical scalability.",
+        "The individual techniques (attention-based token pruning, temporal/global information reuse, layer-wise dynamic re-scoring) are each conceptually incremental extensions of existing ideas in VLM/VLA pruning literature (SparseVLM, EfficientVLA, VLA-Cache), so the core originality lies mainly in combining them plus the action-granularity controller, which is a reasonable but modest degree of novelty."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Strong motivation grounded in a roofline-model analysis (Fig. 1) showing that VLA inference with single-step action-chunk architectures (OpenVLA-OFT, CogACT) is compute-bound, justifying a pruning-based acceleration approach rather than memory-bandwidth optimizations.",
+        "The two key insights (hierarchical attention across layers, and spatial-temporal consistency of globally important tokens across consecutive action steps) are supported by dedicated empirical studies (Fig. 3) rather than asserted without evidence, and directly motivate the two-level pruning design.",
+        "Comprehensive experimental validation: four LIBERO task suites, two different VLA backbones (OpenVLA-OFT and π0, differing in action decoding paradigm), two GPU platforms (A800, RTX 3090), a LIBERO-plus robustness/generalization study with camera/light/background/noise perturbations, and real-world robot deployment on a 7-DoF arm across four manipulation tasks.",
+        "Extensive ablations isolating the contribution of each component (static pruning, dynamic layer pruning, action-aware controller), plus targeted studies on global attention reuse and entropy-based layer weighting that show consistent, interpretable improvements in token recall and success rate.",
+        "Detailed complexity/FLOPs analysis and overhead breakdown (Appendix A.3) showing the auxiliary computations (patch similarity, entropy) are cheap, supporting practical deployability.",
+        "Comparisons against a reasonably broad and recent set of baselines (SparseVLM, DivPrune, FastV, EfficientVLA, VLA-Cache), with method-level analysis of why each underperforms."
+      ],
+      "weaknesses": [
+        "The method introduces a large number of hand-tuned hyperparameters (Kglobal, Klocal, Kdynamic, prune ratio α, similarity threshold τ, EMA rate β, velocity thresholds v_t^th/v_r^th, specific guiding layers 15 and 32, pruning layer schedule with interval T=5), many chosen empirically on LIBERO; while some sensitivity analysis is given, the overall system complexity raises concerns about how much re-tuning is needed for new robots/tasks/backbones, which somewhat undercuts the 'training-free' simplicity claim.",
+        "The absolute speedup gains are fairly modest and not clearly superior to the closest competitor: EfficientVLA achieves comparable or higher raw speedup (1.52x vs authors' 1.46x on A800) at lower FLOPs (35% vs 43%), and the paper's advantage is primarily in success-rate retention rather than acceleration itself — this should be framed more precisely rather than emphasized as a speed advantage.",
+        "Selection of the 'global' guiding layers (15th and 32nd) appears to be derived from a single illustrative task example (Fig. 3a) and then fixed as a hardcoded design choice without broader justification of why these specific depths generalize across architectures/tasks; layer indices may not transfer well to other model depths/backbones.",
+        "EfficientVLA, a key baseline, was not open-sourced and had to be reimplemented by the authors, which could bias the comparison (intentionally or not) in the proposed method's favor; no independent verification of this reimplementation's fidelity is provided.",
+        "Reported FLOPs-reduction figures show minor inconsistency between the main text (57% FLOPs, i.e., 43% retained per Table 1) and the appendix complexity analysis (63% reduction, i.e., 37% retained), which is a small but avoidable discrepancy affecting reproducibility clarity.",
+        "The real-world evaluation, while a valuable addition, is based on a small number of trials per task (task success rates reported without confidence intervals) and only four tasks with a single robot platform, limiting statistical confidence in the 1.70x real-world speedup and success-rate parity claims.",
+        "The paper is dense with many closely related formulas, ablations, and hyperparameter tables spread across a long appendix; the core contribution could be presented more concisely, and some claims (e.g., 'negligible success rate degradation') are asserted based on small differences within typical LIBERO run-to-run variance, which is only partially quantified in Table 12."
+      ]
+    }
+  }
+}

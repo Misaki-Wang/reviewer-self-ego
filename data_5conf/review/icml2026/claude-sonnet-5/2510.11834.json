@@ -1,0 +1,46 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Novel and useful framing: the paper explicitly targets the interaction between a generation policy and a downstream safety classifier as a compound system, rather than treating alignment and filtering as independent problems — an underexplored but practically important setting given real-world deployment architectures (guardrails, content-safety APIs, constitutional classifiers).",
+        "The decision-theoretic derivation (Section 3, Proposition 1) gives a clean, intuitive justification for why expected system utility is minimized near the classifier's decision boundary, motivating the proposed reward shape in a principled (if stylized) way.",
+        "The proposed reward (Eq. 3) is lightweight, requiring only classifier logits and an existing reward model, and is compatible with standard RL fine-tuning (GRPO) and parameter-efficient adaptation (LoRA), making the method practical to apply.",
+        "Experiments span multiple model families and scales (0.5B–14B, Qwen2.5 and Gemma-2), and the ablations (guard-only reward, prompt-aware reward) are informative: they show that the reward-model term is not always necessary for larger models, and that naively encouraging 'easier-to-catch' unsafe generations backfires badly, adding nuance beyond the main result.",
+        "The failure-mode analysis (Section 6.2.2, Appendix C) with concrete qualitative examples strengthens the diagnostic value of the ablations and demonstrates an honest exploration of when the idea does not work."
+      ],
+      "weaknesses": [
+        "No comparison to any existing safety-alignment baseline discussed at length in Section 2 (Safe RLHF, C-DPO, SafeDPO, SACPO, safe-completions/deliberative alignment). The only baselines are the untouched base instruct models and the authors' own ablations, so it is unclear whether Boundary Guidance actually outperforms simpler or already-published alternatives, undermining the significance claim.",
+        "Evaluation relies entirely on a single LLM-as-judge (GPT-4.1) with no human verification or inter-rater agreement check, and the same judge is used for both helpfulness and harmfulness scoring on a 1-4 / 0-3 scale that is coarse and could be noisy; there is no discussion of judge calibration or robustness to prompt wording.",
+        "Train/test split is drawn from the same three source datasets (jailbreak set, Alpaca, HarmfulQA) used for training, so the reported gains reflect in-distribution generalization only. No evaluation on independent, held-out safety/over-refusal benchmarks (e.g., XSTest, OR-Bench, novel jailbreak families) is provided, leaving open whether the boundary-avoidance behavior transfers to unseen attack types or genuinely novel benign queries, which is the central practical concern for a safety method.",
+        "The reward directly optimizes the safety classifier's own confidence score, creating an obvious reward-hacking/adversarial-pressure risk: the policy could learn to produce off-distribution text that pushes the classifier's logit to extremes without being more or less safe in reality. This concern is exactly what the prompt-aware ablation reveals as a failure mode, yet the main experiment does not investigate whether the fine-tuned models are still being scored consistently by the *same* guard classifier used for training versus the independent LLM judge, nor test transferability to a different/held-out classifier.",
+        "The decision-theoretic model is quite reductive (binary safety, constant u(x,y), an arbitrary λ=1 assumption, single scalar threshold τ=0.5 not tied to the actual deployed filter threshold), and the paper acknowledges but does not resolve how these simplifications affect the validity of the derived reward in more realistic multi-harm or non-binary settings (deferred to future work).",
+        "Statistical reporting uses many paired t-tests across sub-groups/models without correction for multiple comparisons, and some key results (e.g., the 14B model's helpfulness drop, several ablation deltas) are only marginally significant or not significant, which is somewhat glossed over in the narrative (e.g., 'the only utility regression... is statistically insignificant').",
+        "Training uses 4-bit quantized LoRA fine-tuning for a single epoch with short (96-token) rollouts, which may bias generation length/content and limits confidence that results would hold under full fine-tuning or with longer, more realistic completions typical of production LLMs.",
+        "The paper's own code is not yet linked (\"Code available at\" is left blank), limiting reproducibility despite claims of comprehensive implementation details."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Well-motivated problem framing: treating the generator+filter as a compound system rather than optimizing the generator in isolation against a 'pass the filter' objective is a useful and underexplored angle for safety fine-tuning.",
+        "A clean, if simple, theoretical justification (Theorem 1 and Proposition 1) is provided for why pushing classifier scores away from the decision threshold should not decrease compound-system utility under natural monotonicity assumptions.",
+        "Reasonably broad empirical study spanning four base models (0.5B to 14B, two model families), multiple ablations (reward-model vs. guard-only reward, prompt-aware reward, weaker classifiers, long-context prompts), which helps characterize when the method helps or fails.",
+        "Commendable transparency: the paper includes a judge-robustness check (Gemini vs. GPT-4.1) and openly reports failure modes (e.g., the 0.5B model collapsing to near-universal refusal under guard-only reward, and the prompt-aware reward hurting performance), rather than only presenting favorable results.",
+        "The training data mixture (jailbreak, benign, harmful prompts) and evaluation protocol are clearly described, aiding partial reproducibility."
+      ],
+      "weaknesses": [
+        "Each configuration is trained with only a single run (explicitly acknowledged in Appendix A.1) with no seeds/variance reported for RL fine-tuning, which is known to be high-variance; this substantially weakens confidence that the observed differences reflect the method rather than training noise.",
+        "The judge-robustness experiment in Appendix D actually undermines central claims: switching to Gemini-2.5 as judge reverses the helpfulness direction for three of four models (only the 14B model retains a clear Pareto improvement), yet this is relegated to an appendix rather than integrated into the main narrative or resolved.",
+        "The theoretical contribution is fairly thin: Theorem 1 is essentially the observation that a pointwise max of two oppositely-monotone functions has a minimum at their crossing point, and the specific reward design m(t)=|t-τ| is only loosely justified as 'the simplest bounded proxy' despite the claim that any monotone transform would work—no ablation over reward-shaping functions is provided.",
+        "No comparison against existing safety-alignment baselines discussed in related work (Safe-RLHF, SafeDPO, C-DPO, SACPO, safe-completions) is conducted; all comparisons are fine-tuned vs. the same model's base version, making it hard to assess whether Boundary Guidance offers gains over prior safety fine-tuning approaches.",
+        "Pareto improvement does not hold uniformly: results broken down by prompt type (Appendix C) show that for harmful prompts, helpfulness decreases for larger models even though harmfulness also decreases, meaning the central 'Pareto improvement' claim is prompt-mix dependent, a caveat that is somewhat underemphasized in the abstract/main text.",
+        "The reliance on training and evaluating with the same classifier (no distribution shift study of train-time vs deployment-time classifier mismatch) leaves a central practical concern about robustness to classifier updates entirely unaddressed except as 'future work', despite this being a core motivation for the method's real-world value.",
+        "Some evidence of possible reward/classifier gaming is noted informally (e.g., '0.5B distilling the reward model') but not investigated with mechanistic analysis, leaving open whether reported improvements reflect genuine quality gains or exploitation of the auxiliary models.",
+        "Evaluation relies solely on LLM-as-a-judge scoring (GPT-4.1 primary, Gemini secondary) with no human validation or inter-annotator agreement, which is a meaningful limitation given known LLM-judge biases, especially for a safety-critical claim."
+      ]
+    }
+  }
+}

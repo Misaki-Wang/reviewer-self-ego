@@ -1,0 +1,44 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Clear problem framing via three well-motivated desiderata (D1-D3) with a systematic comparison table against representative prior work (Max Loss, Max Grad, RHO-Loss, GREATS).",
+        "Novel and efficient signal design: reusing forward-pass logits (nuclear norm) for utility/intra-sample diversity avoids extra backprop, and a Kronecker-factorized SRFT-style projection (Theorem 3.2) provides a theoretically grounded, storage-efficient way to compute inter-sample diversity via a memory buffer, with complexity reduced from O(NVd) to O((N+V)d log(NV)).",
+        "Reasonably thorough empirical evaluation across two backbones (Llama-3.1-8B, Qwen-2.5-7B) and four diverse benchmarks (MMLU, ScienceQA, GSM8K, HumanEval), with consistent accuracy gains over strong baselines (GREATS, RHO-Loss) and higher throughput than several competitors.",
+        "Good supplementary analysis: ablations isolating the nuclear-norm-only and diversity-only components, sensitivity studies on projected dimension d1/d2, memory buffer size M, and trade-off factor α, plus an empirical loss-reduction vs. nuclear-norm correlation plot (Figure 2) supporting the utility claim.",
+        "Reasonably reproducible: hyperparameters, dataset statistics, and training configurations are reported in detail in the appendix."
+      ],
+      "weaknesses": [
+        "The theoretical justification linking nuclear norm to 'optimization utility' relies on a first-order Taylor approximation and an informal claim that the label-probability gradient term Δ is 'less sensitive to scale' than the logits perturbation; this is not rigorously established and is validated only with a single correlation plot (Qwen-2.5-7B on MMLU), leaving the generality of the claim across models/datasets unverified.",
+        "The intra-sample diversity argument (low-rank logits => repetitive predictions, high-rank => diverse/informative predictions) conflates prediction confidence/calibration with lexical diversity; a confidently correct deterministic sequence could also yield varying row directions, and the paper does not empirically disentangle scale (Frobenius norm growth) from rank/diversity effects, despite claiming both are captured.",
+        "Key hyperparameters (data selection ratio K per dataset/model in Table 5, and the trade-off factor α in Table 6) appear to be tuned per benchmark/backbone combination with fairly narrow optimal ranges (per Figure 7's inverted-U shape); it is unclear how these are selected in practice without access to held-out validation performance, which seems to implicitly conflict with the stated D2 desideratum of avoiding external resources/validation sets.",
+        "Experiments are conducted only with LoRA (rank=8) rather than full fine-tuning, which is the more common and computationally expensive regime where online batch selection would matter most; it is unclear whether the method's benefits and efficiency claims transfer to full-parameter SFT.",
+        "Ablation studies (Table 4) and sensitivity analyses are performed only on Qwen-2.5-7B, not on Llama-3.1-8B, limiting confidence that the two-component design and hyperparameter trends generalize across backbones.",
+        "No comparison to offline data-selection SOTA baselines (e.g., LESS, Alpagasus) discussed extensively in the related work section, despite these being natural competitors under a similar data budget; only online selection baselines are compared.",
+        "The magnitude of improvement is uneven and occasionally very large (e.g., +5.15% over GREATS on MMLU with Qwen at a low 12.5% selection ratio) compared to more modest gains on other benchmarks, without deeper analysis of why some settings benefit disproportionately, raising questions about robustness of the reported gains."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "The paper clearly articulates three desiderata (D1-D3) for online batch selection and systematically differentiates UDS from prior work (MaxLoss, MaxGrad, RHO-Loss, GREATS) in Table 1, giving a clear conceptual framing for the contribution.",
+        "The method is computationally elegant: it derives both a utility/intra-sample-diversity signal (nuclear norm of logits) and an inter-sample diversity signal (low-dimensional bilinear random projection with a memory buffer) purely from forward-pass quantities, avoiding backpropagation-heavy scoring or external reference models/validation sets used by baselines like RHO-Loss and GREATS.",
+        "The bilinear SRFT-style projection is theoretically grounded (Theorem 3.2, Appendix C.3) and reduces both storage and computational complexity relative to a naive full projection, and the algebraic reduction to a standard SRFT is a nice technical contribution.",
+        "The experimental evaluation is extensive: results across two backbones (Llama-3.1-8B, Qwen-2.5-7B), four datasets/tasks, ablations on both scoring components, sensitivity analyses on buffer size/projection dimensions/trade-off factor, and appendix studies covering full fine-tuning, larger batch sizes, instruction-tuned models, long-context (MATH), OOD generalization (MATH500/AMC23), and comparison with an offline baseline (FisherSFT) — this breadth strengthens confidence in the general applicability of the method.",
+        "UDS shows consistent accuracy improvements over baselines while maintaining higher training throughput than full-dataset SFT in most settings, directly supporting the paper's efficiency claims."
+      ],
+      "weaknesses": [
+        "The theoretical justification connecting nuclear norm to optimization utility (Section 3.1) relies on a first-order Taylor expansion combined with an informal claim that the gradient term ∆(x;θ) is 'less sensitive to scale' than the logits norm; this argument is heuristic rather than rigorous, and the paper's own empirical support (Figure 2) is drawn from a single model/dataset combination (Qwen-2.5-7B on MMLU) with visibly noisy/variable correlation in early training, which is thin evidence for a core mechanistic claim underlying the entire method.",
+        "Similarly, the claim that nuclear norm captures intra-sample diversity relies on bound-achieving extreme cases (rank-1 vs. full-rank with equal singular values) that rarely occur in practice; the paper does not analyze how well this reasoning holds for typical intermediate-rank matrices actually encountered during training, again relying on a single correlation plot (Figure 3) from one setting.",
+        "The method's practical deployment requires per-dataset/per-backbone tuning of both the data selection fraction (Table 5) and the trade-off factor α (Table 6, with an inverted-U-shaped sensitivity), which is not obviously obtainable without some form of held-out validation signal — this appears to be in tension with desideratum D2 (no external resources/validation set), since choosing these hyperparameters well in a new setting without a validation set is unclear and not addressed.",
+        "Nuclear norm computation requires an SVD of the N×V logits matrix; while the authors mention this could be costly for long sequences/large vocabularies (acknowledged as a limitation and explored via randomized SVD with degraded performance), the actual wall-clock overhead of exact SVD for the vocab sizes used (e.g., Qwen/Llama vocab ~150K) is not clearly reported, raising questions about how the efficiency claims scale to even larger models or longer contexts.",
+        "Main experiments use LoRA (rank=8) rather than full fine-tuning as the primary setting, with full fine-tuning relegated to a single appendix table on one dataset/model combination; this limits confidence that conclusions transfer robustly to full-parameter SFT, which is a common practical regime.",
+        "The paper's central empirical claims of 'consistent' improvement, while generally true, are sometimes accompanied by relatively small margins in some benchmarks (e.g., ScienceQA, HumanEval) where confidence intervals of UDS and the strongest baseline (GREATS) are close, and no statistical significance testing (e.g., paired t-test) is reported beyond means and standard deviations.",
+        "The abstract states 'Code is available at' with no actual link provided in the manuscript text, which is a reproducibility concern if the repository is not clearly accessible to reviewers/readers."
+      ]
+    }
+  }
+}

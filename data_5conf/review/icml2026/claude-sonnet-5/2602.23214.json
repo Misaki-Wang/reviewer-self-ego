@@ -1,0 +1,46 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Clearly identifies a concrete and well-motivated gap in current PnP diffusion solvers (memoryless HQS/proximal gradient updates leading to steady-state bias), using an intuitive control-theory framing (P vs. PI controller).",
+        "The proposed fix (reinstating the ADMM dual variable) is simple and principled, and the paper correctly anticipates and addresses the resulting practical difficulty (spectral coloring of dual residuals causing OOD inputs to the diffusion denoiser) via the Spectral Homogenization module.",
+        "Extensive empirical evaluation across three distinct medical imaging inverse problems (Sparse-View CT, Limited-Angle CT, Accelerated MRI at two acceleration factors) with consistent and often large PSNR/SSIM improvements over strong recent baselines (DDNM, DDS, DAPS, DiffPIR).",
+        "Well-designed controlled ablation isolating the contributions of Dual-Coupling and Spectral Homogenization (Table 2), plus a mechanism-verification experiment (Fig. 3) that directly visualizes the PSD before/after SH and shows qualitative alignment with the on-manifold reference spectrum.",
+        "Convergence-speed analysis (Fig. 4) demonstrating a practically meaningful ~3x reduction in NFEs to reach comparable quality, which is valuable for real-world deployment.",
+        "Reasonably detailed implementation/reproducibility appendix (training details, baseline hyperparameters, controlled comparison protocol against DiffPIR isolating exactly the proposed components)."
+      ],
+      "weaknesses": [
+        "The theoretical guarantees are considerably weaker than the abstract's framing (\"theoretically guaranteeing asymptotic convergence to the exact data manifold\"): the analysis in Appendix C/D only characterizes properties of a fixed point (assuming one exists and is reached), under the strong and generally inexact assumption that a real diffusion denoiser is an exact proximal operator of an implicit convex-friendly regularizer (Assumption D.1). No actual convergence proof, rate, or existence/uniqueness argument is given for the genuinely non-convex, stochastic setting used in practice.",
+        "Proposition 3.1's \"moment matching\" only guarantees the expected PSD (second-order statistic) is approximately flat; it does not establish that the injected complementary noise ξ, combined with the residual r, actually behaves like i.i.d. Gaussian noise in higher-order statistics or spatial distribution, which is the property the diffusion denoiser was actually trained to expect. The claim that this \"aligns the solver's trajectory with the denoiser's valid statistical manifold\" is therefore somewhat overstated.",
+        "Efficiency/fairness of the main comparison is questionable: the data-consistency sub-problem for DC-PnPDP/DiffPIR uses different CG iteration counts across tasks (20 for SVCT vs. 100 for LACT) and other baselines use their own inner-loop iteration counts (e.g., DAPS uses 100 Langevin steps), but only diffusion NFEs are equalized across methods; the reported 3x acceleration and efficiency claims do not clearly account for these extra per-iteration optimization costs.",
+        "Both the CT and MRI evaluations rely on a single dataset per modality (AbdomenCT-1K for CT, fastMRI knee for MRI), limiting evidence for generalization to other anatomies, scanners, or acquisition geometries (e.g., fan-beam CT, multi-coil MRI).",
+        "The paper does not compare against other approaches that already incorporate historical/momentum information into PnP or diffusion solvers (e.g., classical PnP-ADMM baselines, momentum/Nesterov-accelerated diffusion posterior samplers), making it harder to assess whether gains stem specifically from the dual variable versus any form of iterate memory.",
+        "Sensitivity analysis for key SH hyperparameters (kernel bandwidth δ, choice of σ_t schedule for computing the spectral deficit) is missing, leaving open how robust the method is to these choices.",
+        "The code availability footnote is left as a placeholder (\"Code is available at\") with no actual link, so full reproducibility cannot currently be verified."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Identifies a well-motivated and previously underexplored gap: memoryless PnP diffusion solvers (HQS/proximal gradient) lack the integral (dual) feedback of full ADMM, leading to steady-state bias under severe measurement corruption; this is framed clearly via a control-theory analogy.",
+        "The proposed Spectral Homogenization (SH) module is a sensible, lightweight (FFT-based, no extra denoiser calls) solution to the concrete problem that dual-shifted residuals are spectrally colored and thus OOD for AWGN-trained diffusion denoisers.",
+        "Extensive empirical validation across multiple modalities and tasks: sparse-view CT, limited-angle CT, accelerated single-coil MRI (brain and knee), plus natural-image deblurring/super-resolution, with consistent state-of-the-art PSNR/SSIM gains, particularly large margins on LACT.",
+        "Careful controlled ablations: (1) component-wise ablation isolating DC vs SH contributions (Table 2), (2) a strictly controlled comparison against DiffPIR with identical data-consistency solver/hyperparameters to isolate the effect of the dual variable and SH, and (3) matched-NFE (50-NFE) comparisons in the appendix to separate algorithmic gains from extra sampling budget.",
+        "Thorough supplementary diagnostics: runtime/memory profiling showing negligible overhead from SH and the dual update, residual/dual-norm convergence curves supporting the steady-state bias claim, spectral PSD visualizations verifying the mechanism, and an additional comparison against a supervised CT baseline (ProCT) for context.",
+        "Reasonably detailed reproducibility information (training details, hyperparameters, baseline settings) in the appendix."
+      ],
+      "weaknesses": [
+        "The theoretical justification (Proposition 4.1, and the fixed-point theorems in Appendices D and E, which are near-duplicates of each other) relies on strong, only loosely justified assumptions (denoiser as an exact proximal operator, uniformly random independent phase, spectral 'separability' between artifact and estimation-error PSDs) and does not constitute a rigorous convergence guarantee for the actual nonconvex, iteration-dependent algorithm; the redundancy between Appendices D and E suggests padding rather than added rigor.",
+        "The bootstrap residual estimate r^(k+1) = v^(k+1) − z^(k) is particularly unreliable in early iterations when z^(0) is random noise (per Algorithm 1 initialization), yet the paper does not empirically or theoretically analyze SH's behavior/stability during this critical warm-up phase beyond a general asymptotic argument.",
+        "The code repository link in the abstract is empty/not provided, undermining the reproducibility claim despite the fairly detailed hyperparameter appendix.",
+        "Several cited works have unusual or apparently anachronistic publication metadata (e.g., an arXiv ID dated 2026 for Park et al., a Pattern Recognition citation with a 2026 volume/page number for Ma et al.), which raises concerns about citation accuracy/verifiability.",
+        "It is not entirely clear whether all CT baselines are evaluated with the identical pretrained diffusion prior trained by the authors or with their own reported/official configurations, which could confound the fairness of the main comparison in Table 1 (only the controlled DiffPIR comparison explicitly ensures a shared interface).",
+        "Evaluation is restricted to single-coil MRI simulation, which is a less realistic clinical setting than multi-coil parallel imaging; the applicability of the dual-coupling/SH approach to multi-coil reconstruction (with sensitivity maps) is not demonstrated.",
+        "The core idea of combining ADMM dual variables with diffusion priors is closely related to several concurrent works discussed in the related-work section (e.g., AC-DC, dual ascent diffusion, ADMM-decoupled guidance), so the primary novel contribution is fairly narrow (the SH module), even though the empirical execution is thorough."
+      ]
+    }
+  }
+}

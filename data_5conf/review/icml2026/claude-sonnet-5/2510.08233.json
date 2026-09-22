@@ -1,0 +1,45 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Principled theoretical reformulation of dLLM RL fine-tuning as distribution matching (forward KL/cross-entropy) rather than reward maximization, well-motivated via the mode-seeking vs. mass-covering argument (Fig. 2) and grounded in stochastic optimal control connections (e.g., MDNS).",
+        "The WDCE loss elegantly avoids the need to estimate per-token/sequence log-probabilities under the current policy that GRPO-style dLLM methods (diffu-GRPO, coupled-GRPO) require; being off-policy and forward-only, it naturally supports replay buffers and could exploit fast dLLM inference, which is a genuine architectural advantage specific to dLLMs.",
+        "The paper identifies and carefully diagnoses a concrete practical failure mode (small-batch bias toward promoting all sampled responses) and proposes three principled weight-baseline subtraction techniques, with a theoretical justification via a score-function/variance-reduction argument (Appendix B.2) and an additional WDDO variant with its own optimality proof (Appendix B.3).",
+        "Strong and consistent empirical gains over multiple pretrained dLLM baselines and the SOTA RL baseline d1 across 3 generation lengths and 4 benchmarks, with particularly large improvements on planning tasks (Countdown, Sudoku), and informative ablations (Fig. 4, Fig. 5) showing the necessity of weight baseline subtraction.",
+        "Reasonably thorough documentation of datasets, reward functions, and hyperparameters (Appendix C) aiding reproducibility, along with an extensive related-work discussion situating the contribution relative to concurrent work (e.g., FlowRL, DiffusionNFT, wd1, TraceRL)."
+      ],
+      "weaknesses": [
+        "Evaluation is restricted to a single base model (LLaDA-8B-Instruct) and four relatively narrow benchmarks (two math datasets and two synthetic planning puzzles); no coding or open-ended generation tasks are tested despite the framework being motivated for general reasoning, and applicability to other dLLM backbones (e.g., Dream) is untested, as the authors themselves acknowledge.",
+        "The key efficiency claims (forward-only computation, off-policy replay-buffer reuse enabling speed-ups over GRPO-style methods) are argued theoretically but never empirically validated with wall-clock time, throughput, or sample-efficiency comparisons against d1/diffu-GRPO — this is a central selling point of the method that remains unverified.",
+        "The importance-sampling weight estimation relies on a rough, batch-local softmax approximation to an intractable partition function Z(q), and log-likelihoods are only accessible via the (loose) negative-ELBO surrogate; there is no empirical or theoretical analysis of the resulting bias/variance, especially in the small-N per-prompt regime that the paper itself identifies as problematic.",
+        "The main comparison (DMPO without SFT vs. d1 with SFT+diffu-GRPO) conflates two design choices (presence/absence of SFT and RL algorithm), making it harder to cleanly attribute gains to the distribution-matching objective itself rather than to skipping SFT; an ablation isolating diffu-GRPO alone (no SFT) vs. DMPO alone would strengthen the causal claim.",
+        "Results in Table 1 appear to be single-run point estimates without seeds/variance reporting, despite reward curves (Fig. 4) showing non-trivial variance across training, raising concerns about the robustness/significance of the reported accuracy differences.",
+        "WDDO is shown to be unstable and prone to collapse (Fig. 5) but this failure mode is not analyzed in depth or mitigated, leaving one of the two proposed objectives under-explored and of unclear practical value.",
+        "Some baseline numbers appear non-monotonic or unusual (e.g., LLaDA-Instruct Sudoku accuracy drops sharply from 128 to 256 to 512 generation length), which is not discussed or explained, raising minor concerns about evaluation stability."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Proposes a genuinely novel and well-motivated reformulation of dLLM RL fine-tuning as distribution matching (forward KL / cross-entropy) rather than reward maximization, addressing the known mode-seeking/mode-collapse issues of reverse-KL-based GRPO-style methods.",
+        "Strong theoretical grounding: the paper derives the WDCE objective from first principles via importance sampling on order-specific sequence probabilities, and additionally provides an independent, rigorous derivation from a stochastic optimal control / continuous-time Markov chain perspective (Appendix B.1) that shows the ELBO-based sequence matching is equivalent to exact path-measure KL matching -- a nice piece of technical validation.",
+        "Identifies a concrete and previously under-addressed practical failure mode (all-positive importance weights under small batch size) and proposes multiple principled weight-baseline / negative-gradient-insertion solutions (group, individual, model baselines, and a GAN-style WDDO variant), with variance-reduction justification.",
+        "The method is architecturally motivated by dLLM-specific properties (forward noising process, absence of tractable per-token likelihoods) rather than being a naive port of AR-LLM RL algorithms, giving it a distinct off-policy, forward-only character that plausibly explains both stability under stale data and compute/sample efficiency gains.",
+        "Extensive empirical evaluation across 4 reasoning/planning benchmarks, 3 generation lengths, multiple base models (LLaDA-Instruct, LLaDA-SFT, LLaDA-1.5), and thorough ablations (weight baseline choice, buffer frequency F, rollout count N, entropy/diversity analysis, training dynamics vs. d1/diffu-GRPO) that consistently support the paper's efficiency and performance claims.",
+        "Reports substantial and consistent gains over strong recent baselines (d1, cGRPO) particularly on planning tasks (Countdown, Sudoku), along with credible compute/sample-efficiency advantages (up to 8x rollout acceleration, 2-3x sample efficiency) with supporting training curves."
+      ],
+      "weaknesses": [
+        "All experiments are performed on a single model family (LLaDA), and the reported Dream-Instruct numbers are only pretrained baselines never fine-tuned with DMPO; the abstract/figure emphasis on 'across bi-directional dLLMs' overstates the actual generality shown, and the paper itself acknowledges this as the main limitation without addressing it empirically.",
+        "Benchmark diversity is narrow (GSM8K, MATH500, and two synthetic planning tasks, Countdown/Sudoku), all evaluated with rule-based/format rewards; no coding, open-ended instruction-following, or safety-related evaluation is included to assess whether distribution matching's claimed diversity benefits generalize beyond narrow verifiable-reward settings.",
+        "The comparison between DMPO-LLaDA (trained R1-Zero style without SFT) and d1 (which includes an SFT stage before diffu-GRPO) in the main Table 1 is not fully apples-to-apples; while DMPO-LLaDA-SFT is also reported, the headline comparisons mix training recipes, complicating causal attribution of the observed gains to the distribution-matching objective itself versus recipe differences.",
+        "No confidence intervals, multiple seeds, or statistical significance testing are reported for the main Table 1 results (only ablation figures show variance bands), making it hard to assess how robust the reported gains (especially smaller ones like +2.4% on GSM8K) are to run-to-run variability.",
+        "WDDO is shown to be unstable after ~1k steps (Fig. 4) but this instability is not analyzed further or connected back to theory, and it is quietly dropped from the main results without a clear account of when/why it fails, limiting the completeness of the ablation story.",
+        "The method introduces considerable additional complexity (three weight-baseline variants, temperature/proximal-descent generalization, buffer frequency and rollout-count hyperparameters) without clear a priori guidance on which variant/hyperparameters to use for a new task; the paper resorts to task-specific empirical selection (e.g., different baselines used for different datasets in Table 1), which may hinder reproducibility and practical adoption.",
+        "All experiments use LoRA fine-tuning (rank 128) rather than full fine-tuning, which may affect the generality of conclusions about training stability and speed when scaled to full-parameter RL fine-tuning of larger dLLMs."
+      ]
+    }
+  }
+}

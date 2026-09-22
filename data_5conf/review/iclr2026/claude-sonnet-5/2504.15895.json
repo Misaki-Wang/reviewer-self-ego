@@ -1,5 +1,25 @@
 {
   "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "The paper addresses a timely and practically important problem: reducing inference cost/overthinking in large reasoning models via training-free early exit, which is attractive because it needs no fine-tuning and can be applied to off-the-shelf reasoning LLMs.",
+        "The motivating analysis (Section 3, Figures 1-2) provides a reasonably careful empirical study showing that 'pearl reasoning' points exist where truncating and answering directly yields correct results, giving a clear empirical grounding for the proposed method rather than relying purely on intuition.",
+        "The method (reasoning transition monitoring + trial-answer inducing + confidence evaluation) is simple, interpretable, and easy to integrate into existing decoding pipelines without additional training or auxiliary models, in contrast to some competing approaches that need extra probes or fine-tuning.",
+        "Experiments span multiple model scales (1.5B-32B), multiple benchmark types (math, science QA, code), and include ablations on the threshold, on the choice of transition token (Wait vs Alternatively), and a case study, which gives a fairly broad picture of behavior.",
+        "Reported results are consistent in direction across most settings: simultaneous reduction in generation length and improvement in accuracy, which is a nontrivial and appealing combination if it holds robustly."
+      ],
+      "weaknesses": [
+        "The paper is visibly unfinished in places: the related work section contains an unresolved placeholder reference ('Table X'), and the efficiency section explicitly states that key results ('the efficiency gain analysis combined with the inference framework vllm', 'more discussion about end-to-end latency') 'will be added in the forthcoming version,' meaning the central efficiency claims of the method are not fully substantiated at submission time.",
+        "The branch-parallel decoding acceleration strategy, which is presented as a core component to make the confidence-evaluation overhead practical, is described only at a high level (Figure 4) without a rigorous end-to-end latency evaluation using it; the only latency numbers given (Figure 7) explicitly exclude this acceleration and are measured on HuggingFace without any production-grade serving stack, undermining the practical efficiency claims.",
+        "There is no direct quantitative comparison against relevant training-free/prompt-based or post-hoc early-exit baselines (e.g., budget forcing/s1, other confidence- or perplexity-based truncation methods, or the two concurrent works cited in Related Work) in the main tables; comparisons are only against 'Vanilla CoT', making it hard to assess whether DEER's gains are meaningfully better than simpler alternatives.",
+        "All accuracy results use single-sample greedy decoding, with no reported variance, multiple seeds, or statistical significance testing, which is a concern for small benchmarks like AIME 2024 (30 questions) and AMC 2023 (40 questions) where a handful of flipped answers can produce large percentage swings (as seen in the ±5-16 point accuracy changes reported).",
+        "The threshold λ appears to be tuned per setting without clear guidance on how it should be selected in practice for a new model/domain without labeled validation data; while robustness to λ is claimed (Figure 6a), the range tested is narrow (0.94-0.97) and it is unclear how this generalizes across model families, especially given the weaker/mixed results on QwQ-32B.",
+        "The QwQ-32B results (only reduces length by 24% while introducing 3 additional errors) suggest the method's core mechanism (relying on the model reliably terminating thinking via the end-of-thinking delimiter) is not robust across all reasoning model families, and the explanation offered is speculative ('we conjecture...') rather than verified.",
+        "The 'Performance Ceiling of DEER' analysis (Figure 5) is interesting but essentially shows that a substantial fraction of early exits are harmful (red bars), and the paper does not propose or evaluate a concrete solution to this false-positive problem beyond stating it as future work, leaving open whether the net accuracy gains are robust or partly an artifact of benchmark-specific interactions between overthinking and difficulty.",
+        "Related work on efficient reasoning is extensive, but the technical novelty relative to closely related concurrent work (Zhang et al. 2025's trial-answer + probe model, Ma et al. 2025a's direct-answer prompting) is somewhat incrementally differentiated (using intrinsic token confidence instead of a probe) rather than a fundamentally new mechanism."
+      ]
+    },
     "exp3_positive": {
       "oa": 6,
       "strengths": [
@@ -22,6 +42,27 @@
     }
   },
   "v3": {
+    "exp1_quality": {
+      "oa": 6,
+      "strengths": [
+        "Extremely thorough empirical evaluation: 10-11 benchmarks spanning math, science, and code, across 11-12 reasoning models ranging from 1.5B to 671B parameters (DeepSeek-R1-Distill series, Qwen3 series, QwQ-32B, DeepSeek-R1).",
+        "The method is training-free and simple to implement (linguistic marker-based transition detection + confidence-based trial answer evaluation), making it easily adoptable in practice.",
+        "Strong and consistent empirical results: simultaneous improvements in both accuracy (+0.3-5.0%) and generation length reduction (19.1-80.1%), which is a notable 'win-win' compared to most efficient-reasoning baselines that trade accuracy for efficiency.",
+        "Good motivating analysis (Figure 1, 2) clearly establishes the existence of 'pearl reasoning' points and justifies the need for dynamic (rather than static) early exit.",
+        "Extensive ablations: threshold robustness, choice of transition monitor (linguistic vs entropy-based), confidence aggregation (geometric vs arithmetic mean), effect of model size/task difficulty, and comparison with concurrent baselines (Dynasor-CoT, SEAL, NoThinking, CoD, TCC).",
+        "Practical systems contribution via branch-parallel decoding acceleration to offset trial-answer-inducing latency, with reported real end-to-end latency improvements (27.9-58.6%).",
+        "Reasonable statistical validation with confidence intervals over multiple runs for smaller benchmarks (AMC, AIME)."
+      ],
+      "weaknesses": [
+        "Core novelty is incremental relative to closely related concurrent work (Dynasor-CoT, SEAL, and the probe-based approach of Zhang et al. 2025a); the main new ideas are the specific confidence-thresholding mechanism at linguistic transition points and the DEER-Pro robust variant, which are relatively small increments over existing certainty-probing approaches.",
+        "The extensive theoretical analysis in Appendix B (noise robustness of DEER-Pro) relies on strong, somewhat arbitrary assumptions (i.i.d. Gaussian noise on confidence scores, specific noise models for MAD) and reads as an attempt to formalize a heuristic rather than providing rigorous, necessary theoretical grounding; it adds bulk without proportionate insight.",
+        "Some baseline comparisons appear potentially unfavorable to competitors: e.g., TCC's token budget is explicitly set based on DEER's actual generated length, which could bias the comparison in DEER's favor rather than tuning TCC independently for its own best operating point.",
+        "The confidence threshold λ=0.95 is tuned somewhat heuristically and, despite claimed robustness in the 0.9-0.97 range, is still a hyperparameter that requires some calibration per model/setting (Fig. 6 and Table 4 show it is not universally insensitive, e.g., Qwen3-8B shows accuracy monotonically increasing up to 0.95).",
+        "The main paper text relies heavily on a very large appendix (over 30 pages) for essential experimental details, ablations, and theoretical proofs, suggesting the core paper may be less self-contained and makes it harder to verify claims without extensive supplementary reading.",
+        "Limitations are only lightly addressed (e.g., Llama-Nemotron showing weak early-exit rates is mentioned only briefly in the appendix), and there is no deeper analysis of failure cases where DEER underperforms or hurts accuracy.",
+        "The efficiency claims (particularly the 'superlinear speedup' and computational cost analysis in Appendix H) rely on simplified O(L^2) attention cost models that ignore KV-cache incremental decoding cost patterns typical in modern serving frameworks, potentially overstating the theoretical significance of the observed speedup."
+      ]
+    },
     "exp3_positive": {
       "oa": 8,
       "strengths": [

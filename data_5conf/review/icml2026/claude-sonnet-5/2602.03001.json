@@ -1,0 +1,44 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Addresses a well-motivated and previously under-examined gap: existing GNS-based adaptive batch-size methods assume Euclidean geometry, but popular non-Euclidean optimizers (signSGD/Signum, specSGD/Muon) require dual-norm-aware noise metrics. The paper's framing via steepest descent under general norms is conceptually clean.",
+        "The theoretical derivation is principled: using Hölder's inequality and a generalized descent lemma, the authors derive lower bounds on expected improvement that naturally yield l1 (Manhattan) and Schatten-1 (nuclear) GNS metrics, recovering the Euclidean case as a special instance. Table 1 nicely unifies SGD/signSGD/specSGD as squared ratios of dual norms.",
+        "Convergence theorems (Appendix A, Theorems A.4/A.5) are provided for both sublinear (non-convex/smooth) and linear (strongly convex) regimes under the proposed adaptive schedule, giving some formal backing beyond the one-step improvement heuristic.",
+        "The proposed distributed variance estimator that reuses local per-rank mini-batch gradients during the existing AllReduce/ReduceScatter operation is practical and avoids the substantial memory/compute overhead of prior sample-level variance estimators, with concrete DDP/FSDP implementation details.",
+        "Empirical evaluation spans language (160M and 1B Llama-3 on C4) and vision (SimpleViT/Imagewoof, ResNet-18/CIFAR-10) tasks across a diverse optimizer set (SGD, MSGD, signSGD, Signum, AdamW, specSGD, Muon), showing consistent and sometimes large (up to ~85%) reductions in optimizer steps while matching or improving validation loss/accuracy relative to constant-batch baselines.",
+        "Useful ablations are included: comparison of l1 vs l2 GNS for signSGD (Table 9) showing the geometry-matched metric performs better, and multi-seed robustness checks (Figure 3) showing consistent gains despite differing adaptive batch-size trajectories across seeds."
+      ],
+      "weaknesses": [
+        "The theoretical connection between GNS and a practical batch-size schedule relies on a loose lower bound and an essentially free constant (kappa/theta) whose 'principled' choice is not derived from first principles for practical use; the paper explicitly treats theta as a tunable hyperparameter (fixed at 0.6 for language experiments), which somewhat undercuts the stated motivation of replacing brittle heuristics with a principled metric.",
+        "Reported gains are almost entirely in 'training steps' rather than wall-clock time or FLOPs; since adaptive batch sizes change token throughput and hardware utilization dynamically, step-count reduction does not directly establish the wall-clock/hardware efficiency gains that motivate the paper in the introduction.",
+        "Mixed and partially negative results are under-discussed: at 1B scale AdamW fails to reach the baseline's validation loss under the adaptive strategy (Table 3), and this result appears to come from a single run without repeated seeds or error bars, unlike the well-replicated 160M experiments, weakening confidence in the method's scalability and generality across optimizers.",
+        "The distributed variance estimator's quality as a function of data-parallel world size R is not analyzed; all experiments use a single 8-GPU node, so there is no evidence of estimator robustness/degradation under smaller or larger degrees of data parallelism, despite claims of broad compatibility with FSDP/tensor/pipeline parallelism.",
+        "No direct validation of the estimator's accuracy against a ground-truth or oracle GNS (e.g., via large-batch sampling) is provided; the method's correctness is only assessed indirectly through downstream training curves.",
+        "Limited comparison to alternative adaptive batch-size approaches mentioned in related work (e.g., gradient-diversity-based DiveBatch, Merrill et al.'s critical batch size revisited, composite metrics) beyond the Euclidean GNS baseline, making it harder to judge the marginal benefit of the proposed non-Euclidean metric relative to other adaptive heuristics.",
+        "The extension to stateful/preconditioned optimizers (Adam, Muon with momentum, Shampoo) is explicitly left as future work despite these being the most widely used optimizers in practice; the paper's theory technically applies to un-momentum'd signSGD/specSGD, and the practical algorithm's handling of momentum variants (Signum, Muon) is heuristic rather than theoretically justified."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Provides a principled theoretical extension of gradient noise scale (GNS) and critical batch size (CBS) concepts from Euclidean SGD to non-Euclidean steepest descent methods (signSGD/specSGD), grounded in dual-norm geometry and Hölder's inequality bounds, with a clean unifying pattern shown in Table 1.",
+        "Supplies full convergence proofs (Theorems A.4, A.5) for the adaptive schedules under both convex and non-convex assumptions, going beyond the purely empirical heuristics common in this literature.",
+        "Proposes a practically appealing variance estimator that reuses local mini-batch gradients across data-parallel ranks (piggybacking on existing AllReduce/ReduceScatter operations), avoiding expensive additional passes required by prior GNS estimators, and gives detailed FSDP-compatible pseudocode (Algorithms 2-3) plus a cost/overhead analysis (Table 12-13).",
+        "Extensive empirical evaluation spanning language (160M and 1B Llama-3 on C4) and vision (SimpleViT/Imagewoof, ResNet-18/CIFAR-10) tasks, multiple optimizers (signSGD, Signum, AdamW, specSGD, Muon, SGD/MSGD), and multiple seeds with reported error bars, along with ablations on θ sensitivity, ℓ1 vs ℓ2 GNS, and learning-rate scaling choices.",
+        "Clear, well-organized writing with a full theoretical derivation chain from Lemma 3.1 to CBS-GNS relationships (Section 3.3) and an honest discussion of open problems (preconditioned/stateful optimizers, Hessian structure) in the conclusion."
+      ],
+      "weaknesses": [
+        "The core theoretical link between CBS and GNS relies on loose lower bounds (via Hölder's inequality and Jensen's inequality), which the authors themselves acknowledge; in practice θ is treated as a tunable hyperparameter rather than a principled constant, partially undermining the claimed advantage over heuristic, hand-tuned batch schedules.",
+        "Benefits are inconsistent across optimizers/settings: AdamW does not reach the baseline validation loss under the adaptive strategy in the 1B experiment (Table 3), specSGD shows only a modest 16.49% step reduction (Table 2), and MSGD is an exception where adaptive batching underperforms the baseline in the vision experiments (Table 11), weakening the generality of the central claims.",
+        "The paper reports only optimizer 'step' reductions rather than actual wall-clock training time; given that the S1 (spectral) GNS estimator incurs substantial computational overhead (up to ~40% per-step slowdown at 1B scale per Table 12), it is unclear whether the reported step savings translate into genuine end-to-end wall-clock speedups, which is the paper's own motivating metric (hardware utilization).",
+        "Experiments are limited to relatively small-scale models (160M–1B parameters) and single-node, single-GPU-type setups (8×H100), leaving open whether the proposed estimators and adaptive schedules remain effective, stable, and computationally cheap at the much larger scales and multi-node/model-parallel configurations where batch-size scheduling matters most in practice.",
+        "No direct comparison against widely-used heuristic batch-ramp schedules (e.g., linear or stage-wise ramp-ups actually used in production LLM training) is provided; the paper only compares to fixed small/large batch baselines, which somewhat limits the practical significance claims relative to the stated motivation of replacing brittle heuristic schedules.",
+        "The variance/GNS estimator's reliability depends on having a sufficiently large number of data-parallel ranks R to treat local gradients as independent samples; the paper does not analyze sensitivity to small R or single/few-GPU settings, which are common in practice and could make the proposed estimator inapplicable or high-variance."
+      ]
+    }
+  }
+}

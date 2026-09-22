@@ -1,0 +1,70 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Clear and well-motivated problem framing: the paper provides concrete empirical evidence (Fig. 1, Appendix A.1) that existing token-dropping and head-reallocation KV compression methods degrade substantially on reasoning models despite being stable on instruct models, and ties this to specific failure modes (repetition vs. going astray).",
+        "Novel conceptual contribution distinguishing 'reasoning heads' from 'retrieval heads', supported by masking/ablation experiments (Fig. 6, Fig. 7) showing reasoning heads are more critical and exhibit distinct failure signatures than retrieval heads.",
+        "The RL-based identification method is a sensible technical idea: using actual generation-based verifiable rewards to directly optimize a small number of per-head gating parameters is more directly tied to reasoning quality than static/proxy-based head identification used by prior work (DuoAttention, RazorAttention, Ada-KV).",
+        "Thoughtful engineering to stabilize RL training under sparsity (adaptive penalty weighting and self-distillation/curriculum sampling), with ablations (Fig. 8) that isolate each component's contribution and explain a genuine training collapse phenomenon.",
+        "Reasonably comprehensive empirical evaluation across 2 models, 4 benchmarks (3 math + 1 code for OOD generalization), and multiple sparsity levels, with full numerical results and hyperparameters provided in the appendix, aiding reproducibility.",
+        "Consistent and generally strong performance gains over baselines (H2O, R-KV, DuoAttention), particularly at moderate-to-high sparsity (0.4-0.6), which is the practically relevant regime."
+      ],
+      "weaknesses": [
+        "Evaluation appears to rely on single-run, single-seed greedy decoding without variance/error bars, which is concerning particularly for small benchmarks like AIME24 (only 30 problems), where reported gains/losses of a few percentage points may not be statistically meaningful; some 'RLKV surpasses full KV cache baseline' claims are used as evidence of a real phenomenon but could simply reflect evaluation noise.",
+        "The core motivation is deployment efficiency and memory bottlenecks, yet the paper reports only theoretical KV cache budget/sparsity levels and never measures actual wall-clock latency, throughput, or peak GPU memory savings during real inference, leaving the practical efficiency claim only partially substantiated.",
+        "Only two small distilled reasoning models (7-8B, both derived from DeepSeek-R1 distillation) are evaluated; it is unclear whether the reasoning-head phenomenon and RLKV's gains generalize to larger or differently-trained reasoning models (e.g., full R1, QwQ, o1-style, or 32B+ models) which are more representative of the memory bottleneck problem being motivated.",
+        "The comparison set omits some of the more relevant recent head-reallocation baselines discussed in related work (Ada-KV, RazorAttention, PruLong), only including DuoAttention; a more complete comparison against these methods, especially PruLong which is also learning-based, would better substantiate the claimed superiority.",
+        "RLKV requires a full RL training run (with verifiable rewards) per model to identify reasoning heads, which is a nontrivial training cost; the paper does not analyze or discuss this overhead relative to the inference savings achieved, nor whether the identified heads transfer across tasks/domains without re-training (training uses only math data, and generalization to code MBPP, while presented as OOD success, is only one instance).",
+        "The method still shows significant degradation at high sparsity (0.6-0.8), and the paper's own future work section acknowledges this; the practical utility claim of '20-50% cache reduction with near lossless performance' is accurate but somewhat narrows the significance of the contribution relative to the goal of substantial memory reduction for very long CoT generations.",
+        "The extremely poor performance of H2O baseline (often near 0% at higher sparsity) raises fairness concerns about baseline implementation/tuning; despite claimed adjustments (equal sink/local token overhead), such extreme failure invites scrutiny about whether baselines were optimally configured for the reasoning setting.",
+        "The paper relies on verifiable, final-answer-correctness rewards (RLVR) for head identification, which restricts applicability to domains with well-defined verifiable rewards (e.g., math/code); extension to open-ended reasoning or other domains lacking such signals is not discussed."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Strong, well-designed motivational study (Fig 1, Appendix A) using paired instruct/reasoning model variants on the same benchmark to isolate extended CoT generation as the root cause of KV compression failures, rather than confounding it with model capability differences.",
+        "Novel methodological idea: using RL (GRPO with verifiable reward) as a probe to directly optimize learnable per-head gating adapters against actual downstream reasoning quality, rather than relying on proxy heuristics (attention scores) or synthetic recall tasks (DuoAttention, PruLong) that are shown empirically to be mismatched to reasoning generation dynamics.",
+        "Comprehensive empirical evaluation across three reasoning models (Llama-3.1-8B-R1, Qwen-2.5-7B-R1, Qwen-3-4B-Thinking), four reasoning benchmarks, and four MMLU-Pro subsets, at multiple sparsity levels, with full numerical tables in the appendix supporting reproducibility.",
+        "Careful attention to fairness in baseline comparison: identifying and correcting an implicit bias in fixed-budget evaluation for token-dropping baselines (Appendix E/F), which strengthens rather than weakens the baselines, improving the credibility of the comparison.",
+        "Useful mechanistic/qualitative analyses (head sensitivity ablation with random/retrieval/reasoning head control groups, error-mode decomposition into repetitive/incorrect/overlength categories, response-length analysis) that provide interpretable evidence for why the identified heads matter, going beyond simple accuracy numbers.",
+        "Practical stabilization techniques (adaptive penalty weighting, self-distillation/curriculum sampling) are proposed to address a concretely demonstrated training collapse phenomenon (Fig. 4), with ablations isolating their individual contributions.",
+        "Reports actual end-to-end wall-clock speedups (not just theoretical cache savings), which is often omitted in similar compression papers."
+      ],
+      "weaknesses": [
+        "Method requires a non-trivial per-model RL training procedure (22-40 GPU-hours) using math-only training data, which is more costly than training-free baselines (H2O, R-KV) and less generalizable than a single retrieval-head identification pass (DuoAttention); this cost/generality tradeoff is under-discussed relative to the training-free alternatives.",
+        "Head identification is trained exclusively on mathematical reasoning problems, yet evaluated for generalization on code (MBPP) and diverse knowledge domains (MMLU-Pro); while results are reasonable, cross-domain transfer of \"reasoning-critical\" heads is not deeply analyzed, and some MMLU-Pro/Law results show inconsistent or marginal gains (e.g., Table in App. C), suggesting the identified heads may be partly math-specific rather than universally \"reasoning-critical.\"",
+        "Reported end-to-end speedups (1.09-1.21x) are fairly modest given 20-50% cache reduction, and the paper acknowledges the current implementation lacks custom kernels/continuous batching integration, leaving the practical efficiency benefit of the core contribution largely aspirational rather than demonstrated at scale.",
+        "Evaluation is restricted to relatively small models (4B-8B parameters); it remains unclear whether the sparsity patterns, training stability techniques, and near-lossless thresholds generalize to larger reasoning LLMs where head/layer counts and behaviors may differ substantially.",
+        "The static (query-agnostic) gating mechanism is acknowledged as a limitation only in the Future Work section, but its impact on performance for inputs whose reasoning patterns differ from the training distribution is not empirically probed within the paper.",
+        "Removing the KL penalty in GRPO to sharpen the reward signal could risk unstable or reward-hacked adapter solutions; while stabilization techniques are introduced, the interaction between no-KL-penalty training and potential overfitting to the specific verifiable-reward training set is not thoroughly examined beyond the sparsity dimension.",
+        "The operational definition of \"reasoning-critical head\" is tied specifically to the chosen local-attention parameterization (fixed sink/window sizes) used during training and inference; it is unclear how sensitive the identified head rankings are to these hyperparameters, limiting insight into whether the discovered heads reflect a general property or an artifact of the specific compression scheme used to probe them."
+      ]
+    }
+  },
+  "v3": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Well-motivated and clearly diagnosed problem: the paper provides a convincing controlled comparison (instruct vs. reasoning model variants on identical tasks) isolating extended CoT generation as the root cause of KV-compression fragility, and clearly characterizes the distinct failure modes (repetitive loops vs. overlength generation) of token-dropping and head-reallocation baselines.",
+        "The core idea—using on-policy RL (GRPO) with lightweight per-head gating adapters as a 'probe' to discover reasoning-critical heads directly from generation-outcome rewards—is a genuinely novel alternative to prior proxy-based (retrieval-head) or teacher-forced head-identification methods, and is well justified conceptually.",
+        "Extensive empirical evaluation: 3 models (Llama-3.1-8B-R1, Qwen-2.5-7B-R1, Qwen-3-4B-Thinking), 8 benchmarks (4 reasoning/code + 4 MMLU-Pro subsets), 4 sparsity levels, and 4 competitive baselines (H2O, R-KV, DuoAttention, KVZip), plus a long-context generalization test (LongReason, 70K context) that shows the learned heads transfer well beyond the 8K training length.",
+        "Practical systems contribution: integration into SGLang with a dual KV-pool design yields measured end-to-end speedups (up to 2.06x) that are compared against a theoretical bound, going beyond simulated/theoretical compression ratios reported by most competing papers.",
+        "Careful, transparent experimental methodology: the paper identifies and corrects an implicit unfairness in prior fixed-budget baseline evaluation (Appendix E/F), demonstrating the fix actually improves baselines rather than handicapping them, which strengthens trust in the comparisons.",
+        "Useful ablations (adaptive penalty weighting, self-distillation sampling, L1 weight, sink+local window) and qualitative analyses (head sensitivity ranking, error-mode decomposition, response-length analysis) that support the mechanistic claim that 'reasoning-critical heads' are distinct from retrieval heads."
+      ],
+      "weaknesses": [
+        "Statistical robustness is a concern on small benchmarks: AIME24 has only 30 problems, so reported deltas (e.g., +6.7%) correspond to a single-problem change; combined with single-seed greedy decoding, some reported 'improvements' (including cases where compressed models beat the full-cache baseline) may reflect noise rather than a genuine effect, and no variance/multiple-seed analysis is provided.",
+        "Scale limitation: experiments are restricted to relatively small reasoning models (4B–8B); it is unclear whether the head-sparsity phenomenon and RL-probe approach scale to larger, more capable reasoning models (e.g., 32B–70B) where head redundancy patterns and RLVR training dynamics could differ substantially.",
+        "The method requires model- and (currently) domain-specific RL training (tens of GPU-hours per model) using math-heavy curated data, which is more costly than training-free heuristics (H2O) and comparable to but not clearly cheaper than other learned baselines (DuoAttention); scalability of this training cost to larger models/context lengths is not empirically demonstrated.",
+        "Performance still degrades substantially at very high sparsity (≥0.8) across all methods including RLKV, and the paper's own limitations section acknowledges this without a concrete solution beyond suggesting future combination with quantization.",
+        "Train/inference mismatch: training uses soft, continuous mixed-attention gating while inference discretizes to hard top-k head selection; the impact of this discretization gap is only indirectly explored via the sink/local window ablation, not directly quantified (e.g., soft vs. hard gating comparison at matched sparsity).",
+        "Generalization across knowledge domains is mixed and sometimes noisy (e.g., MMLU-Pro Law absolute accuracies are very low and inconsistent across sparsity levels for multiple methods including RLKV), weakening the claim of robust cross-domain transfer of the identified critical heads.",
+        "The GQA group-size limitation observed for Qwen-2.5-7B-R1 (larger KV group size limiting achievable sparsification) suggests the method's benefits may be architecture-dependent, but this is not systematically studied across a wider range of GQA group sizes or newer architectures (e.g., MLA)."
+      ]
+    }
+  }
+}

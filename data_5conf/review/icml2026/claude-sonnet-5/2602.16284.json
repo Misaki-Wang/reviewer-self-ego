@@ -1,0 +1,47 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Clear and well-motivated theoretical framework: the attention-matching objective is grounded in an exact decomposition of concatenated-block attention into locally normalized outputs weighted by attention mass (Eq. 5, Appendix A.2), giving a principled justification for why matching both attention output and attention mass (via the novel bias term) is sufficient for compatibility with future KV-cache concatenation.",
+        "The method decomposes into simple, closed-form subproblems (NNLS for bias, least squares for values, greedy/heuristic selection for keys), enabling compaction in seconds-to-minutes rather than the GPU-hours required by Cartridges, while achieving comparable or better downstream accuracy at practical compaction ratios (up to 50x).",
+        "Extensive empirical evaluation across three model families (Qwen3-4B, Llama3.1-8B, Gemma3-12B) and two distinct long-context benchmarks (QuALITY, LongHealth), with comparisons against a wide range of relevant baselines (Cartridges, H2O+, SnapKV, PyramidKV, KVzip, summarization variants, DuoAttention).",
+        "Thorough ablation studies (leave-one-out analysis in Fig. 4, reference-query sampling comparison in Appendix D, aggregation function comparison in Appendix F.1) that isolate the contribution of each design choice.",
+        "Interesting and practically useful finding that per-head attention sensitivity is largely input-invariant, enabling a reusable, precomputed nonuniform compaction schedule per model (Section 3.4, Figs. 2, 6-8), with an accompanying explanation for why sliding-window architectures retain performance under aggressive compaction.",
+        "Strong reproducibility: extensive appendices detail exact algorithms (OMP variants, NNLS solver, chunked compaction implementations), hyperparameters, and wall-clock timing breakdowns per computational stage (Table 1).",
+        "Nice practical extensions demonstrating versatility: combining Attention Matching with summarization for ~200x compaction (Table 2), and a preliminary but promising online/mid-trajectory compaction experiment on AIME showing preserved reasoning ability under repeated compaction (Appendix F.3)."
+      ],
+      "weaknesses": [
+        "Evaluation is restricted to models up to 12B parameters and largely to multiple-choice QA benchmarks (QuALITY, LongHealth); there is no evaluation on open-ended generation, summarization faithfulness, or agentic/coding tasks that motivate the paper's framing (e.g., Claude Code/Codex compaction), leaving significance for the stated real-world use cases somewhat unproven.",
+        "The Cartridges baseline may be undertrained/under-tuned relative to its original configuration (the paper itself notes 'additional Cartridges training may further improve its results'), which could bias the headline comparison at extreme compaction ratios in the paper's favor; a more carefully matched compute budget or convergence check would strengthen the claim.",
+        "Compaction time, while much faster than Cartridges, is still on the order of minutes for the best-performing OMP variant on long documents, and query generation (self-study/repeat-prefill) dominates runtime with limited discussion of how much this could realistically be optimized in production settings.",
+        "The key-selection step (restricting Ck to a subset of original keys) lacks a closed-form or theoretically justified solution and is acknowledged by the authors as a source of the performance gap versus Cartridges at very high (100x) compaction ratios, indicating the method's degradation is not fully explained or resolved.",
+        "The nonuniform head-budget procedure relies on an approximate separability assumption (single-head sensitivity curves measured with other heads fixed) that is not rigorously validated for potential interaction effects between heads, and its benefits are demonstrated mainly through perplexity ablations rather than downstream task metrics.",
+        "The paper introduces many interacting design choices (query sampling strategy, key selection method, bias stabilization heuristics, chunking strategy, nonuniform budgeting) that make the overall system feel like an engineering pipeline with many tunable knobs, which may reduce clarity about which components are essential versus incidental, despite the ablation study.",
+        "Some empirical results undercut the primary claims: KVzip sometimes matches or exceeds Attention Matching performance (Figure 3), which is attributed post-hoc to its nonuniform budget advantage rather than being investigated or addressed directly."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Well-motivated theoretical derivation: the paper shows that preserving both locally-normalized attention output and attention mass for a compacted block is sufficient to approximately preserve full attention behavior under arbitrary future concatenation (Eq. 1-2, Appendix A.2), which is a clean and useful insight that generalizes the token-eviction paradigm by adding a principled bias correction term.",
+        "The method decomposes into closed-form/convex subproblems (NNLS for bias fitting, least squares for value fitting), enabling compaction in seconds-to-minutes rather than the GPU-hours required by Cartridges, while achieving comparable or better downstream accuracy at practical (e.g., 50x) compaction ratios — this is a compelling systems-relevant Pareto improvement (Figure 1, Figure 4).",
+        "Extensive empirical validation across three model families (Qwen3-4B, Llama-3.1-8B, Gemma3-12B) and five benchmarks (QuALITY, LongHealth, QASPER, LongBench v2, RULER), consistently outperforming a wide range of strong baselines (H2O+, SnapKV, PyramidKV, KVzip, KVMerger, summarization, and Cartridges).",
+        "Thorough ablation study (Figure 5, leave-one-out) isolating the contribution of each design choice (biases, learned values, nonuniform head budgets, on-policy/self-study queries), providing good evidence that each component matters.",
+        "Nonuniform head-budget analysis is a nice empirical contribution: sensitivity curves are shown to be largely input-invariant and transferable across datasets (Figure 3, Appendix E), motivating a practical one-time precomputed allocation scheme.",
+        "Strong reproducibility support: detailed appendices document algorithmic choices (OMP variants, NNLS solvers, numerical stabilization of β), chunked compaction implementation, self-study prompts, and baseline configurations.",
+        "Thoughtful discussion of practical deployment considerations (compatibility with GQA/sliding-window/tensor parallelism, incompatibility with MLA, disaggregated/asynchronous compaction) and honest limitations discussion including cases where Cartridges still wins at extreme (100x) compaction."
+      ],
+      "weaknesses": [
+        "The mixture decomposition justification (Appendix A.2) relies on an approximate mass-weighted mixture identity that is exact only if attention output and mass are both matched jointly and exactly; since matching is approximate (via least-squares fitting on finite reference queries), the analysis does not rigorously bound the resulting end-to-end error, leaving the theoretical guarantees largely heuristic/empirical rather than proven.",
+        "Key selection Ck is restricted to a subset of original keys, which is a design choice justified mainly by tractability rather than optimality; the paper does not explore whether directly-optimized (non-subset) compact keys computed via fast approximate methods could close the residual gap with Cartridges at very high compaction ratios (a gap the authors themselves acknowledge exists at 100x on LongHealth).",
+        "Statistical rigor of the main results is limited: QuALITY evaluation uses 50 contexts (894 questions) and LongHealth uses only 4 aggregated contexts (400 questions total), with no confidence intervals or significance tests reported for the main accuracy-vs-ratio curves (Figure 4), making it hard to assess robustness of the reported advantage over baselines like KVzip, which sometimes closely tracks AM performance.",
+        "The Cartridges comparison, while acknowledged as imperfect (the paper explicitly notes 'additional Cartridges training may further improve its results'), may understate Cartridges' potential performance since training compute/hyperparameters were not extensively tuned for that baseline, which slightly weakens the significance of the 'faster and better' headline claim at some compaction levels.",
+        "The fastest, most practical variants (AM-HighestAttnKeys-fast) are somewhat weaker than the best AM-OMP variant, and even AM-OMP-fast still requires ~100s per context (Table 3), while query generation (especially self-study) dominates cost; the actual wall-clock competitiveness in real deployment settings (vs. simpler heuristics) is somewhat less dramatic than the headline 'seconds' framing suggests for the strongest configurations.",
+        "The nonuniform head-budget schedule requires a one-time per-model calibration procedure (sensitivity curve estimation + greedy allocation) that adds engineering complexity and must be redone whenever base model or fine-tune changes, which is not deeply analyzed in terms of cost or sensitivity to the calibration dataset choice beyond QuALITY/LongHealth."
+      ]
+    }
+  }
+}

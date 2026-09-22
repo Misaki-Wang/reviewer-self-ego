@@ -1,5 +1,24 @@
 {
   "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Clear and well-motivated analysis (via attention maps and Fisher Discriminant Ratio) identifying that MLLMs fail to attend to safety-critical image regions in multimodal jailbreak queries, providing a principled basis for the proposed method rather than an ad hoc fix.",
+        "The three-stage RAS pipeline (vision-aware query reformulation, exponentially weighted risk evaluation, risk-adaptive activation steering) is coherently designed, with each stage's necessity empirically justified via ablations (Table 2, Fig. 8).",
+        "Extensive experiments across four MLLMs (LLaVA-1.5-7B/13B, Qwen-VL-Chat, InternLM-XComposer-2.5) and multiple safety (MM-SafetyBench, SPA-VL, FigStep) and utility (Sci-QA, MM-Vet, GQA, MME) benchmarks, showing consistent and often dramatic ASR reductions (e.g., to single digits) with near-zero utility degradation.",
+        "RAS achieves both lower ASR and higher inference throughput than existing inference-time baselines (FigStep, CoCA, ECSO, ETA), directly addressing the stated efficiency vs. precision trade-off that motivates the work.",
+        "Thorough robustness checks: ablation on refusal vector definition (vs. Arditi et al.), on choice of unsafe query source for prototypes, on hyperparameters γ and N, and detailed qualitative examples showing smooth, interpretable transitions in refusal behavior as risk score increases.",
+        "Good reproducibility: hyperparameters, prompts, and query lists are reported in appendices, and code release is promised."
+      ],
+      "weaknesses": [
+        "The method depends on an MLLM-generated 'visual context' summary during query reformulation; if the underlying model fails to describe or notice the unsafe content in this initial reformulation step (the same underlying weakness the paper identifies), the whole risk-assessment pipeline could silently fail. This potential failure mode and its frequency are not analyzed.",
+        "No evaluation against adaptive or white-box attacks specifically designed to target the defense mechanism itself (e.g., attacks that try to fool the query reformulation or evade the risk-similarity scoring), which is important for inference-time defenses that could be studied/attacked once public.",
+        "Key parameters (S_base, α) are calibrated per-model using 100 SPA-VL samples; the sensitivity of results to this calibration set and generalization to out-of-distribution harmful categories not represented in SPA-VL is not deeply examined.",
+        "Safety judgments rely on a single automatic judge (MD-Judge-v0.2-Internlm2) without human verification or inter-judge agreement checks, which is a common but still limiting evaluation practice for jailbreak ASR claims.",
+        "The added latency/cost of the visual-context-generation sub-step (an extra forward pass before the main response) is not clearly broken out in the throughput analysis, leaving some ambiguity about the true end-to-end overhead relative to baselines.",
+        "The core techniques (activation steering, refusal-direction vectors, attention-based safety diagnostics) build substantially on prior work (Arditi et al., CoCA, ECSO); the novelty is more in combination and adaptation to the multimodal risk-scaling setting than in fundamentally new mechanisms, which somewhat limits conceptual novelty despite strong empirical execution."
+      ]
+    },
     "exp3_positive": {
       "oa": 5,
       "strengths": [
@@ -16,6 +35,26 @@
         "The paper does not evaluate RAS against adaptive or white-box attacks specifically designed to circumvent activation-steering defenses (e.g., attacks that target the risk-scoring mechanism or attempt to keep the query's similarity score below the refusal threshold), which is an important robustness consideration for any inference-time defense relying on a learned/calibrated decision boundary.",
         "Safety judgments rely solely on an automatic judge model (MD-Judge-v0.2), with no human verification of refusal quality/naturalness or of borderline cases, which is a common but nontrivial limitation given known imperfections of LLM-based safety judges.",
         "Discussion of limitations and failure modes (e.g., cases where intermediate risk scores lead to partial/ambiguous refusals, or model-specific sensitivity to the calibrated Sbase/α) is fairly brief, despite the method's dependence on several calibrated thresholds."
+      ]
+    }
+  },
+  "v3": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Provides a clear, well-motivated causal analysis (via attention maps and Fisher Discriminant Ratio) showing that MLLMs fail to attend to safety-critical visual regions, which is a novel and useful diagnostic contribution beyond simply proposing a new method.",
+        "Extensive empirical validation across 5 MLLM backbones (LLaVA-1.5-7B/13B, LLaVA-OneVision-7B, Qwen-VL-Chat, InternLM-XComposer-2.5) and 5 jailbreak benchmarks (SPA-VL, FigStep, MM-Safety, JOOD, VAA), plus utility benchmarks (GQA, MM-Vet, Sci-QA, MME), demonstrating consistent and often large improvements in both safety (ASR) and utility retention relative to strong recent baselines (ETA, AutoSteer, ASTRA, CoCA, ECSO).",
+        "Thorough analysis of computational overhead (pre-deployment calibration time and inference throughput) with clear breakdowns, showing substantial practical efficiency gains (126.6x less pre-deployment overhead, 1.6x higher throughput) over competing steering/refinement methods.",
+        "Comprehensive supplementary material including hyperparameter sensitivity analysis, ablations on refusal vector formulation, robustness to calibration dataset source/scale, over-refusal evaluation (XSTest, OR-Bench), suffix-injection robustness, and fair hyperparameter search for baselines (ASTRA, AutoSteer), which strengthens reproducibility and the fairness of comparisons.",
+        "The three-stage design (vision-aware reformulation, exponentially weighted risk evaluation, scaled activation steering) is logically motivated by the preceding empirical analysis, and the ablation study (Table 2) supports the necessity of combining all three stages."
+      ],
+      "weaknesses": [
+        "The method relies on the same MLLM to generate the visual context/caption that reveals harmful content; if the backbone model fails to accurately caption or describe subtle/novel unsafe visual content, the downstream risk assessment and steering could silently fail, and this dependency/circularity (the model must already partially recognize the danger to caption it) is not deeply analyzed or stress-tested with genuinely novel or adversarially disguised unsafe imagery.",
+        "The core technical contributions (activation/refusal-vector steering, prototype-based similarity for risk scoring, use of auxiliary visual captions for grounding) are recombinations of existing ideas from cited prior work (e.g., Arditi et al. refusal directions, AutoSteer/ASTRA steering, caption-based grounding), making the overall novelty more incremental/engineering-oriented than conceptually new.",
+        "No evaluation against adaptive attackers who might specifically target the visual-context-generation or risk-evaluation stages (e.g., crafting inputs that produce misleading captions or evade the EWRE similarity metric), which is an important robustness consideration for a defense mechanism claiming generalizability.",
+        "The additional visual-context-generation forward pass and separate risk-evaluation pass mean the full pipeline still requires multiple model calls per query; while throughput numbers are favorable relative to baselines, the paper could better contextualize the added latency in absolute terms for real-time deployment scenarios.",
+        "Steering is restricted to the last layer with only the first N response tokens; while ablations on layer choice exist in the supplementary, the main paper does not deeply justify why last-layer-only steering is sufficient/optimal across architecturally diverse backbones beyond empirical results.",
+        "Calibration and prototype construction, while shown to be robust to several alternative sources/scales, is still dependent on a curated small set of unsafe queries and a chosen decay/threshold hyperparameter (γ, N, Sb, α) — the sensitivity analysis is reassuring but the underlying assumption that a small calibration set generalizes to unseen, evolving jailbreak strategies remains an empirical claim requiring further external validation."
       ]
     }
   }

@@ -1,0 +1,45 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Addresses a practical and well-motivated bottleneck (prefilling cost in RAG-style long-context inference) and proposes a simple, interpretable criterion (prompt-conditioned attention norm) for selecting recomputation targets.",
+        "The RoPE geometry analysis (Section 4.2, Table 1) is a genuinely useful insight: it convincingly shows that inconsistent positional configurations during selection destabilize token ranking, and that a globally-consistent RoPE ordering is necessary for the attention-norm signal to be meaningful.",
+        "Broad empirical coverage: three LLM backbones (Qwen, LLaMA, ChatGLM), four LongBench datasets, a VLM setting (Qwen3-VL) across five benchmarks, and a needle-in-a-haystack robustness analysis.",
+        "Efficiency analysis is fairly thorough, including both a 'prepared context' and 'on-the-fly prefilling' regime, with sequence-parallel/ring-attention comparisons on real multi-GPU hardware (H100s), giving concrete latency numbers.",
+        "The discussion section candidly acknowledges a real practical limitation (irregular attention masks are not well supported by existing kernels, causing up to 2x overhead), which is an honest and useful contribution to the community.",
+        "Additional analyses such as RoPE similarity (Table 2) and layer-selection ablation (Appendix B) support the claimed mechanism with more than just aggregate accuracy numbers."
+      ],
+      "weaknesses": [
+        "Empirical results are not fully consistent with the paper's narrative: 'Our + Reorder' sometimes underperforms 'Our' by a large margin (e.g., Qwen fixed-chunk 2WikiMQA: 0.5089 vs 0.4773; HotpotQA: 0.5967 vs 0.5053), undermining the claimed benefit of the reordering contribution, which is presented as a core novelty.",
+        "Budget/recomputation-ratio matching across methods in the main results table (Table 3) is unclear — EPIC is fixed at 15% while 'Our' method's budget is not explicitly stated in the same table, making the head-to-head comparison potentially unfair or at least insufficiently documented; the fair budget-matched comparison only appears later via the Pareto curves in Figure 2 for a subset of settings.",
+        "Some reported numbers are counter-intuitive and unexplained, e.g., for Qwen/NarrativeQA passage-split, 'No Recompute' (0.2078) outperforms 'Baseline' full-context prefilling (0.1654), which is not discussed and raises questions about experimental setup or metric reliability.",
+        "No error bars, variance, or multiple-seed statistics are reported for any table, making it hard to assess whether the (often modest, <0.02 in F1/accuracy) improvements over CacheBlend/EPIC are statistically meaningful.",
+        "Despite framing the contribution as 'casting selective KV recomputation as an information flow problem,' the paper offers no formal information-theoretic treatment or theoretical guarantee — the framing is largely narrative/motivational, and the actual method reduces to an attention-mass heuristic plus a positional-encoding fix, which is a comparatively incremental technical contribution.",
+        "The layer selection for computing attention norms (layers 22-25) is tuned via analysis on Qwen only and then applied uniformly to LLaMA and ChatGLM without justification of transferability, which is a potentially fragile hyperparameter choice that is not ablated per-model.",
+        "The extra cost of computing prompt-to-context attention norms (requiring some form of forward pass/attention extraction over the full concatenated context before selection) is not clearly accounted for in the efficiency analysis, raising questions about whether reported speedups fully capture end-to-end overhead."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Extensive empirical evaluation spanning three LLM backbones (Qwen3-14B, Llama-3.1-8B, GLM-4-9B), one VLM (Qwen3-VL-8B), multiple LongBench/LongBench-v2 datasets, and Needle-in-a-Haystack analysis, alongside comparisons to a wide range of baselines (CacheBlend, EPIC, KVLink5, TurboRAG, PCW, BM25 recompute, PyramidKV, SnapKV, StreamingLLM), which is unusually thorough for this type of systems paper.",
+        "The core empirical finding—that recomputation-target selection is highly sensitive to whether attention norms are computed under an inference-consistent (GLOBAL) RoPE geometry versus mismatched local/tail configurations—is well isolated via a clean four-way ablation (Table 1) and is a useful, somewhat under-appreciated observation for the KV-reuse literature.",
+        "The method is training-free and plug-and-play, requiring no modification to the pretrained model, which improves practical applicability compared to training-based alternatives like KVLink5, and this is validated directly in Appendix B.1.",
+        "Reasonably honest treatment of limitations, including the discussion of kernel-level overhead for irregular attention masks (up to 2x overhead vs. ideal FLOPs) and a clear scoping statement about when the method is and is not applicable (multi-chunk KV reuse vs. contexts exceeding the model window).",
+        "The efficiency analysis under both cached-context and on-the-fly prefilling regimes, including multi-GPU sequence-parallel comparisons against ring attention, adds practical relevance beyond pure accuracy numbers.",
+        "Additional diagnostic experiments (RoPE similarity analysis in Table 2, attention-pattern MSE recovery in Appendix D.3) provide some mechanistic insight into why the proposed norm-based selection works, beyond just reporting downstream QA scores."
+      ],
+      "weaknesses": [
+        "The core selection mechanism—aggregated prompt-to-context attention weight as an importance score—is conceptually a fairly standard attention-based salience criterion (similar in spirit to prior attention-based eviction/compression methods such as H2O/SnapKV, though applied in a different context). The paper's main novel technical contribution is arguably the RoPE-geometry consistency insight rather than the scoring rule itself, and the framing as an \"information flow\" problem is explicitly acknowledged by the authors to be operational/heuristic rather than a rigorous causal or information-theoretic treatment, which somewhat overstates the conceptual contribution.",
+        "Reported gains are inconsistent across configurations: e.g., in Table 3 (Qwen, Fixed Chunk 2048), \"Our + Reorder\" underperforms \"Our\" by a large margin on 2WikiMQA (0.4773 vs 0.5089) and MuSiQue (0.2872 vs 0.3384), and also underperforms plain \"Our\" and even CacheBlend on HotpotQA (0.5053 vs 0.5352/0.5967). This contradicts the paper's claim of \"consistent gains\" from reordering and is not adequately discussed or explained in the main text.",
+        "The four RoPE allocation configurations (GLOBAL, HL-HP, HL-TP, TL-TP) used for the central ablation are somewhat ad hoc rather than derived from a principled decomposition of the RoPE geometry space, and the explanation of why GLOBAL specifically succeeds (beyond frequency range/proximity intuition) remains largely descriptive rather than analytically grounded.",
+        "No error bars, variance, or statistical significance are reported for the main accuracy tables (only TTFT is reported as a median over multiple runs), making it hard to assess whether the reported improvements, some of which are small (e.g., a few points), are robust versus noise, especially given known variance in generative QA metrics.",
+        "The efficiency benefits of the method are undermined in practice by the disclosed ~2x kernel-level overhead for irregular/sparse attention patterns relative to ideal FLOP counts, which the paper acknowledges but does not fully resolve; the favorable TTFT numbers in Tables 5/6 rely on comparing against an unoptimized ring-attention baseline rather than a kernel-matched comparison.",
+        "The method's scope is fairly narrow (multi-chunk KV reuse where offline prefetching is amortizable), and its value proposition versus simply performing full-context prefill when feasible is not strongly quantified in terms of when the break-even point occurs across realistic RAG deployment scenarios beyond the specific sequence lengths tested."
+      ]
+    }
+  }
+}

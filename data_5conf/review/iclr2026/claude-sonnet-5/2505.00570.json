@@ -1,5 +1,24 @@
 {
   "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Introduces a simple, parameter-free technique for KV cache compression based on DCT low-pass filtering, motivated by an interesting empirical observation of energy concentration in low-frequency components across LLaMA-2 decoder layers.",
+        "The approach avoids adding extra modules/parameters (unlike LoCoCo or Activation Beacon), which improves practicality and ease of integration with existing LLM architectures.",
+        "Fairly comprehensive empirical study covering both language modeling (PPL on PG-19/Proof-pile) and downstream long-context understanding (LongBench, Needle-in-a-Haystack), with comparisons against multiple relevant baselines (LongLoRA, LoCoCo, SnapKV, PyramidKV, LM-Infinite, LongHeads).",
+        "Efficiency analysis (decoding latency, FLOPs breakdown, compression overhead) is thorough and demonstrates the method's near-linear scaling and negligible compression overhead.",
+        "Useful ablations in the appendix, including retaining ratio sensitivity, head-wise power spectrum analysis, and the RoPE-before-vs-after compression comparison, which help substantiate design choices."
+      ],
+      "weaknesses": [
+        "The core technical contribution is somewhat incremental: it is essentially a low-pass frequency-domain smoothing/downsampling of cached representations, conceptually adjacent to existing merging/compression techniques (e.g., CaM, D2O) and to prior frequency-domain works (Fourier Transformer, FNet), and the paper does not strongly demonstrate why DCT compression is fundamentally better than simpler pooling/merging approaches beyond a single 'Dropping' baseline comparison.",
+        "The motivating power spectrum analysis (Figure 1) is computed over full, non-causal sequences, which does not directly justify why iteratively re-compressing partial, growing, autoregressively-generated caches preserves relevant information for future token prediction; this gap between the analysis and the actual iterative algorithm is not rigorously addressed.",
+        "Results on LongBench (Table 2) are mixed: FreqKV underperforms the base uncompressed model and other baselines on several sub-tasks (e.g., Qasper, MF-en, TREC, RB-P), which somewhat undercuts the 'consistently improves' claim, and the paper does not analyze why the method fails on some categories.",
+        "The very strong NIAH results (FreqKV outperforming the full-context, uncompressed LLaMA-2-chat baseline in Table 2's implied comparison, and much higher NIAH accuracy than PyramidKV) are not well explained given that the method is inherently lossy; there is no discussion of variance, multiple seeds, or the possibility that retrieval tasks benefit disproportionately from the specific sink+low-frequency retention scheme, leaving the strong results somewhat unconvincing without deeper analysis.",
+        "Missing comparisons: LoCoCo and Activation Beacon are not evaluated on LongBench/NIAH tasks, and no comparison is made against more recent/strong context-extension baselines beyond 7B/8B scale, limiting the generality and significance of the conclusions.",
+        "Iterative repeated compression (compressing already-compressed representations together with new tokens) could compound reconstruction error over many iterations, but the paper provides no analysis of degradation as compression count grows beyond aggregate PPL curves at very long context (e.g., no probing of information loss for very early tokens after 15+ compression iterations).",
+        "Reproducibility details are limited: no mention of code release, and hyperparameter/training details (e.g., how retaining ratio interacts across different model architectures like GQA in LLaMA-3) are only briefly covered."
+      ]
+    },
     "exp3_positive": {
       "oa": 6,
       "strengths": [
@@ -22,6 +41,26 @@
     }
   },
   "v3": {
+    "exp1_quality": {
+      "oa": 6,
+      "strengths": [
+        "Novel and reasonably well-motivated idea: framing KV cache redundancy reduction as a frequency-domain (DCT) low-pass filtering problem for decoder-only LLMs, which to the authors' knowledge has not been explored before for autoregressive KV compression.",
+        "Solid empirical motivation: power spectrum analysis across layers/heads, targeted perturbation experiments, and summarization ablations converge on a consistent story that low-frequency components carry global/semantic information while high-frequency components carry local detail.",
+        "The method is parameter-free and architecture-agnostic, avoiding the extra memory overhead of learned compressor modules (e.g., Activation Beacon, LoCoCo), and integrates cleanly with RoPE by compressing before rotary encoding and reassigning cache-local position indices, avoiding out-of-window position extrapolation issues.",
+        "Broad and fairly rigorous experimental coverage: perplexity on PG-19/Proof-pile up to 256K context, LongBench, RULER, Needle-in-a-Haystack, and LongGenBench, spanning both prefilling/understanding and decoding/generation scenarios.",
+        "Extensive ablations (retaining ratio, sink size, high- vs low-frequency retention, RoPE-before/after compression, rescaling factor, dropping-vs-compression variant) that support the design choices and add credibility to the core claims.",
+        "Efficiency analysis is thorough: near-linear decoding latency, negligible FLOPs/time overhead from the compression step (<0.5%), and notable reduction in training time/memory versus full fine-tuning."
+      ],
+      "weaknesses": [
+        "Potentially unfair comparison protocol: most eviction/merging baselines (SnapKV, PyramidKV, FastKV, GemFilter, D2O, etc.) are applied training-free to the base model, whereas FreqKV benefits from additional LongAlpaca SFT specifically tuned for the compression/extension mechanism, confounding the source of the reported gains.",
+        "Key related methods explicitly designed for context extension with compression (LoCoCo, Activation Beacon) are only evaluated on perplexity (Table 2/9) and excluded from the main downstream understanding/generation benchmarks (LongBench, RULER, NIAH, LongGenBench), leaving the strongest and most comparable competitors untested on the tasks that matter most for the paper's claims.",
+        "Despite claims of robustness at extended lengths, absolute performance at 16K on RULER (47.3 average) remains quite low relative to in-window performance (87.68 at 8K), suggesting substantial degradation is merely less catastrophic than baselines rather than genuinely strong.",
+        "Mixed results on LongBench: FreqKV is not uniformly best across tasks (e.g., noticeably worse than PyramidKV/SnapKV on TREC, RB-P for LLaMA-2, and few-shot learning tasks), and improvements on other metrics are sometimes marginal, weakening the 'consistently outperforms' claim.",
+        "The core mechanism (retaining low-frequency DCT components) is conceptually close to a smoothing/averaging operation, and its relationship/advantage over simpler token-merging approaches (CaM, KVMerger) is not deeply analyzed beyond aggregate benchmark scores.",
+        "No wall-clock or memory comparison against baselines during actual prefilling on long-context benchmarks (only decoding latency and FLOPs are profiled), leaving prefilling-stage efficiency claims less substantiated.",
+        "The Proof-pile results show FreqKV underperforming LongLoRA (full-cache) at longer lengths, indicating information loss for symbol-dense content, which somewhat undercuts the 'preserves all information' framing of the method."
+      ]
+    },
     "exp3_positive": {
       "oa": 6,
       "strengths": [

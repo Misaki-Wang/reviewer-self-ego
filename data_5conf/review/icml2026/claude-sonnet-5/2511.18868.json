@@ -1,0 +1,45 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 2,
+      "strengths": [
+        "The paper tackles a well-motivated and timely problem: navigating the large optimization space of LLM-based kernel generation, where naive iterative refinement wastes compute on unpromising strategies.",
+        "The hierarchical MAB formulation (kernel selection + strategy selection as a two-level bandit) is a reasonably intuitive and principled way to frame the exploration-exploitation trade-off in this domain, and to the authors' knowledge is a new application of bandit theory to this problem.",
+        "The combination of hardware-profiling-derived priors (compatibility score) with UCB exploration and behavior-based clustering to reduce the arm space is a sensible systems-level design, and the paper attempts a formal regret bound to justify the clustering approximation.",
+        "The evaluation spans two GPU platforms (RTX 4090, A100) and two LLM backends (DeepSeek-V3.2, GPT-5.1), which is a reasonable attempt to show generality across hardware/model configurations."
+      ],
+      "weaknesses": [
+        "Only a single baseline (GEAK) is compared against, despite the related-work section listing many directly relevant competitors (STARK, EvoEngineer, ConCuR, Kevin, CUDA-L1, TritonRL). Without comparing to at least some of these, the claim of 'significantly outperforms state-of-the-art methods' is not well supported.",
+        "Section 5.3 (Ablation and Case Study) is essentially missing its core content: subsection headers such as 'KERNELBAND achieves high efficiency in exploring the kernel optimization space' appear with no accompanying analysis, table, or figure, despite the abstract/intro promising 'detailed analysis of the contribution of each component.' No ablation isolating the profiling-guided prior, the clustering mechanism, or the UCB exploration term is actually presented.",
+        "Reported results are highly non-monotonic and inconsistent in ways that are not discussed: e.g., in Table 1 GPT-5.1/4090, KernelBand achieves speedup 11.19 at iteration 6 but drops to 0.88 at iteration 9; A100 current-iteration speedup jumps from 5.98 (iter 6) to 18.35 (iter 9). No variance, multiple seeds, or error bars are reported, and the paper claims 'statistically sound performance measurements' without substantiating this with repeated trials or confidence intervals.",
+        "Several hyperparameters (α=0.5, buffer B=500, SGD lr η=0.1, ℓ2 penalty λ=1e-4, K=3 clusters, warm-up of 1000 synthetic pairs) are stated with high specificity but no sensitivity analysis, ablation, or justification for these choices is provided.",
+        "The theoretical regret bound (Eq. 13/22) relies on an 'Assumption 4.1' (cluster-similarity) and an 'Assumption 4.3' (profiling error bound) that are referenced but never formally stated anywhere in the main text or visible appendix content, making the proof difficult to verify; additionally the reward is defined as unbounded below (-∞, 1] in Eq. 3, contradicting the 'bounded rewards' assumption used in the regret proof.",
+        "The reference list includes at least one suspicious citation: 'Ringlein & Lin, 2025' with arXiv ID 2501.12345 — an implausibly round/sequential arXiv number, suggesting a fabricated or placeholder citation, which raises concerns about the reliability of the related-work section and possibly other claims.",
+        "The benchmark is limited to 29 kernels from TritonBench L1/L2 with one kernel manually excluded, and results are reported on a fairly narrow set of workloads; no discussion of generalization to more complex/real-world kernels (e.g., attention, MoE routing) that motivated the introduction.",
+        "No code, artifact, or reproducibility statement is provided, and several implementation details (e.g., exact LLM prompting protocol, how GEAK was configured/reproduced, exact strategy set S) are not specified, limiting reproducibility.",
+        "The core algorithmic novelty is somewhat incremental — combining standard UCB, k-means clustering, and a logistic-regression prior — rather than a fundamentally new technique; the main contribution is the problem formulation and engineering integration, whose significance is undercut by the weak experimental validation."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Clear and well-motivated problem framing: the paper articulates the mismatch between LLM's tendency toward functionally-correct code generation and the combinatorial search nature of kernel optimization, and proposes a principled contextual-bandit formulation to address it.",
+        "Practically useful system design: hardware-aware pruning via profiling (Nsight Compute signatures) and behavior-based clustering are sensible, lightweight mechanisms for handling an unbounded action space, and the paper reports these add minimal runtime overhead.",
+        "Extensive empirical evaluation spanning 3 GPU architectures (RTX 4090, H20, A100) and 4 LLM backends, with consistent and often large improvements over GEAK and Best-of-N baselines in Correct%, Fast@1, and geometric mean speedup.",
+        "Rich set of secondary analyses: scaling/cluster-count sensitivity, strategy risk-reward breakdown, cost-per-dollar analysis, PyTorch baseline contextualization, and single-component vs. framework-level ablations, which together provide a reasonably thorough characterization of the method's behavior.",
+        "The ablation showing that replacing the bandit policy with LLM semantic reasoning collapses performance below baseline is a compelling piece of evidence that structured exploration—not just LLM capability—drives the gains."
+      ],
+      "weaknesses": [
+        "The theoretical analysis is superficial relative to its prominence in the paper's narrative: Theorem 1's derivation in Appendix B never actually uses Assumption 1 (hardware-aware gain boundedness) or the pruning mask; the final regret bound depends on K|S| (total strategies) rather than K|S_valid| (post-pruning strategies), so the proof does not actually demonstrate the benefit of hardware-aware pruning that the abstract emphasizes as a core contribution.",
+        "The bandit is explicitly non-stationary: clusters are recomputed every τ iterations and the frontier P_t grows over time, yet the regret proof implicitly treats the problem as a fixed K-arm UCB setting. The interaction between periodic re-clustering (which can reassign/merge/split arms and reset or bias empirical estimates) and the UCB regret guarantee is not rigorously addressed, undermining the claimed 'reduces regret bound to depend on covering number' result.",
+        "No variance/repeated-trial reporting: given LLM sampling stochasticity (temperature=1.0) and reliance on ratios (correctness %, Fast@1, geometric mean over correct tasks only), the absence of confidence intervals or multiple seeds makes it hard to assess whether the reported gains (e.g., 33-140%) are statistically robust versus favorable single-run outcomes, especially on small subsets (50 or fewer kernels for several analyses).",
+        "Metric definitions create some confusing/inconsistent results, e.g., GEAK's geometric mean speedup falling below 1.0x (0.95-1.06x) on 'standard mode' despite substantial Fast@1 percentages, and a discrepancy between the formal reward definition (Clip to [0,1], Eq. under Sec 2.2) and Algorithm 1's implementation (max(0,·) with no upper clip), suggesting some lack of internal rigor in the formalism.",
+        "Limited baseline breadth: comparisons are restricted to one open-source LLM agent (GEAK) and Best-of-N; no comparison to established non-LLM autotuning/bandit-based systems (e.g., Ansor, Roller, or FPGA/compiler bandit autotuners cited in related work) that could better contextualize how much of the gain comes from the bandit formulation versus from using strong LLMs at all.",
+        "No mention of code/artifact release, and while implementation details are provided in the appendix, several design choices (e.g., exact profiling caching, softmax kernel-sampling temperature, LLM prompt templates for each strategy) are not fully specified, which may hinder exact reproducibility.",
+        "The core algorithmic novelty is somewhat incremental: bandit-based autotuning with clustering and profiling-based pruning closely parallels prior systems-optimization bandit literature (cited in Related Work, e.g., FPGA compilation autotuning, Ansor/Roller-style hardware-aware search); the main new ingredient is coupling this with LLM-based code transformation, which, while practically valuable, is a narrower conceptual contribution than the framing suggests."
+      ]
+    }
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Novel and elegant combination of ideas: linear probe heads on a frozen molecular embedding, combined with a hierarchical reaction/R-group/synthon factorizer, yields an additive decomposition of surrogate predictions that permits truly exhaustive (rather than sampled) top-k retrieval over CSLs with >10B compounds in under 30 seconds on a single consumer GPU. This is a genuinely different paradigm from existing exploration/exploitation-based virtual screening algorithms.",
+        "The FLOP/memory analysis (Section 3.3) makes a clear, quantitative case for why the factorization is tractable at ultra-large scale (e.g., 3 TFLOP vs. 4 PB of storage for naive caching), and this is empirically validated with concrete wall-clock runtimes in Table 1.",
+        "The authors construct and release an open, non-proprietary benchmark CSL (up to 10B compounds) with exhaustively computed docking scores across five diverse targets and physicochemical properties, addressing a real reproducibility gap since libraries like Enamine REAL are proprietary and cannot be fully enumerated/docked for ground-truth comparisons.",
+        "Constraints are incorporated natively into the retrieval objective via a constraint-violation term (Eq. 18) that is folded into the priority queue ordering, addressing a documented limitation of prior screening algorithms (e.g., Thompson sampling as implemented here does not support constraints).",
+        "The paper provides both GPU and CPU implementations with custom CUDA kernels and reports detailed runtime comparisons and scaling behavior with respect to k, constraints, and library size.",
+        "Comparisons against Thompson sampling (a strong, widely used baseline) show APEX matching or exceeding recall at matched evaluation budgets, particularly at smaller budgets."
+      ],
+      "weaknesses": [
+        "The surrogate is constrained to a linear function of a frozen embedding (Eq. 3), and the factorizer further approximates the embedding as an additive sum of pairwise (R-group, synthon) contributions (Eq. 11/16). This double approximation inherently cannot capture higher-order or nonlinear interactions between synthons/R-groups (e.g., cooperative binding effects), which is plausibly reflected in the relatively modest R^2 for docking-score endpoints in Figure 7 (roughly 0.3-0.75), the primary objective of interest in the paper's own motivating use case.",
+        "Evaluation is essentially self-referential: the \"ground truth\" is computed via GPU-accelerated AutoDock Vina, itself a fast/approximate scoring function, and the benchmark CSL is synthetically constructed via BRICS fragmentation of ZINC22 leads without regard to synthetic feasibility (acknowledged by the authors). This weakens the claimed relevance to real drug-discovery campaigns despite the framing around Enamine REAL-style libraries.",
+        "Recall numbers, while well above a random baseline, are far from perfect in absolute terms — e.g., recall of top-j=100 at k=100,000 (0.8% of the library) is well under 0.8 in the best case and drops substantially under stricter constraint sets (e.g., Astex Rule of 3) and for larger j — yet the paper does not discuss what level of recall would be considered practically sufficient for real screening campaigns or how errors might affect downstream hit rates.",
+        "The Thompson sampling comparison is limited to the unconstrained setting on only the 5 largest reactions of the 12M library (never the full library or the 10B-scale library), so the paper's central claims about scalable, constrained search are not benchmarked against a strong baseline at the scale that is the paper's main selling point.",
+        "No comparison is made to other established large-library screening methods explicitly discussed in the introduction (e.g., V-SYNTHES, NGT), leaving open how APEX compares to hierarchical or generative approaches beyond Thompson sampling.",
+        "Some factorized-surrogate endpoints show very poor reconstruction fidelity relative to the original surrogate (e.g., near-zero R^2 for n_bridgehead_atoms and weird_fragment_score in Figure 7), suggesting the additive factorization breaks down for certain molecular properties without much discussion of when/why this occurs or its practical implications for constraint satisfaction.",
+        "No error bars, confidence intervals, or statistical testing are reported for recall results across targets/reactions/constraint sets, making it hard to assess the robustness of the reported performance differences.",
+        "Embedding dimension (d=64) and other hyperparameters were chosen without tuning, and the paper does not explore sensitivity of retrieval accuracy to model capacity, limiting insight into whether the reported accuracy-speed tradeoff is close to optimal or could be substantially improved."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Addresses a genuine and important bottleneck in virtual screening of ultra-large combinatorial synthesis libraries (CSLs), where even trained surrogates require O(|library|) evaluations that become intractable at 10B+ scale.",
+        "The core technical idea—factorizing surrogate molecular embeddings into per-synthon additive 'associative contributions' so that any compound's score can be computed via cached lookups and a few FLOPs—is a clever and well-motivated adaptation of factorization-machine-style decompositions to CSL structure, and is clearly connected to prior recommender-systems literature.",
+        "Strong practical/engineering contribution: a custom GPU top-k implementation (chain-of-batches with AIR top-k) achieving retrieval of the approximate top-1M from a 10B-compound library in under 30 seconds, with demonstrated order-of-magnitude speedups over CPU and clear scaling advantages over baseline surrogate/oracle approaches.",
+        "Thorough empirical evaluation along multiple axes: recall of ground-truth top-j sets across five docking targets and six constraint sets, comparison against Thompson sampling (a strong existing ultra-large-CSL method), zero-shot transfer to the real 70B-compound Enamine REAL library, and an interesting counter-screening/composite-objective use case.",
+        "Construction and release of an open, reproducible 10M+ compound benchmark CSL with docking scores against five diverse targets and RDKit-computed properties, addressing the lack of public ground-truth benchmarks for this problem (proprietary libraries like Enamine REAL cannot be exhaustively evaluated for ground truth).",
+        "Useful theoretical error decomposition (surrogate error vs. factorizer error, with a demonstrated negligible cross-term) that clarifies where future architectural improvements would be most impactful.",
+        "The method natively and flexibly supports arbitrary constraint combinations without retraining or additional oracle calls, offering amortization across screening campaigns that iterative/generative baselines lack."
+      ],
+      "weaknesses": [
+        "Retrieval accuracy, while far above random, is still moderate in absolute terms: at a substantial evaluation budget (k=100,000, ~0.8% of the 12M library), recall of top-100 compounds is roughly 0.6–0.75 and degrades markedly for larger j and stricter constraint sets (e.g., Astex Rule of 3), which could matter in practice since many true top hits are still missed.",
+        "The additive-factorization assumption implicitly treats per-synthon contributions to docking score as separable, which is a strong structural approximation; the reported R² for docking-score prediction (Figure 6A) is considerably lower (roughly 0.2–0.8, worst for MET) than for simpler physicochemical properties, suggesting the factorization may struggle precisely for the harder, most decision-relevant objectives.",
+        "The benchmark CSL is synthetically constructed via BRICS fragmentation of ZINC22 compounds without verifying real synthetic feasibility, so it may not fully capture the structural complexity/heterogeneity of real vendor CSLs (variable component counts, more intricate reaction chemistries); the zero-shot Enamine REAL results partially mitigate this but are not benchmarked against ground truth there.",
+        "Comparisons to alternative methods are limited to Thompson sampling, and even this comparison is restricted to only the five largest reactions (4M of 12M compounds) rather than the full-scale setting where APEX's advantages should be most pronounced; no comparison to other established surrogate-based approaches (Deep Docking, MolPal, V-SYNTHES) is provided, even in restricted settings.",
+        "Key design choices—such as the noise-injection regularization intended to make the surrogate robust to the factorization's errors-in-variables problem, and the embedding dimension d=64—are asserted/used without ablation studies demonstrating their necessity or sensitivity.",
+        "Statistical robustness of the main recall results is not clearly reported (no confidence intervals or repeated-trial variance shown for Figure 2A), making it harder to assess consistency of the reported gains.",
+        "The work is purely computational/in silico with docking scores as the sole proxy for binding affinity; no experimental or orthogonal computational validation (e.g., different scoring functions or co-folding) is provided to support claims of practical drug-discovery impact."
+      ]
+    }
+  }
+}

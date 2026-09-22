@@ -1,0 +1,66 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Novel and well-motivated combination of semantic clustering with multipole/dipole expansions from computational physics, providing a principled way to go beyond monopole (centroid) approximations used in prior clustering-based attention work.",
+        "Clear theoretical derivation via cumulant generating functions that explains why separate query/key clustering and a two-stage refinement scheme are needed, including a precise characterization of the leading-order error term (Tr[Cov(q~,q~)Cov(k~,k~)]) that motivates the K-means clustering objective.",
+        "Reasonably thorough ablation study isolating the contribution of the dipole term, the two-stage mechanism, and the monopole term, showing each component meaningfully reduces error.",
+        "Practical algorithmic engineering: clear complexity analysis (O(NCD) acausal, O(NCD log N) causal), an efficient 'partially specialized dipole' trick that avoids O(CqND^2) cost, and a sensible causal block-decomposition scheme combining exact local Flash attention with approximate long-range MuSe blocks.",
+        "End-to-end microbenchmarks against both CUDNN Flash Attention and an in-house Pallas Flash Attention baseline across a range of context lengths, showing a consistent crossover and increasing speedup with context length (up to 20-30x at 64k for isolated attention).",
+        "Honest discussion of scope: the paper explicitly frames itself as an initial viability study at small scale rather than overclaiming large-scale results, and clearly lists hyperparameters and setup in the appendix for reproducibility."
+      ],
+      "weaknesses": [
+        "The end-to-end pretraining validation is very limited: a single 29M-parameter, 7-layer model trained on only 2B tokens, with only one attention layer (the 'central' layer) actually using MuSe while all other layers use a fixed 256-token sliding window; this narrow setup makes it hard to assess how results would generalize to models with more/larger global-attention layers or to larger-scale pretraining.",
+        "Reported relative squared errors for the chosen operating point (~0.19-0.20, i.e., ~20% of output variance is error) are substantial, and the paper does not analyze how such approximation error might compound across layers or affect downstream task performance, generalization, or validation loss (only training NLL is reported).",
+        "No direct empirical comparison against other approximate-attention baselines discussed in related work (Performer, Nyströmformer, Linformer, Fast Multipole Attention, H-Transformer) in terms of speed/accuracy trade-offs; the comparison is only against exact Flash Attention implementations, leaving the relative merit of MuSe versus other O(N) or O(N log N) approximations unclear.",
+        "The reported wall-clock pretraining speedup (12.2-12.7%) is modest and specific to a particular window/block-size configuration (16k context, 8k block); it is unclear how this scales with more global-attention layers, different context lengths, or different cluster-count/iteration settings, since only one causal configuration is tested end-to-end.",
+        "Cluster count and K-means iteration hyperparameters were tuned to balance the specific hardware/kernel implementation (e.g., picking C=64 for square matmul convenience) rather than systematically optimized for the accuracy/speed Pareto frontier, and the authors themselves note that kernel implementation choices (not yet optimized for C=32/128 or head dims other than 64) confound the reported comparisons.",
+        "No code or artifact release is mentioned, and while hyperparameters are given, the complexity of the custom Pallas kernels (ragged tensor handling, block merging, causal decomposition) may make faithful reproduction difficult without released implementation details."
+      ]
+    }
+  },
+  "v3": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Clear and well-motivated technical contribution: separate clustering of queries and keys with a principled theoretical argument (dual-space/change-of-basis invariance) for why joint clustering is ill-posed, and an exponential-tilting mechanism that is shown to be essential for drop-in compatibility with pretrained models.",
+        "Extensive and carefully designed ablations (Tables 2-3, 9-21, Appendix E-F) isolate the contribution of query clustering versus retrieval versus monopole approximation, providing strong mechanistic understanding of why the method works (e.g., the 9x effective cluster-count advantage from query clustering).",
+        "End-to-end validation at a non-trivial scale (up to 1B parameters, 64k context, ~24B tokens per domain) on two distinct domains (code and scientific PDFs), including scaling-law analysis from 96M to 1B parameters showing MuSe tracks exact-attention scaling behavior.",
+        "Demonstrates practical wall-clock speedups (36% end-to-end, 2x on isolated attention layers) alongside comparable or slightly better loss than the exact baseline, and includes a favorable head-to-head comparison against MoBA at matched sparsity.",
+        "Validates generalization to existing pretrained models (Llama 3.1-8B, 3.2-1B) without retraining, which is a meaningful practical contribution beyond typical from-scratch-only evaluations of efficient attention methods.",
+        "Reasonably transparent about limitations (head-dimension-64 focus, GQA optimization left as future work, complexity of combining dipole corrections with retrieval) rather than overstating generality."
+      ],
+      "weaknesses": [
+        "All pretraining experiments are conducted at fairly modest scale (≤1B parameters, single node of 8 A100s); it remains unclear whether the accuracy/speed tradeoffs and the reported 'regularization' benefits persist at scales more representative of current frontier pretraining (10B+ parameters, longer contexts beyond 64k).",
+        "Central quality claims (MuSe matching or 'beating' the exact baseline, e.g., 0.7026 vs 0.7001) are based on differences of a few tenths of a percent with no reported variance across seeds or repeated runs, making it hard to distinguish a genuine regularization effect from run-to-run noise.",
+        "Wall-clock speedup claims rely on the authors' own Pallas/JAX kernels compared against CUDNN Flash Attention and a partially-optimized MoBA baseline; the paper acknowledges its own kernels are 'not highly optimized,' which complicates fair comparison and raises questions about how the speedup advantage would change under a fully optimized implementation of either method.",
+        "No code or artifact release is mentioned, and the method involves many interacting components (streaming K-means, two-level retrieval, causal accumulation, exponential tilting) that would be nontrivial to reproduce faithfully from the paper alone.",
+        "Downstream task evaluation is limited to two benchmarks (ARC-Easy, SciQ) at a single model scale, offering only a narrow sanity check rather than a thorough assessment of whether the approximation affects capabilities relevant to real use cases.",
+        "The explanation for why MuSe sometimes outperforms exact attention (implicit regularization vs. adaptation effects) is speculative and not rigorously tested (e.g., no controlled experiment isolating regularization from noise or optimization dynamics).",
+        "Complexity scaling to longer contexts (beyond 64k) and interaction with distributed strategies (ring attention) are explicitly deferred to future work, leaving open how well the approach extends to the very long contexts that motivate the paper's introduction."
+      ]
+    }
+  },
+  "v4": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Well-motivated theoretical contribution: the dual-vector-space argument for why queries and keys must be clustered independently (rather than jointly, as in prior key-only clustering work) is clearly laid out and directly supported by a cumulant-expansion error analysis in Appendix B that explains exactly which terms the monopole approximation drops and why K-means is the appropriate clustering objective.",
+        "Extensive and carefully designed empirical validation: microbenchmarks at 96M and 1B scale isolate the individual contributions of query clustering, key clustering, retrieval, cluster count, block size, and retrieval-budget allocation (semantic vs. spatial), consistently showing that query clustering provides large error reductions (up to ~9x effective cluster-count advantage).",
+        "End-to-end pretraining results across two domains (code, scientific PDFs) and five model scales (96M-1B) show MuSe matches or slightly beats exact-attention baselines, with scaling-law fits confirming the approximation does not distort compute-optimal scaling behavior.",
+        "Strong comparison against a relevant, contemporaneous sparse-attention baseline (MoBA) at matched sparsity/budget, showing a clear quality advantage attributable specifically to semantic clustering rather than sparsity alone.",
+        "Demonstrated drop-in compatibility with pretrained models (Llama 3.1-8B/3.2-1B) without retraining, plus a thoughtful custom code-repository NIAH benchmark that is in-domain for the trained models, addressing the limitations of RULER for small domain-specific base models.",
+        "High transparency and reproducibility: detailed hyperparameters, architecture specs, clustering algorithm, and code release; honest discussion of an observed train/test adaptation gap along with two independent mitigations (brief fine-tuning and a gradient-stop trick)."
+      ],
+      "weaknesses": [
+        "All pretraining experiments are conducted at up to only 1B parameters; it remains unclear how well the method's benefits (throughput, approximation quality, adaptation behavior) extrapolate to the larger model scales where quadratic attention cost is most painful in practice.",
+        "The headline 36% wall-clock speedup is explicitly attributed to unoptimized Pallas kernels, making it hard to judge the method's true competitive advantage against a production-grade, highly optimized flash-attention implementation; the authors acknowledge 'substantially larger speedups are achievable' but do not demonstrate them.",
+        "Main pretraining loss comparisons (e.g., 0.7026 vs 0.7001, 1.6201 vs 1.6166) are very small in magnitude and appear to be based on single training runs per configuration with no reported variance across seeds, making it difficult to assess whether the reported improvements are statistically meaningful versus run-to-run noise.",
+        "The explanation that MuSe's approximation acts as 'implicit regularization' to explain cases where it beats the exact baseline is offered as a post-hoc hypothesis without a direct controlled experiment isolating this effect from other confounds (e.g., different effective batch composition or numerical differences).",
+        "RULER results show both MuSe- and CUDNN-trained models perform near-randomly on most tasks, limiting the strength of the long-context retrieval validation; the custom in-house NIAH benchmark designed to compensate for this is not independently validated and could favor the authors' setup.",
+        "The method itself is fairly intricate (global clustering, two-level retrieval, causal accumulation, exponential tilting, careful gradient-stop handling), and Table 5 shows retrieval and block-diagonal exact attention dominate runtime (67%) while the core novel contribution (monopole summarization + clustering) is a minor share (~17%), somewhat undercutting the centrality of the paper's main technical novelty to the observed speedup."
+      ]
+    }
+  }
+}

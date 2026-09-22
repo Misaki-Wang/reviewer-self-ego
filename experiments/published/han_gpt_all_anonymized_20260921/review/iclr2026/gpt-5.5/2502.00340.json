@@ -1,0 +1,123 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Addresses a timely and practically important problem: making backward token filtering improve training efficiency, not only utility.",
+        "The core systems idea is clear and plausible: preserve sparsity through activation filtering and convert token-sparse operations into dimension-reduced dense GEMMs that are better matched to current GPU libraries.",
+        "The paper provides useful analysis of why naive backward token filtering gives little speedup and why generic sparse GEMM is ineffective at 30-40% token sparsity.",
+        "Implementation discussion is relatively concrete, including PyTorch autograd graph updates, Torchgen-based skeleton generation, special batch/sequence markers, and compatibility with FlashAttention-style operators.",
+        "Efficiency results show meaningful reported gains on three 1B-1.5B models, including up to 35.1% backward-time reduction and up to 22.0% end-to-end iteration-time reduction at 40% filtering."
+      ],
+      "weaknesses": [
+        "The main empirical evidence is too narrow for the strength of the claims: all experiments use small models, one single-node 8x RTX 3090 setting, and only one substantial utility evaluation on TinyLlama/math data.",
+        "The method changes the training objective relative to Rho/backward filtering by cutting gradient paths from retained tokens to filtered context tokens; the paper acknowledges this but does not provide a rigorous correctness analysis or enough optimization study to establish that utility is preserved.",
+        "Utility is substantially worse than the closest token-filtering baseline Rho on most tasks in Table 2, and the explanation that different hyperparameters could fix this is speculative without supporting experiments.",
+        "The systems evaluation lacks important baselines and ablations, such as custom compacting implementations, sequence packing/token dropping variants, recomputation alternatives, compiler-based graph rewrites, memory/communication breakdowns, and comparisons across hardware generations.",
+        "Reproducibility is limited: the paper does not clearly commit to releasing code, generated operators, reference losses, or detailed scripts, and the method depends on fragile PyTorch internal autograd node attributes that may change across versions.",
+        "The claimed generality to many architectures and distributed strategies is not fully demonstrated. Tensor/sequence/pipeline/MoE communication benefits are discussed but not experimentally validated.",
+        "Several claims are overstated, including 'full efficiency' and easy one-line integration; the workflow still requires offline model-specific operator generation and assumes runtime graph stability, fixed shapes, and correct identification of sequence dimensions.",
+        "The reference-model overhead is assumed away by using offline prepared losses, while the proposed n-gram alternative is only preliminary and not integrated into the end-to-end evaluation.",
+        "The paper would benefit from stronger validation that graph rewriting is safe, including numerical checks of gradients, failure cases when the graph changes, support for variable sequence lengths, and interaction with gradient checkpointing or other common training optimizations.",
+        "Writing and presentation have multiple rough edges, duplicated/missing references, typos, inconsistent timing numbers between abstract and body, and occasional unclear terminology, which reduces confidence in the polish of the submission."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper targets a relevant systems problem: backward token filtering can improve model utility but does not automatically translate into training speedups under standard autograd execution.",
+        "The core systems idea of exploiting row/sequence-structured sparsity by converting sparse GEMMs into reduced dense GEMMs is plausible and potentially useful for moderate sparsity regimes where generic sparse GEMM is inefficient.",
+        "The manuscript includes an implemented PyTorch C++ extension and reports nontrivial per-iteration speedups across three small LLMs, with detailed timing breakdowns separating forward, loss, graph update, and backward costs.",
+        "The motivation section clearly explains why simply zeroing token losses is insufficient for end-to-end backward sparsity, especially through attention."
+      ],
+      "weaknesses": [
+        "The main technical change is not merely an efficiency optimization: filtering attention activations changes the gradients and therefore the training objective. The paper acknowledges this but does not provide a convincing theoretical or empirical account of the resulting bias, stability, or when the modified gradients remain beneficial.",
+        "The utility evidence is weak and partly contradicts the paper's framing. Collider is substantially worse than Rho filtering on the reported average and on most tasks, and the claim that this can be fixed with different hyperparameters is speculative because no tuning results or ablations are provided.",
+        "Evaluation is too limited for the strength of the claims: utility is reported only for TinyLlama on a math-focused fine-tuning setup, while Qwen2.5 and Phi1.5 are evaluated only for efficiency. There is no evidence on larger models, pretraining-scale settings, varied domains, or modern distributed configurations where the claimed impact would matter most.",
+        "Several important claims are unmeasured, including communication savings under tensor/sequence/pipeline parallelism, compatibility robustness across model implementations, and the overhead of reference-model scoring. These are discussed as advantages but not experimentally validated.",
+        "The systems comparison is narrow. The paper mainly compares against regular training and Rho-style filtering, but lacks comparisons or ablations against alternative implementation strategies, optimized custom kernels, checkpointing/recomputation choices, compiler-based graph transformations, or manually reduced dense baselines.",
+        "The graph-rewriting approach appears brittle. It relies on runtime graph stability, synthetic marker dimensions, Torchgen-derived node handling, and internal autograd node attributes, but the paper does not adequately evaluate failure modes across PyTorch versions, dynamic sequence lengths, padding patterns, control flow, or different attention kernels.",
+        "Reproducibility is insufficiently supported in the manuscript. Many implementation details required to trust the C++ graph mutation are under-specified, and it is unclear whether code, generated operators, exact scripts, and reference losses will be released.",
+        "There are presentation and consistency issues that reduce confidence: the manuscript contains typos, inconsistent timing numbers between abstract and body, a claim of three models after saying two models, and an overstated 'one line of code' integration claim despite requiring token-filtered loss and masks."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "The paper tackles a clear and important systems problem: backward token filtering can improve utility but has not translated into meaningful wall-clock training speedups. The motivation is well articulated, including the two key bottlenecks of insufficient propagated sparsity and poor sparse GEMM performance at realistic filtering ratios.",
+        "The core system idea is compelling: filter relevant backward activations to preserve token-level sparsity across layers, then convert the resulting row/column-sparse operations into dimension-reduced dense GEMMs. This is a practical design that aligns well with current GPU kernels.",
+        "The automatic graph-updating workflow is a useful engineering contribution. Using runtime-stable autograd graphs, Torchgen-derived node handling, and special batch/sequence markers is a reasonable way to avoid brittle fully manual graph rewrites across model implementations.",
+        "The efficiency results are meaningful: at 40% token filtering, Collider reports 25.7-35.1% backward-time reduction and 15.0-22.0% end-to-end training-time reduction across TinyLlama, Qwen2.5-1.5B, and Phi1.5 on 8 RTX 3090 GPUs.",
+        "The paper includes a nontrivial utility run, training TinyLlama on 15B OpenWebMath tokens, and shows that Collider improves over regular training while reducing training time from roughly 4.5 to 3.7 days."
+      ],
+      "weaknesses": [
+        "The main utility evidence is limited to one model family/scale and one domain, mathematical reasoning. Efficiency is tested on three small models, but there is no corresponding utility validation for Qwen2.5 or Phi1.5, nor for larger or more diverse LLM training settings.",
+        "Collider substantially underperforms Rho filtering in utility under the reported setup, despite inheriting the motivation from Rho-style backward filtering. The paper attributes this to non-optimal hyperparameters but does not provide tuning experiments, making the claim that Collider preserves token-filtering utility only partially supported.",
+        "The method changes the gradient semantics by cutting off contributions through filtered activations. This is central to the speedup, but the paper does not sufficiently characterize when this approximation is benign, harmful, or recoverable through hyperparameter changes.",
+        "Several evaluation gaps weaken the systems case: there is little breakdown of graph-rewrite correctness, memory overhead/savings, failure cases across PyTorch operators, robustness to variable sequence lengths or dynamic model branches, and compatibility beyond the tested implementations.",
+        "The distributed-training discussion is mostly qualitative. Claims about tensor, sequence, pipeline, and MoE parallel communication benefits are plausible but not experimentally demonstrated.",
+        "Reproducibility is not fully established from the manuscript. The implementation appears specialized and depends on generated C++ graph-update operators, but the paper does not clearly provide code, artifact details, or enough operational detail to assess ease of reuse.",
+        "The writing has repeated overclaims and small inconsistencies, such as describing the evaluation as comprehensive despite limited utility coverage and claiming sustained utility while showing a notable drop relative to the strongest token-filtering baseline."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 6,
+      "strengths": [
+        "Addresses a timely and practical problem: backward token filtering can improve utility but does not automatically yield real training speedups because sparsity is not propagated through the network and common sparse GEMM libraries are ineffective at 30-50% sparsity.",
+        "The paper presents a coherent algorithm/system co-design: modifying attention backward computation to preserve correct gradients while propagating token sparsity, then converting row/sequence sparsity into dimension-reduced dense GEMMs that can use optimized standard kernels.",
+        "The efficiency evaluation is fairly broad for a systems paper, covering multiple model sizes and settings, including DP, TP, LoRA, and models up to 40B, with substantial reported end-to-end speedups of roughly 18-35% at 50% filtering.",
+        "The paper includes useful diagnostic analysis explaining why loss-only backward filtering gives little speedup, why a naive activation-filtering strawman breaks memory-efficient attention, and why PyTorch sparse GEMM is a poor fit for this sparsity regime.",
+        "The convergence results support the central claim that CENTRIFUGE preserves the behavior of loss-only token filtering while avoiding the failure mode of the naive strawman."
+      ],
+      "weaknesses": [
+        "Reproducibility is a significant concern: the appendix claims the system is open-sourced, but the provided hosting section contains no actual GitHub link. This is especially problematic because the method depends on custom C++/PyTorch autograd graph manipulation and custom attention-backward behavior.",
+        "The utility evaluation is much narrower than the efficiency evaluation. The detailed downstream task table appears to use only TinyLlama-1.1B on math-related tasks, while the paper makes broad claims about preserving utility benefits across LLM training. There are no comparable downstream utility results for the larger models used in timing experiments.",
+        "The main utility comparison is mostly against regular finetuning and loss-only token filtering. The paper would be stronger with comparisons to other efficiency-oriented training approaches, forward/token-dropping methods under matched compute, gradient sparsification/sequence packing alternatives, or hand-optimized baselines for the same filtering objective.",
+        "Correctness and robustness of the graph-rewriting workflow are under-justified. The runtime-stability assumption may fail under variable sequence lengths, padding patterns, activation checkpointing, compiler modes, different PyTorch versions, dynamic control flow, or framework-level optimizations. The paper does not provide enough stress tests or failure-mode analysis.",
+        "The implementation appears invasive despite the one-line integration claim. Users must generate model-customized operators, rely on internal autograd node attributes, and support specific backend/kernel combinations. This makes the portability claims to other models/frameworks somewhat overstated.",
+        "Several reported claims are stronger than the evidence. For example, benefits for PP, SP, and MoE are mostly analytical or discussed rather than experimentally validated, and the statement that the method fully unlocks token-filtering efficiency is not established beyond the tested configurations.",
+        "The experimental protocol lacks some details needed to judge training fairness and statistical reliability, such as variance across runs, exact token budgets for all models, reference model quality, cost of computing/storing reference losses, and whether evaluation uses identical effective training compute or identical retained-token budgets."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper identifies a real systems bottleneck: backward token filtering creates sparse output gradients, but this sparsity is quickly lost through attention backward and is poorly served by off-the-shelf sparse GEMM kernels at 30-50% sparsity.",
+        "The core systems idea of converting row-sparse backward computation into dimension-reduced dense GEMMs is sensible and, if robustly implemented, could be practically useful because it leverages optimized dense kernels rather than relying on sparse libraries.",
+        "The paper reports nontrivial speedups across several model sizes and training settings, including data parallelism, tensor parallelism, and LoRA, and the best reported end-to-end improvements are meaningful.",
+        "The exposition of the attention-backward sparsity issue is relatively clear, and the paper makes a plausible case that naive activation filtering can break memory-efficient attention implementations."
+      ],
+      "weaknesses": [
+        "The central algorithm appears to change the optimization objective rather than merely making existing backward token filtering efficient. In causal self-attention, a filtered token may still serve as key/value context for retained tokens, so zeroing or dropping its K/V gradients is not equivalent to loss-only filtering. The paper does not provide a rigorous correctness argument for this gradient modification, yet repeatedly claims to preserve token-filtering utility.",
+        "The utility evaluation is weak and does not support the broad claims. Table 1 evaluates downstream accuracy only for TinyLlama-1.1B and compares against regular finetuning, but it omits the most important utility baseline: loss-only backward token filtering under the same setup. Thus the paper does not convincingly show that CENTRIFUGE preserves the utility of the original token-filtering method.",
+        "The reported model-performance gains are mostly inherited from token filtering/data selection, not clearly from the proposed systems contribution. The paper conflates improved utility from filtering with efficiency from CENTRIFUGE, which makes the claimed contribution look stronger than the evidence warrants.",
+        "The systems evaluation is incomplete for a top-tier venue. Timing is averaged over only ten iterations after two warmup iterations, with no variance, no memory measurements, no throughput over longer realistic runs, no accounting for reference-model/filtering overheads, and no comparison to strong implementation baselines beyond regular training and sparse GEMM.",
+        "The paper’s broad claims of seamless one-line integration are not adequately substantiated. The method depends on graph mutation, custom attention backward behavior, runtime graph stability, and prime-number dimension marking, all of which seem fragile under dynamic sequence lengths, padding, activation checkpointing variants, dropout, different kernels, compiler stacks, or nonstandard model code.",
+        "Reproducibility is limited. The paper gives high-level implementation descriptions but no clear code-release statement, no detailed kernel validation, no gradient-equivalence or approximation tests, and insufficient details to reproduce the graph-rewriting system reliably.",
+        "The evaluation scope is narrower than the claims. Utility is focused on math fine-tuning, while efficiency is measured on selected hardware and configurations. The abstract’s 1.1B-to-40B claim is efficiency-oriented, but the paper does not demonstrate utility preservation at larger scales.",
+        "Several claims are overstated, including “fully unlocks” efficiency, “fully preserves” utility, and “one line of code.” The evidence suggests an interesting prototype with promising speedups, but not a robust, generally validated LLM training system."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "The paper identifies a concrete and important systems gap: backward token filtering improves utility but does not translate into real training speedups because sparsity does not propagate through attention and because existing sparse GEMM kernels are ineffective in the 30-50% sparsity regime.",
+        "The proposed algorithm/system co-design is compelling: selectively handling attention backward outputs to preserve correct gradients while amplifying sequence-dimension sparsity, then converting sparse operations into dimension-reduced dense GEMMs, is a practical and well-motivated approach.",
+        "The efficiency results are promising and fairly broad for a systems paper, covering models from 1.1B to 40B, data/tensor parallel settings, LoRA, different context lengths, and filtering ratios, with reported end-to-end training reductions up to 34.7%.",
+        "The paper connects efficiency improvements with utility preservation, showing that CENTRIFUGE matches loss-only token filtering convergence and improves downstream math-task performance over regular fine-tuning in the reported setting.",
+        "The presentation is generally clear: the observations motivating the design are easy to follow, and the distinction between inadequate sparsity, sparse-kernel mismatch, and graph-level dimension reduction is useful."
+      ],
+      "weaknesses": [
+        "The utility evaluation is narrower than the headline claims suggest. Most utility evidence is centered on math-oriented fine-tuning, and the detailed downstream task table appears to use TinyLlama-1.1B only; it is unclear whether the same utility preservation holds across the larger models, other domains, or more general pretraining settings.",
+        "The systems baselines are somewhat limited. The paper compares mainly against regular training, loss-only token filtering, and PyTorch sparse GEMM, but does not compare against more specialized sparse/dynamic-shape compilation approaches, custom row-compaction kernels, or alternative implementations that might be competitive in this structured sparsity regime.",
+        "Reproducibility is a concern. The appendix says the system is open-sourced and hosted on GitHub, but the link appears missing in the manuscript. Since the method relies on PyTorch C++ extensions, generated graph-specific operators, and internal autograd node attributes, code availability and version details are especially important.",
+        "The claimed ease of integration is somewhat overstated. Online use may be one line for an existing token-filtering pipeline, but the method requires offline graph analysis, model-customized operator generation, special dimension markers, and assumptions about runtime graph stability. These requirements may be fragile under changing sequence lengths, kernels, PyTorch versions, activation checkpointing, compilation stacks, or heterogeneous model code.",
+        "The paper would benefit from stronger correctness validation. The attention-backward modification is plausible, but the evaluation lacks detailed numerical gradient checks, equivalence tests against an explicit dense/token-filtered reference implementation, or sensitivity analysis for different filtering masks and sequence layouts.",
+        "Several generalization claims are mostly analytical rather than experimentally demonstrated, especially for pipeline parallelism, sequence parallelism, and MoE. The discussion of MoE load balancing is useful, but it also highlights that the current system may face unresolved issues in an increasingly important training regime.",
+        "Some reported results would be easier to assess with more complete variance/reporting details, including repeated runs for utility metrics, memory usage effects, offline preparation costs across models, and breakdowns of communication versus computation savings in distributed settings."
+      ]
+    }
+  }
+}

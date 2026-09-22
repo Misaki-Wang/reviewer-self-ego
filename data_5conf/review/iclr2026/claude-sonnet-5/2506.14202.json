@@ -1,0 +1,46 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "The paper proposes a mathematically clean and interesting connection between residual network blocks and Euler discretization of the reverse diffusion PF-ODE, providing a principled way to interpret and partition network blocks by noise level rather than by naive greedy or local-loss heuristics used in prior layerwise training work.",
+        "The equi-probability partitioning strategy (aligning block boundaries with equal cumulative probability mass under the EDM log-normal noise distribution) is a sensible and well-motivated design choice, and the ablation in Table 3 shows it clearly outperforms uniform noise-level partitioning.",
+        "The framework unifies image generation and language modeling under a single blockwise diffusion training scheme, and includes reasonably thorough ablations on overlap coefficient and block count that shed light on trade-offs between block granularity and quality.",
+        "The paper is generally clearly written, with explicit derivations connecting VE-diffusion PF-ODE, denoising score matching, and residual updates, and provides algorithmic pseudocode and implementation details in the appendix that aid reproducibility."
+      ],
+      "weaknesses": [
+        "Critical confound in the main comparison: each DiffusionBlocks block contains its own input embedding and output projection/head (Section 3.1), meaning the blockwise model has substantially more total parameters than the single end-to-end baseline with one embedding and one output head. The paper only equalizes 'total layer forwards' (Appendix D.1) but never equalizes or even reports parameter counts, so the reported superior FID/MAUVE scores could simply reflect increased model capacity rather than a genuine algorithmic advantage of the diffusion-blockwise training scheme.",
+        "No empirical measurement of actual memory usage (peak GPU memory in GB) is provided anywhere in the paper; the claimed 'B-fold memory reduction' is asserted purely from a layer-count argument, without any real profiling that would also need to account for the extra per-block embedding/output components.",
+        "Reported FID values (41.87 baseline / 41.39 ours on CIFAR-10, and 16.62/15.55 on ImageNet-256) are far worse than what is achievable with standard EDM/DiT training (single-digit FID is typical on CIFAR-10), suggesting the baseline (and possibly the proposed method) is undertrained or otherwise suboptimally configured; this casts doubt on whether the relative comparison would hold under well-tuned, standard training budgets, and undermines the significance of the claimed improvement.",
+        "All main results (Tables 1 and 2) report single numbers with no variance/error bars over multiple seeds, making it impossible to assess whether the reported differences (e.g., 41.87 vs 41.39, a very small gap) are statistically meaningful.",
+        "No empirical comparison against any of the other layerwise/blockwise training baselines discussed at length in Related Work (e.g., Forward-Forward, local learning, greedy layerwise pretraining, Blockwise Self-Supervised Learning, or especially the closely related concurrent NoProp) — the only baseline is generic end-to-end backpropagation, which weakens the positioning of the contribution relative to the most relevant prior art.",
+        "Apparent inconsistency/error in Table 5: B=3 and B=4 report the identical FID value (41.39) to two decimal places, which is suspicious given they use different architectures/layer allocations, and is never explained or discussed, raising concerns about experimental rigor or a copy-paste mistake.",
+        "The scale of experiments (DiT-S/DiT-L on CIFAR-10/ImageNet-256, a 12-layer LM1B language model) is quite small and does not match the paper's motivating narrative about democratizing training of 'hundreds of billions of parameters' models; there is no demonstration at a scale where the memory bottleneck the paper targets would actually be a limiting real-world factor.",
+        "The theoretical explanation for why independently trained diffusion blocks would outperform end-to-end backpropagation is left almost entirely speculative (Appendix A merely lists untested hypotheses such as implicit regularization), so the central empirical finding (superior performance despite less coordination) lacks a rigorous or convincing mechanistic explanation.",
+        "The autoregressive language modeling approach requires O(K·M) forward passes for K tokens and M diffusion steps, a substantial inference overhead compared to standard O(K) autoregressive decoding, which is acknowledged as a limitation but not quantified in the experiments (e.g., no wall-clock generation time reported for the LM task)."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Novel and elegant theoretical framing: connecting residual-connection updates to Euler discretization of the reverse diffusion ODE provides a principled foundation for block-wise training that is missing from prior ad-hoc approaches (Forward-Forward, greedy layer-wise, local error signals).",
+        "Impressive breadth of demonstrated applicability across five distinct architecture families (ViT classification, DiT image diffusion, masked diffusion LM, autoregressive LM, recurrent-depth models), each requiring non-trivial but coherent adaptations (Appendix A-C).",
+        "The equi-probability partitioning strategy is theoretically motivated (equal cumulative probability mass) and empirically validated via ablations (Table 7), showing clear benefit over naive uniform partitioning.",
+        "Interesting and somewhat novel application to recurrent-depth models, converting iterative BPTT-based training into single forward-pass training, which is conceptually distinct from the block-wise memory-saving story and could be of independent interest.",
+        "Reasonably thorough related-work positioning against NoProp and stage-specific diffusion models, with a dedicated ablation (Table 6) isolating the contribution of continuous-time block-wise training."
+      ],
+      "weaknesses": [
+        "Absolute performance in the generative experiments is quite weak by modern standards (DiT CIFAR-10 FID ~37-40, ImageNet FID ~10-12), far above typical EDM/DiT benchmarks, raising doubts about whether the small-scale/likely under-trained setups are representative enough to support claims of \"competitive with end-to-end training\" at scale.",
+        "All experiments use fairly shallow networks (12-24 layers, 2-4 blocks); the paper does not test on genuinely deep/large models where the claimed memory bottleneck is most severe, leaving scalability of the core motivating claim (memory savings for large-scale models) largely unverified.",
+        "The paper reports memory reduction per training step (L/B) but does not clearly account for total training compute/wall-clock time versus end-to-end backprop; for AR models the described concatenation trick even doubles sequence memory, undercutting the stated memory-efficiency narrative without a full accounting.",
+        "Missing empirical comparisons against several block-wise/layer-wise baselines discussed in the related work section (e.g., greedy layer-wise learning, local error signals, blockwise self-supervised learning) beyond Forward-Forward and NoProp, making it hard to assess whether DiffusionBlocks is state-of-the-art among block-wise methods overall.",
+        "The surprising finding that moderate blocking (B=2,3) outperforms full end-to-end backprop (B=1) is not adequately explained or investigated (e.g., whether hyperparameters/training budgets were matched fairly between baseline and DiffusionBlocks), and is left as speculative future work rather than being rigorously analyzed.",
+        "Inference for DiffusionBlocks-converted networks becomes an iterative multi-step denoising process even for tasks that originally required a single forward pass (e.g., ViT classification, AR next-token generation), which is a substantive change in inference cost/behavior that is not clearly quantified or discussed as a trade-off.",
+        "Limited statistical rigor: most results appear to be single-run numbers without confidence intervals or multiple seeds (FID uses min of three runs only for image tasks), making it hard to assess robustness of the reported gains, especially the cases where DiffusionBlocks outperforms the baseline.",
+        "No mention of code release, and the framework requires numerous architecture-specific design choices (noise conditioning schemes, causal masking tricks for AR, masking-schedule partitioning for MDM), which may hinder reproducibility."
+      ]
+    }
+  }
+}

@@ -1,5 +1,49 @@
 {
+  "v3": {
+    "exp1_quality": {
+      "oa": 6,
+      "strengths": [
+        "Well-motivated problem: clearly identifies that KV retrieval methods (accurate) suffer from severe efficiency bottlenecks (selection+recall dominating latency), while KV dropping methods (efficient) lose accuracy, and targets closing this gap with a Pareto-improving design.",
+        "Nice empirical grounding of the core algorithmic idea (speculative retrieval): the cosine-similarity analysis of query vectors across adjacent decoding steps (Fig. 3) across multiple models/layers/heads convincingly motivates step-wise KV reuse, and the observation of per-head outlier variability motivates the fine-grained correction mechanism.",
+        "Reasonable algorithm-system co-design: speculative retrieval + query-based correction to bound accuracy loss, combined with hybrid NHD/HND memory layouts and double-buffered streamed recall to address the concrete fragmented-transfer bottleneck identified in profiling (Fig. 1 right).",
+        "Broad and relevant evaluation: covers long-input (LongBench v2), long-generation (LongGenBench), and long-reasoning (MATH500/AIME24/GPQA) tasks across multiple model families (Llama-3.1, Qwen-2.5, DeepSeek-R1 distillations), and compares against a reasonably comprehensive set of baselines (RazorAttention, RaaS, Quest, ArkVale, ShadowKV).",
+        "Ablation study (Fig. 8) isolates the contribution of hybrid layouts, double buffering, and speculative retrieval, showing each component's incremental benefit, which supports the claimed system design choices.",
+        "Reported speedups (up to 13x over ArkVale, up to 8.4x over ShadowKV) are substantial and if reproducible would represent a meaningful systems contribution for practical long-context LLM serving."
+      ],
+      "weaknesses": [
+        "Accuracy gains over baselines in Tables 2-3 are often marginal or mixed (e.g., FreeKV is frequently tied with or only slightly better than Quest/ArkVale, and sometimes worse, e.g., Qwen-2.5-7B LongBench v2 overall 26.84 vs Quest's 27.63), which weakens the 'near-lossless and best accuracy' framing given in the abstract/intro relative to other retrieval methods; the paper should more explicitly discuss cases where FreeKV underperforms.",
+        "The core efficiency gains largely stem from systems-level engineering (hybrid layouts, double buffering) rather than the 'speculative retrieval' algorithmic contribution — per the ablation, hybrid layout alone yields up to 10.5x speedup while speculative retrieval/correction only adds ~1.9x, yet the abstract/intro place heavy emphasis on the algorithmic idea; the actual novelty/impact balance could be stated more transparently.",
+        "Only single-GPU, single-node experiments on A100 40GB are reported; no discussion of scaling to multi-GPU/tensor-parallel serving settings, no larger models (e.g., 70B), and only relatively small batch sizes (1,2,4) are tested, limiting evidence for real production-scale deployment claims.",
+        "The correction mechanism's threshold τ is tuned per-scenario (0.8 for long-input, 0.9 for long-generation/reasoning) without a systematic sensitivity analysis or principled method for setting τ, raising concerns about robustness and practical tunability across new tasks/models.",
+        "Comparisons with ArkVale/ShadowKV do not fully control for implementation-level engineering differences (e.g., FreeKV's system optimizations like hybrid layout might apply to baselines too); it's unclear whether some of the speedup comes from more highly optimized low-level implementation (kernels, memory management) versus the proposed methodology itself, which could inflate the reported speedup relative to a fair apples-to-apples comparison.",
+        "No wall-clock/latency-accuracy Pareto curves are shown varying the KV budget B; all comparisons fix B=2048, making it hard to assess how FreeKV's accuracy-efficiency tradeoff generalizes across different budget/sparsity regimes.",
+        "Group-consistent selection and page-wise summarization (min-max pooling) closely follow existing techniques (Quest, ArkVale), so the core selection method is largely incremental; the primary novelty is confined to the reuse+correction scheduling and the memory layout/streaming engineering.",
+        "Statistical significance/variance of results is not reported (e.g., how many runs, variance across seeds for reasoning tasks beyond k=8 samples), and given known sensitivity of reasoning benchmarks to sampling, some of the reported differences (e.g., 1-2 point gaps) may not be robust conclusions."
+      ]
+    }
+  },
   "v4": {
+    "exp1_quality": {
+      "oa": 8,
+      "strengths": [
+        "Well-motivated problem framing: clearly demonstrates that KV dropping methods lose accuracy on summarization/reasoning tasks while KV retrieval methods are accurate but suffer severe efficiency bottlenecks (selection+recall dominating latency in ArkVale, ShadowKV, InfiniGen)",
+        "Novel and simple algorithmic insight (speculative retrieval): leverages high cosine similarity of query vectors across adjacent decoding steps to move selection/recall off the critical path, cleanly differentiated from InfiniGen's re-projection approach",
+        "Fine-grained correction mechanism using per-head query similarity thresholding is a sensible and lightweight way to bound the accuracy cost of stale KV reuse, with mean-pooling for group consistency justified by ablation",
+        "Strong systems contribution: hybrid NHD/GPU + HND/CPU layout design and double-buffered streamed recall are well-motivated (avoiding fragmented small transfers) and directly address a concrete bottleneck",
+        "Extensive empirical evaluation across diverse model families (Llama-3.1, Qwen-2.5, DeepSeek-R1 distills) and task types (long-input QA, long-generation, long reasoning) with near-lossless accuracy relative to full KV cache and consistent superiority over KV dropping and other KV retrieval baselines",
+        "Substantial efficiency gains demonstrated (up to 13x over ArkVale, up to 8.4x over ShadowKV) with ablations isolating the contribution of each system optimization (HL, DB, SR)",
+        "Thorough appendix analyses: generalization of query similarity property across tasks/scales/architectures/training stages, detailed correction-rate distributions per layer, and multiple ablations on design choices (group-consistent selection variants, threshold tuning)",
+        "Comparisons against a comprehensive and relevant set of SOTA baselines spanning both dropping and retrieval categories"
+      ],
+      "weaknesses": [
+        "Efficiency evaluation is limited to a single A100 GPU with batch sizes up to 4; scalability to larger batch sizes, multi-GPU/distributed serving, or different interconnects (NVLink, PCIe Gen5) typical of production LLM serving is not explored",
+        "Correction rates on harder reasoning tasks (AIME24, GPQA) can be quite high (up to ~50%), which could substantially reduce the practical speedup benefit in exactly the scenarios (long-CoT reasoning) the paper emphasizes as increasingly important, yet the main efficiency benchmarks (Sec 5.3) are run on long-input/long-generation settings rather than the reasoning tasks where correction overhead is largest",
+        "The core algorithmic novelty (temporal locality of attention/query patterns for prefetching) builds incrementally on ideas already explored by InfiniGen and prior works on attention locality (e.g., MInference, RaaS), with the main new contribution being largely on the systems/implementation side",
+        "No analysis of control-plane/scheduling overhead or behavior under concurrent multi-request serving, which is important for real deployment scenarios where CPU controller synchronization could become a bottleneck",
+        "Quest is excluded entirely from efficiency comparisons due to OOM, and no throughput/latency numbers are given relative to plain full-KV cache inference without any offloading in the main results (only in the motivating Fig. 1 breakdown), making it harder to gauge overall practical speedup versus the simplest baseline in typical serving conditions",
+        "Threshold tau requires manual tuning per scenario type (0.8 for long-input, 0.9 for long-generation/reasoning), and the paper does not discuss a principled or adaptive way to set this hyperparameter for unseen task types"
+      ]
+    },
     "exp3_positive": {
       "oa": 8,
       "strengths": [

@@ -1,0 +1,46 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a real and underexplored limitation of MoE models: once an expert is selected it is always executed at full capacity, creating discontinuous accuracy-compute trade-offs.",
+        "The proposed slimmable-expert design is architecturally simple, requires no change to the standard MoE training pipeline, and the two-width sampling training recipe (full width + one random width per step) is a practical, low-overhead way to instill multi-width capability.",
+        "Extensive experimental sweep across model sizes (55M-1B), routing configurations (E8A2/E8A4/E16A4), and token budgets (3B-15B), consistently showing MoSE (TTT) shifts the Pareto frontier relative to uniform-width execution and vanilla MoE.",
+        "The lightweight test-time training (TTT) mechanism for learning a router-probability-to-width mapping (single scalar or per-layer γ) is an elegant, cheap adaptation strategy, and the ablation (uniform vs normalized-probability vs TTT) clearly isolates its contribution.",
+        "Additional analyses (γ interpretability, FLOPs breakdown, width-wise training dynamics, routing transfer, γ transferability across datasets) add useful diagnostic depth."
+      ],
+      "weaknesses": [
+        "All experiments are on very small-scale GPT-2 style models (55M-1B parameters) trained on relatively tiny token budgets (3B-15B tokens), far below the scale of modern production MoE LLMs; it is unclear whether the slimming/TTT approach and its gains hold at scale, with larger vocabularies, longer training, or more experts.",
+        "No empirical comparison to the elastic-MoE baselines discussed in Related Work (RoE, EMoE), despite these being the most directly relevant competing methods; the paper only compares against a static vanilla MoE baseline, limiting the ability to judge relative significance.",
+        "Efficiency claims are based solely on theoretical FLOPs per token; there is no wall-clock latency/throughput measurement, and slicing variable-width matrix multiplications may not translate into actual hardware speedups (e.g., due to irregular shapes, kernel/memory-bandwidth bottlenecks, or batched execution with heterogeneous widths across tokens/experts in real serving systems).",
+        "The core slimming mechanism (nested/ordered channel slicing) is a direct, largely unmodified application of pre-existing slimmable-network techniques (Yu et al. 2019, Tastan et al. 2025a) to MoE FFNs; the main novelty is combinatorial/integrative rather than a fundamentally new mechanism, and this positioning could be made more explicit.",
+        "Results appear to be single-run (no seeds/variance reported), which is a concern given the paper's own acknowledgment that accuracy metrics exhibit noise and non-monotonic fluctuations (Figure 9 discussion).",
+        "Training cost is effectively doubled (two forward/backward passes per step) to obtain the slimmable model, but this additional training overhead is not weighed against the inference-time savings in an overall compute accounting, potentially overstating net efficiency gains.",
+        "The calibration set for test-time training is drawn from the same corpus (OpenWebText) used for the main pretraining/eval numbers in Table 1, raising a minor concern about whether reported gains partly reflect calibration-domain overlap rather than a purely general-purpose mechanism (partially addressed by the LAMBADA transfer experiment, but only for perplexity, not the main results table).",
+        "Discussion of limitations is fairly thin, mainly noting small model scale and post-training applicability as open questions; there is no discussion of how slimmable experts interact with expert-parallel distributed serving infrastructure, which is central to practical MoE deployment."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "The core idea—decoupling expert selection from expert capacity via slimmable/nested FFN widths—addresses a genuine gap in standard MoE (once an expert is chosen, it always runs at full capacity), and is a natural, well-motivated extension of slimmable-network ideas to the MoE setting.",
+        "The training recipe is simple (two forward passes per step, standard MoE auxiliary losses) and requires no changes to the core MoE pipeline, which supports ease of adoption.",
+        "The empirical study is broad: multiple model scales (55M to 2.5B from scratch, plus CPT on a 16B DeepSeek-V2-Lite checkpoint), multiple routing regimes (E8A2/E8A4/E16A4/E64A8/E128A8), multiple token budgets, and several inference-time width-assignment strategies (uniform, normalized-probability, shared/layer-wise test-time-trained γ).",
+        "The proposed test-time training (TTT) mechanism for width identification is lightweight (a single scalar or one scalar per layer, calibrated on ~50 small batches) yet yields consistent, non-trivial improvements to the compute-quality Pareto frontier across settings, and the learned γ is shown to transfer across datasets (LAMBADA) reasonably well.",
+        "Thorough supplementary diagnostics are provided: routing-stability statistics (load CV, entropy, aux loss) comparing full-width vs sampled-width branches, expert-utilization heatmaps, JS-divergence of routing distributions across widths, FLOPs breakdown by component, and an empirical FLOPs-vs-latency/throughput correlation check, which collectively support the internal consistency of the method and partially justify the use of FLOPs as the primary reported metric.",
+        "Reproducibility details (architectures, optimizer settings, routing hyperparameters, per-experiment token budgets) are reported in an appendix, aiding replication."
+      ],
+      "weaknesses": [
+        "No variance/error bars or multiple seeds are reported for any experiment; given that many reported perplexity/FLOPs improvements are modest (e.g., single-digit percentage point PPL differences), it is hard to assess whether observed gains are statistically meaningful versus noise from a single training run.",
+        "The paper does not empirically compare against relevant baselines discussed in Related Work (RoE, Elastic MoE) or against simpler efficiency techniques (e.g., structured pruning, distillation, early-exit, or dynamic depth) despite these being natural comparators for compute-quality trade-off claims; the significance of the contribution relative to existing elastic-inference methods is therefore not empirically substantiated.",
+        "Scale remains modest: from-scratch experiments stop at 2.5B parameters/50B tokens, well below current frontier MoE model sizes, and the only larger-scale evidence (DeepSeek-V2-Lite, 16B) is CPT-only rather than full pretraining; the authors acknowledge this as a limitation, but it constrains claims about applicability to state-of-the-art LLMs.",
+        "MoSE with uniform width (w=1.0) already outperforms the MoE baseline in several settings (Table 1), suggesting part of the benefit may come from the multi-width training acting as an implicit regularizer rather than from the inference-time width-adaptation mechanism itself; the paper does not disentangle these two effects (e.g., via an ablation training MoSE with only full-width sampling or controlling total training compute equally between MoE and MoSE).",
+        "Runtime/latency validation (Appendix B.4) is only conducted for small model/expert configurations (E8A2, E64A8) and does not extend to the larger backbones or the DeepSeek CPT setting where the main efficiency claims are made, leaving open whether FLOPs savings translate to real wall-clock gains at the scales emphasized in the main results (GPT2-Large, DeepSeek-V2-Lite).",
+        "Downstream zero-shot reasoning evaluation (Table 2) is reported for only a single model configuration (GPT2-Medium, E8A2), limiting confidence that accuracy gains under width reduction generalize across scales and routing regimes as robustly as the perplexity results.",
+        "The router-probability-to-width mapping (power-law scoring with sharpness γ) is heuristic without theoretical grounding; while it empirically works, the design choice (and the choice of budget Γ, discretization step 0.05) is not deeply justified or compared against alternative parameterizations beyond the ablation of fixed vs. learned γ."
+      ]
+    }
+  }
+}

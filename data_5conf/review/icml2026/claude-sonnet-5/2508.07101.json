@@ -1,0 +1,49 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Clear and well-motivated empirical analysis (Section 2) showing spatial locality across attention heads and recency locality across decoding steps in reasoning tasks, which directly motivates the proposed design.",
+        "The proposed method (Unified Attention Head Selection + Stable Recency Window) is simple, training-free, and easy to integrate into an existing sparse-attention pipeline (TidalDecode), lowering the barrier to adoption.",
+        "Strong and consistent empirical results across two model scales (Qwen3-4B/8B) and four benchmarks (AIME-24/25, MATH500, GPQA-Diamond), with LessIsMore matching or exceeding full-attention accuracy at much smaller token budgets than all compared baselines, including the training-required SeerAttention-r.",
+        "Efficiency claims are backed by an actual custom-kernel implementation and measured decoding latency rather than only theoretical FLOP reduction, and the paper additionally shows that LessIsMore avoids the generation-length inflation that hurts competing sparse-attention methods (Table 1).",
+        "Useful ablations (Fig. 8, Fig. 9) isolating the contribution of unified head aggregation vs. head-specific selection and the effect of the recency window ratio, which support the design choices rather than just reporting end results.",
+        "Honest and fairly detailed limitations/future-work section (adaptive ratio, generalization beyond GQA, memory savings, native training) that does not overstate the contribution."
+      ],
+      "weaknesses": [
+        "The method is incremental relative to TidalDecode: it primarily adds a cross-head aggregation step and a fixed recency-window allocation on top of an existing backbone, and the paper explicitly states it is bootstrapped from TidalDecode's layer schedule (full attention/selection/sparse layer split), limiting the technical novelty.",
+        "The core locality analysis in Section 2.2 is drawn from a single AIME problem at a single layer (Layer 4) with a single model (Qwen3-8B); it is unclear how consistent these locality patterns are across problems, layers, and model families, which weakens the generality of the motivating claims.",
+        "The reported end-to-end speedups (1.1x vs full attention, 1.13x vs TidalDecode) are fairly modest despite claims of 2x fewer attended tokens and up to 87.5% sparsity, suggesting the practical efficiency benefit may be smaller than the sparsity numbers imply; the union/aggregation overhead (implemented in plain PyTorch, not CUDA) likely eats into potential gains.",
+        "The efficiency evaluation (Section 4.3) is conducted on a different model (Llama-3.1-8B) than the accuracy evaluation (Qwen3-8B/4B), justified only as being architecturally similar; this substitution weakens the direct coupling between the accuracy results and the latency results presented as a unified system contribution.",
+        "The fixed recency ratio r=0.25 and the choice of selection layers are hand-tuned per model via a small needle-in-haystack calibration (Appendix A.1) rather than derived principledly, and adaptivity is left entirely to future work, which somewhat undercuts the training-free simplicity claim.",
+        "No variance/confidence intervals are reported for the pass@1 accuracy numbers averaged over 16/8 samples, making it hard to assess whether some of the reported accuracy differences (e.g., LessIsMore vs. Full Attention at higher budgets) are statistically meaningful.",
+        "The method still requires maintaining the full KV cache (selection-based, not eviction-based), so memory savings are not realized despite the paper's efficiency framing; this is acknowledged but limits practical significance for memory-constrained deployment.",
+        "Comparisons are limited to TidalDecode, Quest, and SeerAttention-r; other recent training-free or hybrid sparse-attention approaches for reasoning are not benchmarked, leaving the relative standing of LessIsMore against the broader current landscape less clear."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Clear and well-motivated empirical analysis (Figure 1, Figure 2) demonstrating that existing sparse attention methods (StreamingLLM, TidalDecode) suffer severe attention-recall degradation specifically on long-horizon reasoning tasks compared to retrieval tasks, providing a concrete diagnosis of the problem the paper addresses.",
+        "The identified structural properties (cross-head spatial locality and temporal recency locality) are intuitive, empirically supported with visualizations across layers/steps (Section 2.3-2.4, Appendix A.6), and directly motivate the proposed method's two design components.",
+        "The proposed method (CUSA + stable recency window) is training-free, simple to implement on top of an existing selection-based framework (TidalDecode), and architecture-agnostic (demonstrated on both GQA and MHA models).",
+        "Extensive experimental validation across multiple model families (Qwen3-4B/8B/14B, DeepSeek-R1-Distill-Llama-8B) and reasoning benchmarks (AIME-24/25, MATH500, GPQA-Diamond), showing consistent accuracy improvements at aggressive sparsity levels (e.g., lossless accuracy at 2K token budget on AIME-24).",
+        "Notably avoids the generation-length inflation problem observed in prior sparse-attention baselines, which is an important practical finding (Table 2) since length inflation can offset any latency gains from sparsity.",
+        "Solid efficiency validation, including custom kernel-level benchmarks and realistic end-to-end serving evaluation in SGLang with FlashInfer, going beyond synthetic latency numbers.",
+        "Thorough set of ablations (recency ratio, re-selection layer choice, aggregation scheme, GQA-specific validation) that support the design choices rather than presenting them as unmotivated heuristics.",
+        "Additional generalization experiments to long-context (non-reasoning) tasks (NIAH, LongBench) and to an MHA-based model, strengthening claims of broader applicability."
+      ],
+      "weaknesses": [
+        "The core technical contribution—aggregating per-head top-k proposals into a global ranking plus a fixed-ratio recency window—is a relatively incremental combination of ideas already present in prior work (StreamingLLM's recency window, TidalDecode's selection-then-reuse framework); the main novelty is largely empirical characterization rather than a new algorithmic mechanism.",
+        "The explanation for why cross-head aggregation preserves recall and generalizes across future layers is primarily supported by qualitative heatmap visualizations (Figures 2, 9, 10) rather than a more rigorous statistical or theoretical account of the union-based selection process, e.g., no analysis of expected recall as a function of head overlap or budget allocation.",
+        "Because LessIsMore retains the full KV cache (selection-based, not eviction-based), memory footprint savings are limited relative to eviction-based baselines; the paper does not clearly discuss this trade-off or memory cost implications for very long-context deployment.",
+        "The fixed recency ratio r=0.25 is treated as a stable universal hyperparameter, but the ablation (Figure 8) is conducted only on a single model/task combination (Qwen3-8B/AIME-24); it is unclear whether this ratio transfers robustly across models, tasks, and token budgets, especially given that GPQA and MATH500 have different reasoning length profiles.",
+        "The efficiency gains, while real, are modest at shorter context lengths (e.g., only ~1.1x at 16K context) and grow substantially only at longer contexts (64K); the practical impact for typical AIME/MATH problem lengths (~15-20K tokens per the paper's own data) is therefore more limited than the headline 1.6x number suggests.",
+        "The baseline comparison is somewhat narrow, focusing mainly on TidalDecode, Quest, StreamingLLM, and SeerAttention-r; other recent training-free or hybrid reasoning-specific sparse-attention approaches are not benchmarked, limiting the strength of the significance claim relative to the broader landscape.",
+        "The paper inherits its comparison layer-selection procedure directly from TidalDecode's own methodology, which, while argued to be fair, means the overall system design is tightly coupled to and dependent on TidalDecode's amortization structure rather than presenting a fully independent architecture."
+      ]
+    }
+  }
+}

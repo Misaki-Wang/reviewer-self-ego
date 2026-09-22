@@ -1,0 +1,49 @@
+{
+  "v3": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Addresses a well-motivated and practical problem: compression methods for RAG typically degrade downstream task performance due to reliance on heuristic proxies rather than task-aligned signals.",
+        "The core idea of using downstream QA performance (EM/F1) as an RL reward for context compression is intuitive, removes the need for hard-to-obtain gold summary labels, and is implemented in a reasonably principled way with GRPO plus a distillation warm-start for stability.",
+        "Extensive empirical evaluation across four datasets (single-hop and multi-hop QA), multiple compressor backbones (Qwen2.5-1.5B, Llama3.2-1B/3B), and two downstream LLMs (Qwen2.5-14B, Llama-3.1-8B) shows consistent improvements over strong baselines (RECOMP, NoiseFilter-IB, BM25, off-the-shelf LLM compressors, and even DeepSeek-V3 as a compressor).",
+        "Useful ablations isolating the contribution of distillation vs. GRPO, and a sweep over the F1-reward weighting hyperparameter α, add some insight into design choices.",
+        "Reasonably detailed implementation description (hyperparameters, frameworks, prompts in appendix) supports partial reproducibility.",
+        "Case studies provide qualitative, interpretable evidence of how the compressor’s outputs differ from baselines and lead to correct answers."
+      ],
+      "weaknesses": [
+        "The central claim of 'lossless compression' is imprecisely used: the method actually improves EM/F1 over the uncompressed baseline in most settings, which is not 'lossless' in a natural sense but rather 'gainful'; the terminology is potentially misleading and inconsistent with reported compression ratios that vary across sections (e.g., abstract states 3% while main text cites ~6% for 5-doc and 2-3% for 10-doc settings).",
+        "No variance/robustness analysis: all results appear to be single-run numbers without confidence intervals, standard deviations, or multiple seeds, despite RL training (GRPO) being known to have run-to-run variability; this weakens the strength of the empirical claims.",
+        "Reward is computed using the exact same downstream LLM (Qwen2.5-14B-Instruct) that is also used at evaluation time in most tables, raising a possible confound of the compressor learning to optimize for this specific LLM's idiosyncrasies (overfitting to M) rather than producing genuinely more informative summaries; the transfer experiment to only one additional LLM (Llama-3.1-8B) is a useful but limited check on this.",
+        "Training cost of the full CORE pipeline (teacher distillation with DeepSeek-V3, filtering via LLM-based accuracy checks, and RL rollouts requiring repeated calls to the downstream LLM M) is not discussed in terms of total compute/training overhead, which is relevant to claims of 'efficiency' — only the inference-time token count is reported.",
+        "The compressor is trained separately per dataset (2 epochs per dataset) rather than as a single unified model, which is not clearly acknowledged as a limitation and somewhat undercuts claims of general applicability compared to baselines that may also be dataset-specific but are described similarly.",
+        "Novelty is somewhat incremental relative to concurrent/related work (e.g., Kim & Thorne 2025 also use reward-based training for context filtering); the paper's differentiation from this closely related approach is only briefly mentioned and not empirically compared.",
+        "The qualitative case study is limited to two hand-picked examples, offering only anecdotal evidence rather than systematic human evaluation of summary faithfulness or informativeness.",
+        "No analysis of failure cases, potential reward hacking (e.g., compressor learning to insert the gold answer verbatim or exploit F1 token overlap in ways that don't generalize), or robustness to noisy/adversarial retrieved documents.",
+        "No wall-clock latency or actual computational cost comparison despite efficiency being a central motivation; only token counts are reported, which is an imperfect proxy given that the compressor itself must first encode all documents before compressing."
+      ]
+    }
+  },
+  "v4": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "The core idea of using performance-driven RL (GRPO) with task-level reward instead of proxy heuristics (mutual information, teacher mimicry, lexical overlap) is well-motivated and addresses a real limitation of existing RAG compression methods.",
+        "Extensive experimentation: four QA benchmarks (single-hop and multi-hop), multiple compressor backbones (Qwen2.5-1.5B, Llama3.2-1B/3B), multiple downstream LLMs (Qwen2.5-14B, Llama-3.1-8B), transfer across datasets and LLMs, robustness to noisy contexts, and an additional LongBench evaluation with much longer documents. This breadth strengthens confidence that the gains are not an artifact of one setting.",
+        "The two-stage recipe (distillation warm-start + RL fine-tuning) is a sensible and practical design, and the ablation (Table 2) convincingly shows both stages contribute, with RL being especially important.",
+        "Reported results are strong and consistent: CORE matches or exceeds full-context RAG performance at very high compression ratios (down to ~2-6% of tokens) and consistently beats strong baselines (RECOMP, NoiseFilter-IB, LongLLMLingua, QGC, and even DeepSeek-V3 671B), which is a compelling practical contribution given efficiency gains.",
+        "Efficiency analysis (Appendix B) and case studies (Appendix D.4) provide useful qualitative and quantitative support for the mechanism (i.e., that the compressor filters noise and retains answer-critical facts) rather than resting on aggregate numbers alone.",
+        "Good coverage of related work situating the method versus soft compression, other RL-based prompt compression (TACO), and agentic search-reasoning RL approaches, clarifying the paper's specific niche (black-box generator, lightweight plug-in compressor)."
+      ],
+      "weaknesses": [
+        "The evaluation is restricted entirely to extractive, short-answer QA tasks (EM/F1) where the reward signal (rule-based EM/F1 match) is straightforward to compute; Section 3.4 acknowledges this and merely speculates about extension to open-ended generation without any empirical support, so the claimed generality of the framework is unverified.",
+        "The reliance on a black-box LLM as the reward source for RL training means training cost scales with the number of rollouts times LLM calls; while Appendix B addresses training time (~5 hours on 8 H20 GPUs), the actual API/inference cost and scalability to larger-scale or noisier real-world corpora is not deeply analyzed beyond the single noisy-NQ experiment.",
+        "Variance/statistical significance is not reported anywhere (single-run point estimates in all tables), making it hard to assess whether some of the smaller EM/F1 gaps versus baselines (e.g., 1-2 points) are meaningful or within noise, especially given RL training is known to have high run-to-run variance.",
+        "The teacher model (DeepSeek-V3) used for the distillation-based curation of training data is also one of the primary baselines compared against in Table 1 and Table 3, creating a potential fairness/contamination concern -- CORE's compressor is essentially built with supervision partly filtered by DeepSeek-V3's own outputs before being shown to outperform DeepSeek-V3 as an off-the-shelf compressor; this relationship deserves more explicit discussion.",
+        "The construction of training data during the distillation stage explicitly uses the same downstream LLM (M) and test-time-style evaluation (psummary vs poriginal) that closely resembles the evaluation metric, raising some concern about how cleanly the SFT warm-start and RL stages are separated from the evaluation protocol, and whether hyperparameters (e.g., document count k=5, threshold criteria for discarding) were tuned on data that overlaps with reported test performance.",
+        "No comparison to compute/latency overhead of the RL-based training procedure relative to simpler heuristic methods is quantified in wall-clock or cost terms beyond a rough training time; a more rigorous cost-benefit analysis (e.g., FLOPs, dollar cost of teacher API calls, rollout LLM calls) would strengthen claims of practical efficiency.",
+        "The reward design (EM + alpha*F1) is fairly simple and tuned per-dataset (values 0.2-0.5-1.0), which may limit out-of-the-box applicability without per-task tuning, slightly undercutting the 'plug-and-play' framing.",
+        "Presentation contains minor typos (e.g., 'directy' in abstract) and some redundant repeated content between the main text bullet claims and appendix, but this is a minor issue relative to substantive concerns."
+      ]
+    }
+  }
+}
