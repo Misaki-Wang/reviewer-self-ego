@@ -34,43 +34,9 @@ These figures are transcribed from the two supplied screenshots. The first table
 
 ---
 
-# Five-conference major-improvement review token and cost estimates
-
-## Scope and interpretation
-
-The target `data_5conf/anonymized/major_imp_index/` contains **3,784 deduplicated PDF versions** (`paper_version_id`). The table below estimates **one review per PDF version and model**. To estimate three review conditions per version, multiply the projected totals by three.
-
-Gemini figures are the user's supplied measured totals for 9,355 and 9,357 successful reviews. All other model figures are historical per-review usage averages extrapolated to 3,784 reviews. They are estimates, not new runs or invoices. Reasoning tokens are included in output tokens and are not counted twice. Missing-usage attempts are not treated as zero; model averages use attempts with reported usage.
-
-## Per-model results
-
-| Model | Evidence / status | Successful or usage-reported reviews in evidence | Observed or average tokens per review | Observed or projected total tokens for 3,784 reviews | Observed or estimated total cost (USD) | Estimated cost per review (USD) |
-|---|---|---:|---:|---:|---:|---:|
-| Gemini 3.8 Flash | User-supplied full-run measurements | 9,355 successful | 15,945 | 149,163,914 observed | $170.53 observed | $0.01823 |
-| Gemini 3.5 Flash | User-supplied full-run measurements | 9,357 successful | 16,317 | 152,674,753 observed | $404.61 observed | $0.04324 |
-| **Gemini combined** | User-supplied full-run measurements | **18,712 successful** | **16,131 weighted mean** | **301,838,667 observed** | **$575.14 observed** | **$0.03074 weighted mean** |
-| Claude Sonnet 5 | Estimate from 3 successful canary reviews; API-equivalent observed cost | 3 | 38,163 | 144,407,531 projected | $633.04 projected | $0.16729 |
-| Claude Opus 5 | Estimate from 3 successful canary reviews; API-equivalent observed cost | 3 | 37,827 | 143,137,368 projected | $1,504.29 projected | $0.39754 |
-| Claude Fable 5.1 | Estimate from 3 successful canary reviews; API-equivalent observed cost | 3 | 38,665 | 146,309,621 projected | $3,269.74 projected | $0.86410 |
-| Claude Haiku 4.5 | No successful canary usage sample; not estimated | 0 successful (3 failed attempts have usage) | Unknown | Unknown | Unknown | Unknown |
-| GPT-5.5 | Estimate from ICLR three-model historical review attempts with reported usage; API-equivalent price | 14,067 usage-reported turns | 376,229 | 1,423,651,383 projected | $2,812.39 projected | $0.74323 |
-| GPT-5.6 Sol | Estimate from ICLR three-model historical review attempts with reported usage; API-equivalent price | 14,065 usage-reported turns | 706,522 | 2,673,480,631 projected | $3,078.65 projected | $0.81360 |
-| GPT-6 Astra | Estimate from ICLR three-model historical review attempts with reported usage; API-equivalent price | 14,184 usage-reported turns | 481,114 | 1,820,535,935 projected | $5,300.02 projected | $1.40064 |
-
-## Method and caveats
-
-- The five-conference target size is 3,784 unique PDF versions. The unit is one model review of one version, not one comparison pair; repeated endpoints are counted once.
-- Gemini rows use the supplied actual totals. Per-review averages are calculated from those totals and successful-review counts; the combined mean is weighted by review count.
-- Claude averages use the three successful canary receipts per model in `experiments/runs/claude_review_quota_4model_20260920T185806Z/`. Extrapolation assumes the canary PDFs represent the full target. Costs use the receipts' API-equivalent list costs.
-- GPT averages use `res/published/iclr2026_three_model_review_20260917/models/<model>/attempts.jsonl.gz`. They divide summed reported input-plus-output tokens by turns with usage, then extrapolate to 3,784 reviews. Usage-reported counts are lower than physical-attempt counts because some attempts lack usage.
-- GPT API-equivalent estimates apply current standard input, cached-input, and output rates separately: GPT-5.5 $5/$0.50/$30 per million tokens; GPT-5.6 Sol $4/$0.40/$20; GPT-6 Astra $10/$1/$50. Costs are not Codex subscription charges.
-- Claude API-equivalent costs are based on per-receipt native cost metadata. The 3-review sample is small; it is not a confidence interval or a guarantee of full-run consumption.
-- The Gemini 3.5/3.8 figures are actual reported costs supplied for this comparison. They are not converted from current public list prices.
-- This workspace cannot access `/fsx` because that filesystem is not mounted in the current environment. This file is the local mirror at `data_5conf/stastics.md`; it has not been copied to the remote MBZ path.
-
 ## Updated token and API-equivalent cost statistics
 
-This user-supplied table is the latest consolidated estimate for 3,784 reviews per model. The earlier canary-based estimates above are retained as historical context. API-equivalent costs are estimates, not Codex subscription charges.
+This user-supplied table is the latest consolidated estimate for 3,784 reviews per model. API-equivalent costs are estimates, not Codex subscription charges.
 
 | Model | Successful reviews in source | Average tokens per review | Average API-equivalent cost per review (USD) | Estimated tokens for 3,784 reviews | Estimated API-equivalent cost for 3,784 reviews (USD) |
 | ----------------------------- | ---------------------------: | ------------------------: | -------------------------------------------: | ---------------------------------: | ----------------------------------------------------: |
