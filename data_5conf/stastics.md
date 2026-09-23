@@ -11,6 +11,7 @@ These figures are transcribed from the two supplied screenshots. The first table
 | ACL 2026 | 772 | 2,296 | 33.62% |
 | CVPR 2026 | 943 | 4,089 | 23.06% |
 | ECCV 2026 | 633 | 2,834 | 22.34% |
+| **Total** | **6,959** | **21,128** | **32.94%** |
 
 ## arXiv-confirmed papers versus official accepted papers
 
