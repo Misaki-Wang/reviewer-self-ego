@@ -1,4 +1,27 @@
 {
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "The core theoretical contribution—decomposing eviction loss into a fixed 'Oracle Loss' term and a metric-dependent 'Optimality Gap' (Eq. 7)—is a clean and insightful formalization that clarifies why magnitude-based cross-head allocation (e.g., AdaKV) can be suboptimal even with a good intra-head scoring metric.",
+        "The convex-hull relaxation via PAVA/isotonic regression is a well-motivated and practical solution to the NP-hard combinatorial allocation problem, and Figure 2a empirically validates that the greedy solver on the relaxed objective matches the DP-optimal solution.",
+        "The offline profiling protocol elegantly sidesteps the chicken-and-egg problem of needing future decoding results at inference time, achieving reportedly negligible online overhead (Section 5.5, Figure 5) while still incorporating oracle-importance-derived allocation.",
+        "Experimental coverage is broad: three base models (Mistral-7B, Llama-3.1-8B, Qwen2.5-32B), two/three heuristic metrics (SnapKV, KeyDiff, and EA in the appendix), two benchmarks (LongBench, RULER at 4K/16K), and two compression ratios (50%/80%), with full per-dataset breakdowns in the appendix.",
+        "Results on RULER are particularly compelling, showing large, consistent gains over Uniform/PyramidKV/AdaKV across nearly all settings and multi-key/multi-value tasks that are known stress tests for retrieval robustness.",
+        "The diagnostic analyses (Figures 3, 4) showing layer-wise and head-wise loss heatmaps provide intuitive, convincing evidence for *why* the method works (eliminating loss bursts/spikes that PyramidKV and AdaKV exhibit), going beyond simple headline accuracy numbers.",
+        "The ablation in Table 3 isolates the specific contribution of modeling the optimality gap (vs. naively trusting oracle importance rankings), directly supporting the paper's central claim."
+      ],
+      "weaknesses": [
+        "The 'Oracle Importance' (Eq. 4) is itself a heuristic approximation (attention weight × projected value norm, inspired by AdaKV/CriticalKV) rather than a directly verified ground truth of output contribution; the paper does not validate how well this proxy actually correlates with true generation quality degradation, so claims of closing an 'optimality gap' toward this oracle are only indirectly supported by downstream task performance rather than a rigorous causal link.",
+        "The offline calibration protocol relies on a single small AI-generated synthetic document (~4,000 words, 30 queries; Appendix E) per metric/model. The paper shows profile consistency across a handful of LongBench task types (Figure 2b) but does not analyze sensitivity to the calibration corpus's domain, length, or style (e.g., code, tables, non-English text), leaving open questions about generalization and potential overfitting to the specific synthetic narrative used.",
+        "The computational cost of the offline profiling stage (full-attention decoding across many queries and a dense grid of compression ratios, per model per metric) is not quantified, making it hard to assess the practical deployment cost/scalability tradeoff relative to baselines like AdaKV that require no offline profiling at all.",
+        "The comparison baselines (Uniform, PyramidKV, AdaKV) are somewhat dated relative to methods discussed in the Related Work section (HeadKV, CAKE, CriticalKV, KVzip), none of which are empirically compared against despite being directly relevant cross-head allocation or scoring alternatives; this weakens the significance claim of state-of-the-art performance.",
+        "Kmax in the Oracle Importance definition (Eq. 4) is never specified or ablated, despite being a central hyperparameter defining the 'long-horizon' window—its choice could materially affect both the oracle target and the resulting profiles.",
+        "The convex relaxation is proven optimal only for the *relaxed* (isotonic) objective; no formal bound is given on the gap between the relaxed solution and the true NP-hard discrete optimum, so 'near-optimal precision' claims rest on empirical validation (Figure 2a, single example) rather than theoretical guarantees.",
+        "Method requires per-metric re-profiling (metric-universality claim), and although this is a reasonable design choice, the paper does not discuss how allocation profiles transfer (or fail to transfer) across metrics not explicitly profiled, limiting practical flexibility claims."
+      ]
+    }
+  },
   "v2": {
     "exp1_quality": {
       "oa": 5,
@@ -20,6 +43,24 @@
         "Presentation is dense with heavy notation across Sections 3-4, which may hinder accessibility; some symbols (e.g., ρ vs σ) are used inconsistently between the main text and figures/algorithm description."
       ]
     },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper identifies a genuine and underexplored problem: existing cross-head KV budget allocation methods (Uniform, PyramidKV, AdaKV) rely on comparing uncalibrated, instantaneous heuristic scores across heads, an assumption the authors show breaks down due to heterogeneous 'predictive fidelity' across heads.",
+        "The theoretical decomposition of eviction loss into an Oracle Metric Loss and an Optimality Gap Loss (Eq. 7) is clean and gives a principled justification for why head-wise calibration matters beyond simply improving the intra-head scoring metric.",
+        "The convex-hull relaxation via PAVA plus greedy marginal-gain allocation is a practical and well-motivated solution to the proven non-convexity of the discrete budget allocation problem (Appendix A.1/A.2), and the near-exact match with the DP optimum (Fig. 2a) supports its correctness on the relaxed objective.",
+        "Extensive empirical evaluation: multiple base models (Mistral-7B, Llama-3.1-8B, Qwen2.5-32B), two/three underlying metrics (SnapKV, KeyDiff, EA), two benchmarks (LongBench, RULER) at multiple compression ratios (50/80/90%), plus substantial appendix material (per-head loss heatmaps, transferability of profiling corpus, comparison with HeadKV, integration with KVZip/CAKE, efficiency plots).",
+        "The method is shown to be metric-agnostic and gives consistent, often large, improvements when layered on top of different underlying importance metrics (Table 12, 13), suggesting the contribution is a genuinely separable 'allocation layer' rather than a metric-specific trick."
+      ],
+      "weaknesses": [
+        "The term 'Oracle Importance' (Eq. 4) is itself a heuristic (max over a future decoding window of attention-weight times projected-value norm), not a rigorously derived ground truth; calling it 'Oracle' risks overclaiming, since it is itself an approximation inspired by AdaKV/CriticalKV perturbation bounds rather than a provably optimal target.",
+        "The offline profiling protocol depends on a small, specific calibration set (one ~4k-token synthetic document, 30 generated queries) and 'oracle' computation via full-attention decoding on that data; the paper does not report the computational/GPU-hour cost of this profiling stage, which is important for assessing practical deployability and reproducibility.",
+        "The claimed 'task-agnostic' framing sits somewhat in tension with the fact that the oracle importance and resulting profiles are estimated from a particular query distribution; while Appendix F.2 offers a transferability check (two corpora, one model), this is limited in scope (single model, two profiling sources) and does not fully establish robustness across domains, languages, or context lengths mismatched from the profiling setup.",
+        "Some RULER baseline numbers (e.g., Uniform-π1 collapsing to ~29% average accuracy at 80% compression from an 86.63% Full-KV baseline) are extremely low, raising a question about whether the question-agnostic 80% compression setting is unusually harsh for baselines in a way that could inflate the relative gains of LU-KV; more discussion of why simple baselines degrade so catastrophically (versus a fairness/implementation check) would strengthen the claims.",
+        "The method does not uniformly dominate baselines on all sub-tasks/metrics (e.g., Code category in Table 1 Mistral-π1: LU-KV 57.69 vs. AdaKV 62.05), and the paper does not discuss these failure cases or provide error analysis explaining when/why the long-horizon utility framework underperforms.",
+        "The convex relaxation solves a surrogate (isotonic-regression-smoothed) objective, and while it matches DP on the relaxed problem, there is no formal bound relating the relaxed optimum to the true non-convex objective in Eq. 8; the guarantee of 'near-optimal' allocation for the original problem is only empirically suggested, not proven."
+      ]
+    },
     "exp3_positive": {
       "oa": 5,
       "strengths": [
@@ -37,29 +78,6 @@
         "No variance/uncertainty reporting (e.g., over multiple calibration seeds or profiling corpora) is given in the main results, limiting the ability to assess robustness of the reported gains.",
         "The paper does not address KV cache growth during autoregressive decoding (focus is on prefill-stage eviction); the interaction between the offline-calibrated budget and long decoding trajectories is unexamined.",
         "While computational overhead of online inference is shown to be small, the cost/complexity of the offline profiling procedure itself (repeated full-attention decoding across compression-ratio grid and multiple queries) is not quantified, which is relevant for practical adoption at scale (e.g., per new model or per new profiling corpus)."
-      ]
-    }
-  },
-  "v1": {
-    "exp1_quality": {
-      "oa": 4,
-      "strengths": [
-        "The core theoretical contribution—decomposing eviction loss into a fixed 'Oracle Loss' term and a metric-dependent 'Optimality Gap' (Eq. 7)—is a clean and insightful formalization that clarifies why magnitude-based cross-head allocation (e.g., AdaKV) can be suboptimal even with a good intra-head scoring metric.",
-        "The convex-hull relaxation via PAVA/isotonic regression is a well-motivated and practical solution to the NP-hard combinatorial allocation problem, and Figure 2a empirically validates that the greedy solver on the relaxed objective matches the DP-optimal solution.",
-        "The offline profiling protocol elegantly sidesteps the chicken-and-egg problem of needing future decoding results at inference time, achieving reportedly negligible online overhead (Section 5.5, Figure 5) while still incorporating oracle-importance-derived allocation.",
-        "Experimental coverage is broad: three base models (Mistral-7B, Llama-3.1-8B, Qwen2.5-32B), two/three heuristic metrics (SnapKV, KeyDiff, and EA in the appendix), two benchmarks (LongBench, RULER at 4K/16K), and two compression ratios (50%/80%), with full per-dataset breakdowns in the appendix.",
-        "Results on RULER are particularly compelling, showing large, consistent gains over Uniform/PyramidKV/AdaKV across nearly all settings and multi-key/multi-value tasks that are known stress tests for retrieval robustness.",
-        "The diagnostic analyses (Figures 3, 4) showing layer-wise and head-wise loss heatmaps provide intuitive, convincing evidence for *why* the method works (eliminating loss bursts/spikes that PyramidKV and AdaKV exhibit), going beyond simple headline accuracy numbers.",
-        "The ablation in Table 3 isolates the specific contribution of modeling the optimality gap (vs. naively trusting oracle importance rankings), directly supporting the paper's central claim."
-      ],
-      "weaknesses": [
-        "The 'Oracle Importance' (Eq. 4) is itself a heuristic approximation (attention weight × projected value norm, inspired by AdaKV/CriticalKV) rather than a directly verified ground truth of output contribution; the paper does not validate how well this proxy actually correlates with true generation quality degradation, so claims of closing an 'optimality gap' toward this oracle are only indirectly supported by downstream task performance rather than a rigorous causal link.",
-        "The offline calibration protocol relies on a single small AI-generated synthetic document (~4,000 words, 30 queries; Appendix E) per metric/model. The paper shows profile consistency across a handful of LongBench task types (Figure 2b) but does not analyze sensitivity to the calibration corpus's domain, length, or style (e.g., code, tables, non-English text), leaving open questions about generalization and potential overfitting to the specific synthetic narrative used.",
-        "The computational cost of the offline profiling stage (full-attention decoding across many queries and a dense grid of compression ratios, per model per metric) is not quantified, making it hard to assess the practical deployment cost/scalability tradeoff relative to baselines like AdaKV that require no offline profiling at all.",
-        "The comparison baselines (Uniform, PyramidKV, AdaKV) are somewhat dated relative to methods discussed in the Related Work section (HeadKV, CAKE, CriticalKV, KVzip), none of which are empirically compared against despite being directly relevant cross-head allocation or scoring alternatives; this weakens the significance claim of state-of-the-art performance.",
-        "Kmax in the Oracle Importance definition (Eq. 4) is never specified or ablated, despite being a central hyperparameter defining the 'long-horizon' window—its choice could materially affect both the oracle target and the resulting profiles.",
-        "The convex relaxation is proven optimal only for the *relaxed* (isotonic) objective; no formal bound is given on the gap between the relaxed solution and the true NP-hard discrete optimum, so 'near-optimal precision' claims rest on empirical validation (Figure 2a, single example) rather than theoretical guarantees.",
-        "Method requires per-metric re-profiling (metric-universality claim), and although this is a reasonable design choice, the paper does not discuss how allocation profiles transfer (or fail to transfer) across metrics not explicitly profiled, limiting practical flexibility claims."
       ]
     }
   }

@@ -19,6 +19,26 @@
         "The magnitude of improvement is uneven and occasionally very large (e.g., +5.15% over GREATS on MMLU with Qwen at a low 12.5% selection ratio) compared to more modest gains on other benchmarks, without deeper analysis of why some settings benefit disproportionately, raising questions about robustness of the reported gains."
       ]
     },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "The paper is well-organized around a clear set of desiderata (D1-D3) and Table 1 gives a transparent comparison against baselines along these axes.",
+        "The idea of reusing forward-pass logits (nuclear norm) to avoid extra backward passes for scoring is a sensible and potentially efficient design choice.",
+        "The paper provides a Johnson-Lindenstrauss-style theoretical analysis (Theorem 3.2) for the structured bilinear/SRFT projection used to compress logits for the memory buffer, which is a nice piece of rigor for the efficiency claim.",
+        "Extensive ablations (Table 4), sensitivity analyses of α, buffer size M, and projection dimensions d1/d2 (Figs 5-7) are provided, along with results across two backbones and four benchmarks."
+      ],
+      "weaknesses": [
+        "Central methodological tension with the paper's own D2 claim (\"no external resources\"): the selection ratio K and trade-off factor α are tuned per (model, dataset) combination to specific optimal values (Tables 5 and 6), and Fig. 7 shows sharp inverted-U sensitivity to α. Achieving these per-task optimal values in practice requires exactly the kind of validation-based tuning the method claims to avoid, which undercuts the paper's core selling point relative to RHO-Loss/GREATS.",
+        "The theoretical story for the nuclear norm conflates two distinct and potentially competing effects (Frobenius-norm growth = optimization utility vs. flatter spectrum at fixed Frobenius norm = intra-sample diversity) into a single scalar score without any mechanism to disentangle or verify which effect dominates in practice; the paper never empirically separates these two claimed contributions.",
+        "The key empirical support for the \"nuclear norm predicts loss reduction\" claim (Figure 2) is a single Spearman-correlation trajectory on one model/one dataset (Qwen-2.5-7B on MMLU); this is thin evidence for a claim used to justify the method across all benchmarks and both backbones.",
+        "All experiments use LoRA (rank=8) rather than full fine-tuning, which is a significant restriction on the generality of both the accuracy and, especially, the efficiency/throughput claims (forward-heavy scoring overhead would look very different under full-parameter backpropagation).",
+        "Fairness of baseline comparisons is questionable: the validation set size for GREATS is fixed at only 5 examples, and RHO-Loss's reference model is swapped for a much smaller surrogate (Llama-2-13B instead of a within-family larger model) with the justification of computational cost—this could understate the true achievable performance of both strong baselines.",
+        "The \"Regular\" (full-dataset) baseline is comparatively weak on several benchmarks (e.g., only 38.24% MMLU accuracy for Llama-3.1-8B), and training budget parity between Regular and the selection methods (total gradient steps/epochs vs. wall-clock samples/s) is not clearly specified, making the \"UDS beats full-dataset training\" claim harder to trust at face value.",
+        "The inter-sample diversity signal relies on a FIFO memory buffer of only the most recently *selected* training samples, which is a local, order-dependent, and recency-biased notion of \"global\" diversity rather than a principled measure over the full data distribution; this design choice is not empirically compared against alternatives (e.g., reservoir sampling, cluster-based buffers).",
+        "No comparison to a broader range of relevant offline/curriculum data-selection baselines (e.g., LESS, D4, QuRating, Self-Instruct-style filtering) that are discussed in Related Work but never empirically benchmarked, limiting the paper's ability to substantiate its significance claim relative to the wider data-curation literature.",
+        "Results are reported with only 4 seeds and no explicit statistical significance testing; several reported gains (e.g., ScienceQA improvements of ~1 point) are within or close to one standard deviation of the baselines."
+      ]
+    },
     "exp3_positive": {
       "oa": 4,
       "strengths": [
@@ -59,6 +79,24 @@
         "Main experiments use LoRA (rank=8) rather than full fine-tuning as the primary setting, with full fine-tuning relegated to a single appendix table on one dataset/model combination; this limits confidence that conclusions transfer robustly to full-parameter SFT, which is a common practical regime.",
         "The paper's central empirical claims of 'consistent' improvement, while generally true, are sometimes accompanied by relatively small margins in some benchmarks (e.g., ScienceQA, HumanEval) where confidence intervals of UDS and the strongest baseline (GREATS) are close, and no statistical significance testing (e.g., paired t-test) is reported beyond means and standard deviations.",
         "The abstract states 'Code is available at' with no actual link provided in the manuscript text, which is a reproducibility concern if the repository is not clearly accessible to reviewers/readers."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper is well-motivated and clearly positions itself against prior online batch-selection work (MaxLoss, MaxGrad, RHO-Loss, GREATS) via a clean desiderata table (D1-D3).",
+        "Extensive empirical evaluation: two backbones (Llama-3.1-8B, Qwen-2.5-7B), four benchmarks, and a large appendix with ablations on buffer update policy, distance aggregation, random-projection construction, larger batch size, full-parameter fine-tuning, instruction-tuned models, long-context (MATH) and OOD settings, plus a comparison to an offline method (FisherSFT).",
+        "The bilinear/Kronecker SRFT projection for compressing the logits matrix into a low-dimensional embedding is a nice engineering solution to the otherwise prohibitive memory cost of storing full logits matrices in a history buffer, and is backed by a JL-preservation proof (Theorem 3.2).",
+        "Ablations (Table 4) show both scoring components (nuclear norm and diversity distance) individually help over random selection and are complementary when combined.",
+        "Reasonably transparent limitations and LLM-usage disclosure sections."
+      ],
+      "weaknesses": [
+        "The central justification for using the nuclear norm of the *raw logits* (not probabilities) as a utility/diversity signal is conceptually shaky: raw pre-softmax logits can be scaled by an arbitrary constant (e.g., due to layer norm, learned temperature, or simply larger weight magnitudes) without changing the predicted distribution or true sample difficulty/diversity at all, yet this would inflate the Frobenius/nuclear norm. The paper's derivation (Eqs. 5-8) only shows that loss perturbation correlates with Frobenius norm assuming ∆ (P−Y) is 'scale insensitive,' but this argument is heuristic, not rigorous, and the paper offers only correlational evidence (Figures 2-3, Spearman ~0.7-0.8 with visible drops early in training) rather than a controlled analysis that rules out this scale confound.",
+        "The claim that intra-sample diversity is captured by rank/nuclear norm of the logits matrix is illustrated only via a toy 3-token cartoon (Figure 4); for real LMs with 30k-150k vocabulary and generally peaked (low-entropy) correct predictions, it is unclear whether 'high rank' logits actually correspond to richer, more useful content versus just noisier/less confident predictions, which could equally indicate the model is undertrained or the text is garbled rather than diverse.",
+        "The paper claims 'no external resources' (D2) as a key advantage, yet the trade-off factor α is tuned per dataset/backbone (Table 6) with values spanning an order of magnitude; the manuscript does not explain how α was selected without some form of held-out evaluation, which would implicitly reintroduce a validation-set dependency it claims to avoid.",
+        "Actual computational overhead of computing an SVD (needed for the nuclear norm) on N×V logits matrices per candidate sample every iteration is not clearly reported; Table 3's throughput numbers are described as accounting for the projection buffer, but it is not explicit whether SVD cost is included, and the appendix elsewhere mentions that approximate/randomized SVD degraded performance, suggesting the full SVD is used, which could be substantial for large-vocabulary models -- this affects the core D3 efficiency claim.",
+        "The magnitude of accuracy gains in some settings is very large for a data-selection technique under LoRA (e.g., MMLU 55.32→63.34, +8 points with only 12.5% of data selected for Qwen-2.5-7B) which raises questions about whether baselines (especially 'Regular' full-dataset training) were adequately tuned, and no statistical significance testing is provided despite fairly narrow gaps against the strongest baseline (GREATS) in some benchmarks (e.g., HumanEval, ScienceQA).",
+        "No code link is actually provided (placeholder text only), limiting reproducibility verification at review time; hyperparameters for SVD/embedding dimension selection and baseline reference-model choices (e.g., substituting Llama-2-13B for RHO-Loss instead of a same-family larger model) could bias comparisons in UDS's favor."
       ]
     },
     "exp3_positive": {

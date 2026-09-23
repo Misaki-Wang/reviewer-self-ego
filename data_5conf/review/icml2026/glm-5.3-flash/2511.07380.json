@@ -21,6 +21,27 @@
         "Training data quality is confounded by GPT-4o-mini-generated chain-of-thought responses, and the 'TAIA evaluation strategy' is adopted for some settings; these choices add hyperparameters/decisions that could affect comparisons but are not ablated."
       ]
     },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The problem setting is realistic and well-motivated: selecting auxiliary data from a large general corpus when neither a large in-domain pool nor a validation set exists, which is a genuine gap relative to LESS/DSIR/TSDS-style methods.",
+        "Empirical evaluation is broad in scope: two backbone models (Llama3-8B-Instruct, Qwen3-8B), four low-resource domains spanning eight tasks, several selection baselines, and multiple ablations (auxiliary-data scaling, target-set size, projection dimension, pre-selection size M).",
+        "The paper does not only report end-task numbers; it includes supporting analyses such as eNTK kernel regression comparison (Table 3), runtime/complexity breakdown (Table 4), and qualitative case studies of selected auxiliary samples (Appendix A.8), which helps connect the method to its stated rationale.",
+        "Honest reporting of negative results in the ecosystem, e.g., that domain-only fine-tuning can degrade performance and that random augmentation sometimes hurts stronger models (Qwen3-8B), is useful context for practitioners.",
+        "Theorem 1 and the Jacobian-free approximation are clearly stated, with proofs in the appendix, and the Frobenius cosine similarity framing (Definition 1) is a concrete, testable formalization."
+      ],
+      "weaknesses": [
+        "The theoretical contribution is thin. Theorem 1 is essentially a least-squares decomposition plus a time reparameterization; the resulting perturbation bound uses loose norm inequalities (spectral ≤ Frobenius) and does not itself justify the data-selection score. The claim of being the 'first' systematic study of kernel behavior in LLMs under instruction tuning overstates novelty relative to Malladi et al. (2023) and Wei et al. (2022), which the paper itself cites.",
+        "A critical ablation is missing: the two-stage design conflates embedding-based pre-selection with NTK scoring, but there is no baseline that simply takes the top-N samples by embedding similarity (i.e., skipping the NTK stage entirely). Without this, it is unclear how much of the gain is attributable to the NTK machinery versus cheap semantic nearest-neighbor retrieval, which is the paper's central claim.",
+        "Evidence for the core 'NTK-like behavior' assumption is narrow: Figure 2a shows kernel stability only for the financial sentiment analysis task and two models, yet this assumption is relied upon globally across four heterogeneous domains. The cross-term analysis for the Jacobian-free approximation (≈6% of exact NTK) is likewise empirical, on a limited setting.",
+        "Statistical rigor is lacking. All results appear to be single runs with no error bars, confidence intervals, or seed variance, despite several headline margins being small (e.g., 76.6 vs. 74.8 for LESS/TSDS on Llama3; MMLU-Med +0.4 for Qwen3), and 1K domain samples being randomly drawn. Conclusions of 'consistent improvement' are not statistically supported.",
+        "Baseline comparability is questionable. LESS requires a validation set that the problem setting forbids; the adaptation (warm-up on 0.1% of candidate data, mixed Adam/SGD gradients) deviates substantially from its original design, so the severe LESS failure (a 49.8-point drop on FPB for Qwen3-8B) may reflect implementation mismatch rather than a property of influence-function selection. Similarly, the asymmetric adoption of the TAIA evaluation strategy for medical/legal mixed-training runs introduces an evaluation-protocol confound.",
+        "Attribution of gains is muddied by GPT-4o-mini-generated chain-of-thought responses being injected into the training data; the interplay between synthetic CoT augmentation and the selection method is not disentangled.",
+        "Potential leakage concern in the eNTK regression analysis: the regularization parameter λ is 'determined through a hyperparameter search,' but the selection criterion (validation vs. test) is unspecified; given the no-validation-set premise, if test accuracy was used this weakens the Table 3 evidence.",
+        "Practical cost is significant (~31 A100-hours per selection) and is only partly justified; the paper's own diminishing-returns analysis suggests much of the benefit accrues at small scale, again raising the question of whether a much cheaper embedding-based alternative would suffice.",
+        "Reproducibility support is limited: a reproducibility statement lists appendix descriptions, but no code or data release is mentioned, and several implementation details (e.g., how Pi dimension 8192 interacts with LoRA gradient dimensionality, exact NTK ground-truth computation for Figure 2b) are underspecified."
+      ]
+    },
     "exp3_positive": {
       "oa": 4,
       "strengths": [
@@ -44,6 +65,26 @@
     }
   },
   "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "The paper addresses a practically important and well-motivated problem: selecting auxiliary data from large general-domain corpora (CoT Collection) to improve low-resource domain adaptation, where existing task-specific selection methods (LESS, DSIR, TSDS) rely on assumptions (large in-domain pools, validation sets) that do not hold.",
+        "The empirical claim of 'NTK-like behavior' in LLM fine-tuning is supported by a substantial body of evidence: kernel cosine similarity across 10-50 epochs, multiple models (Llama3, Qwen3, DeepSeek-R1-1.5B, Hermes3), multiple fine-tuning strategies (LoRA, IA3, full fine-tuning), and hyperparameter sweeps (Appendix H.1), plus an eNTK kernel-regression sanity check (Table 3) showing kernel analogs achieve >90% of fine-tuning accuracy.",
+        "The theory is more careful than typical for this area: Theorem 3.2 provides a time-reparameterization argument bounding the perturbation from using the initial kernel, and Appendix E gives a genuine high-dimensional analysis of cross-output terms (bulk + low-rank Jacobian structure) extending Mohamadi & Sutherland (2022), with the assumptions honestly framed as 'high-dimensional regularity hypotheses' rather than exact claims.",
+        "The experimental evaluation is unusually thorough: 8 tasks across 4 domains, 2 backbone models, 3 runs averaged, many selection baselines, compute-matched comparison against domain-only training (Table 12, addressing the 10x-data confounding), warm-up ablation (Table 13), overlap/leakage analysis (Table 14), extra genuinely low-resource tasks (Table 16), and clear runtime/storage analysis (Tables 4, 11).",
+        "Honest and nuanced reporting: the paper openly presents cases where auxiliary data or advanced baselines degrade performance (e.g., LESS's 49.8-point drop on FPB for Qwen3-8B, random selection harming Qwen3), discusses saturation/diminishing returns, and notes in the appendix that the warm-up stage contributes little.",
+        "Good reproducibility: detailed LoRA hyperparameters (Table 5), baseline implementations with links and recommended settings, evaluation protocol (CoT evaluation, vLLM, TAIA), and per-stage wall-clock costs."
+      ],
+      "weaknesses": [
+        "Novelty is incremental: the 'Jacobian-free NTK approximation' (Eq. 5) is acknowledged in Appendix E to be 'exactly a rescaled version of the pNTK' of Mohamadi & Sutherland (2022); the adaptation-side contributions (LoRA gradients + random projection + two-stage filtering) are standard engineering. The core selection score is essentially average gradient similarity, and its margin over the plain 'Gradient' baseline (76.6 vs 73.9 on Llama3; 78.6 vs 76.1 on Qwen3) and over DSIR (77.7 on Qwen3) is modest (~1-2 points average) and is reported without statistical significance tests despite 3-run averaging.",
+        "The headline '10.9x and 5.7x improvement over domain-only fine-tuning' is rhetorically misleading in the abstract/introduction since NTK-Selector trains on 10x more data; the fairer compute-matched comparison (Table 12) showing 76.6 vs 69.5 is relegated to the appendix.",
+        "The theoretical justification rests on strong and only heuristically motivated assumptions for a *trained* LLM: an isotropic Gaussian LM head (Assumption E.1) and a bulk-plus-low-rank backbone Jacobian Gram (Assumption E.2). The justifications (neural collapse arguments, outlier-dimension literature) are plausible but loose, and the resulting bounds are asymptotic in d; the theory therefore provides qualitative comfort rather than quantitative guarantees for the actual selection procedure.",
+        "The causal link between the NTK machinery and the observed gains is not fully isolated: the NTK component's advantage over pre-selection alone is shown (Table 15), but whether the specific NTK framing (vs. simply weighted gradient alignment at a warmed-up checkpoint) matters, and how sensitive the ranking is to kernel approximation error, is not deeply probed.",
+        "The 'low-resource' setting is partially weakened by heavy reliance on GPT-4o-mini to generate CoT rationales for domain training data, and on a 1.8M-sample curated candidate corpus; a truly data-scarce practitioner would need this extra pipeline, whose cost/quality implications are not fully analyzed.",
+        "Some presentational issues: the repository link is empty ('Official repository:'), Figure 1 and Table 1 numbers are slightly inconsistent, and the theoretical claims about kernel stability use a coarse scalar metric (Frobenius cosine similarity) that could miss meaningful spectral restructuring of the kernel.",
+        "The NTK-like behavior claim of 'first empirical evidence' for LLMs overstates the gap relative to prior work (Malladi et al. 2023, Afzal et al. 2024), which already examined kernel views of (smaller) LM fine-tuning; the contribution is primarily a scaling-up and systematization."
+      ]
+    },
     "exp3_negative": {
       "oa": 3,
       "strengths": [

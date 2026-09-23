@@ -1,4 +1,24 @@
 {
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Extensive and convincing empirical evaluation: multiple target models (LLaMA-3.1-8B, Qwen3-4B/8B/Coder-30B-A3B), diverse task categories (math, code, chat), both greedy and sampling decoding, and both a research-friendly Transformers backend and a realistic SGLang production serving setup with varying concurrency levels, giving good confidence the speedups are not cherry-picked to a single narrow configuration.",
+        "The core technical idea—injecting fused target hidden features into the Key/Value projections of every draft layer rather than only at the input embedding (as EAGLE-3 does)—is a clear, well-motivated architectural contribution, and the paper provides a reasonable mechanistic argument (information dilution with depth) for why this design scales acceptance length with draft-model depth.",
+        "Training methodology is carefully adapted to the speculative-decoding setting (anchor-token sampling that mirrors the inference-time bonus-token conditioning, position-weighted loss for early-token accuracy, shared/frozen embedding and LM head), and each of these choices is separately ablated with results supporting the design decisions (Tables 5–9, Figure 5).",
+        "The paper offers a clean theoretical framing of the drafting-cost trade-off between autoregressive and diffusion drafters (Eq. 1–3, Figure 3), which helps explain why parallel diffusion drafting can be advantageous even with deeper draft networks.",
+        "Comparisons against EAGLE-3 are reasonably controlled (matched drafting budget/tree size, same training data in the LLaMA-3.1 comparison using official EAGLE-3 checkpoints), which strengthens the credibility of the reported 2–2.5× improvement over EAGLE-3."
+      ],
+      "weaknesses": [
+        "The paper claims 'lossless' acceleration throughout (title of Section abstract, Figure/Table captions) but never explicitly formalizes or empirically verifies that the verification/rejection-sampling procedure applied to block-diffusion-generated draft tokens preserves the exact target output distribution; because diffusion drafting produces tokens with bidirectional attention rather than a standard left-to-right factorization, the correctness argument for standard speculative-sampling verification deserves explicit justification (or an empirical KL/exact-match check against pure autoregressive sampling) that is missing from the manuscript.",
+        "No comparison is made against other diffusion-based speculative decoding baselines (DiffuSpec, SpecDiff-2, Samragh et al., TiDAR) despite these being the most directly relevant prior works; the stated reason (lack of open-source code) is understandable but leaves the paper's quantitative superiority claims over these specific competitors unverified rather than just qualitatively argued in Related Work.",
+        "Most ablation studies (Tables 5–9) are run on only a 100K-sample subset of the full ~800K training mixture and on a narrow set of three benchmarks, raising questions about whether conclusions (e.g., optimal layer count, hidden-feature count, block-size generalization) transfer to the full-scale models used in the main results.",
+        "Speedup gains shrink substantially as batch concurrency increases (e.g., Table 3 Qwen3-Coder HumanEval drops from 3.5× to 3.1×, and Table 4 EAGLE-3(60) even falls below 1× at concurrency 32), yet the paper does not analyze or discuss verification-cost bottlenecks at higher batch sizes/throughput-oriented deployment regimes in depth, which is important for the practical significance claims made in the abstract.",
+        "The abstract's headline '6× lossless acceleration' and '2.5× higher than EAGLE-3' figures come from a small subset of favorable settings (Qwen3-8B on select benchmarks under Transformers backend); the more realistic SGLang throughput results show comparatively smaller gains (up to 5.1×, often ~3-4× at moderate concurrency), which could be presented with more balanced framing to avoid overstating typical real-world benefit.",
+        "No discussion of the extra memory/compute overhead incurred by extracting and injecting features from 5 target-model layers into every draft layer's KV cache, nor a direct comparison of the DFlash draft model's total parameter count/memory footprint against EAGLE-3's shallow single-layer drafter, which is relevant for fair efficiency comparisons in resource-constrained serving."
+      ]
+    }
+  },
   "v2": {
     "exp1_quality": {
       "oa": 4,
@@ -19,6 +39,26 @@
         "Training data construction (800K samples with target-generated responses, offline caching of multi-layer hidden features) implies a non-trivial infrastructure and storage burden that is only partially detailed in the appendix (A.1, A.3), potentially limiting exact reproducibility without the released code/checkpoints being fully documented in the paper text."
       ]
     },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Extensive empirical evaluation across multiple model families (Qwen3-4B/8B/Coder-30B, LLaMA-3.1-8B), multiple benchmarks (math, code, chat), multiple inference backends (Transformers, SGLang, vLLM), and both greedy and sampling decoding, showing consistent and often large speedups over EAGLE-3 and the autoregressive baseline.",
+        "The core idea of using a lightweight block-diffusion model conditioned on multi-layer target hidden features via persistent KV injection (rather than input-embedding fusion as in EAGLE-3) is a reasonable and seemingly effective architectural choice, supported by an ablation (Table 9) showing KV injection outperforms input fusion under matched conditions.",
+        "Thorough ablation studies covering number of draft layers, number of target hidden features, block-size train/test mismatch, loss re-weighting, and random anchor sampling for masked-block construction, which help isolate the contribution of individual design choices.",
+        "The paper provides a reasonably clear latency decomposition (Eq. 1-3) motivating why parallel diffusion drafting should, in principle, allow deeper/more expressive drafters without proportional latency cost.",
+        "Code and model links are provided, which is good practice for reproducibility."
+      ],
+      "weaknesses": [
+        "The paper explicitly avoids comparison with the most directly relevant prior work (DiffuSpec, SpecDiff-2, TiDAR, Samragh et al.'s LoRA future-token adapter, PARD) citing 'lack of open-source implementation,' yet these are precisely the methods that also use diffusion/parallel drafting for speculative decoding. Without these comparisons, the claim that DFlash represents a significant advance over the existing diffusion-drafting landscape is asserted narratively (via numbers pulled from those papers' reported ranges) rather than empirically validated under matched conditions, which is a serious gap for a paper whose central contribution is precisely in this niche.",
+        "The headline claim of 'over 6x lossless acceleration' in the abstract/Figure 1 is drawn from a single best-case cell (Math500, Qwen3-8B, 6.08x) rather than being representative of the reported average (~4.9x at temperature 0, ~4.0x at temperature 1 in Table 1); this framing risks overstating the typical achievable speedup.",
+        "The paper repeatedly asserts the method is 'lossless' but never explicitly details the verification/rejection-sampling procedure used to reconcile parallel, non-sequential diffusion-drafted tokens with the target distribution. Standard speculative decoding's lossless guarantee relies on sequential proposal probabilities; extending this to a block of jointly/parallel-denoised tokens is non-trivial and deserves an explicit algorithmic description or proof, which is absent from both the main text and appendix.",
+        "Architectural specification of the draft model itself (hidden dimension, attention configuration beyond the KV-injection mechanism, parameter counts per model size) is sparse, limiting exact reproducibility from the text alone despite released code.",
+        "No variance/error bars or repeated-run statistics are reported for any of the speedup or acceptance-length numbers, making it hard to assess the robustness of the (often small) gaps between configurations in the ablations (e.g., Table 6, Table 7).",
+        "Some ablations use only 100K training samples (a small subset of the full ~800K mixture) which may not reflect final-model behavior, and it's unclear how sensitive the reported design-choice conclusions are to full-scale training.",
+        "The ablation study comparing autoregressive vs. block-diffusion drafting under KV injection (Table 9) uses a small draft block size (8) and only Qwen3-4B, which may not generalize to the larger block sizes (16) used in the main results, limiting the strength of the head-to-head comparison supporting the core architectural claim.",
+        "The training procedure requires caching or on-the-fly computation of hidden features from 5 target-model layers across the full training corpus, which is acknowledged to scale storage/compute cost with the number of extracted layers, but this training-cost overhead is not quantified in wall-clock or dollar terms, making the total cost-benefit relative to EAGLE-3 training unclear."
+      ]
+    },
     "exp3_positive": {
       "oa": 5,
       "strengths": [
@@ -36,26 +76,6 @@
         "Training cost and overhead of extracting/caching hidden states from 5 target layers (needed for KV injection) is only briefly quantified in terms of parameter/activation memory (Appendix A.3), but wall-clock training time or storage cost comparisons against EAGLE-3-style training are not reported, making it hard to assess practical training-side trade-offs.",
         "The Impact Statement is generic and the paper lacks an explicit, dedicated Limitations section; discussion of failure modes (e.g., tasks/domains where acceptance length is low, degradation at very long generation lengths beyond what was tested, or behavior under adversarial/out-of-distribution prompts) is absent or only implicitly touched on via the long-context ablation.",
         "Some benchmarks (e.g., GPQA in Table 2, Alpaca mentioned in Section 5 but only appearing in Table 5) are introduced without full description earlier in the text, and dataset/task selection across tables is inconsistent, slightly reducing clarity and making cross-table comparison harder."
-      ]
-    }
-  },
-  "v1": {
-    "exp1_quality": {
-      "oa": 4,
-      "strengths": [
-        "Extensive and convincing empirical evaluation: multiple target models (LLaMA-3.1-8B, Qwen3-4B/8B/Coder-30B-A3B), diverse task categories (math, code, chat), both greedy and sampling decoding, and both a research-friendly Transformers backend and a realistic SGLang production serving setup with varying concurrency levels, giving good confidence the speedups are not cherry-picked to a single narrow configuration.",
-        "The core technical idea—injecting fused target hidden features into the Key/Value projections of every draft layer rather than only at the input embedding (as EAGLE-3 does)—is a clear, well-motivated architectural contribution, and the paper provides a reasonable mechanistic argument (information dilution with depth) for why this design scales acceptance length with draft-model depth.",
-        "Training methodology is carefully adapted to the speculative-decoding setting (anchor-token sampling that mirrors the inference-time bonus-token conditioning, position-weighted loss for early-token accuracy, shared/frozen embedding and LM head), and each of these choices is separately ablated with results supporting the design decisions (Tables 5–9, Figure 5).",
-        "The paper offers a clean theoretical framing of the drafting-cost trade-off between autoregressive and diffusion drafters (Eq. 1–3, Figure 3), which helps explain why parallel diffusion drafting can be advantageous even with deeper draft networks.",
-        "Comparisons against EAGLE-3 are reasonably controlled (matched drafting budget/tree size, same training data in the LLaMA-3.1 comparison using official EAGLE-3 checkpoints), which strengthens the credibility of the reported 2–2.5× improvement over EAGLE-3."
-      ],
-      "weaknesses": [
-        "The paper claims 'lossless' acceleration throughout (title of Section abstract, Figure/Table captions) but never explicitly formalizes or empirically verifies that the verification/rejection-sampling procedure applied to block-diffusion-generated draft tokens preserves the exact target output distribution; because diffusion drafting produces tokens with bidirectional attention rather than a standard left-to-right factorization, the correctness argument for standard speculative-sampling verification deserves explicit justification (or an empirical KL/exact-match check against pure autoregressive sampling) that is missing from the manuscript.",
-        "No comparison is made against other diffusion-based speculative decoding baselines (DiffuSpec, SpecDiff-2, Samragh et al., TiDAR) despite these being the most directly relevant prior works; the stated reason (lack of open-source code) is understandable but leaves the paper's quantitative superiority claims over these specific competitors unverified rather than just qualitatively argued in Related Work.",
-        "Most ablation studies (Tables 5–9) are run on only a 100K-sample subset of the full ~800K training mixture and on a narrow set of three benchmarks, raising questions about whether conclusions (e.g., optimal layer count, hidden-feature count, block-size generalization) transfer to the full-scale models used in the main results.",
-        "Speedup gains shrink substantially as batch concurrency increases (e.g., Table 3 Qwen3-Coder HumanEval drops from 3.5× to 3.1×, and Table 4 EAGLE-3(60) even falls below 1× at concurrency 32), yet the paper does not analyze or discuss verification-cost bottlenecks at higher batch sizes/throughput-oriented deployment regimes in depth, which is important for the practical significance claims made in the abstract.",
-        "The abstract's headline '6× lossless acceleration' and '2.5× higher than EAGLE-3' figures come from a small subset of favorable settings (Qwen3-8B on select benchmarks under Transformers backend); the more realistic SGLang throughput results show comparatively smaller gains (up to 5.1×, often ~3-4× at moderate concurrency), which could be presented with more balanced framing to avoid overstating typical real-world benefit.",
-        "No discussion of the extra memory/compute overhead incurred by extracting and injecting features from 5 target-model layers into every draft layer's KV cache, nor a direct comparison of the DFlash draft model's total parameter count/memory footprint against EAGLE-3's shallow single-layer drafter, which is relevant for fair efficiency comparisons in resource-constrained serving."
       ]
     }
   }

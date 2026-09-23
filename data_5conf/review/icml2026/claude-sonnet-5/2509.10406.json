@@ -81,6 +81,26 @@
         "Complexity scaling to longer contexts (beyond 64k) and interaction with distributed strategies (ring attention) are explicitly deferred to future work, leaving open how well the approach extends to the very long contexts that motivate the paper's introduction."
       ]
     },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper provides a clear theoretical motivation for separating query and key clustering, grounded in the dual-space invariance argument of softmax attention (translation/basis invariance of keys vs queries), which is a genuinely useful conceptual contribution beyond prior key-only clustering approaches (e.g., Hooper et al. 2025a).",
+        "Extensive ablation studies (Appendix E, F, G) systematically isolate the contribution of query clustering vs key clustering, monopole vs retrieval components, block size, and cluster count scaling, providing a thorough mechanistic understanding of where gains come from.",
+        "The comparison against MoBA at matched sparsity (Table 1, 6, 21) is a meaningful and fair baseline comparison, showing that semantic clustering meaningfully outperforms fixed spatial blocking at equivalent sparsity levels.",
+        "The generalization experiments to pretrained Llama 3.1-8B/3.2-1B without retraining (Figure 5) are a nice practical validation, and the ablation showing exponential tilting is essential (loss explodes without it) is informative.",
+        "Scaling analysis from 96M to 1B parameters with consistent power-law behavior (Table 5, Figure 4) lends some credibility to the claim that the approximation does not distort learning dynamics."
+      ],
+      "weaknesses": [
+        "Statistical rigor is a major concern: all headline pretraining results (Table 4, 5, 6, 7) appear to be single training runs with no reported seeds, variance, or confidence intervals, yet the paper repeatedly claims MuSe 'beats' the exact CUDNN baseline based on margins as small as 0.2-0.4% (e.g., 0.7026 vs 0.7001, 1.6201 vs 1.6166). Without repeated runs, it is impossible to determine whether these differences are meaningful or within run-to-run noise, undermining the central 'MuSe matches or exceeds baseline quality' claim.",
+        "The batch size used throughout pretraining is only 2 sequences of 64k tokens (128k tokens/step), which is very small for a 1B-parameter model; this raises concerns about training stability and whether the reported loss curves and comparisons are representative rather than artifacts of a small, possibly noisy training regime.",
+        "Model scale is capped at 1B parameters, which is modest for a paper about long-context pretraining aimed at 'entire code repositories'; it is unclear whether the approximation quality and speedup advantages hold at scales (7B+) where long-context pretraining is most practically relevant and expensive.",
+        "The headline 36% wallclock speedup is measured against the authors' own admittedly 'not highly optimized' Pallas kernels for MuSe compared to production CUDNN Flash Attention, while the paper simultaneously claims 'substantially larger speedups are achievable'—this creates an inconsistent picture of the true efficiency advantage and makes the reported number difficult to trust as a stable, reproducible figure.",
+        "The method carries substantial implementation complexity (global K-means clustering, two-stage summary computation, causal accumulation, two-level retrieval, exponential tilting, custom Pallas/CUDA kernels) with many interacting hyperparameters (C, k1, k2, B, balance caps), which raises real reproducibility concerns despite the appendix details; the clustering overhead itself is not clearly broken out in the main runtime comparisons.",
+        "Domain diversity is narrow: pretraining experiments are restricted to Python-only code and a single 'science_tech' bucket of scientific documents, limiting the generality of the quality-preservation claims.",
+        "No comparison is provided against other standard efficient/sparse attention baselines beyond MoBA (e.g., sliding-window + periodic global attention, Performer, Nystromformer, or other retrieval-based methods mentioned in related work), despite these being discussed extensively in Section 2.",
+        "The practical utility of the drop-in compatibility claim is undercut by the observation that without high cluster counts (e.g., QK512) the approximation gap to exact attention remains non-trivial on Llama models, and the paper does not quantify runtime costs of clustering overhead at inference time in this setting."
+      ]
+    },
     "exp3_positive": {
       "oa": 4,
       "strengths": [
@@ -119,6 +139,24 @@
         "The explanation that MuSe's approximation acts as 'implicit regularization' to explain cases where it beats the exact baseline is offered as a post-hoc hypothesis without a direct controlled experiment isolating this effect from other confounds (e.g., different effective batch composition or numerical differences).",
         "RULER results show both MuSe- and CUDNN-trained models perform near-randomly on most tasks, limiting the strength of the long-context retrieval validation; the custom in-house NIAH benchmark designed to compensate for this is not independently validated and could favor the authors' setup.",
         "The method itself is fairly intricate (global clustering, two-level retrieval, causal accumulation, exponential tilting, careful gradient-stop handling), and Table 5 shows retrieval and block-diagonal exact attention dominate runtime (67%) while the core novel contribution (monopole summarization + clustering) is a minor share (~17%), somewhat undercutting the centrality of the paper's main technical novelty to the observed speedup."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The core idea—clustering queries and keys separately in representation space with exponential tilting toward query centroids—is a genuinely novel and reasonably well-motivated extension of prior key-only clustering approaches, with a clear theoretical justification (dual-space argument in Sec. 1, cumulant-expansion error analysis in Appendix B).",
+        "The experimental scope is unusually extensive for a single paper: isolated-layer microbenchmarks, 1B-parameter pretraining on two domains, a five-point scaling study (96M-1B), a matched-sparsity comparison to MoBA, generalization to off-the-shelf Llama 3.1-8B/3.2-1B without retraining, and custom in-domain NIAH plus LongBench/ARC/SciQ downstream evaluations.",
+        "Ablations (Tables 2, 3, 15, 16, 19, and Appendix E/F) carefully isolate the contribution of query clustering versus retrieval versus monopole summarization, giving a fairly convincing mechanistic account of where the method's benefit comes from.",
+        "The paper is unusually candid about a negative finding discovered late (the adaptation gap and its gradient-flow explanation in Appendix C/G.5), and proposes both an empirical fix (brief fine-tuning) and a principled one (stopping gradients through tilted aggregation weights)."
+      ],
+      "weaknesses": [
+        "The central 'MuSe matches or beats baseline quality' claim, which the abstract and conclusion foreground, rests on single pretraining runs with no repeated seeds or confidence intervals; the reported differences are extremely small (e.g., 0.7001 vs 0.7026, 1.6166 vs 1.6201, 0.9384 vs 0.9400), well within plausible run-to-run noise for language-model pretraining, so it is not established that MuSe reliably outperforms exact attention rather than simply being statistically indistinguishable from it.",
+        "The efficient-attention baselines actually benchmarked are limited to CUDNN/Pallas Flash Attention and MoBA; other cited methods (Reformer, Routing Transformer, Performer, Nystromformer, H-Transformer, Fast Multipole Attention) are discussed in related work but never empirically compared, leaving the positioning of MuSe's accuracy/speed tradeoff against the broader efficient-attention literature untested.",
+        "The headline 36% wall-clock speedup is explicitly acknowledged to stem from unoptimized Pallas kernels relative to production CUDA (Sec. 4.2), so the reported number reflects current implementation quality rather than an intrinsic property of the algorithm; given the claimed 64x far-field sparsity, it is unclear how much of the theoretical benefit is actually realized versus left on the table, making the practical significance of the reported speedup hard to assess.",
+        "All pretraining experiments are capped at 1B parameters and 64k context on a single 8-GPU node; the paper itself defers speedup quantification at longer contexts to future work, so claims of practical benefit for 'entire code repositories' or large-scale long-context pretraining are largely extrapolated rather than demonstrated.",
+        "The method introduces substantial additional complexity (separate query/key K-means, per-block summary tensors, causal accumulation, two-level retrieval, exponential tilting, balanced-assignment caps, gradient-stopping tricks) with many interacting hyperparameters (C, k1, k2, B, β), which raises real reproducibility and practical-adoption concerns beyond what the released research code can fully mitigate for outside practitioners.",
+        "The custom in-domain NIAH results are relatively strong for MuSe, but the standardized RULER evaluation is reported as near-zero for both MuSe- and CUDNN-trained code models on almost all sub-tasks, which weakens confidence in the long-context capability claims and is explained post hoc as domain shift/instruction-following limitations rather than being controlled for experimentally.",
+        "Downstream task evaluations (ARC-Easy, SciQ, LongBench code completion) show MuSe and baseline within one standard error of each other, which supports parity but is in tension with the paper's simultaneous rhetorical framing that MuSe acts as a beneficial regularizer and 'beats' the baseline elsewhere in the paper."
       ]
     },
     "exp3_positive": {

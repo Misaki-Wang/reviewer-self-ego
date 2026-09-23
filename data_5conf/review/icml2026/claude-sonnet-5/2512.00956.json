@@ -1,4 +1,26 @@
 {
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Addresses a genuinely interesting and previously open question: whether/why the (data-agnostic) Hadamard transform is optimal for LLM quantization, and derives closed-form data-aware alternatives.",
+        "The theoretical derivation is carefully structured: probabilistic reformulation of the blockwise loss, reduction to a one-sided problem via SVD parameterization, and separate treatments for FP and INT quantizer noise models, with explicit proofs (including auxiliary lemmas on maxima of sub-Gaussian/Laplacian variables in the appendix).",
+        "The resulting construction (WUSH) is structurally simple: a fixed Hadamard backbone plus a data-dependent whitening/rotation component, which is appealing because it explains empirical Hadamard success as a special (data-agnostic) case and remains implementable via an efficient GPTQ-like calibration algorithm (Algorithm 1).",
+        "Reasonably broad empirical validation: layerwise loss comparisons across three numeric formats (MXFP4, NVFP4, INT4) and full LM-Eval-Harness/PlatinumBench evaluations across four models (Llama-3.2-3B, Llama-3.1-8B, Qwen3-8B, Qwen3-14B), generally showing WUSH improves accuracy recovery over identity and Hadamard baselines, sometimes substantially (e.g., MXFP4 gains of 3-5 points).",
+        "Honest discussion of limitations and concrete future-work directions (GPTQ integration, kernel support, diagonal approximations), and clear acknowledgment that results are preliminary."
+      ],
+      "weaknesses": [
+        "The 'provably optimal' claim rests on several idealizing approximations that are not carefully validated against real data: first-order truncation of the joint quantization loss (Eq. 7), a smoothed/approximated model of FP quantizer rounding (Theorem 2, using log-domain rounding + first-order Taylor expansion), and treatment of INT quantization noise as data-independent multiplicative AbsMax noise (Theorem 3). These are reasonable modeling choices but the gap between the idealized model and the true RTN quantizer error is not empirically quantified.",
+        "The block-independence approximation (summing per-block losses instead of jointly optimizing the whole layer) is asserted but not justified theoretically or tested against the true joint loss.",
+        "Empirical results are mixed and do not uniformly support the theory: in Table 1, WUS (without Hadamard) is competitive with or better than full WUSH for NVFP4, and catastrophically worse than identity/Hadamard for INT4, suggesting the data-aware-only component can be numerically unstable; in Table 2, WUSH slightly underperforms the identity baseline for Llama-3.1-8B under NVFP4 (95.37% vs 95.44% recovery), which is not discussed or explained despite the paper's optimality claims.",
+        "No comparison against other learned or heuristic transform-based baselines discussed at length in Related Work (SpinQuant, QuIP#, FlatQuant, QuaRot) — only identity, random rotation, and plain Hadamard are used as experimental baselines, which weakens the significance claim relative to the existing literature.",
+        "Experiments are explicitly labeled 'preliminary,' evaluate only RTN quantization (not combined with GPTQ-style weight updates, which the authors themselves note is important future work), and the layerwise loss table uses a single arbitrarily chosen transformer block (18th) rather than aggregating across all layers, raising reproducibility and generality concerns.",
+        "No sensitivity analysis or ablation for key hyperparameters (damping ratio λ, block size d, calibration set size), and no discussion of computational/inference overhead of computing/applying per-block non-orthogonal transforms at inference time, despite this being flagged as a nontrivial systems challenge in Future Work.",
+        "No mention of code or artifact release, which limits reproducibility of the somewhat intricate derivations and algorithm.",
+        "The extensive, notation-heavy theoretical exposition (many pages of matrix decompositions and inequalities) could be better summarized with intuition-first explanations, making the paper's core insight harder to extract for readers focused on practical impact."
+      ]
+    }
+  },
   "v2": {
     "exp1_quality": {
       "oa": 5,
@@ -19,6 +41,25 @@
         "Since WUSH's non-orthogonal component is calibration-data-dependent, the paper does not discuss robustness/sensitivity to calibration-inference distribution mismatch (a known concern for GPTQ-style calibration methods), which could affect real-world deployment robustness."
       ]
     },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper provides a genuinely novel theoretical contribution: closed-form, block-diagonal, data-aware transforms derived from first principles for both FP and INT RTN quantizers, with a clear derivation chain (Cholesky + SVD + Hadamard) and explicit optimality/near-optimality theorems.",
+        "The construction elegantly explains, rather than just uses, the empirical success of Hadamard rotations (it emerges as the only data-agnostic optimal ingredient), which is a nice conceptual insight beyond prior heuristic transform papers.",
+        "The GPU kernel section is a serious engineering effort: it shows that per-block, data-dependent transforms can be fused into a GEMM-equivalent kernel with negligible (~1.3%) overhead relative to a fixed Hadamard kernel, addressing a natural objection that data-aware transforms would be impractical online.",
+        "Reasonably broad empirical validation (Llama-3.2-3B/3.1-8B-Instruct, Qwen3-8B/14B/32B; RTN and GPTQ; MXFP4/NVFP4/INT4; layerwise loss, KL-divergence, and downstream benchmarks) with generally consistent improvements over strong recent baselines (MR-GPTQ/QuaRot/SpinQuant/SmoothQuant)."
+      ],
+      "weaknesses": [
+        "The practical benefit is uneven: for NVFP4 the authors themselves state gains are 'often within run-to-run variability,' and for the flagship Qwen3-32B MXFP4 RTN result WUSH actually underperforms the plain Hadamard baseline (82.01 vs 82.15 average, Table 4), undercutting the headline claim of consistent superiority.",
+        "The theory rests on a stack of strong simplifying assumptions (i.i.d. Gaussian-like columns, block-independent losses, first-order/unbiased-quantizer approximations, smoothed FP/INT error models) that are not tightly connected back to real weight/activation distributions; the paper's own admission that MXFP4 behaves as a 'hybrid' requiring post-hoc reinterpretation suggests the idealized model does not fully capture the empirical regime it is meant to explain.",
+        "The INT-quantizer optimality guarantees are only within a factor of d (or d^{o(1)} for tail-bounded distributions) — for realistic block sizes (e.g., G=32), this is a loose bound, so 'provably near-optimal' is a considerably weaker and less informative claim than the FP result, yet the abstract/intro present both with similar strength.",
+        "Table 1's ablation reveals fragility of the non-Hadamard (WUS) component: for INT4, WUS alone produces catastrophic losses (e.g., 213 vs. 2.39 for full WUSH on Q), meaning the Hadamard backbone is doing essentially all of the heavy lifting in that regime and the 'data-aware' contribution's marginal value is unclear/inconsistent across formats.",
+        "No reporting of calibration-time/computational overhead for computing per-block Cholesky+SVD decompositions across all layers of a large model (only inference-time GPU throughput is benchmarked), which is an important practicality question given the added complexity relative to a single reusable Hadamard matrix.",
+        "The GPTQ integration (Algorithm 1) requires a nontrivial interleaved schedule coupling transform construction and weight updates; the added implementation complexity and its wall-clock cost versus standard GPTQ are not discussed or measured.",
+        "Some baseline results appear unusually weak (e.g., QuaRot MXFP4 dropping to 62.90 average accuracy, far below even naive RTN-I at 69.32 in Table 2), raising questions about whether all baselines were tuned to a comparable standard, which could inflate the apparent margin of improvement.",
+        "The GPTQ-based results show much smaller gains than RTN-based results (e.g., +0.7 vs +2.8 points on Llama-3.1-8B MXFP4), suggesting that as the quantizer itself becomes more sophisticated, the marginal value of the proposed transform shrinks substantially, limiting the practical significance of the contribution in the more commonly deployed GPTQ setting."
+      ]
+    },
     "exp3_positive": {
       "oa": 5,
       "strengths": [
@@ -36,28 +77,6 @@
         "Reported improvements are uneven across formats: NVFP4 gains are explicitly noted as 'often within run-to-run variability,' meaning the practical benefit of WUSH is concentrated mainly in MXFP4, which somewhat narrows the paper's claimed significance despite the broader theoretical framing.",
         "The extra offline computational cost of computing per-block SVD/Cholesky decompositions (and their interaction with GPTQ's interleaved schedule) is not quantified in terms of calibration-time overhead, which is relevant for practitioners deciding whether to adopt WUSH over cheaper fixed-Hadamard alternatives.",
         "Presentation is dense and notation-heavy (e.g., Section 4 and the appendix derivations), which may limit accessibility; while rigorous, a more intuitive high-level summary of why non-orthogonality helps (beyond Figure 1) earlier in the main text would improve readability."
-      ]
-    }
-  },
-  "v1": {
-    "exp1_quality": {
-      "oa": 4,
-      "strengths": [
-        "Addresses a genuinely interesting and previously open question: whether/why the (data-agnostic) Hadamard transform is optimal for LLM quantization, and derives closed-form data-aware alternatives.",
-        "The theoretical derivation is carefully structured: probabilistic reformulation of the blockwise loss, reduction to a one-sided problem via SVD parameterization, and separate treatments for FP and INT quantizer noise models, with explicit proofs (including auxiliary lemmas on maxima of sub-Gaussian/Laplacian variables in the appendix).",
-        "The resulting construction (WUSH) is structurally simple: a fixed Hadamard backbone plus a data-dependent whitening/rotation component, which is appealing because it explains empirical Hadamard success as a special (data-agnostic) case and remains implementable via an efficient GPTQ-like calibration algorithm (Algorithm 1).",
-        "Reasonably broad empirical validation: layerwise loss comparisons across three numeric formats (MXFP4, NVFP4, INT4) and full LM-Eval-Harness/PlatinumBench evaluations across four models (Llama-3.2-3B, Llama-3.1-8B, Qwen3-8B, Qwen3-14B), generally showing WUSH improves accuracy recovery over identity and Hadamard baselines, sometimes substantially (e.g., MXFP4 gains of 3-5 points).",
-        "Honest discussion of limitations and concrete future-work directions (GPTQ integration, kernel support, diagonal approximations), and clear acknowledgment that results are preliminary."
-      ],
-      "weaknesses": [
-        "The 'provably optimal' claim rests on several idealizing approximations that are not carefully validated against real data: first-order truncation of the joint quantization loss (Eq. 7), a smoothed/approximated model of FP quantizer rounding (Theorem 2, using log-domain rounding + first-order Taylor expansion), and treatment of INT quantization noise as data-independent multiplicative AbsMax noise (Theorem 3). These are reasonable modeling choices but the gap between the idealized model and the true RTN quantizer error is not empirically quantified.",
-        "The block-independence approximation (summing per-block losses instead of jointly optimizing the whole layer) is asserted but not justified theoretically or tested against the true joint loss.",
-        "Empirical results are mixed and do not uniformly support the theory: in Table 1, WUS (without Hadamard) is competitive with or better than full WUSH for NVFP4, and catastrophically worse than identity/Hadamard for INT4, suggesting the data-aware-only component can be numerically unstable; in Table 2, WUSH slightly underperforms the identity baseline for Llama-3.1-8B under NVFP4 (95.37% vs 95.44% recovery), which is not discussed or explained despite the paper's optimality claims.",
-        "No comparison against other learned or heuristic transform-based baselines discussed at length in Related Work (SpinQuant, QuIP#, FlatQuant, QuaRot) — only identity, random rotation, and plain Hadamard are used as experimental baselines, which weakens the significance claim relative to the existing literature.",
-        "Experiments are explicitly labeled 'preliminary,' evaluate only RTN quantization (not combined with GPTQ-style weight updates, which the authors themselves note is important future work), and the layerwise loss table uses a single arbitrarily chosen transformer block (18th) rather than aggregating across all layers, raising reproducibility and generality concerns.",
-        "No sensitivity analysis or ablation for key hyperparameters (damping ratio λ, block size d, calibration set size), and no discussion of computational/inference overhead of computing/applying per-block non-orthogonal transforms at inference time, despite this being flagged as a nontrivial systems challenge in Future Work.",
-        "No mention of code or artifact release, which limits reproducibility of the somewhat intricate derivations and algorithm.",
-        "The extensive, notation-heavy theoretical exposition (many pages of matrix decompositions and inequalities) could be better summarized with intuition-first explanations, making the paper's core insight harder to extract for readers focused on practical impact."
       ]
     }
   }
