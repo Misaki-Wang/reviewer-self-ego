@@ -67,3 +67,18 @@ Gemini figures are the user's supplied measured totals for 9,355 and 9,357 succe
 - Claude API-equivalent costs are based on per-receipt native cost metadata. The 3-review sample is small; it is not a confidence interval or a guarantee of full-run consumption.
 - The Gemini 3.5/3.8 figures are actual reported costs supplied for this comparison. They are not converted from current public list prices.
 - This workspace cannot access `/fsx` because that filesystem is not mounted in the current environment. This file is the local mirror at `data_5conf/stastics.md`; it has not been copied to the remote MBZ path.
+
+## Updated token and API-equivalent cost statistics
+
+This user-supplied table is the latest consolidated estimate for 3,784 reviews per model. The earlier canary-based estimates above are retained as historical context. API-equivalent costs are estimates, not Codex subscription charges.
+
+| Model | Successful reviews in source | Average tokens per review | Average API-equivalent cost per review (USD) | Estimated tokens for 3,784 reviews | Estimated API-equivalent cost for 3,784 reviews (USD) |
+| ----------------------------- | ---------------------------: | ------------------------: | -------------------------------------------: | ---------------------------------: | ----------------------------------------------------: |
+| Gemini 3.8 Flash | 9,355 | 15,945 | $0.01823 | 60,335,249 | $68.98 |
+| Gemini 3.5 Flash | 9,357 | 16,317 | $0.04324 | 61,742,147 | $163.63 |
+| Claude Sonnet 5 | 3,105 | 81,097 | $0.31330 | 306,870,444 | $1,185.52 |
+| Claude Haiku 4.5 | 1,979 | 71,047 | $0.15226 | 268,841,058 | $576.17 |
+| GPT-5.5 | 5,943 | 162,070 | $0.40754 | 613,272,363 | $1,542.13 |
+| GPT-5.6 Sol | 6,455 | 313,592 | $0.62078 | 1,186,633,892 | $2,349.05 |
+| GPT-6 Astra | 6,454 | 243,001 | $0.88719 | 919,517,292 | $3,357.11 |
+| **Total across seven models** | — | — | — | **3,417,212,445** | **$9,242.59** |
