@@ -34,12 +34,26 @@ These figures are transcribed from the two supplied screenshots. The first table
 
 ---
 
-## Updated token and API-equivalent cost statistics
+## Token statistics by task
 
-This user-supplied table is the latest consolidated estimate for 3,784 reviews per model. API-equivalent costs are estimates, not Codex subscription charges.
+The following user-supplied figures separate check_diff, anonymization, and review workloads. Review and anonymization totals are estimates for the 3,784-version target; check_diff values summarize completed responses with reported usage.
+
+### check_diff
+
+| Model | Completed responses with usage | Attempts without reported usage | Average tokens per response | Total reported tokens | Average API-equivalent cost per response (USD) | Total API-equivalent cost (USD) |
+| ----------- | -----------------------------: | ------------------------------: | --------------------------: | --------------------: | ---------------------------------------------: | ------------------------------: |
+| GPT-6 Astra | 9,066 | 525 of 9,591 attempts | 1,382,597 | 12,534,628,738 | $3.14668 | $28,527.80 |
+
+### Anonymization
+
+| Model | Successful PDF receipts sampled | Target unique PDF versions | Average tokens per PDF | Estimated total tokens | Average API-equivalent cost per PDF (USD) | Estimated total API-equivalent cost (USD) |
+| ------- | ------------------------------: | -------------------------: | ---------------------: | ---------------------: | ----------------------------------------: | ----------------------------------------: |
+| GPT-5.5 | 336 (two model calls each) | 3,784 | 1,831,353 | 6,929,838,074 | $2.09226 | $7,917.12 |
+
+### Review
 
 | Model | Successful reviews in source | Average tokens per review | Average API-equivalent cost per review (USD) | Estimated tokens for 3,784 reviews | Estimated API-equivalent cost for 3,784 reviews (USD) |
-| ----------------------------- | ---------------------------: | ------------------------: | -------------------------------------------: | ---------------------------------: | ----------------------------------------------------: |
+| -------------------- | ---------------------------: | ------------------------: | -------------------------------------------: | ---------------------------------: | ----------------------------------------------------: |
 | Gemini 3.8 Flash | 9,355 | 15,945 | $0.01823 | 60,335,249 | $68.98 |
 | Gemini 3.5 Flash | 9,357 | 16,317 | $0.04324 | 61,742,147 | $163.63 |
 | Claude Sonnet 5 | 3,105 | 81,097 | $0.31330 | 306,870,444 | $1,185.52 |
@@ -47,4 +61,4 @@ This user-supplied table is the latest consolidated estimate for 3,784 reviews p
 | GPT-5.5 | 5,943 | 162,070 | $0.40754 | 613,272,363 | $1,542.13 |
 | GPT-5.6 Sol | 6,455 | 313,592 | $0.62078 | 1,186,633,892 | $2,349.05 |
 | GPT-6 Astra | 6,454 | 243,001 | $0.88719 | 919,517,292 | $3,357.11 |
-| **Total across seven models** | — | — | — | **3,417,212,445** | **$9,242.59** |
+| **All seven models** | — | — | — | **3,417,212,445** | **$9,242.59** |
