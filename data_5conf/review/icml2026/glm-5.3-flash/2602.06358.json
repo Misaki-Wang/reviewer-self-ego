@@ -1,5 +1,89 @@
 {
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "The paper addresses a genuine and increasingly relevant problem: converting long contexts into compact parameterized form (LoRA adapters) in a single forward pass, avoiding the latency/memory cost of in-context prompting and the training overhead of SFT/test-time training.",
+        "The architecture is well motivated and thoughtfully designed: reusing the frozen LLM backbone with Meta LoRA to compress context into a sequence of memory states, and an M2P Transformer with alternating row/column (bidirectional) attention that avoids the bottleneck of prior segment-wise or single-state approaches (e.g., ICAE, Text-to-LoRA, Generative Adapter). The complexity analysis (O(LM^2 + ML^2) vs. O((LM)^2)) and the ~90% FLOP saving claim are clearly derived.",
+        "The training pipeline (pretraining on 6B tokens with reconstruction/completion objectives, then instruction fine-tuning on MQA/IQA data) is a sensible and unusually thorough recipe for a hypernetwork, and the scale 'far exceeding all previous hypernetwork implementations' lends credibility to the results.",
+        "Empirical evaluation is broad: MS MARCO MQA multi-turn F1, six 1QA benchmarks including multi-hop tasks (HotpotQA, MuSiQue, 2WikiMultihopQA), comparison against TTT methods (SEAL, PaST), efficiency/FLOP/memory analysis, and scaling studies over both backbone size and hypernetwork hyperparameters (Table 4).",
+        "Honest and useful ablations in the appendix, e.g., the 'Bitter Lesson' experiment (Figure 10) showing hand-designed coupled cross-attention priors underperform generic full attention, and the analysis of reshape/transpose modes and post-layerNorm choice. The comparative architectural analysis in Appendix C is informative."
+      ],
+      "weaknesses": [
+        "The central framing overstates the results relative to the golden baseline: in Table 2, In-Context prompting substantially outperforms SHINE on most 1QA benchmarks (e.g., 86.8 vs 63.6 on SQuAD, 68.7 vs 59.0 on HotpotQA, 84.9 vs 37.5 on SQuAD-N-2K), and in Figure 6 SHINE degrades on multi-turn conversations. 'Parity, or occasionally exceeds' is a generous characterization; the honest claim is that SHINE dominates SFT and TTT baselines while saving cost, not that it matches ICL quality.",
+        "The comparison to test-time training baselines (Table 3/5) is confounded by a backbone mismatch: SEAL and PaST results are from Qwen2.5-7B-Instruct while SHINE uses Qwen3-8B, so the 'defeated by a large margin' claim is not an apples-to-apples comparison.",
+        "Scalability claims rest on thin evidence: maximum context length is only 1,150 tokens, so the method is untested on the long-context regimes where the cost advantage would matter most; scaling curves are evaluated at only 40% of the pretraining schedule and the backbone scaling spans just 0.6B-8B, making the 'no signs of capacity bottleneck' claim preliminary.",
+        "Only one backbone (Qwen3-8B) is used for the main results; generality across model families and the dependence of Meta LoRA initialization on architecture are not examined.",
+        "SHINE's multi-turn degradation (attributed to long-context post-training deficits in ICL models) is acknowledged but not analyzed or mitigated; this is a material limitation for the proposed use case (contextualized conversation).",
+        "Presentation issues: the abstract is truncated mid-sentence ('Our code is available a'), Figure 6 lacks error bars/quantiles, and some efficiency claims would benefit from wall-clock measurements on the stated hardware rather than only FLOP estimates.",
+        "Generated rank-8 LoRAs may cap achievable capacity; the paper does not explore or discuss the ceiling imposed by the fixed generated rank relative to task difficulty."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper tackles a relevant problem: converting a context into model parameters in a single forward pass, removing both the context-window cost of ICL and the iterative optimization cost of SFT/TTT.",
+        "The proposed architecture is reasonably well motivated: memory tokens widen the context-to-parameter bottleneck relative to gist-based approaches, and the alternating row/column attention in the M2P Transformer addresses the O((LM)^2) cost of full attention with a clear complexity analysis and appendix derivation.",
+        "The training pipeline (reconstruction + completion pretraining, then instruction fine-tuning) is clearly described and the evaluation covers multiple axes: multi-turn MQA, six QA benchmarks, TTT comparisons, and both backbone-scaling and hyperparameter-scaling analyses.",
+        "Efficiency accounting is unusually careful: FLOPs and peak-memory derivations (Appendix B.5/B.6) are explicit, and the amortizable vs. generation time split in Table 1 is informative.",
+        "The negative result on coupled cross-attention (Appendix D) is honest and adds value; hyperparameters and training details are reported at a level that supports reproduction, and code availability is claimed."
+      ],
+      "weaknesses": [
+        "The headline claim that SHINE 'achieves parity with, or occasionally exceeds, In-Context learning' is not supported by the evidence. In Table 2, SHINE trails In-Context by large margins on SQuAD (63.6 vs 86.8), HotpotQA (59.0 vs 68.7), and MuSiQue (28.5 vs 36.3), only exceeding it on the MS MARCO v1/v2 variants. Similarly, in Table 1 SHINE's F1 is 55.6 vs In-Context's 69.4, described as 'comparable'. This systematic overstatement of results relative to what the tables show is a serious soundness issue.",
+        "No statistical rigor: single runs, no seeds, no variance estimates, no significance testing on any reported F1 or PPL, despite differences that would need to be adjudicated (e.g., SHINE vs. SFT on several benchmarks is within a few points).",
+        "The SFT baseline appears weak or under-tuned: a rank-8 LoRA trained for 10 epochs on only 5 conversations per context yields 33.0 F1 vs. 69.4 for In-Context. SHINE's large advantage over SFT may partly reflect a better-trained setup (full QA data, more tuning) rather than the hypernetwork itself; the comparison is not controlled.",
+        "The TTT comparison in Table 3/B.7 is conducted across different backbone models (Qwen-2.5-7B-Instruct for SEAL/PaST vs. Qwen3-8B for SHINE) and cross-copied numbers from another paper; a '63.6 vs 58.2' claim of being 'defeated by a large margin' is not credible under this setup, and the framing overreaches.",
+        "MS MARCO MQA is synthesized by Qwen-Flash, from the same model family as the Qwen3 backbone, with automated LLM fact-checking; the potential for train/test distribution bias and label noise is not analyzed, and downstream gains on MS MARCO-based evaluations could be inflated.",
+        "Evaluation scope is narrow for the claims made: a single backbone family, contexts capped at ~1,150 tokens, only extractive-style QA (excluding MS MARCO no-answer items), no ablation of memory-token count M on downstream QA, no analysis of what the generated LoRAs actually encode, and no evaluation of robustness (paraphrase, out-of-distribution contexts, hallucination when context contradicts model priors).",
+        "Presentation has notable defects: the abstract is truncated mid-sentence ('Our code is available a'), the paper cites '(Anonymous, 2026)' as a key related work, and Figure 6 is a low-information plot without axes labels resolved; there is no dedicated limitations section.",
+        "Originality is incremental: the method is an assembly of existing components (Meta-LoRA / in-context LoRA prediction à la Generative Adapter and ICAE, plus a bidirectional variant of prior segment-wise generators). The claimed advantage — bidirectional information flow across layers 'mimicking backpropagation' — is asserted but never validated with ablations isolating the row/column attention design against layer-wise or unidirectional alternatives.",
+        "The scaling analysis (Section 5.4) uses only 40% of the pretraining schedule, mixing model capacity effects with incomplete training; conclusions about 'no signs of capacity saturation' are therefore tentative at best."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Novel and well-motivated architecture: reusing the frozen LLM backbone itself as the context encoder inside the hypernetwork, with Meta LoRA and a sequence of memory tokens, is a clean way to sidestep the need for a separate language encoder and to widen the bottleneck of prior segment-wise hypernetworks.",
+        "The M2P Transformer with alternating row/column (bidirectional) sparse attention is a sensible efficiency design, and the FLOP/memory analysis in Appendix B.5/B.6 is unusually thorough and transparent (full derivations, MAC=2 FLOP convention, KV-cache vs. no-cache regimes).",
+        "Broad empirical coverage: pretraining (reconstruction/completion PPL across context lengths), MQA multi-turn conversation, six iQA benchmarks, comparison against hypernetwork baselines (Generative Adapter) and test-time-training baselines (SEAL, PaST), plus two-axis scaling studies (backbone size, M2P layers/ranks).",
+        "SHINE clearly dominates Naive, SFT, and Generative Adapter on most tasks and substantially outperforms iterative TTT methods at a fraction of the cost, which is a useful and practically relevant result.",
+        "Honest architectural ablations, e.g., Appendix A.2 (LoRA reshape ordering) and Appendix D (coupled cross-attention 'Bitter Lesson' experiment), add credibility and insight beyond the headline method.",
+        "Code availability is stated, and training/hyperparameter details (ranks, learning rates, seeds of data construction, dataset construction prompts) are reported at an unusually detailed level for reproducibility."
+      ],
+      "weaknesses": [
+        "The central claim of matching the In-Context baseline is overstated. Table 1 shows SHINE at 55.6 F1 vs. 69.4 for In-Context, and Table 2 shows a large gap on single-hop QA (e.g., SQuAD 53.4 vs. 85.9, HotpotQA 59.0 vs. 68.7). The text's 'parity, or occasionally exceeds' characterization is not supported across the benchmark suite; the paper should quantify rather than soften this gap.",
+        "Cross-paper comparison with TTT baselines (SEAL, PaST, Table 3/5) is problematic: those results use Qwen2.5-7B-Instruct and possibly different prompts/protocols, while SHINE uses Qwen3-8B. Claiming SHINE 'defeats them by a large margin' without running the baselines under a matched setup weakens the TTT comparison.",
+        "Only one modern backbone family is tested end-to-end; the backbone scaling study (Figure 8) evaluates only pretraining PPL at 40% of the schedule rather than downstream task performance, so the claim that the hypernetwork scales with the LLM is not directly verified on the tasks that matter.",
+        "Maximum context length is 1,150 tokens, which is short relative to the stated motivation of internalizing long contexts; there is no study of length extrapolation or behavior beyond the training window.",
+        "The explanation for SHINE's multi-turn degradation (Figure 6) is vague ('lack of time-consuming long-context post-training') and the benefit of amortizing the context away is undercut if the conversation history still grows unboundedly, as acknowledged.",
+        "MS MARCO MQA is self-constructed with Qwen-Flash generation and Qwen-Flash self-validation, and Qwen-Flash is plausibly the same model family as the backbone; the 76% share of this synthetic data in MQA training raises questions about data quality and potential circularity that deserve more scrutiny (e.g., human spot-checks).",
+        "No explicit limitations section; abstract text is truncated ('Our code is available a'), suggesting incomplete proofreading. Some design choices (post-layer-norm, rl reshape mode) are justified only empirically and briefly.",
+        "Generative Adapter results may be confounded by data scale: SHINE is trained on 6B pretraining tokens plus a large IFT corpus, while baselines were not trained at this scale, so the architecture-versus-data attribution of the gains is not fully disentangled."
+      ]
+    }
+  },
   "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "The paper tackles a well-motivated and timely problem: converting context into parameters in a single forward pass, addressing the scalability bottlenecks of prior hypernetwork designs (single-state bottlenecks, reused MLPs, subset-of-layers generation).",
+        "The architecture is sensible and well described: reusing the frozen LLM backbone with Meta LoRA for memory extraction, a multi-layer memory state tensor, and a lightweight M2P Transformer with alternating row/column attention that enables bidirectional information flow across layers, approximating a backpropagation-like dependency structure. This is a genuine architectural contribution over prior segment-wise MLP generators.",
+        "The training pipeline is unusually thorough for hypernetwork work: 6B-token pretraining with reconstruction/completion objectives plus a two-stage instruction fine-tuning regime, far exceeding the training scale of prior hypernetwork baselines.",
+        "Comprehensive evaluation: multi-turn conversation (MQA), nine 1QA benchmarks, comparison against TTT methods (SEAL, PaST), SFT variants (LoRA/DoRA/IA3 with time costs), scaling studies over backbone size, M2P depth, and LoRA ranks, and ablations including a candid 'bitter lesson' study showing hand-designed coupled attention priors hurt final performance.",
+        "Efficiency analysis is detailed and quantitative, with FLOPs and memory derivations in the appendix supporting the claimed latency/memory advantages over In-Context and SFT.",
+        "The recurrent SHINE-R extension for long contexts is a thoughtful attempt to address the fixed memory capacity limitation, and the limitation (still trailing In-Context) is stated honestly."
+      ],
+      "weaknesses": [
+        "Potential train/test contamination undermines the headline results: SQuAD and MS MARCO appear both in the 1QA/MQA training collections (Appendix B.3/B.4) and as evaluation benchmarks in Table 2. The paper never explicitly states that evaluation splits are disjoint from training data, so results like SQuAD 63.6 are hard to interpret. This must be clarified.",
+        "The claim that SHINE 'achieves parity with, or occasionally exceeds, In-Context learning' is not supported by Table 2: In-Context outperforms SHINE by ~23 points on SQuAD (86.8 vs 63.6) and ~10 points on HotpotQA. The parity claim mostly holds for the MS MARCO MQA multi-turn setting (55.6 vs 69.4 is also a clear gap). The narrative overstates the empirical evidence.",
+        "The comparison with TTT baselines (Table 3) uses a different backbone (Qwen-2.5-7B-Instruct vs Qwen3-8B) and different training data regimes, making the 'outperforms significantly' conclusion weakly controlled; it is presented more favorably than the setup warrants.",
+        "A large fraction of training data (76% of MQA) is LLM-generated (Qwen-Flash) with LLM-based validation, and the MS MARCO MQA test set is itself synthetic; no human verification of QA quality is reported, so the F1 numbers may partly reflect dataset artifacts.",
+        "No statistical significance, variance across seeds, or confidence intervals are reported anywhere, despite multiple fine-grained comparisons (e.g., Table 2 differences of <1 F1 point between SHINE variants).",
+        "The abstract is truncated mid-sentence ('Our code is available a'), and there are minor typos, suggesting insufficient polish; the released-code claim needs verification for reproducibility.",
+        "The information-capacity argument for choosing M = ceil(rD/H) (Eq. 4) is informal; no analysis of whether memory states are the binding constraint versus LoRA rank 8, and only the Generative Adapter is compared head-to-head among hypernetwork baselines on the same task.",
+        "SHINE-R still trails In-Context by large margins on LongBench (e.g., QMSum 19.87 vs 22.44 for Naive; 33.1 vs 45.5 on 2WikiMQA), and the 'insufficient training' explanation is not empirically verified."
+      ]
+    },
     "exp3_negative": {
       "oa": 3,
       "strengths": [
@@ -19,6 +103,26 @@
         "No explicit limitations section; the impact statement is boilerplate. Failure modes (e.g., knowledge conflicts mentioned in related work via Cheng et al., degradation in multi-turn conversations, GSM8K failure in Table 11) are noted in passing but not analyzed.",
         "Presentation issues: several 2026 citations lack venues or complete identifiers, Figures 9/17/18 appear to duplicate content, and the writing contains grammatical errors ('it not only memorize', 'but also understand and express').",
         "Generated-LoRA rank is fixed at 8, and the useful operating range (max context 1,150 tokens) is narrow relative to modern context lengths; the practical deployment story rests on the under-trained SHINE-R variant, which is not yet competitive."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "The paper addresses a well-motivated and timely problem: converting in-context knowledge into parameter space in a single forward pass, avoiding both context-window costs and per-context fine-tuning. The proposed architecture (reusing the frozen LLM with Meta LoRA to extract multi-layer memory states, plus a lightweight M2P Transformer with alternating row/column bidirectional attention) is a sensible and reasonably novel design that directly targets the expressivity/bottleneck limitations of prior segment-wise MLP hypernetworks.",
+        "The training pipeline is substantially more ambitious than prior hypernetwork work: a two-stage pretraining (reconstruction + completion) and instruction fine-tuning recipe using 6B tokens is a meaningful scale-up over earlier text-to-adapter methods, and this appears to translate into real capability.",
+        "The evaluation is broad for this line of work: pretraining reconstruction/completion metrics, multi-turn conversation F1 (Table 1, Fig. 6), nine 1QA benchmarks including multi-hop QA, comparison with TTT methods (SEAL, PaST), long-context extension (SHINE-R on LongBench), hyperparameter/backbone scaling studies, and ablations on M2P architecture alternatives (Appendix E.1-E.2) that support the design choices.",
+        "The analysis in Appendix C (parameter efficiency, bottleneck, and expressivity comparisons with Generative Adapter, ICAE, Compositional Adapter, Text-to-LoRA, DnD) is a useful contribution for positioning the method, and Appendix B.5/B.6 provides careful FLOPs and memory derivations.",
+        "The 'Bitter Lesson' ablation (Appendix E.1), showing that adding LoRA-structure priors (coupled cross-attention) helps early but hurts later, is an honest and interesting negative result."
+      ],
+      "weaknesses": [
+        "Overclaiming relative to the actual numbers. The abstract claims 'outstanding results on various tasks' and Section 5.2.1 claims SHINE is 'comparable to In-Context,' yet Table 1 shows SHINE at 55.6 vs. In-Context 69.4 (a 14-point F1 gap), and Table 2 shows SHINE below In-Context on 8 of 9 datasets, often substantially (e.g., SQuAD 63.6 vs. 86.8; HotpotQA 59.0 vs. 68.7). Similarly, SHINE-R trails In-Context clearly on all six LongBench tasks. The writing should be calibrated to 'narrowing the gap,' not 'parity.'",
+        "The TTT comparison in Table 3 is potentially confounded: SHINE's instruction fine-tuning data includes SQuAD, MS MARCO, HotpotQA, MuSiQue, and 2WikiMultihopQA (Appendix B.4), so SHINE has supervised task exposure that the TTT baselines (trained on Qwen-2.5-7B-Instruct, a different backbone) lack. The comparison of a hypernetwork trained on the target task distribution against zero-shot TTT methods overstates the advantage; the paper does not discuss this fairness issue.",
+        "The primary multi-turn evaluation (MS MARCO MQA) relies on synthetic QA pairs generated and validated by the same LLM (Qwen-Flash), and this synthetic dataset constitutes 76% of the MQA training data. There is no human verification of QA quality, and performance on such data may not transfer to naturally occurring queries.",
+        "Scalability claims are only partially supported. The backbone scaling experiment (Fig. 9) evaluates all models at only 40% of the pretraining schedule, on PPL rather than downstream QA, and only up to 8B parameters. The 'no sign of capacity bottleneck' claim in the contributions is based on short-horizon PPL curves; a proper scaling study (full schedule, downstream metrics) is missing.",
+        "Generality is limited by fixed design choices: maximum context length of 1,150 tokens for the main model, generated LoRA rank 8, and the memory-length constraint M = ceil(rD/H). Robustness to contexts longer than the training window (without SHINE-R) is not evaluated, and no statistical significance, error bars, or multiple seeds are reported for any table.",
+        "Reproducibility and polish issues: the abstract ends mid-sentence ('Our code is available a') with no actual link or repository provided; hyperparameters for the M2P Transformer (hidden size, heads), data mixing ratios, and the 1QA/2QA fine-tuning mixture are only partially specified. These gaps hinder independent replication.",
+        "The recurrent SHINE-R section is thin: it is trained only up to 18K tokens, its multi-hop results regress well below In-Context (e.g., 2WikiMQA 33.1 vs. 45.5), and there is no analysis of where the lossy chunk-wise LoRA accumulation fails.",
+        "Writing quality is uneven in places (e.g., 'but also understand and express it,' vague attributions of multi-turn decline to 'lack of the time-consuming long-context post-training'), and Figure 6/7 axes and aggregate F1 reporting would benefit from clearer presentation."
       ]
     }
   }

@@ -1,5 +1,43 @@
 {
   "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "The paper identifies an interesting and empirically well-supported observation: standard stochastic test-time scaling (temperature-based Best-of-N) is poorly suited to MDLMs, and diversity should instead come from structural variation (different models/strategies). This is a useful reframing for the diffusion-LM inference literature.",
+        "The method is clearly specified (Algorithm 1, action tuple (θ_a, T_a, g_a), ratio schedule, caching procedure), and the deterministic-rollout + node-caching design is a sensible, well-motivated mechanism for NFE efficiency, with a direct ablation quantifying cache hit rates (~50%) and gains (Table 3).",
+        "The experimental comparison is unusually thorough for this area: 28 baseline configurations spanning BoN, DTS*, AB-MCTS (both single- and multi-model), and 'Pair' budget-splitting baselines, evaluated at matched NFE budgets across three coding benchmarks plus MATH, with scaling curves to NFE=24576 and full results in the appendix.",
+        "The ablations directly test the central claims: Table 4 isolates action type (multi-model > temperature > remask diversity), and Table 5 decouples interleaving-models-in-one-trajectory from mere budget splitting. The case study (Figures 3-4) gives qualitative evidence for 'collaborative generation'.",
+        "The paper is honest about its relationship to prior tree-search work (DTS, MEDAL, TReASURe, AB-MCTS) and articulates the distinct axis of exploration, and includes a thoughtful impact statement."
+      ],
+      "weaknesses": [
+        "The theoretical motivation is thin: Eq. (1) is the trivial inequality that a pointwise minimum of errors is bounded by any single fixed choice; it holds for any action set and provides no insight specific to multi-model deterministic actions, budget efficiency, or caching. It does not really predict when UMF will help.",
+        "Statistical rigor is insufficient for the claims made: results are based on only 100 problems per coding benchmark (105 for MATH), with apparently single runs and no error bars, confidence intervals, or significance tests. Differences of a few Pass@1 points (e.g., UMF 28 vs. AB-MCTS 21 on LiveCodeBench, +2 points at NFE=24576) may not be reliable at this sample size.",
+        "Originality is moderate: the core mechanism is essentially AB-MCTS/MCTS applied to MDLM unmasking with actions defined as inference configurations plus caching. Tree search over diffusion unmasking already exists (DTS, MEDAL, TReASURe), and the main novelty is the multi-model action space, which is a somewhat incremental design choice.",
+        "Generalization beyond coding is weakly supported: the MATH evaluation uses only 105 problems with an external process reward model (Qwen2.5-Math-PRM-7B) as the search signal, and no baseline comparison is reported for MATH, so 'UMF generalizes to reasoning tasks' (contribution 3) is under-evidenced.",
+        "The method has notable engineering caveats that limit generality and reproducibility: cross-tokenizer text-based remapping between Dream-Coder and LLaDA is validated only by the authors' observation of 'no structural degradation'; the action set, ratio schedule [0.9,...,0.2], and per-model temperatures (T=0.1 for Dream, T=0 for LLaDA) appear hand-tuned without sensitivity analysis; and no code release or reproducibility statement is provided.",
+        "The computational setting is restrictive: fixed length 768 with one token unmasked per NFE means NFE=12288 corresponds to very expensive search, and the applicability to other generation lengths or multi-token-per-step regimes (which most practitioners use) is not examined.",
+        "The comparison is slightly favorable to UMF in construction: baselines must pick among fixed temperature/remasking configurations while UMF always includes the single best deterministic configuration as an action, and heterogeneous models may differ in intrinsic quality on these benchmarks; a per-problem oracle analysis or stronger multi-model baselines (e.g., AB-MCTS with more diverse action sets) would strengthen the attribution of gains to UMF's structured search."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The central empirical observation—that temperature-based stochastic scaling degrades MDLM generation quality rather than helping it, unlike AR-LLMs—is interesting and useful, and is supported by fairly extensive baseline sweeps (16 baseline configurations across three coding benchmarks, plus MATH).",
+        "The caching mechanism is a concrete, measurable contribution: Table 3 quantifies cache hit rates (~50-56% at NFE>=3072) and the corresponding pass@1 gains, and the ablations (Table 4, Table 5) cleanly decouple the benefit of multi-model interleaving from mere budget splitting between models, which is a well-designed control.",
+        "The paper is well written and organized; the motivation, method (Algorithm 1), ablations, and a qualitative case study (Figures 3-4) are clearly presented, and the Impact Statement is thoughtful.",
+        "Evaluation covers both coding and mathematical reasoning, and includes a scaling study up to NFE=24576 to test for saturation."
+      ],
+      "weaknesses": [
+        "The 'theoretical' motivation is overstated. Equation 1 is a trivial inequality (sum of minimums <= minimum of sums) applied to quantities (expected KL errors of 'kernel' actions) that are neither defined precisely nor measurable in the actual algorithm. Section 5.1 does not derive or validate anything about UMF's actual behavior; calling the framework 'principled' based on this is not justified.",
+        "Statistical rigor is weak. All coding benchmarks use only 100 problems and MATH uses 105 problems, with single runs, no error bars, no confidence intervals, and no significance tests. Headline gains like 21.0 -> 28.0 on LiveCodeBench correspond to 7 problems out of 100 and could plausibly arise from run-to-run variance in MCTS, especially since the paper itself notes fluctuations in stochastic baselines.",
+        "The reward signal during search is the proportion of passed public test cases, which is a very strong proxy for the evaluation metric itself. For EvalPlus the reward uses the standard test set and evaluation the extended set; for LiveCodeBench the reward uses public tests and evaluation private tests. This setup borders on optimizing the evaluation signal, and the paper does not discuss the risk of reward hacking or overfitting search to test cases. The MATH experiment relies on an external PRM (Qwen2.5-Math-PRM-7B), whose quality directly shapes results but is not ablated.",
+        "Novelty is incremental. MCTS/tree search over masked-diffusion unmasking already exists (DTS, MEDAL, TReASURe, AB-MCTS), all of which are cited and compared. The genuinely new axis is defining actions as 'switch to a different pretrained model', which is essentially ensembling plugged into MCTS, plus caching. The multi-model contribution rests on exactly two 7-8B models; the paper does not test whether gains persist with a different or larger model pair, or with models of different families.",
+        "The tokenizer-interoperability mechanism (decoding segments with one tokenizer and re-encoding with another) is a significant confound. The paper reports only 'no structural degradation' empirically; no quantitative analysis of information loss or of how often cross-tokenizer transfers alter the sequence is provided. This limits reproducibility and raises questions about what 'deterministic' means under this conversion.",
+        "The Var[R] ~ 0 / m=1 rollout argument in Section 5.2 is heuristic: with only one rollout per branch, UCT-based Q estimates are still noisy across the tree, and the claimed Monte Carlo convergence analysis is informal. The interplay between depth-7 expansion, cache hits, and effective exploration width is not analyzed.",
+        "Reproducibility is a concern: no code or artifact release is mentioned, and many details that matter (search hyperparameters beyond c_exp=1, tie-breaking rules, evaluation harness, MATH subset selection) are underspecified given the method's sensitivity to determinism.",
+        "Some ablation choices are narrowly scoped: the multi-model comparison in Table 4 uses only Dream-Coder as the single-model base, and the pair-baseline comparisons fix NFE splits (6144+6144) rather than exploring how the advantage changes with model quality asymmetry."
+      ]
+    },
     "exp3_positive": {
       "oa": 4,
       "strengths": [
@@ -17,6 +55,70 @@
         "The theoretical analysis is informal: Eq. (1) is a near-trivial inequality applied without conditions quantifying when interleaving 'best local kernels' is realizable by search within the NFE budget, so it motivates rather than substantiates the method.",
         "Novelty is moderate: the method is essentially UCT-MCTS with a small discrete action set (2 models × 2 temperatures × greedy remasking) plus caching; the search machinery is standard, and the contribution is primarily the empirical finding that model-interleaving beats stochastic diversity for MDLMs. Whether the gains hold at larger model scale, other MDLM families, or beyond 768-token generations is untested.",
         "Cache-ablation results are reported only for LiveCodeBench; given that caching is a central design pillar, corroboration on the other benchmarks would strengthen the evidence."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Clear and well-motivated empirical finding: the paper convincingly demonstrates that stochastic test-time scaling (temperature-based diversity) is poorly suited to MDLMs, motivating a deterministic, structure-based exploration axis. This is a useful and credible insight for the diffusion LM community.",
+        "Comprehensive and fair baseline coverage: the paper compares against Best-of-N, DTS*, AB-MCTS (single- and multi-model), 'Pair' ensembling, and additionally ReMDM and TReASURe in the appendix, all under matched NFE budgets. The ablations (caching, action types, two- vs. three-model action sets, pair-of-single-model-UMF vs. joint two-model UMF) are well designed — particularly Table 5, which cleanly decouples 'interleaving models within one trajectory' from 'splitting budget across independent models'.",
+        "The budget-efficiency analysis (Sec. 5.2) gives a plausible account of why deterministic actions + caching beat stochastic branching under fixed NFE, and the caching ablation (Table 3) quantifies the claimed benefit (hit rates ~50-55%, consistent gains).",
+        "Thorough engineering treatment: heterogeneous tokenizer handling is explicitly addressed with measured drift (1.09% average length change), block-diffusion compatibility is shown (Appendix A.2), and runtime/memory/model-switch overheads are reported (Tables 8-9), supporting practical reproducibility.",
+        "Reasonable robustness checks: sensitivity to public-test mismatch (Table 10) and alternative MATH answer-extraction pipelines (Table 11) are included, and an honest impact statement is provided."
+      ],
+      "weaknesses": [
+        "Statistical rigor is lacking. All coding results are based on only 100 problems per benchmark (and 105 MATH problems), with no confidence intervals, error bars, or significance tests. Several headline gaps (e.g., UMF 28.0 vs. AB-MCTS 21.0 on LiveCodeBench) are plausibly robust, but ablation deltas of 2-3 points (Tables 3, 4, 7) could easily be within sampling noise on n=100, weakening claims like 'consistently outperforms' for specific action-type comparisons.",
+        "The theoretical motivation is thin. Eq. (1) is a trivial sum-of-minima inequality that applies to any diverse kernel set and provides no guarantees for the actual UCT-based search; the Var[R] argument in Sec. 5.2 is heuristic and does not account for correlated stochastic rollouts or reward-model noise. The theory motivates but does not substantiate the method.",
+        "Some concern of evaluation-on-tuned-methods: the action set design (which configurations to include, the mask-ratio schedule, c_exp) was selected via 'extensive experiments in Section 6' on the same coding benchmarks used for the headline results, while baselines merely use authors' recommended settings. This asymmetry risks inflating UMF's advantage; there is no held-out or post-hoc-fixed validation split.",
+        "The MATH evaluation lacks a main-table baseline (Table 2 reports only UMF's scaling), and the TReASURe comparison in Appendix A.7 shows an implausibly large gap (e.g., 9.5 vs. 52.4 at NFE=1536), suggesting the baseline may be misconfigured or mismatched to the setting; the paper itself concedes these are not 'exact drop-in replacements', yet the huge margin is presented as evidence of superiority.",
+        "The method depends on an external, reliable verifier (test execution or a PRM) for the reward signal, limiting applicability to domains with cheap reliable rewards; PRM-based rewards also carry reward-hacking risk that is not discussed beyond the robustness check on public-test drop rates.",
+        "Novelty is incremental: tree search over MDLM unmasking already exists (DTS, MEDAL, TReASURe), and AB-MCTS already supports multi-model action spaces; UMF's core delta — deterministic actions defined as model/inference-config switches plus caching — is a relatively simple recombination, so the contribution rests almost entirely on the empirical evidence, which has the statistical weaknesses above.",
+        "Reproducibility concerns: no code release is mentioned; key hyperparameters (mask-ratio schedule, action-set composition, generation length 768) are stated without tuning procedures, and several details (e.g., tie-breaking rules needed for exact determinism) are under-specified.",
+        "Evaluation is confined to 7-8B models and two model families; generalization to larger scale or other model combinations is untested, and the 'collaborative generation' interpretation (Sec. 6.4) rests on a single qualitative case study."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The core observation—that high-temperature stochastic sampling degrades MDLM generation quality and that diversity is better obtained from structural/deterministic variation (model switching, inference configurations)—is interesting, clearly motivated, and supported by systematic baseline comparisons (e.g., BoN and DTS* with random remasking at T≈0 collapse to 1-2% on LiveCodeBench).",
+        "The deterministic-action design enables exact node caching, and the paper quantifies its benefit directly (Table 3: ~50% cache hit rate, +7.7% at NFE=12288), rather than merely asserting it.",
+        "The ablations are genuinely informative: Table 4 isolates action types (temperature vs. remasking vs. multi-model), Table 5 decouples interleaved multi-model search from simple budget splitting via the 'Pair of 1-model UMFs' control, and the three-model extension (A.3) shows gains are not just from adding a stronger model.",
+        "Comparisons cover a wide space of matched-NFE baselines (Best-of-N, DTS*, AB-MCTS-M in single- and multi-model variants across temperatures), and additional analyses (runtime/memory in Table 8-9, public-test mismatch robustness in Table 10, block-diffusion compatibility in A.2, ReMDM/TReASURe comparisons in A.7) go beyond the minimum.",
+        "The qualitative case study (Figures 3-4) provides mechanistic evidence that heterogeneous models interleave productively within a single trajectory, supporting the 'collaborative generation' claim.",
+        "The impact statement and limitations discussion are thoughtful and substantive."
+      ],
+      "weaknesses": [
+        "Statistical rigor is insufficient: results are single runs on 100 problems per benchmark (105 for MATH) with no error bars, confidence intervals, or repeated seeds. Several headline claims rest on differences of 2-4 points (e.g., UMF 28.0 vs. AB-MCTS 21.0, cached vs. uncached 22.0 vs. 21.0, three-model 65.0 vs. two-model 62.7 average), which may be within sampling noise at this sample size.",
+        "The theoretical framing in Section 5 is thin. Eq. (1) is a trivial inequality (sum of minima ≤ minimum of sums) applied to heuristic quantities (expected KL errors per action), and the Var[R]≈0 argument assumes exact determinism of transitions and rewards that is only approximately satisfied (tie-breaking, tokenizer drift, test-case rewards); no formal guarantees or even measured variance values are provided.",
+        "The central hypothesis—that early stochastic errors propagate through denoising and cause irreversible structural defects—is asserted but never directly tested with a diagnostic experiment (e.g., measuring trajectory divergence or error localization at different schedule stages).",
+        "Reward design raises an overfitting concern: MCTS directly optimizes against public test cases for LiveCodeBench and standard EvalPlus tests, so Pass@1 on private/extended tests may partly reflect search exploitation of the reward rather than genuine capability; the robustness check in Table 10 partially addresses this but only at the reward level, not for the BoN/tree-search baselines under identical conditions.",
+        "The comparison with TReASURe on MATH (48.57 vs. 6.67) is so lopsided that it suggests mismatched settings (different reward interfaces, model configurations, or search formulations), as the authors themselves concede; such comparisons weaken rather than strengthen the case.",
+        "The contribution is incremental relative to closely related work: the paper itself positions UMF as a variation on DTS/MEDAL/TReASURe where the exploration axis is 'inference configurations instead of stochastic branching.' The main novelty is the action definition plus caching, which is an engineering-level contribution rather than a new algorithmic principle.",
+        "Heterogeneous-tokenizer handling between Dream-Coder and LLaDA is ad hoc (decode-and-reencode of text spans), and while the measured length drift (1.09%) is small, its effect on search equivalence and state reuse is not fully characterized.",
+        "Reproducibility is limited: no code or artifact release is mentioned, and implementation details critical to exact determinism (tie-breaking rules, cache keying on states across tokenizers) are under-specified.",
+        "Some fixed choices are not ablated: the mask-ratio schedule [0.9,...,0.2], c_exp=1, and search depth 7 are used throughout without sensitivity analysis."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "The core idea is well-motivated and distinct from prior tree-search work on MDLMs (DTS, MEDAL, TReASURe): branching over inference configurations (multiple pretrained MDLMs, temperatures, remasking strategies) rather than stochastic token-level perturbations. The related-work section clearly delineates this exploration axis.",
+        "The empirical observation that temperature-based diversity degrades MDLM generation quality (unlike AR-LLMs) is interesting and supported by extensive baselines (28 configurations across three coding benchmarks), giving the field a useful negative result about naive TTS transfer.",
+        "The variance-based argument in Section 5.2 for why deterministic actions are more sample-efficient under a fixed NFE budget is intuitive and directly tied to the caching design, and the caching ablation (Table 3, ~50% hit rate, 4-8% gains) substantiates the claimed mechanism rather than merely asserting it.",
+        "The ablation in Section 6.3.3 / Table 5 is well-designed: comparing multi-model UMF against a 'Pair of independent single-model UMFs' under matched models and total NFE isolates the benefit of interleaving model capabilities within a trajectory, and Figure 4 gives a convincing qualitative case of collaborative generation.",
+        "Evaluation hygiene is above average: matched NFE budgets against all baselines, robustness to public-test mismatch (Table 10), two answer-extraction pipelines for MATH (Table 11), wall-clock runtime/memory analysis (Tables 8-9), and compatibility with block diffusion decoding (Table 6).",
+        "Limitations and deployment considerations (compute cost, safety, reward-mismatch risk) are addressed honestly in the Impact Statement and appendices."
+      ],
+      "weaknesses": [
+        "Statistical rigor is insufficient for the headline claims. Benchmarks use only 100 LiveCodeBench / 105 MATH problems, results appear to be single runs without error bars, confidence intervals, or significance tests, and several key margins are small (e.g., UMF 28.0 vs. AB-MCTS 21.0 on a 100-problem set corresponds to 7 problems; HumanEval+/MBPP+ gains are similarly modest).",
+        "The theoretical framing in Section 5.1 is thin: Eq. (1) is the trivial inequality that a sum of minima bounds the minimum of sums, applied to KL-error terms that are never instantiated or measured. It provides motivation but not verifiable support for the claim that interleaved kernels reduce accumulated error in practice.",
+        "The evaluation reward uses the same public test cases available for LiveCodeBench problems during search, creating an overfitting/hacking risk; the drop-robustness check in Appendix A.5 partially mitigates this, but the strongest benchmark (LiveCodeBench) is precisely where search-time reward and final evaluation are closest.",
+        "Hyperparameters of the search (the fixed mask-ratio schedule [0.9,...,0.2], c_exp=1, depth 7, 768-token budget) are stated without sensitivity analysis, so it is unclear how fragile the results are to these choices; the schedule in particular appears hand-tuned.",
+        "The heterogeneous-tokenizer bridge (decode-and-reencode of non-special spans) is a heuristic whose effect is validated only by average length drift (1.09%) and anecdotal inspection; no controlled experiment isolates its impact on the multi-model gains.",
+        "No code release or artifact link is provided, which limits reproducibility given the many moving parts (MCTS, caching, cross-model state transfer, reward interfaces) and the reliance on specific model versions.",
+        "Comparisons with ReMDM and TReASURe (Tables 12-13) show very large gaps that the authors themselves flag as not exactly matched settings; presented without deeper analysis, these comparisons risk overstating the advantage over prior methods."
       ]
     }
   }

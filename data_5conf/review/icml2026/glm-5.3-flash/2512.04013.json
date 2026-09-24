@@ -1,5 +1,25 @@
 {
   "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a timely and practically important problem: scheduling for augmented (tool/API-calling) LLM inference under SLO constraints, where FCFS and static batch limits demonstrably degrade goodput (Figures 2-6, Table 1).",
+        "Well-executed empirical motivation: the paper systematically demonstrates head-of-line blocking under FCFS, the sensitivity of goodput to the batch token limit, and the influence of API return length on latency (Proposition 1 gives a simple analytic justification).",
+        "Reasonable design: the two-stage scheduling value (predictive estimation with runtime correction) and anti-starvation term form a coherent mechanism that anticipates and corrects prediction errors; the dynamic token budget based on free/paused GPU memory is sensible and includes stability bounds.",
+        "Extensive evaluation: implementation on vLLM, two models (GPT-J-6B, OPT-13B), three GPU configurations (RTX 4090, H800, 2x A100), two datasets, three workload generators (Poisson, fixed-count, Gamma/bursty), plus ablation, SLO-attainment, P95 tail latency, TPOT, and overhead breakdown (Table 4) — coverage is broader than many systems papers.",
+        "The ablation (Figure 10) and time breakdown support the claimed contribution of each component rather than only reporting end-to-end gains."
+      ],
+      "weaknesses": [
+        "The cost model (Equations 4-26) is a stack of ad hoc heuristic formulas without theoretical grounding or empirical validation of the cost proxy itself (e.g., that ranking by V correlates with actual completion time). Several equations are loosely stated (e.g., Eq. 7 is not a well-formed definition; WasteSwap uses N_fwd_max in a way whose units/derivation are unclear).",
+        "Key hyperparameters (alpha in Eq. 26, gamma, beta_low, beta_high, target_max, prediction bucket sizes) materially shape behavior, but there is no sensitivity study; reproducibility is further weakened because no code release is mentioned and offline profiling of target_max is under-specified.",
+        "Prediction quality is modest (65% accuracy on Merge output length) yet the impact of prediction errors on scheduling decisions is asserted rather than measured; no analysis of how the two-stage correction degrades under correlated prediction failures.",
+        "The headline 33x/13x improvements are partly an artifact of evaluating baselines deep into overload where their goodput collapses toward zero, inflating ratios; absolute goodput differences (e.g., Table 3) are more modest. Baselines are limited to vLLM and InferCept — no comparison with other SLO-aware or output-length-aware schedulers (FastServe, S3, Sarathi-Serve, E2E variants) despite the related work discussing them.",
+        "Several results show abrupt, unexplained discontinuities (e.g., vLLM SLO attainment 98.4% at 4.0 req/s dropping to 22.7% at 5.0 req/s in Table 7; vLLM goodput 1.09 at 4.0 but 0.25 at 5.0 in Table 3), which are not discussed and raise questions about experimental stability or configuration choices.",
+        "Ablation is restricted to one dataset/model/GPU configuration; the generalization of each component's benefit is not established.",
+        "Novelty is moderate: it is largely a careful adaptation of known techniques (predicted-length SJF-style scheduling with runtime re-prioritization, plus memory-driven dynamic batching) to the augmented-LLM setting; the incremental step relative to InferCept and prior length-prediction scheduling ([10,16,19,30,31,41]) should be more sharply delineated.",
+        "The paper lacks a limitations discussion, and the fit to ICML is arguable since the contribution is a heuristic systems scheduler rather than a machine learning method; writing contains grammatical and notational sloppiness that impedes precision."
+      ]
+    },
     "exp3_negative": {
       "oa": 3,
       "strengths": [
@@ -16,6 +36,26 @@
         "Fit and framing for ICML: this is a systems/scheduling paper with a heuristic cost model and a trivial proposition (Proposition 1 is straightforward algebra), little methodological novelty for the ML audience, and no learning component beyond a fine-tuned BERT regressor. Precedent exists (InferCept at ICML'24), but the technical depth here is thinner.",
         "Reproducibility concerns: no code or artifact release is mentioned, key configuration details (SLO settings per experiment, bucket sizes, hyperparameter values) are scattered or deferred, and the merged 'Merge' dataset construction is described too briefly to reconstruct.",
         "No limitations discussion: single-instance serving only (no multi-GPU tensor/disaggregated settings beyond naive 2xA100), no modern models (OPT-13B/GPT-J are dated), no consideration of concurrent/asynchronous tool calls [13], and no discussion of adversarial or non-stationary API latencies."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "The problem is well-motivated and timely: serving augmented (tool-calling) LLMs under SLOs is an important systems problem, and the paper builds directly on the InferCept (ICML'24) line of work, making it relevant to the ICML community.",
+        "The motivation is backed by systematic empirical study (Figures 2-6, Tables 1-2): the FCFS-vs-random comparison, the batch-token-limit sweep, and the analysis of API return length effects (including Proposition 1) convincingly establish that arrival-order scheduling and static token limits are limiting factors.",
+        "The design is carefully worked out: the two-stage scheduling value (Stage I prediction-based, Stage II runtime-corrected) with explicit cost formulations (Eqs. 4-25), context-handling-policy integration, anti-starvation term, and a dynamic token budget with bounded constraints (Eqs. 27-32) is fully specified, and Algorithm 1 in the appendix supports reproducibility.",
+        "The evaluation is broad and multi-dimensional: two datasets (Merge, ToolBench), three hardware configurations (RTX 4090, H800, 2xA100), three workload generators including bursty Gamma arrivals (Table 6), SLO attainment and 5x-SLO goodput (Tables 7, Figures 11-12), tail latency (Figures 13-14), TPOT (Figure 15), an ablation isolating the two components (Figure 10), and an overhead breakdown (Table 4, prediction <1%).",
+        "Reported gains are large and consistent across settings (up to 33x goodput, up to 96.3% TTFT reduction), and the ablation shows both components contribute complementary benefits rather than the result hinging on a single trick."
+      ],
+      "weaknesses": [
+        "Limited novelty in the core mechanism: the scheduling value is essentially shortest-job-first ranking with predicted lengths (prior work [10,16,19,30,31,41] already does prediction-guided scheduling), combined with InferCept's Preserve/Discard/Swap policy selection and known memory-aware batching. The two-stage refinement is an incremental extension; the paper does not articulate a fundamentally new algorithmic insight beyond the cost equations.",
+        "Missing key baselines: given the paper's central claim is about scheduling, comparisons against other scheduling-aware serving systems (e.g., FastServe, S3, response-length-ranking schedulers, or even a simple predicted-length SJF policy on InferCept) are absent. The Motivation section shows random scheduling already beats FCFS, so the community would want to know how much AugServe adds beyond a Bearer [REDACTED] baseline. Only vLLM and InferCept are compared.",
+        "Models are dated and small (GPT-J-6B, OPT-13B). No modern LLM (e.g., Llama-3, Qwen2.5) with grouped-query attention, which changes KV-cache memory trade-offs central to the Preserve/Swap/Discard decisions, weakening generality claims for current deployments.",
+        "No sensitivity analysis of the many heuristic hyperparameters: alpha (anti-starvation), beta_low/beta_high, gamma, target_max from offline profiling. The cost model (Eqs. 9-25) is heuristic with no theoretical or empirical validation that it tracks actual resource cost; the trade-off between throughput and fairness/starvation of large requests is not analyzed (no per-request-length breakdown of SLO attainment).",
+        "Prediction quality is modest (65% accuracy on Merge, MSE ~5s on API duration) and the paper does not analyze how prediction errors propagate into scheduling decisions, even though error amplification is the stated motivation for the two-stage design.",
+        "Some reported gains likely stem from baseline weaknesses (vLLM discards KV cache on external calls, causing recomputation) rather than AugServe's scheduling alone; without stronger baseline configurations this inflates headline numbers.",
+        "Presentation issues: several typos ('an key factor', 'attatinment', 'Fix batch token limit'), inconsistent notation in Stage II formulas, and Proposition 1 is a straightforward algebraic observation presented with more weight than it merits.",
+        "No explicit code/artifact release statement, which limits reproducibility of a heavily engineering-dependent system despite the detailed algorithm."
       ]
     }
   },

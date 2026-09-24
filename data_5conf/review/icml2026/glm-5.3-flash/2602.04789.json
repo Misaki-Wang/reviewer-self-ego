@@ -1,5 +1,24 @@
 {
   "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Identifies and clearly motivates a genuine gap: existing sparse attention methods (designed for bidirectional video diffusion) degrade autoregressive video generation due to chunk-level error accumulation, supported by intuitive toy experiments (Fig. 2) showing asymmetric sensitivity of early vs. later chunks.",
+        "Chunk-Aware Growth (CAG) is a sensible and novel mechanism that allocates sparsity across chunks based on accumulated error rather than treating chunks in isolation; the empirical ablation (Table 2) supports that CAG improves quality over chunk-agnostic sparsity, and HSA recovers dynamics (66.7 vs. 37.5 Dynamic Degree), demonstrating complementary contributions.",
+        "Comprehensive evaluation against five strong baselines across two AR models (Self Forcing, LongLive) with full VBench results in the appendix, latency measured on hardware with a consistent kernel backend, ablations for both components, hyperparameter sensitivity (topk), and detailed baseline implementation notes that improve fairness and reproducibility.",
+        "Achieves parity or slight improvement over dense attention (84.5 vs. 84.1 total score on Self Forcing) while providing real speedups (1.2–1.3× end-to-end, 3.3× attention), and demonstrates practical deployment (19.7 FPS on RTX 5090 with FP8 + LightVAE).",
+        "Includes an appendix theory sketch linking sparsity-induced error to noise level via a TV bound, and an honest limitations section covering model scale (1.3B only), kernel portability, and combination with other acceleration techniques."
+      ],
+      "weaknesses": [
+        "The theoretical grounding for CAG is loose: Eq. (4) is a generic diffusion sampling TV bound (borrowed from Li et al., 2023) that does not specifically characterize sparse-attention error; the jump from this bound to the concrete allocation rule s_i = s_base − α_i β (Eq. 5–6) is heuristic, and the claim that α_i ∝ 1/√t inherits the bound's structure is asserted rather than derived. The theory does not actually predict the chosen hyperparameters.",
+        "Method requires 2,000 iterations of post-training for Light Forcing (and for VMoBA/SLA baselines), so 'surpasses dense attention' reflects an adapted model rather than a plug-and-play sparse approximation; the distinction is understated in the abstract and introduction.",
+        "Scale and generality are limited: only 1.3B models, 5-second videos (7 chunks), and two related model families (Self Forcing, LongLive) are evaluated. Whether CAG's early-chunk-dense allocation matters for much longer rollouts or larger models is untested, though this is the setting where error accumulation is most severe.",
+        "Absolute efficiency gains are modest (1.2–1.3× end-to-end at ~90% target sparsity), and the headline 2.3× / 19.7 FPS figures conflate contributions from FP8 quantization and LightVAE with the sparse attention itself.",
+        "The margin over dense attention on VBench total score is small (0.3–0.7 points) and could be within evaluation noise; no error bars, confidence intervals, or human evaluation are provided to support the 'lossless' framing.",
+        "HSA's core mechanism (mean-pooled block summaries + top-k frame and block retrieval) closely resembles prior dynamic sparse attention; the main novelty lies in the chunk-level allocation policy, so the methodological novelty is incremental beyond the AR-specific adaptation.",
+        "Quantitative measurement of error accumulation (e.g., over-saturation) is only shown via toy visualizations and qualitative comparisons; a direct metric of drift/error over chunk index would strengthen the causal story connecting CAG to reduced error propagation."
+      ]
+    },
     "exp3_negative": {
       "oa": 4,
       "strengths": [
@@ -16,6 +35,25 @@
         "Several claims of superiority over dense attention rest on small VBench margins (84.5 vs. 84.1; 83.9 vs. 83.2) on a benchmark known to be noisy, and per-dimension results show regressions versus dense on metrics such as Color, Human Action, and Spatial Relationship. The ablation also shows CAG alone severely degrades Dynamic Degree (37.5 vs. 63.1), indicating the allocation scheme is only usable in combination with HSA, which complicates attributing the gains.",
         "Baseline fairness is not fully convincing: baselines designed for bidirectional models require nontrivial AR adaptations (sparsity ratios set to different values for static vs. dynamic methods, VMoBA finetuning convergence issues acknowledged, resolution changed to 512x768 partly to avoid 'non-equivalence' in some methods), so the comparison may not reflect the baselines' best achievable performance.",
         "Code is promised but not available at review time, and key hyperparameters (s_target=0.9, s_base=0.98, topk=6) appear tuned on the test benchmark (VBench itself), with no held-out validation."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Clear and well-motivated problem identification: the paper convincingly demonstrates (Fig. 1, Fig. 2 toy experiments, Table 2 ablation) that naively applying bidirectional-model sparse attention to AR video diffusion causes severe quality degradation due to error accumulation across chunks, and that earlier chunks warrant denser attention.",
+        "Strong empirical results: consistent gains over five representative sparse-attention baselines on two AR models (Self-Forcing, LongLive) across VBench quality and semantic metrics, with the highest speedups (1.30x/1.19x), and total scores exceeding dense attention (84.5 vs 84.1; 83.9 vs 83.2).",
+        "Useful system contribution: combining CAG + HSA + FP8 + LightVAE achieves 2.33x end-to-end speedup and 19.7 FPS on a consumer RTX 5090, a practically meaningful milestone for real-time AR video generation.",
+        "Reasonably thorough ablations: component-wise ablation (Table 2) shows each part matters, and sensitivity analysis on topk (Table 3) supports robustness; baseline implementation details for the AR setting are provided in Appendix A.",
+        "Honest limitations section (1.3B-only evaluation, FlashAttention-2 kernel constraints, unexplored combinations with distillation/quantization), and a promise of code release.",
+        "The preliminary theory (Appendix B) is at least correct in itself, extending standard diffusion sampling-error bounds (Li et al., 2023) via KL chain rule and Pinsker's inequality to the chunk-wise denoising-with-re-noising setting."
+      ],
+      "weaknesses": [
+        "The theoretical motivation is weak relative to its billing. The TV bound (Eq. 4/21) concerns standard few-step sampling and score-estimation error and contains no term involving attention sparsity at all; the link from this bound to the CAG sparsity schedule s_i = s_base - alpha_i*beta (Eq. 5) is a heuristic leap. In particular, alpha_i ∝ 1/sqrt(t) is asserted, not derived, and the claim that sparse-attention error behaves like score-estimation error is only empirically motivated. The 'theoretical perspective' framing oversells what is essentially an empirically guided design rule.",
+        "Signs of test-set tuning: hyperparameters s_target, s_base, and especially topk=6 in HSA were selected on VBench, which is also the primary evaluation benchmark. With no held-out validation set or multiple seeds, the reported 84.5 vs 84.1 advantage over dense attention (a 0.4 margin) could plausibly be noise, yet it underpins the headline claim that sparse attention 'surpasses dense attention'.",
+        "Evaluation scale is limited: only two 1.3B models, 5-second videos (7 chunks), and a resolution change (480x832 to 512x768) that slightly complicates comparability with prior reported results. Generalization to longer videos and larger models (where sparse attention matters most and where the fixed-complexity HSA claim would be truly stressed) is untested.",
+        "Novelty is incremental: the individual components (mean-pooled blockwise importance scoring, top-k frame/block retrieval, coarse-to-fine hierarchical selection, progressive sparsity schedules) closely resemble existing techniques (e.g., VMoBA, PSA/pyramid sparse attention, SpargeAttn). The contribution is primarily their adaptation to the AR setting plus the chunk-aware allocation policy, which is a valuable but modest methodological step.",
+        "Baseline fairness is imperfect: finetunable baselines (VMoBA, SLA) receive 2,000-iteration post-training while static methods do not, and sparsity ratios differ across method classes (~80% static vs ~90% dynamic); some baseline failures (e.g., VMoBA's collapse on LongLive) may partly reflect adaptation difficulty rather than fundamental limits, as the authors themselves acknowledge.",
+        "Some key design choices are deferred to the appendix or asserted without full justification (e.g., keeping the first chunk dense, the ~2% overhead of frame retrieval, how CAG's sparsity ratio maps to HSA's block budget), which slightly hampers reproducibility until code is actually released."
       ]
     }
   },
@@ -39,6 +77,41 @@
         "Fairness of baseline comparison depends partly on post-training: finetunable baselines (VMoBA, SLA) receive 2000-iteration fine-tuning, but hyperparameter choices and convergence for those baselines are only sketched, and several baselines collapse severely (e.g., Radial at 73.7), which makes relative gains easier to demonstrate.",
         "CAG/HSA involve several hand-tuned hyperparameters (s_target, s_base, n_past_keep, n_sink, n_win) that differ between 5s and 15s settings (Tab. 5); sensitivity analysis is provided only for top-k, not for the sparsity-budget hyperparameters.",
         "The 'first sparse attention solution for AR video generation' claim is difficult to verify precisely given a fast-moving literature (e.g., Rolling Forcing, Reward Forcing, Self-Forcing++ are cited but not compared)."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Addresses a genuine and timely gap: the paper identifies why sparse attention methods developed for bidirectional video diffusion models degrade autoregressive (AR) video diffusion, and is plausibly the first systematic treatment of sparse attention tailored to AR chunk-by-chunk generation.",
+        "The two proposed components are complementary and clearly motivated: Chunk-Aware Growth (CAG) allocates sparsity across chunks based on error accumulation, and Hierarchical Sparse Attention (HSA) performs coarse-to-fine frame/block selection to retain long-range context. The toy experiments (Fig. 2) providing intuition about the first chunk acting as a 'visual anchor' are a nice empirical touch.",
+        "Evaluation is unusually thorough for this area: three AR models (Self Forcing, LongLive, Infinite-Forcing), two benchmarks (VBench, VBench-Long), five sparse-attention baselines plus feature-caching/token-reduction methods, component ablations (Tab. 3), a hyperparameter sensitivity study (Tab. 4), multi-GPU latency measurements with memory analysis (Tabs. 10-11), and qualitative comparisons.",
+        "The end-to-end deployment results (27.4 FPS on RTX 5090, 33.9 FPS on H100) with an open Docker image and released code strengthen reproducibility, and the limitations section (Sec. J) is honest about scale (1.3B only), residual artifacts, and hardware-dependent kernel gains.",
+        "The appendix contains additional ablations (Fig. 8-9), full VBench dimension breakdowns, and a reasonably careful treatment of baseline adaptation details (Tab. 5, Appendix A)."
+      ],
+      "weaknesses": [
+        "The theoretical contribution is largely decorative and does not actually support the central claim. The TV bound in Eq. (4)/(21) characterizes error as a function of denoising steps T and score error ε_score, but contains no sparsity term whatsoever. The leap from this bound to the sparsity schedule s_i = s_base − α_iβ (Eq. 5) is heuristic; s_base is admitted to be a 'predefined constant that reflects the score estimation error' and β is solved only to enforce a FLOPs equality (Eq. 6), not derived from theory. Calling CAG a mechanism to 'quantitatively estimate the contribution of each chunk' overstates what is actually a hand-tuned schedule with fitted hyperparameters.",
+        "The claimed superiority over dense attention (84.5 vs. 84.1 Total Score) is within plausible noise on VBench and rests on metrics like Dynamic Degree that changed dramatically across ablation rows (63.1 → 37.5 → 66.7), suggesting metric instability; 'lossless' claims should be tempered.",
+        "The method requires 2,000 iterations of post-training, yet the paper gives almost no detail on what is trained, how (LoRA? full? which loss?), or how sensitive results are to this finetuning; this weakens reproducibility and makes the fair-comparison story with training-free baselines less clean.",
+        "The ablation narrative is somewhat at odds with the design intent: with CAG alone, Dynamic Degree collapses (37.5 vs. 63.1 dense), indicating the chunk-level sparsity allocation actively harms motion and must be rescued by HSA; the individual contributions are therefore less cleanly separable than presented.",
+        "Evaluation is confined to 1.3B models and the resolution was changed from 480×832 to 512×768 'to avoid excessive padding overhead', which complicates direct comparison with prior reported results; the HSA sensitivity study covers only three topk values explicitly 'due to limited time and resources'.",
+        "Several citations appear anomalous (e.g., arXiv:2603.05451 dated 2026, AAAI volume 40 dated 2026), and the related-work discussion does not engage with concurrent or adjacent AR-specific acceleration work in sufficient depth to fully substantiate the 'first' claim."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Clear and well-motivated problem statement: the paper convincingly identifies why existing sparse attention methods (designed for bidirectional VDMs) degrade when applied to AR video diffusion—error accumulation across chunks and insufficient use of historical context—supported by intuitive toy experiments (Fig. 2) and attention pattern analysis (Fig. 4).",
+        "Technically coherent two-part method: Chunk-Aware Growth allocates sparsity across chunks based on a principled (if heuristic) error analysis, and Hierarchical Sparse Attention provides coarse-to-fine frame/block retrieval that keeps attention cost bounded as history grows. The components are complementary and the ablation (Tab. 3) cleanly disentangles their contributions, including the interesting finding that CAG alone hurts dynamics while HSA recovers them.",
+        "Extensive and largely convincing evaluation: comparisons against six strong sparse-attention baselines plus feature-caching/token-reduction methods on three AR models (Self Forcing, LongLive, Infinite-Forcing), two benchmarks (VBench, VBench-Long), and four GPU platforms with careful latency, speedup, and peak-memory accounting (Tabs. 1, 2, 8, 10, 11). Results show quality exceeding dense attention in several metrics, not merely matching it.",
+        "Good reproducibility posture: code and model links are released, hyperparameters are tabulated (Tab. 5), baseline adaptation details are provided in the appendix, and measurements use a fixed open-source Docker image across devices.",
+        "Honest treatment of limitations (only 1.3B models, residual artifacts, GPU-specific kernel gaps, limited scope of theory), which the reviewer should not penalize."
+      ],
+      "weaknesses": [
+        "The theoretical justification for CAG is loose: the TV bound (Eq. 4 / Appendix C) concerns standard diffusion sampling error, but the link from this bound to the specific sparsity schedule si = sbase − αiβ is heuristic. sbase is a hand-tuned constant 'reflecting score estimation error', and the FLOPs-equality constraint (Eq. 6) is a budget-balancing device rather than something derived from the theory. The theory motivates the direction of the schedule but does not predict its form.",
+        "Standalone end-to-end speedup is modest (1.19–1.33×), and the headline 2.0–3.0× figures combine orthogonal optimizations (FP8 linear layers, LightVAE, kernel fusion) that are not contributions of this paper; readers may over-attribute the gains to the sparse attention method itself.",
+        "Baseline fairness has caveats: all sparse baselines were designed for bidirectional models and require adaptation; some (VMoBA, SLA, and the method) receive 2,000 post-training iterations while others do not, and hyperparameters for baselines were re-tuned by the authors. The VBench Total Score advantage over dense attention (+0.4 to +0.7) is small and possibly within evaluation noise given VBench's variance.",
+        "Only 1.3B-scale models are evaluated; the heterogeneity of attention patterns (and thus sparsity tolerance) at larger scales is a genuine open question acknowledged but not addressed.",
+        "Novelty is incremental relative to prior hierarchical/pyramid dynamic sparse attention (e.g., PSA, VSA, twin-level gating); the main originality lies in the AR-specific error-accumulation analysis and chunk-wise budget allocation rather than an entirely new attention mechanism."
       ]
     }
   }

@@ -1,5 +1,24 @@
 {
   "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "The core idea is clean and well-motivated: decoupling expert selection from expert capacity by giving each expert slimmable (nested) widths adds a genuinely new axis of conditional computation to MoE models, and the paper clearly articulates how it differs from elastic-routing work (RoE, EMoE) and slimmable/nested networks.",
+        "The experimental coverage is unusually thorough for the scale: three model sizes (55M–1B), multiple routing configurations (E8A2/E8A4/E16A4), two token budgets (3B/15B), an ablation isolating the three inference modes (uniform, normalized-probability, TTT), inference-time routing transfer with a fixed checkpoint, transferability of the learned γ to LAMBADA, a FLOPs breakdown by component (Appendix B.2), and width-wise training dynamics (Appendix B.3).",
+        "The training recipe is simple and practical: sampling one random width plus full width per iteration integrates into standard MoE pipelines without architectural or routing changes, and the training-loss curves (Fig. 3) show slimmability does not destabilize pre-training.",
+        "The test-time training of a single (or per-layer) sharpness parameter γ is lightweight (50 batches, scalar parameters, frozen weights), and the ablation (Fig. 10) convincingly shows the learned mapping beats both uniform widths and the fixed γ=1.0 normalized-probability heuristic, supporting the claim that adaptive probability-to-width mapping matters.",
+        "The limitations section is honest and specific (small scale only, multi-width baked in from pre-training, post-training instillation left open), and the impact statement is present."
+      ],
+      "weaknesses": [
+        "Training compute overhead is not accounted for. MoSE runs the model twice per iteration (full width plus a sampled width) with backprop through both losses (Eq. 6), roughly doubling training FLOPs relative to the MoE baseline. For a paper whose central claim is an improved accuracy–compute Pareto frontier, the total (training + inference) cost accounting is incomplete, and the 'low overhead' characterization is asserted rather than quantified.",
+        "Efficiency is measured only in FLOPs per token. Slimmable width slicing at arbitrary granularity (step 0.05, e.g., w=0.35) implies irregular tensor shapes and gather/slice operations that may not map efficiently onto hardware; no wall-clock latency, throughput, or memory results are reported, so 'significantly fewer FLOPs' does not establish real deployment savings.",
+        "Table 1 marks MoSE*(TTT) with a star denoting 'lower FLOPs at comparable or better performance (Section 3.3)', but no FLOPs column is reported, making the headline table unverifiable as presented. Additionally, the abstract's 'matches or improves upon standard MoE at full width' is only weakly supported: MoSE (w=1.0) is slightly worse than MoE on OpenWebText/WikiText for GPT2-Small at 15B (31.26 vs 31.03; 121.50 vs 120.48).",
+        "No statistical treatment. Zero-shot results rest on small benchmarks (WSC has 273 examples; reported gains such as 0.5311 vs 0.5531 correspond to roughly six examples), and no error bars, seeds, or significance tests are provided anywhere, for perplexity or accuracy.",
+        "The experimental base is small and dated: GPT-2-style models up to 1B trained with the 2017 sparsely-gated MoE framework on OpenWebText, whereas modern MoE practice (e.g., Mixtral/DeepSeek-style routing, shared experts, fine-grained experts) may interact differently with width slicing. The authors acknowledge this, but it limits the strength of 'consistently shifts the Pareto frontier' claims for contemporary LLMs.",
+        "Reproducibility is only partial: hyperparameters, schedules, and calibration details are helpfully documented in Appendix A, but no code release is mentioned, and several details needed to reproduce Pareto frontiers (how Γ is varied, per-budget evaluation protocol) are spread across text and figures.",
+        "Presentation issues: Figure 3's caption references only GPT2-Small while showing a GPT2-Standard panel; the abstract/intro repeatedly use undefined labels (MoSE*, TTT) before they are explained; and the claimed mechanism in Figure 1 (adjusting widths allows more experts to contribute 'under the same parameter budget') is not the configuration actually evaluated in the main results, where budget Γ is fixed at |S(x)| for Table 1."
+      ]
+    },
     "exp3_negative": {
       "oa": 3,
       "strengths": [
@@ -19,6 +38,84 @@
         "Only FLOPs are reported, not wall-clock latency or throughput. Per-token dynamic widths (varying m(w) per token) create irregular compute patterns that are known to be hard to realize efficiently on real hardware; the practical speedup implied by FLOP savings is unverified.",
         "Reproducibility is incomplete: hyperparameters are listed but no code release is mentioned, several details are deferred vaguely, and Figure 3's caption ('GPT2-Small model') mismatches the two-panel figure, suggesting some sloppiness in experimental reporting.",
         "The abstract's framing of 'large discontinuities' in MoE accuracy-compute trade-offs is asserted but never directly demonstrated; no evidence is shown that this is a practically important problem for standard MoE deployments."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "The core idea is clean and well-motivated: decoupling expert selection from expert capacity by making MoE experts slimmable (nested FFN widths) adds a genuinely useful axis of conditional computation, and the paper clearly explains how it generalizes standard MoE (Eq. 5 reduces to standard MoE at w=1.0).",
+        "The training recipe is simple and practical: sampling one random width plus full width per iteration, combined with standard load-balancing and z-losses, requires no changes to the standard MoE pipeline, and Figure 3 / Figure 13 show that multi-width training does not destabilize pre-training across widths.",
+        "The evaluation covers a reasonable grid: three model scales (55M–1B), three routing configurations (E8A2, E8A4, E16A4), multiple token budgets, and several benchmarks (OpenWebText, WikiText-103, LAMBADA, WSC), with Pareto frontiers traced over compute budgets rather than single operating points.",
+        "The ablation of inference modes (Figure 10) is informative: uniform-width < normalized-probability (γ=1) < learned TTT γ shows that router confidence carries signal for width allocation but that adapting the probability-to-width mapping matters, and Figure 11's analysis of learned γ across budgets/layers adds interpretability.",
+        "The inference-time routing transfer experiment (Figure 8) and γ-transferability experiment (Figure 9) probe robustness beyond the training configuration, and the test-time training procedure is attractive because it optimizes only one (or layer-wise) scalar(s) with all model weights frozen.",
+        "The limitations section is honest about the small-scale scope and the open question of whether slimmability can be instilled post-hoc at larger scales."
+      ],
+      "weaknesses": [
+        "Training-compute fairness is not addressed. MoSE trains the model twice per batch (full width + random width, Eq. 6), roughly doubling per-iteration cost, while the MoE baseline is trained for the same number of tokens. The claim that MoSE 'matches or improves upon standard MoE at full width' (Table 1) may partly reflect the additional training compute; a compute-matched MoE baseline (e.g., trained for 2x iterations) or wall-clock comparison is needed to substantiate this central claim.",
+        "Experiments are limited to GPT2-scale models (up to 1B) on OpenWebText only. Whether slimmable experts remain beneficial at LLM scale (where MoE is actually deployed) is untested; the paper acknowledges this but the practical significance of the contribution depends heavily on it.",
+        "No statistical rigor: results appear to be single runs with no seeds, confidence intervals, or variance estimates. Several headline differences are small (e.g., OpenWebText PPL 20.81 vs 20.38; WSC accuracy differences of ~0.02 on a 273-example validation set, i.e., ~5 correct answers), so claims of consistent improvement are hard to assess.",
+        "No empirical comparison against the most relevant competing elastic-MoE methods (RoE, EMoE, MatFormer/MoE variants, Matryoshka-style approaches). Related work is contrasted only qualitatively; the Pareto-frontier claim of 'consistently dominating' would be far more convincing with at least one external baseline on the same plots.",
+        "The 'lower FLOPs' claims and starred entries in Table 1 are confusing: MoSE(TTT) is compared against full-width MoE with 'maximum budget Γ = |S(x)|' yet is described as using lower FLOPs, and the FLOPs↓ percentages in Figures 4–8 (e.g., '20.3% FLOPs↓') lack a precise definition of the reference point (iso-perplexity? iso-budget?). Only FLOPs are reported, not wall-clock latency, and sliced intermediate dimensions may not translate to real speedups on hardware.",
+        "Potential evaluation leakage: the TTT calibration stream is drawn from OpenWebText, which is also the in-domain test set for perplexity; the paper should clarify calibration/test disjointness.",
+        "Presentation defects: Eq. 3 mixes indices (m vs r), Figure 3's caption does not match its panels (claims GPT2-Small but shows two models), Figure 4's caption is truncated/ungrammatical, and no code release is mentioned, which weakens reproducibility despite a generally detailed Appendix A."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Clear, well-motivated idea: decoupling expert selection (routing) from expert capacity (execution width) is a natural and underexplored axis of conditional computation in MoE models, and the paper positions it well against slimmable networks and elastic-MoE prior work (RoE, EMoE, Matformer).",
+        "The training recipe is simple and non-invasive (two-pass multi-width training on top of a standard MoE pipeline with unchanged auxiliary losses), and the paper shows convincing evidence that it does not destabilize training: routing diagnostics (CV of expert loads, routing entropy, aux loss, JS divergence of expert histograms across widths) directly address the natural concern that multi-width training perturbs routing.",
+        "Comprehensive evaluation across model scales (55M–2.5B, up to 50B tokens), multiple routing granularities (E8A2 through E128A8), zero-shot downstream benchmarks (LAMBADA, WSC, HellaSwag, PIQA, SIQA), and a practical continual-pretraining path on DeepSeek-V2-Lite (16B).",
+        "Good ablation of inference modes (uniform-width vs. normalized-probability vs. TTT) showing that learning the probability-to-width mapping matters, not just probability-based allocation; also useful transferability analysis of the learned sharpness parameter γ across datasets.",
+        "Honest limitations discussion, including the explicit admission that frontier-scale from-scratch training is not yet covered, and an appendix (B.4) that carefully scopes the validity of FLOPs as a cost metric with actual latency/throughput measurements."
+      ],
+      "weaknesses": [
+        "Training-compute fairness is not established. MoSE performs two forward/backward passes per batch (full width plus a sampled width), so its per-iteration and total training FLOPs exceed the MoE baseline's. The paper asserts the overhead is 'lower than that of two full-width passes' but never reports a training-FLOPs-matched comparison against MoE. It is therefore unclear whether the (modest) full-width quality gains in Table 1 reflect the slimmable architecture or simply extra effective training compute.",
+        "Headline full-width results are mixed, not 'matches or improves': e.g., in Table 1 GPT2-Small at 15B tokens, vanilla MoE beats MoSE (w=1.0) on OpenWebText (31.03 vs 31.26) and WikiText-103 (120.48 vs 121.50). The compute-quality gains come mostly from sub-full-width operation, and the frontier at low budgets in Figures 4–5 sits above the MoE baseline for uniform-width execution.",
+        "The 'test-time training' framing is inflated: the method optimizes a single scalar γ (or one scalar per layer) on 50 calibration batches. This is essentially scalar calibration with a new name, which weakens the novelty of the inference contribution.",
+        "No variance reporting: all results appear to be single-run, with no seeds or confidence intervals, despite small full-width deltas (fractions of a perplexity point) that drive several claims.",
+        "Reproducibility is undermined by an empty code URL ('The code can be found at: .'), which is inconsistent with the claimed release; some implementation details that would be needed to reproduce the width-projection and discretization behavior are deferred.",
+        "Missing comparison to stronger adaptive-inference baselines (e.g., token-level early exit, dynamic-k routing, or direct per-token width controllers trained end-to-end); the learned width policy is restricted to a fixed functional form (normalized router probabilities raised to γ), so it is unclear how far from optimal this policy family is.",
+        "Notation and naming inconsistencies (e.g., 'three GPT-style model scales' followed by four models; GPT2-Medium/Large labeled 1B/2.5B, deviating from standard GPT-2 naming) slightly hurt presentation clarity."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The core idea—decoupling expert selection from expert capacity by making MoE experts slimmable—is intuitive and addresses a genuine limitation of standard MoE models (fixed per-expert compute once routed).",
+        "The empirical scope is broad: multiple model scales (55M–2.5B), several routing configurations (E8A2/E8A4/E16A4/E64A8/E128A8), multiple inference modes, zero-shot downstream tasks, and continual pre-training adaptation on DeepSeek-V2-Lite (16B).",
+        "The paper includes useful diagnostics: routing stability analysis (Figures 17–19), FLOPs-to-latency correlation (Figure 16), width-wise training dynamics (Figure 15), and γ value analysis (Figure 13).",
+        "The limitations section is honest about not yet training at frontier MoE scale, and the impact statement appropriately notes that safety evaluations should account for behavior across execution widths."
+      ],
+      "weaknesses": [
+        "Novelty is modest and key related work is missing. The method is essentially slimmable networks (Yu et al., 2019) applied to MoE FFN experts. Closely related 'nested experts' work (e.g., Mixture of Nested Experts by Agarwal et al., ICLR 2025; Matformer/elastic-nested inference lines) appears to be absent from the related work despite being directly relevant—the only 'Agarwal et al., 2025' cited is the gpt-oss model card. The contribution reads as a recombination of known components rather than a new mechanism.",
+        "Training-compute fairness is not controlled. MoSE training runs two forward passes per step (full width plus a sampled width) while the MoE baseline runs one, yet Table 1 compares the two at equal token budgets. This likely explains why MoSE (w=1.0), architecturally identical to MoE, outperforms MoE in Table 1 (e.g., 39.02 vs 41.82 PPL). The 'matches or improves standard MoE' claim is therefore not supported without equalizing or reporting optimizer-step/compute-matched baselines.",
+        "The 'test-time training' framing overstates the mechanism: it is optimization of a single scalar (or one scalar per layer) γ—a calibration of a hyperparameter via grid-free search. Calling this test-time training invites confusion with actual TTT methods and inflates perceived novelty.",
+        "A critical baseline is missing: applying width reduction (slicing) to a vanilla pretrained MoE without slimmable training, or a simple structured pruning baseline. Without this, the measured FLOPs savings (20–40%) cannot be attributed to the proposed training recipe rather than to the trivial fact that smaller experts use fewer FLOPs.",
+        "No comparison against existing elastic-MoE methods (EMoE, RoE) that the paper itself discusses in Related Work, so there is no way to assess whether MoSE offers practical advantages over prior elastic-MoE approaches.",
+        "No variance or statistical significance reporting: results appear to come from single runs, and downstream accuracy differences (e.g., WSC on 273 validation items) are well within plausible seed noise.",
+        "Reproducibility gaps: the abstract's code URL is literally empty ('The code can be found at: .'), and some notation is inconsistent (Figure 7 refers to 'n16k4' while the rest of the paper uses EnAk; non-standard model names like 'GPT2-Small (55M)' and 'GPT2-Standard (322M)' deviate from conventional GPT-2 naming and invite confusion, especially with the same labels also denoting token budgets in figure captions).",
+        "Some headline numbers are ambiguous: e.g., '38.1% lower FLOPs at matched perplexity' on DeepSeek-V2-Lite is described as corresponding to 920 MFLOPs/token savings, but the CPT adaptation details that would let a reader verify this are deferred to an appendix that is referenced but not included in the manuscript as presented."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "The core idea is clean and well-motivated: decoupling expert selection (router) from expert capacity (execution width) is a natural generalization of conditional computation in MoE models, and the paper clearly articulates why the intermediate FFN dimension is the right target for slimmability.",
+        "The evaluation is unusually comprehensive for this line of work: four model scales (55M–2.5B from scratch), multiple routing regimes (E8A2/E8A4/E16A4/E64A8/E128A8), inference-time routing transfer, zero-shot downstream benchmarks, and continual-pretraining adaptation of a real 16B pretrained checkpoint (DeepSeek-V2-Lite).",
+        "The ablation in Figure 8 is well designed: it separates uniform-width, a fixed probability-based allocation (γ=1), and the learned TTT policy, showing that gains require learning the probability-to-width mapping rather than just confidence-based routing — this is a genuinely informative analysis.",
+        "Strong supporting diagnostics: routing-stability analyses (Figures 17–19), FLOPs-to-latency/throughput validation (Figure 16), and width-wise training dynamics (Figure 15) directly address plausible objections about stability and the FLOPs-as-proxy assumption.",
+        "The limitations discussion is honest (no frontier-scale from-scratch training), and the TTT mechanism is lightweight and well-specified (50 batches, only γ optimized)."
+      ],
+      "weaknesses": [
+        "Compute-matched baseline fairness is not established. MoSE performs two forward/backward passes per step (full width + sampled width), so its training compute exceeds the MoE baseline at the same token budget. The claim that MoSE 'matches or improves' MoE at full width (Table 1) could partly reflect this extra training compute; a compute-matched MoE baseline (or an ablation of width-randomization training on a standard MoE) is needed to attribute the gains to slimmability itself.",
+        "No comparison against the most relevant efficiency baselines: expert/width pruning, distillation-to-smaller-experts, or post-hoc nesting methods (e.g., Matformer-style nesting applied to MoE checkpoints, which is directly related and cited but not empirically compared). The Pareto improvement claims are only made against vanilla MoE and MoSE's own inference modes.",
+        "Mixed and inconsistent evidence at full width: in Table 1, MoSE (w=1.0) is sometimes worse than MoE (e.g., OpenWebText 15B: 31.26 vs 31.03) and sometimes better (e.g., WSC jumps from 0.5165 to 0.5421 on only 273 test items). All results appear to be single runs with no seeds or confidence intervals, and the headline FLOPs reductions (20–40%) lack uncertainty estimates or precise specification of the matched-perplexity operating point.",
+        "Originality is moderate: nesting width-multiplier structure inside experts is a fairly direct composition of slimmable networks (Yu et al., 2019) with MoE, and elastic-MoE works (EMoE, RoE) already target inference-time k flexibility. A deeper analysis of *why* router confidence predicts optimal expert width (beyond the γ heatmaps) would have elevated the contribution.",
+        "Reproducibility gap: the abstract states 'The code can be found at:' with an empty link. Given that exact widths, γ optimization details, and capacity factors matter substantially, the missing code release weakens reproducibility at present.",
+        "Some presentation issues: nonstandard model naming ('GPT2-Small (55M)' vs 'GPT2-Standard'), and the DeepSeek CPT experiment details are largely deferred to the appendix, leaving the most practically relevant result (Figure 12) under-supported in the main text."
       ]
     }
   }

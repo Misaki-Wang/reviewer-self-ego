@@ -1,5 +1,43 @@
 {
   "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Addresses a practical and increasingly important problem: redundant prefix computation in RL post-training of LLMs, where rollouts naturally form prefix trees that existing pipelines ignore.",
+        "The core DFS-based dynamic traversal design is well-motivated and clearly described: materializing only one root-to-leaf path at a time, interleaving forward/backward, and releasing popped subgraphs keeps live memory bounded by the longest sequence rather than total tree size.",
+        "Several sensible system optimizations are described (chunked backpropagation for long sequences, skipping KV caching for leaf nodes, greedy DFS ordering), and the load-balanced partitioning algorithm (DFS-ordered contiguous segmentation with binary search on a cost threshold) is a clean and reasonable solution to the dispatch problem.",
+        "The evaluation includes a broad ablation matrix: 4 model scales (1.7B–14B), 1/2/4/8 GPU configurations, throughput and memory measurements, and an end-to-end comparison against the AReaL baseline including reward curves showing training stability is preserved.",
+        "Honest reporting of end-to-end gains (1.28x–2.28x) separately from the single-worker backward-pass gains (up to 8.31x), and explicit acknowledgment of non-determinism in asynchronous RL reward curves."
+      ],
+      "weaknesses": [
+        "Missing empirical comparison against the closest prior work, Tree Training [5], which the paper identifies as 'the only relevant attempt' but dismisses only qualitatively. A direct head-to-head comparison is essential to substantiate the central scalability claims; comparisons to DeFT/FastTree-style optimized tree-attention kernels are also absent.",
+        "The compute-savings analysis is incomplete and possibly overstated. Because backward passes through shared prefix nodes must be performed once per descendant leaf (as described in Section 3.1), prefix sharing saves forward compute but not backward compute; the paper does not quantify this asymmetry or report forward/backward time breakdowns, making it hard to assess where the speedup actually comes from.",
+        "The headline 8.31x number is a microbenchmark of the backward/gradient computation step on a single worker, not end-to-end training throughput; the abstract framing risks overstating the practical gain.",
+        "Evaluation is narrow in scope: a single workload (tau^2-bench), a single algorithm (PPO), a single 8xH800 node, and small model scales (up to 14B). No error bars, no repeated runs, and no evaluation on more prefix-rich workloads (e.g., multi-turn agentic or search RL where branching is deeper), despite those being the motivating use cases.",
+        "Several technical assertions lack proof or justification, e.g., the claim that DFS-ordered contiguous partitioning introduces at most (K-1) x max(len(s_i)) duplicated tokens, and the optimality of the greedy partition under the DFS order constraint.",
+        "Reproducibility concerns: no code release is mentioned, and key implementation details are missing (interaction of sequential per-branch backward passes with distributed gradient synchronization, tensor/pipeline parallelism integration, DFS tree construction from tokenized rollouts).",
+        "Internal inconsistencies and sloppiness: Figure 4's caption and text disagree about which optimizations are ablated ('backward pass' vs 'forward pass'); the 'LB' ablation label is described as backward chunk size in Section 5.3 but as load balancing elsewhere; multiple typos ('navie', 'cacluate', 'throuhgput', 'evalutaions', 'poping').",
+        "No limitations section and no discussion of cases where the approach degrades, e.g., rollouts with little prefix sharing (flat trees), where DFS bookkeeping overhead could make the method slower than dense training."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The core idea — exploiting the prefix-tree structure of RL rollouts via a DFS traversal that interleaves forward and backward passes, keeping live activations bounded by the longest root-to-leaf path rather than total tree size — is sensible, well-motivated, and clearly explained (Sections 3.1–3.2, Figure 1).",
+        "The load-balanced distributed partitioning algorithm (Section 4) is a reasonable and non-trivial contribution: sorting in DFS order to preserve prefix sharing across GPUs and using binary search with a greedy check to find an optimal contiguous partition is clean and justified with an intuitive bound on duplication overhead.",
+        "The ablation study is structured component-wise (Tree, Cut Tail, DFS, LB) across four model scales (1.7B–14B) and GPU counts (2/4/8), and it isolates the contribution of each optimization (Figure 4–8).",
+        "The paper honestly distinguishes headline single-worker speedups (8.31×) from cluster-level (6.20×) and end-to-end (2.28×/1.28×) gains, which gives a more realistic picture of practical impact."
+      ],
+      "weaknesses": [
+        "Limited evaluation breadth: all experiments use a single benchmark (τ²-bench), a single RL algorithm (PPO), and a single GPU type (8×H800). Since the speedup depends entirely on the degree and shape of prefix sharing in the rollout tree, the paper never characterizes the tree statistics of the workload (branching factor, shared-prefix fraction, sequence-length distribution), making it impossible to judge how gains generalize to other RL workloads (e.g., single-turn math RL with minimal sharing).",
+        "The closest prior work, Tree Training [5], is discussed in Section 2.2 and criticized in detail, but is never empirically compared against. The 6.59×–8.31× numbers are only relative to 'Dense+CKPT'; without a head-to-head comparison, the central claim that AREAL-DTA 'overcomes the inherited scaling challenges' of prior tree-attention training is unsupported.",
+        "A key technical asymmetry is not analyzed: prefix sharing only reduces forward compute, while backward passes through shared prefix nodes are repeated once per descendant leaf (Section 3.1). The paper therefore should explain where the large backward-pass throughput gains (Figure 4) come from — apparently mostly from avoiding activation checkpointing overhead — but no such analysis is given, and the reported 6.59× average speedup is not decomposed.",
+        "Evidence for training correctness is thin. Figures 2–3 show overlapping, noisy training-reward curves on only two model sizes with no repeated runs, error bars, or statistical treatment, and there is no post-RL evaluation on held-out task metrics. Given that gradient handling across branching nodes is the correctness-critical part of the design, this is a significant evidential gap.",
+        "Reproducibility is inadequate: no code release is mentioned, and important details are missing (batch/group sizes, number of rollouts per prompt, chunk length settings, hyperparameters, how tree cost is measured at dispatch time). The paper also lacks a limitations section.",
+        "Presentation quality is below the bar for the main track: numerous typos and grammatical issues ('navie', 'throuhgput evalutaions', 'cacluate', 'optimial', 'poping', 'enlightened by'), informal phrasing ('we want to explore...'), and figures whose axis scales are hard to compare across subplots. These are individually minor but collectively suggest an under-polished manuscript.",
+        "The contribution is largely incremental over Tree Training [5] (dynamic vs. static traversal, plus a load balancer) and over standard activation-checkpointing systems work; as a systems paper the novelty is modest, and as an ML paper the algorithmic content is limited — the fit to the ICML main track is questionable."
+      ]
+    },
     "exp3_positive": {
       "oa": 4,
       "strengths": [
@@ -17,6 +55,68 @@
         "The headline end-to-end result (RQ1) rests on 'manually tuned optimal parallel RL training configurations' (Table 1) that are identical for the 1.7B and 8B models, which is suspicious; the tuning methodology and search space are not described, leaving the 2.28× end-to-end claim partly unverifiable.",
         "Reproducibility is weak: no code or artifact release is mentioned, key hyperparameters (chunk length 2048 is the only one given) are sparse, and there is no limitations section. The claim that Tree Training-style approaches 'have not been able to scale effectively' is asserted without cited measurements.",
         "Presentation quality is below bar in places: several typos ('navie', 'throuhgput evalutaions', 'cacluate', 'optimial', 'poping'), the 'LB' ablation label is described as 'increasing the backward chunk size' but LB elsewhere denotes load balancing, and the term 'quadratic memory blowup' for naive tree attention conflates mask memory (quadratic in tokens) with activation memory (linear)."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "The paper addresses a timely and practically important problem: redundant prefix computation in RL post-training of LLMs, where multi-turn and multi-sample rollouts induce large shared prefix trees.",
+        "The core idea is well-motivated and technically sound: DFS traversal that materializes only one root-to-leaf path keeps live memory proportional to the longest path rather than total tree tokens, avoiding the memory-scaling problems of packed tree-mask (Sparse) approaches. The space complexity argument (Section 3.1) is clear and convincing.",
+        "The system includes thoughtful engineering refinements: the optimized leaf-order execution (Algorithm 3) reducing FWD/BWD rounds, chunked backpropagation for long suffixes, and a greedy DFS ordering heuristic, each with measured overhead (~7% for FWD-NOGRAD passes).",
+        "The load-balanced distributed dispatching is formalized properly (Eq. 2), and the reduction from balanced tree partitioning to DFS-contiguous ordered partitioning with binary search is clean and comes with a sensible worst-case bound on lost prefix sharing ((K−1)×max(len(s_i))).",
+        "Evaluation is reasonably thorough for a systems paper: single-GPU throughput and memory ablations across 4 model sizes (1.7B–14B), Sparse (FlexAttention) and Dense(+CKPT) baselines, 2/4/8-GPU dispatching ablations, an end-to-end GPU allocation sweep (Table 2), and honest low-compression workloads (Table 3) that expose where the method regresses.",
+        "The paper is unusually candid about limitations: the low-compression results (e.g., 0.58× on Modified Prefix with Qwen3-1.7B) are reported openly and the applicability boundary is explicitly discussed in Section 5.4 and Appendix B.2."
+      ],
+      "weaknesses": [
+        "The closest prior work (Tree Training, Wang et al., 2025a) is not directly compared; the paper instead uses a FlexAttention-based 'Sparse' proxy. While the authors argue Tree Training is closely related to the Sparse formulation, claims of superiority over the state of the art in tree-based training rest on an approximation of the actual competitor, which weakens the evidential support for the central efficiency claims.",
+        "No numerical verification of gradient correctness is provided. The paper claims gradients from shared prefixes are 'accumulated correctly,' but the only evidence is reward curves that are 'similar but not identical' between AREAL-DTA and AREAL. A direct check (e.g., gradient norm/element-wise comparison against dense computation on small cases) would substantially strengthen the correctness claim.",
+        "End-to-end results are limited to a single 8×H800 node, one RL algorithm (GRPO), and one primary workload (τ²-bench). The 2.28× end-to-end headline number is specific to one configuration; there is no evidence at multi-node scale or with AReaL's staleness-aware objective, both of which are relevant to the claimed contribution of scaling asynchronous RL.",
+        "The code availability link is empty ('Our code is available at .'), which undermines reproducibility claims at submission time.",
+        "The greedy DFS ordering (Algorithm 1) is presented as 'simple yet effective' but with no analysis, ablation against alternative orderings (beyond the vanilla order), or discussion of when it fails; the FWD-NOGRAD overhead is workload-dependent and only characterized for τ²-bench.",
+        "The generalizability of the headline gains is narrower than the framing suggests: benefits require high compression rates (C ≈ 9.4× on τ²-bench), which the authors themselves show does not hold for common math RL workloads (GSM8K C=1.09, AIME C≈1.0), where the method can be slower than dense training. The abstract/introduction could better foreground this dependency.",
+        "Some evaluation details are underspecified: reward curves run only ~40 steps (Figure 3), variance/seeds across asynchronous runs are not reported, and the end-to-end speedup depends on manually tuned parallel configurations whose tuning procedure is not fully described."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper targets a real and important inefficiency in RL post-training of LLMs: rollouts sharing long prefixes are recomputed independently in forward/backward passes, and the paper quantifies the opportunity well (compression rate C=9.43x on tau2-bench).",
+        "The core design idea is attractive: a DFS traversal that keeps live state proportional to the longest root-to-leaf path rather than total tree tokens, addressing a genuine scaling weakness of packed tree-mask approaches, while retaining optimized dense (causal) attention kernels instead of lower-MFU sparse kernels.",
+        "The load-balanced DFS-contiguous partitioning with binary search is a clean, well-motivated reduction with a provable bound on prefix duplication ((K-1) x max len), and its ablation shows a meaningful effect (11.93% degradation when disabled).",
+        "The evaluation includes useful ablations (Dense, Dense+CKPT, Dense+Leaf, Sparse variants, Tree/Tree+DFS/Tree+DFS+LB) across four model scales and 1/2/4/8 GPU configurations, plus an honest low-compression boundary analysis (Table 3) showing where the method slows down.",
+        "The rollout/training GPU allocation sweep (Appendix B.1) is a thoughtful systems-level analysis showing how training-side speedups shift the optimal pipeline balance."
+      ],
+      "weaknesses": [
+        "No empirical verification of gradient correctness is provided. The central claim that DFS traversal 'accumulates gradient contributions from shared prefixes correctly' is asserted but never validated against the dense per-sequence computation (e.g., numerical comparison of losses/gradients, or matched reward curves at step level). For a paper whose contribution is an alternative execution of the same objective, this equivalence check is essential.",
+        "The closest prior work, Tree Training (Wang et al., 2025a), which also targets RL fine-tuning with prefix reuse, is not directly compared; the paper only benchmarks a FlexAttention 'Sparse' proxy. Claims of superiority over state-of-the-art tree-training methods are therefore not directly supported.",
+        "Evaluation breadth is narrow: a single workload (tau2-bench) and a single RL algorithm (GRPO) drive all headline results; Qwen3 models on one 8xH800 node. Table 3 shows the method can be slower than dense training for smaller models at low compression (e.g., 0.58x on GSM8K-like settings), yet the adaptive runtime policy to decide when to use DTA remains future work.",
+        "End-to-end gains are modest (1.28x/2.28x) and depend on manually re-tuned rollout/training GPU allocations (Table 1); the headline 8.31x applies only to single-GPU training throughput, not the full pipeline, and no automatic allocation strategy is offered.",
+        "Reproducibility concerns: the code availability URL is blank ('Our code is available at .'), several key implementation details (parallel strategies use only DP, no TP/PP for training; interaction with FSDP, reference models, value models, and KL penalties) are not described, and the ablation-only 'Tree Training' baseline is re-implemented rather than used.",
+        "Reward curves (Figures 3-4) are noisy, apparently from a single run per configuration with no seeds or error bars, weakening the training-stability claim ('does not compromise training stability').",
+        "The peak-memory ablation (Figure 6) is only for Qwen3-1.7B, and several efficiency claims (e.g., MFU of sparse kernels, ~7% FWD-NOGRAD overhead) are stated without supporting measurements or methodology.",
+        "Algorithm 1's greedy DFS ordering is described only as a heuristic ('simple yet effective') without analysis, pseudocode-level justification, or an ablation isolating its effect separately from chunk-size choices; several figures (5-9) are difficult to read at the given resolution with many OOM entries."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "The core idea is well-motivated and clearly articulated: RL rollouts naturally form a prefix tree, and the paper provides a concrete quantification of the reuse opportunity (compression rate C, prefix-sharing rate S) that makes the analysis reproducible and interpretable.",
+        "The DFS-based dynamic traversal with push/pop stack semantics is a sensible and well-executed design that addresses a real weakness of packed tree-mask training (memory growth with total tree tokens and low MFU of sparse kernels). The space-complexity argument (peak memory proportional to longest path, not total tree size) is clearly stated and supported by the memory ablations (>50% peak-memory reduction on Qwen3-1.7B, Figure 6).",
+        "The system optimizations are substantive rather than cosmetic: the optimized leaf-order execution (Algorithm 3), chunked backpropagation, and the DFS-contiguous load-balanced partitioning with an O(N log C) binary-search solution (Algorithm 4) are all non-trivial and individually ablated (Tree vs. Tree+DFS vs. Tree+DFS+LB; LB ablation across 2/4/8 GPUs).",
+        "The evaluation is commendably honest about boundaries: Appendix B.2 and Table 3 explicitly show that AREAL-DTA can be slower than dense training (0.58x) on low-compression workloads and small models, and the conclusion and Section 5.4 state the applicability limits rather than overclaiming.",
+        "The GPU-allocation sweep (Table 2, Eq. 3) provides a convincing explanation for why faster training shifts the optimal rollout/training split (5/3 vs. 2/6), which strengthens the end-to-end speedup story beyond a single cherry-picked configuration.",
+        "Pseudocode for all four algorithms is provided, and the code is stated to be available, supporting reproducibility."
+      ],
+      "weaknesses": [
+        "The main results rest on a single, nearly ideal workload (τ²-bench with C=9.43x, S=89.4%). The headline speedups (8.31x, 6.20x) are therefore measured in a best-case regime, and Table 3 shows the method degrades to 0.58x-0.95x of dense throughput on low-compression tasks. The paper is honest about this, but the breadth of applicability is narrow and not characterized across other prefix-sharing-heavy agentic workloads.",
+        "There is no head-to-head comparison against the closest related work, Tree Training (Wang et al., 2025a), which is acknowledged as directly targeting the same problem; the Sparse FlexAttention baseline is only described as a 'practical proxy.' This makes it hard to assess the contribution's delta over the prior art.",
+        "Gradient correctness is asserted rather than verified: there is no numerical equivalence check of the DFS-accumulated gradients against dense per-sequence training, which is the natural validation for a method that reorders and interleaves forward/backward passes across a tree. Correctness concerns are amplified in the asynchronous setting, where staleness-aware importance weighting interacts with per-branch gradient injection; this interaction is not analyzed.",
+        "The end-to-end comparisons rely on reward curves that the authors themselves note are 'similar but not identical' due to asynchronous non-determinism, but no statistics (seeds, variance, or matched-compute final rewards) are provided; the throughput claims would be more convincing with controlled, repeated runs.",
+        "The throughput figures are computed against a dense baseline that requires activation recomputation at 16K context, which inflates the relative speedup; absolute MFU/utilization numbers would help contextualize the gains.",
+        "Experiments are limited to a single 8-GPU H800 node with Qwen3 up to 14B; scaling behavior of the dispatcher and tree construction at larger clusters (where the load-balancing contribution should matter most) is only shown at 8 trainer GPUs in the ablations, not at production scale.",
+        "Presentation has minor but noticeable roughness: inconsistent notation (η vs. N for token counts), an empty/dangling 'Our code is available at .' sentence, and Figure 1's caption burying the leaf-only compression rate that materially affects the achievable savings."
       ]
     }
   }

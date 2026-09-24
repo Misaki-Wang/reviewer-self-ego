@@ -1,5 +1,82 @@
 {
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "The core idea is elegant and well-motivated: LEMUR reduces multi-vector (MaxSim) similarity search to single-vector MIPS by formulating MaxSim estimation as a multi-output regression task whose linear output layer's weight rows serve as document embeddings in a learned latent space. This is a clean conceptual contribution (Secs. 3.1-3.2) that goes beyond the data-oblivious fixed-dimensional encodings of MUVERA.",
+        "The empirical evaluation is unusually broad for this area: 6 BEIR datasets, 5 multi-vector text models (not just ColBERTv2), and 2 visual document retrieval models on ViDoRe. The finding that the embedding model matters more than the dataset for the performance of multi-vector search methods (Sec. 7) is a valuable observation for the community.",
+        "Baselines appear to be treated fairly: LEMUR and MUVERA share the same ANNS library (Glass) and the same reranking implementation, official implementations are used for DESSERT/IGP, hyperparameters are set to author recommendations, and Pareto-optimal QPS-vs-recall curves are reported rather than cherry-picked points.",
+        "Useful ablations: latent dimension (1024 vs 2048 vs 4096) with the interesting result that 1024-d learned embeddings beat 10x-larger MUVERA FDEs on 5/6 datasets; effect of ANNS vs exact inference; effect of training-set selection (queries vs corpus-query vs corpus embeddings) in Appendix D.",
+        "The method is simple (a 2-layer MLP), trains quickly even on CPU, hyperparameters are held fixed across all experiments, code is open-sourced, and full training hyperparameters are given in Appendix A, supporting reproducibility.",
+        "Limitations are honestly discussed (memory of multi-vector representations, low-precision compatibility left as future work), and limitations of prior work on non-ColBERTv2 embeddings are documented rather than hidden."
+      ],
+      "weaknesses": [
+        "Missing cost-side comparisons: the learned index is an m x d' weight matrix (e.g., ~8.8M x 2048 for MS MARCO, roughly 70GB in fp32), and indexing requires the pre-training + per-document OLS pipeline of Sec. 4.3. The paper reports indexing throughput (~1000 docs/sec) but never compares total index build time or memory footprint against MUVERA/PLAID/IGP, which is a material omission for a paper whose central claim is efficiency.",
+        "LEMUR is corpus-specific: the model must be retrained (or at least the output weights refit via OLS) for every new corpus, and it is unclear how the model behaves under corpus drift or incremental updates beyond the sampled m'=8192 pre-training documents. This practical constraint is understated in the main text.",
+        "Generalization of the learned model is not studied: it is unknown whether a model trained on one corpus transfers to another, which affects whether LEMUR can ever be an off-the-shelf component the way MUVERA FDEs are.",
+        "Evaluation measures recall w.r.t. exact MaxSim k-nn and QPS only; no end-to-end retrieval effectiveness (nDCG/MRR) is reported, and no single-query tail latency is given (experiments parallelize over 40 cores and report QPS), which limits interpretability for interactive IR deployments.",
+        "Conceptual novelty is moderate: the reduction-to-single-vector idea is shared with MUVERA, and the learned-embedding-via-regression machinery is standard; the contribution is a clever combination rather than a new technique class. The paper is honest about this, but it caps the significance for a main-track ML venue.",
+        "Some important evidence is deferred to the appendix (e.g., the claim that 1024-d LEMUR beats 10240-d FDEs on 5/6 datasets, non-ColBERTv2 end-to-end results), making the main text occasionally harder to verify on its own.",
+        "The claim 'order of magnitude faster' in the abstract is supported at the 80% recall operating point (5-11x, Table 2), but the advantage appears to narrow at very high recall levels (Fig. 3 shows ANNS benefits diminish above ~0.95 recall); the abstract could be more precise about operating conditions."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Clear and well-motivated problem formulation: reducing multi-vector (MaxSim) similarity search to single-vector MIPS via a learned per-token feature encoder is elegant, and the observation that MaxSim decomposes as a sum of per-token contributions (making the output layer linear and document vectors become learned weight rows) is a neat technical insight (Secs. 3.1-3.2).",
+        "Comprehensive empirical evaluation: 6 BEIR datasets plus ViDoRe visual document retrieval, 5+ different multi-vector embedding models (ColBERTv2, answerai-colbert-small, GTE-ModernColBERT, LFM2, jina-colbert-v2, ColModernVBERT, ColQwen), and strong baselines (MUVERA, PLAID, DESSERT, IGP) with official implementations where available.",
+        "The evaluation goes beyond the ColBERTv2 setting that dominates prior work, and the finding that several baselines (notably MUVERA) degrade badly on non-ColBERTv2 embeddings is a valuable benchmarking observation for the community (Fig. 5, Sec. 6.3).",
+        "Useful ablations: latent dimension (Fig. 2), effect of ANNS vs. exact search (Fig. 3), and training-set selection including a no-query-encoder variant (Appendix D), showing robustness to training data choice.",
+        "Good reproducibility: open-source code, hyperparameters fully specified (Table 3, Appendix A), and consistent hyperparameters across experiments."
+      ],
+      "weaknesses": [
+        "Modest methodological novelty: the core idea (learn a projection so MaxSim ranking becomes single-vector MIPS) is an incremental refinement of MUVERA's FDE approach, replacing fixed random projections with a trained 2-layer MLP; the supervised-learning framing is sensible but the machinery is simple.",
+        "The evaluation measures recall against exact MaxSim k-nn and QPS, but never reports downstream retrieval quality (e.g., nDCG/MRR) or memory/storage footprints in the main comparison, even though memory is a first-order concern for multi-vector retrieval; the limitations section only defers quantization to future work.",
+        "Per-corpus supervised training introduces an indexing-time cost (MLP training plus OLS for output weights) that is not quantified; the practical cost of retraining the model for every new corpus or model update is not discussed.",
+        "Latency results are CPU-only on a fixed hardware configuration; no GPU or end-to-end-system comparison, and no variance/error bars over repeated runs, making the large QPS claims (5-11x) hard to assess rigorously.",
+        "The ANNS advantage largely disappears at very high recall (>=0.95, Fig. 3), and much of the claimed speedup depends on the chosen candidate/recall operating points; the paper would benefit from a clearer characterization of where the method does and does not help.",
+        "Potential distribution-shift concern: MaxSim estimates for unseen queries rely on the MLP generalizing beyond the sampled training embeddings; while Appendix D partially addresses this, a formal or empirical analysis of approximation error as a function of query distribution is absent."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "The core idea is elegant and well-executed: multi-vector similarity search is reformulated as a multi-output regression task whose target decomposes as a sum of per-token functions, and the linear output layer makes the MaxSim estimates inner products in a learned latent space — cleanly reducing multi-vector search to single-vector MIPS usable with off-the-shelf ANNS libraries.",
+        "The scalable training design is thoughtful: pre-training the feature encoder on a sampled subset followed by closed-form OLS for per-document output weights (Eq. 7) makes indexing practical (~1000 docs/sec) and allows incremental indexing of new documents.",
+        "Evaluation is unusually broad for this area: six BEIR datasets, five multi-vector text models, and two visual document retrieval models (ViDoRe), rather than the near-exclusive ColBERTv2 setting of prior work (MUVERA, PLAID, DESSERT, IGP). The finding that baseline methods degrade badly on modern non-ColBERTv2 embeddings is itself a valuable benchmarking contribution.",
+        "Results are strong and consistent: 5–11x speedup at 80% recall over the best baseline across all datasets, with the learned 1024-dim embeddings beating 10x-larger MUVERA FDEs in recall. Ablations on latent dimension, ANNS vs. exact inference, and training-set selection (Appendix D) are convincing, and the same hyperparameters are used across all experiments, reducing tuning concerns.",
+        "The paper is clearly written, open source, uses recommended/default hyperparameters for baselines, and includes an honest limitations section (memory consumption, low-precision compression left as future work)."
+      ],
+      "weaknesses": [
+        "Memory overhead of the learned output weight matrix is not quantified in the main text: storing one 2048-dim latent vector per document (~72 GB in fp32 for MS MARCO, before quantization) in addition to the multi-vector embeddings is a significant practical cost, and although acknowledged, a direct memory comparison against baselines would strengthen the claims.",
+        "The feature encoder is pre-trained on outputs from only 8192 sampled documents (m' = 8192); the effect of this budget relative to corpus size, and whether quality degrades on substantially larger corpora than those tested (max ~8.8M docs), is not analyzed.",
+        "Evaluation is CPU-only; no GPU latency results are reported, which limits conclusions about the method's performance in common GPU-accelerated serving configurations where the reranking stage (the bottleneck) is often offloaded.",
+        "Recall appears to plateau below 1.0 for LEMUR in several plots (e.g., Fig. 2/4); there is no theoretical or empirical analysis of the recall ceiling, and no variance/significance reporting for the QPS numbers.",
+        "Methodological novelty is moderate — the framework is essentially a learned, task-optimized variant of the single-vector reduction idea of MUVERA — though the empirical gains and the insight about embedding-model sensitivity more than justify the contribution."
+      ]
+    }
+  },
   "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Clear and elegant core insight: MaxSim decomposes as a sum over query tokens of per-token support functions, which turns multi-vector similarity estimation into a multi-output regression problem whose linear output layer collapses into single-vector MIPS in the learned latent space. The two-step reduction (supervised learning → single-vector ANNS) is well motivated and cleanly presented (Sections 3.1–3.2).",
+        "Comprehensive and convincing empirical evaluation: 8 BEIR datasets plus ViDoRe, across 5 text and 2 visual document retrieval embedding models, with Pareto-frontier (QPS vs. recall) comparisons and end-to-end latency including reranking, not just candidate-generation recall.",
+        "Fair baseline treatment: official C++ implementations for MUVERA/DESSERT/IGP, fast-plaid for PLAID, MUVERA combined with the same Glass index and reranking implementation as LEMUR, and author-recommended hyperparameters for baselines.",
+        "The learned representations empirically dominate the data-oblivious FDEs: 1024-dim LEMUR embeddings beat 10x larger 10240-dim FDEs on 7/8 datasets, and the advantage over baselines is largest for non-ColBERTv2 models where prior methods degrade badly (Figures 4–5) — a practically significant and under-explored finding about robustness of multi-vector search methods.",
+        "Strong reproducibility: code released, full hyperparameter table (Appendix A), consistent hyperparameters across all experiments, and detailed implementation descriptions for both the method and baselines.",
+        "Thoughtful ablations: latent dimensionality, training-set selection (query vs. corpus-query vs. corpus embeddings), ELM/random-hidden-layer variant showing the approach is robust to training data, correlation analysis with exact MaxSim, and long-query evaluation (Appendix E).",
+        "Honest limitations discussion covering memory/compression, incremental indexing, and generality to other similarity measures."
+      ],
+      "weaknesses": [
+        "Corpus-specific index: the model and its output-layer weight vectors are trained per corpus, requiring 4.8 hours of indexing on the largest dataset (8.8M documents) on CPU. Incremental document arrival is acknowledged as an operational challenge and only partially addressed (Section 4.3, Limitations).",
+        "Theoretical analysis is minimal: the universal approximation argument in Appendix B is admitted to be trivial and provides no guidance on the required hidden dimension d' or any recall/latency guarantees; the d'=2048 choice is justified purely empirically.",
+        "All results are CPU-only; the claimed GPU applicability (e.g., via CAGRA) is not empirically validated, even though many competing systems target GPU retrieval.",
+        "Memory footprint of the learned document vectors (m x d' rows of W) is not rigorously compared against baselines; quantization is only suggested as future work, so the memory story versus MUVERA/PLAID is incomplete.",
+        "The abstract's 'order of magnitude faster' claim is slightly stronger than the reported 5-16x speedup at >=80% recall, and the headline claim depends on the k'=100 setting (k=10 results are relegated to the appendix).",
+        "The contribution is conceptually simple (per-token regression with a linear head, equivalent to learning per-document linear probes in a shared feature space); its value rests almost entirely on empirical results, which, while extensive, cover only retrieval-scale corpora up to ~8.8M documents and English-language benchmarks."
+      ]
+    },
     "exp3_negative": {
       "oa": 4,
       "strengths": [
@@ -16,6 +93,25 @@
         "All experiments are CPU-only on one hardware configuration (2x Xeon Gold 6230). Given that the reranking stage dominates on ViDoRe and that GPU implementations are only asserted (not evaluated), the hardware generality of the speedup claims is unverified. Some baselines (e.g., PLAID in Rust, DESSERT/IGP official C++) may be differentially advantaged or disadvantaged on this specific setup.",
         "The recall metric is Recall@k against exact MaxSim ground truth rather than end-to-end relevance measures on most datasets; the nDCG@10 verification (Appendix C) covers only ColBERTv2 embeddings and does not report the actual nDCG@10 values achieved by LEMUR, only the QPS at which nDCG matches exact search within epsilon. Evidence that the approximation preserves ranking quality for the modern embedding models is thinner.",
         "The claim that LEMUR 'bridges the latency gap between single-vector and multi-vector retrieval' is not tested against any single-vector retrieval baseline; the comparison is exclusively among multi-vector search methods, leaving the broader framing only indirectly supported."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "The core idea is simple, elegant, and well-motivated: MaxSim over a document is a sum of per-token support functions, so MaxSim approximation can be cast as multi-output regression with a linear output layer, and the output weights become document vectors in a latent space where standard single-vector ANNS applies. This gives a clean two-step reduction (multi-vector search -> supervised regression -> single-vector MIPS) with a correct (if straightforward) universal-approximation argument in Appendix B.",
+        "The method is clearly superior in practice: at >=80% recall it is 5-16x faster than the best baseline on ColBERTv2 embeddings across eight BEIR datasets (Table 2, Figures 3, G.1), and 1024-dim LEMUR embeddings beat 10x-larger MUVERA FDEs on 7/8 datasets (Section 6.2), which is a strong and well-isolated ablation.",
+        "Evaluation breadth is a real strength: beyond ColBERTv2, the paper evaluates four modern text multi-vector models (answerai-colbert-small, GTE-ModernColBERT, LFM2-ColBERT, jina-colbert-v2) and two visual document retrieval models (ColModernVBERT, ColQwen2), revealing that prior methods (especially MUVERA) degrade badly on non-ColBERTv2 embeddings while LEMUR remains robust. This is an important benchmarking contribution in itself.",
+        "Thorough robustness and sensitivity analyses: latent dimension ablation (Section 6.2, Appendix F), training-set selection including training from corpus-only embeddings and actual queries (Appendix H.1-H.2), a random-hidden-layer/ELM variant showing the learned feature map is not the main driver (Appendix H.3), long-query experiments (Appendix E), correlation with exact MaxSim (Appendix D), and nDCG@10 verification that end-to-end retrieval quality is preserved (Appendix C).",
+        "Practical considerations are addressed honestly: indexing time is reported (4.8h on 8.8M docs, CPU-only), incremental updates are supported via OLS per new document, and the limitations section candidly discusses memory optimization, incremental indexing, and low-precision compression as open items.",
+        "Hyperparameters are fixed across all experiments (Appendix A) and baseline implementations use official code with author-recommended settings, with query-side hyperparameters grid-searched for all methods, supporting a fair comparison."
+      ],
+      "weaknesses": [
+        "The corpus-specific nature of the learned index is a significant deployment constraint that is somewhat underplayed: the feature encoder and per-document weights must be (re)computed for each corpus, indexing is CPU-hours-scale, and the method implicitly assumes query embeddings are drawn from a distribution similar to the corpus token geometry. The robustness experiments partially mitigate this concern, but generalization behavior under domain shift (e.g., a corpus far from its query distribution) is not systematically characterized.",
+        "The theoretical contribution is thin: Theorem B.1 follows directly from the universal approximation theorem applied to the (continuous, piecewise-linear) target function, and the |X|*epsilon bound is a trivial triangle-inequality consequence. It provides existence guarantees only, with no quantitative link between d', sample sizes, and achievable recall, so the theory is largely decorative relative to the empirical contribution.",
+        "Efficiency comparisons are CPU-only (40-core Xeon), while modern deployments of PLAID/MUVERA increasingly target GPUs; the authors note GPU compatibility (CAGRA) but provide no measurements, so the claimed order-of-magnitude advantage is hardware-scoped. Additionally, memory footprint comparisons between LEMUR's m x 2048 weight matrix and baselines' indexes are only discussed qualitatively in the ablation rather than reported systematically in the main results.",
+        "All encoder/query-time costs and end-to-end system context aside, some baseline settings may be disadvantaged: DESSERT gets a grid search but PLAID/IGP use fixed recommended index parameters, and WARP (for XTR-trained models) is discussed but not benchmarked. The recall focus is on k=100 in the main text, with k=10 relegated to the appendix, which favors candidate-generation-heavy pipelines.",
+        "The code availability statement in the abstract is incomplete ('Our code is available at' with no URL), which weakens reproducibility as stated, though the described implementation (PyTorch + Glass + C++ reranking) is otherwise well specified.",
+        "There is a residual distribution-mismatch risk in the default training strategy (corpus documents encoded with the query encoder); while Appendix H shows this works, the paper does not fully explain when this proxy breaks down, and the ViDoRe experiments had to fall back to a different strategy, hinting at fragility for modalities where the trick is unavailable."
       ]
     }
   }

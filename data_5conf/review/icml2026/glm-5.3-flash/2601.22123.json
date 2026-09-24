@@ -1,5 +1,25 @@
 {
   "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "The core idea is original and well-motivated: adapting the Mean Flow consistency formalism (from few-step generative modeling) to deterministic Hamiltonian dynamics enables learning large-timestep flow maps from instantaneous, decorrelated phase-space samples, removing the need for expensive trajectory generation or a teacher MLFF. This is a genuinely useful capability for the MD community.",
+        "The theoretical development is careful: the mean displacement field is derived from first principles (Eqs. 6–9), and Appendix C establishes both necessity and sufficiency of the consistency condition, with a clear note that errors stem only from label bias or generalization error.",
+        "The experiments are broad and unusually thorough for this area: toy Hamiltonian systems, a gravitational N-body benchmark, MD17 small molecules, paracetamol (including a 256-sample low-data regime), and alanine dipeptide with 1 ms of rollout. Extensive ablations cover timestep-sampling distributions, training horizon, semi-group consistency (G.8), filter effects (G.10), and thermostat choice (G.4).",
+        "The paper is refreshingly honest about limitations: instabilities around ∆t ≈ 10 fs for alanine dipeptide are reported openly (Table 15 shows PMF error exploding at 10–11 fs), degradation of h(r) accuracy with ∆t is shown rather than hidden, and Figure 21 convincingly demonstrates that the inference filters do not artificially rescue invalid trajectories.",
+        "The coupled energy/angular-momentum conservation filter (Appendix B.3) is a clean closed-form contribution, and wall-clock throughput (378.5 ns/day at 9 fs vs. 31.7 for the MLFF baseline) supports the practical acceleration claim.",
+        "Code is released, implementation details are extensive (loss weighting, jvp-based training, augmentation), and compute budgets are reported, supporting reproducibility."
+      ],
+      "weaknesses": [
+        "Missing empirical comparison against the closest prior art: the paper positions itself against trajectory-based large-timestep models (FlashMD, TrajCast, Timewarp) but never runs them on the same benchmarks, using only a self-trained equivariant MLFF as baseline. Without this, it is hard to judge whether trajectory-free training achieves competitive accuracy per unit compute relative to existing large-timestep approaches; the ScoreMD comparison covers only a generative-sampling-style method.",
+        "Quantitative accuracy at large timesteps is mixed: in Table 1, HFM at 9 fs degrades notably relative to the MLFF baseline (e.g., ethanol 0.115 vs. 0.073; aspirin 0.046 vs. 0.030), and even at 1 fs the HFM is not consistently better. The practical benefit rests mainly on throughput, not accuracy, which should be framed more carefully.",
+        "The learned map sacrifices symplecticity, energy conservation, and equivariance, so the method depends on an ensemble of inference-time corrections (random rotations, drift removal, coupled conservation filter requiring a separate potential-energy evaluation, and a stochastic thermostat that 'dampens model errors'). While the ablations in G.10 partially address whether the filters carry the result, the reliance on Langevin stochasticity for stability (and the artifacts under Nosé–Hoover, Table 10) weakens the generality of the 'large-timestep integration' claim.",
+        "Some results appear inconsistent or under-explained: large stability/accuracy outliers (e.g., aspirin PMF 29.7 at 10 fs, naphthalene 0.501 under Nosé–Hoover) are attributed to an 'inherent instability' without a mechanistic diagnosis; the theoretical link between one-step consistency error and long-rollout stability is asserted but not established.",
+        "Evaluation is confined to small isolated molecules (up to alanine dipeptide, 22 atoms) with no periodic boundaries, condensed phases, or datasets where trajectory generation is most expensive (e.g., SPICE/OMol25-style diverse sets), which limits evidence for the headline claim of training on 'widely-available trajectory-free MLFF datasets' at scale.",
+        "The non-equivariant transformer with random-rotation augmentation is a pragmatic but somewhat inelegant choice; a comparison against an equivariant HFM backbone, or discussion of why equivariance was not used with the consistency loss, would strengthen the contribution.",
+        "The reported training overhead (~30% over standard MLFF) and up to ~1.5 days training on a single GPU for small molecules is reasonable, but the comparison in Table 7 uses the authors' own re-implementations; timings for the baseline MLFFs without the auxiliary energy-correction pass are not fully disentangled."
+      ]
+    },
     "exp3_negative": {
       "oa": 4,
       "strengths": [
@@ -16,9 +36,50 @@
         "Baselines are relatively weak or self-constructed: the MLFF comparison uses the authors' own SO(3)-transformer rather than strong public MLFFs; the wall-clock comparison includes only SchNet and NequIP re-implementations; ScoreMD is the sole generative baseline. The claim of training on 'widely available trajectory-free MLFF datasets' is only tested on small MD17 molecules, paracetamol, and one small peptide — no larger molecules, condensed phase, or universal-potential setting.",
         "The core identity requires time-independent separable Hamiltonians with v = p/m and momenta sampled from Maxwell–Boltzmann distributions decoupled from x; extensions beyond this regime (non-separable Hamiltonians, constraints, barostats) are unaddressed and could matter for practical MD."
       ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "The core idea is well-motivated and original: adapting the Mean Flow consistency condition from few-step generative modeling to deterministic Hamiltonian dynamics yields a trajectory-free training objective that uses only instantaneous phase-space samples and force labels, removing the need for expensive teacher MLFFs or trajectory generation that limits prior large-timestep approaches (Bigi et al., Thiemann et al.).",
+        "The mathematical development is sound: the mean displacement field (Eq. 6), the forward consistency condition (Eqs. 7-9), and the sufficiency proof in Appendix C are clearly derived, and the objective reduces to standard MLFF force matching at ∆t = 0, giving a clean unified model that acts as both force field and large-timestep integrator.",
+        "Evaluation is unusually comprehensive: toy systems (Barbanis, spring pendulum), a 100-body gravitational system, MD17 molecules, paracetamol in low-data regimes, and alanine dipeptide with 1 ms rollouts; metrics include structural observables (h(r) MAE), temporal observables (power spectra), free energy surfaces with PMF/MJS errors, wall-clock throughput (378.5 ns/day vs 31.7 for the own MLFF), and comparison against a generative baseline (ScoreMD).",
+        "Thorough ablations: τ sampling distribution, ∆t_max trade-off, semi-group consistency analysis, force MAE vs q_∆t=0, and a convincing control (Figure 21) showing inference filters do not artificially stabilize Velocity Verlet, supporting that large-timestep stability stems from the learned flow map.",
+        "The coupled energy/angular-momentum conservation filter is derived as a closed-form constrained optimization (Appendix B.3), which is a useful methodological contribution beyond prior sequential correction schemes.",
+        "Honest limitations discussion: non-preservation of symplecticity/equivariance, instability at ∆t ≈ 10 fs for alanine dipeptide, difficulty in chaotic regimes, and reliance on filters and stochastic thermostats are all stated explicitly."
+      ],
+      "weaknesses": [
+        "The method leans substantially on inference-time machinery (random rotation, drift removal, coupled energy/angular momentum correction, thermostat choice); the model itself is non-symplectic and non-conservative, and the main results would not hold without these filters plus stochastic Langevin dynamics that masks integration errors, as the authors themselves note for Nosé-Hoover artifacts (Table 10).",
+        "Accuracy degrades noticeably with timestep: at ∆t = 9 fs the h(r) MAE is consistently worse than the MLFF baseline at 0.5 fs, force MAE is roughly 2-3x the dedicated MLFF (Table 8), and stability fails for salicylic acid at larger timesteps; the benefit is therefore primarily throughput rather than accuracy, which could be framed more carefully.",
+        "Experiments are limited to small molecules (≤ 21 atoms) and one small peptide in implicit solvent. Despite claiming trainability on widely available MLFF datasets (SPICE, omol25), no experiment demonstrates transferability to chemically diverse or larger systems, where the decorrelated-snapshot training regime and independent Maxwell-Boltzmann momentum sampling may be less appropriate.",
+        "No direct quantitative comparison against trajectory-based large-timestep methods (FlashMD, TrajCast, Timewarp) on shared benchmarks; the only external baseline is ScoreMD, which is a generative model with different objectives, making it hard to judge how the trajectory-free objective trades off against teacher-distilled approaches.",
+        "Training cost claims of 'comparable' to standard MLFFs are somewhat optimistic: HFM training takes up to 1d11h vs 16h for the MLFF baseline on small molecules (~2x), plus ~30% per-step overhead, and the auxiliary MLFF forward pass for the energy correction filter adds inference cost that partially offsets the larger-timestep gains.",
+        "Some results are less favorable than the narrative suggests: an unexplained systematic instability at ∆t ≈ 10 fs for alanine dipeptide across hyperparameters (Table 15) and HFM at ∆t = 1 fs slightly worse than MLFF in Table 1 deserve deeper analysis.",
+        "Reproducibility would benefit from more detail: the code link is a placeholder ('github'), and hyperparameter sensitivity (e.g., mixture distribution weights, q values) appears to be empirically tuned per system without general guidance."
+      ]
     }
   },
   "v4": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "The core idea is well-motivated and clearly novel: adapting the Mean Flow / flow-map consistency formalism (Geng et al., 2025; Boffi et al., 2025) from generative modeling to deterministic Hamiltonian dynamics, yielding a trajectory-free training objective that requires only instantaneous (x, p, v, f) samples. This avoids expensive teacher-MLFF trajectory generation and reframes a real bottleneck in MD simulation.",
+        "The mathematical derivation (Eqs. 6-10) is clean and self-contained: the forward (start-time) consistency condition is shown to be both necessary (main text) and sufficient (Appendix C) for recovering the true Hamiltonian flow map, with a convincing argument that the integration constants coincide at Δt = 0.",
+        "Unifying instantaneous force prediction (Δt = 0 recovers the standard MLFF loss, Eq. 11) with large-timestep integration in a single model that supports arbitrary Δt ∈ [0, Δtmax] is an elegant and practically useful design.",
+        "Evaluation is unusually broad and rigorous: analytic toy systems (Barbanis, spring pendulum), gravitational N-body (Brandstetter benchmark), MD17/MD22 molecules, alanine dipeptide (1 µs rollouts), paracetamol data-efficiency/spectra studies, and coarse-grained proteins (Chignolin, BBA) with transition-rate (Markov chain JSD) analysis.",
+        "The comparison to trajectory-based training under matched force-evaluation budgets (Appendix G.14, Tables 19-20, Figures 27-28) directly substantiates the paper's central claim that trajectory-free training is more data-efficient, rather than merely asserting it.",
+        "Thorough, honest ablations: τ-sampling distributions, training horizon Δtmax, semi-group consistency (G.8), thermostat dependence (including documented Nosé-Hoover artifacts), inference filters (showing they do not artificially rescue bad trajectories, Fig. 23), Lyapunov-time analysis (G.13), and an analysis linking the ~10 fs alanine dipeptide instability to hydrogen vibrational periods.",
+        "Good reproducibility: code, model weights, JAX/PyTorch notebooks promised, plus detailed hyperparameters, architectures, and compute budgets in appendices; honest limitations section and impact statement."
+      ],
+      "weaknesses": [
+        "The main-text MD comparisons are primarily against the authors' own MLFF and ScoreMD; head-to-head comparisons against the strongest existing large-timestep systems (e.g., FlashMD, TrajCast) on identical datasets appear only indirectly (via the trajectory-matching objective reimplementation in G.14). A direct empirical comparison to these published systems would substantially strengthen the significance claims.",
+        "Dependence on inference-time scaffolding is non-trivial: the headline NVT results rely on a stack of filters (random rotation, drift removal, coupled energy/angular-momentum conservation requiring an auxiliary energy model) plus a local stochastic thermostat. While G.11 convincingly shows the filters are not the source of large-timestep capability, the method as a whole is a pipeline rather than a single integrator, which complicates adoption and attribution of gains.",
+        "The claim of 'comparable training and inference cost' to standard MLFFs is not fully consistent with the reported numbers: HFM training times (e.g., 1d11h on small molecules, 22h-40h elsewhere) are roughly 2-4x the MLFF baselines' training times in the same appendices, and inference includes an extra MLFF energy forward pass per step.",
+        "Some reported throughput comparisons are against weak or oddly tuned baselines (e.g., SchNet at 0.3 ms/step but NequIP at 20.6 ns/day), which makes the speedup numbers harder to interpret in context.",
+        "Regions of instability remain unexplained in a mechanistically satisfying way for at least one system (alanine dipeptide at Δt ≈ 10 fs, Table 17 shows PMF errors of 29.7/10.5 at 10-11 fs), and the authors themselves note that rollout stability does not consistently correlate with one-step error - a warning sign for practitioners that reliability across molecules/timesteps is not yet predictable.",
+        "Some design choices feel empirical rather than principled (e.g., the 0.98 B(1,2) + 0.02 U(0,1) mixture for τ, the qΔt=0 = 0.75 anchoring ratio, edge-case momenta sampling probabilities qL=0 = qp=0 = 0.25), though each is at least ablated.",
+        "The code URL is blank in the manuscript; reproducibility claims rest on promised artifacts that a reviewer cannot verify at submission time."
+      ]
+    },
     "exp3_negative": {
       "oa": 4,
       "strengths": [
@@ -36,6 +97,27 @@
         "Several baselines are self-constructed (the SO(3)-equivariant MLFF, the JAX reimplementation of SchNet/NequIP) rather than published reference numbers, and the ScoreMD comparison may not fully reflect that method's intended operating regime. A head-to-head against the strongest published trajectory-based large-timestep model (e.g., FlashMD) under identical data budgets is missing from the main results.",
         "The architectural choice of a non-equivariant translation-invariant transformer with random-rotation augmentation is acknowledged but not ablated against an equivariant backbone, leaving open whether the instability artifacts and filter requirements are partly architecture-induced.",
         "The stop-gradient formulation avoids higher-order derivatives but means the consistency target is only approximately correct during training; the paper cites prior work for this choice but provides limited analysis of when this biases the learned map."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Clear and well-motivated core contribution: a trajectory-free training objective for learning large-timestep Hamiltonian flow maps from instantaneous (x, p, f) samples, removing the need for teacher MLFFs or pre-computed trajectories required by prior large-timestep methods (e.g., FlashMD, TrajCast).",
+        "The mathematical development is careful: the mean displacement field is derived from first principles, the consistency identity (Eqs. 7-9) is shown to be both necessary and sufficient (Appendix C, including the forward- vs. backward-consistency distinction from Geng et al.), and the objective recovers the standard MLFF loss at ∆t = 0, unifying force prediction and integration in one model.",
+        "Unifying instantaneous forces and large-timestep propagation in a single continuous-time model (arbitrary ∆t at inference) is a genuinely useful property relative to fixed-timestep trajectory-based approaches.",
+        "Very extensive and convincing experiments: toy systems (Barbanis, spring pendulum), gravitational N-body, MD17/MD22 molecules, alanine dipeptide (1 µs rollouts), and coarse-grained proteins, with structural (h(r) MAE), temporal (vibrational spectra), thermodynamic (equipartition), and kinetic (Lyapunov times, transition rates) observables.",
+        "Exceptionally thorough ablations: ∆t-sampling distribution, ∆t_max horizon, force-matching ratio q_∆t=0, effect of inference filters (including showing filters do not rescue Velocity Verlet at large timesteps), semi-group consistency, and a direct data-efficiency comparison against trajectory-matching training under matched force-evaluation budgets (Appendix G.14), which substantiates the central claim that trajectory-free training is more label-efficient.",
+        "Honest limitations discussion: the ∆t ≈ 10 fs alanine dipeptide instability (attributed to hydrogen vibration period resonance, supported by spectral analysis in Fig. 25), non-symplecticity, the reliance on inference filters and stochastic thermostats, and optimization difficulty in chaotic regimes are all explicitly acknowledged.",
+        "Good reproducibility: detailed hyperparameters, architectures, compute budget, software licenses, and promised code, weights, and self-contained notebooks.",
+        "Proposed coupled energy/angular momentum conservation filter is a clean closed-form constrained projection that is a useful technical contribution in its own right."
+      ],
+      "weaknesses": [
+        "Conceptual novelty is somewhat derivative: the core objective is a direct adaptation of Mean Flow (Geng et al., 2025a) / flow-map self-distillation (Boffi et al., 2025a) to Hamiltonian dynamics. The adaptation is well done and domain-appropriate, but the consistency-condition machinery itself is imported rather than invented.",
+        "Main quantitative comparisons lack direct baselines from prior large-timestep trajectory-based models (e.g., FlashMD or TrajCast trained and evaluated on the same datasets); the headline comparison is against the authors' own MLFF with Velocity Verlet. The trajectory-matching comparison in G.14 uses their own MLFF as the ground-truth proxy, which softens the strength of those numbers.",
+        "The method depends on a stack of inference-time corrections (drift removal, coupled energy/angular momentum filter requiring an extra MLFF potential evaluation, random rotations, and choice of a stochastic thermostat); while ablations show filters do not create the large-timestep capability, the gap between 'learned integrator' and 'learned integrator plus correction machinery' slightly complicates the headline claim, and Nosé-Hoover results (Table 12) show notable degradation.",
+        "Instantaneous force accuracy is consistently worse than a dedicated MLFF (Table 10), and error grows with ∆t; the method trades per-step accuracy for throughput, which is fair but should temper expectations for force-critical applications.",
+        "The ∆t ≈ 10 fs resonance failure on alanine dipeptide (PMF error 29.7) is system-dependent; the paper offers a plausible explanation but no principled mitigation, and it is unclear how generally such resonances will appear across chemical space.",
+        "Many of the strongest supporting details (wall-clock comparison, data-efficiency study, filter analysis, transition rates) are relegated to the appendix; the main text alone somewhat undersells the evidential support and relies on qualitative claims in places."
       ]
     }
   }
