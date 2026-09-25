@@ -74,9 +74,13 @@ def analyze():
             assert eid in record['evaluators']
             rows.append({'pair_id': pid, 'evaluator_id': eid, 'name': f['evaluator_name'], 'label': record['label'], 'conference': record['conference'], **a})
         assert completed == d['completed_pairs']
-        assert d['total_pairs'] == 40 and d['status'] == ('complete' if completed == 40 else 'in_progress')
+        assert d['total_pairs'] == 40
+        assert d['status'] == ('complete' if completed == 40 else 'in_progress')
+        if completed == 40 and '-in_progress-' in path.name:
+            metadata_notes.append(f"{f['evaluator_name']}: filename still says in_progress, but all 40 answers are complete.")
         files.append({'file':path.name, 'sha256':sha256(path.read_bytes()).hexdigest(), 'evaluator':f['evaluator_name'], 'completed':completed})
-        if d['exported_at'][:10] not in path.name:
+        filename_date = re.search(r'\d{4}-\d{2}-\d{2}', path.name)
+        if filename_date and d['exported_at'][:10] != filename_date.group():
             metadata_notes.append(f"{f['evaluator_name']}: filename date differs from exported_at; do not infer work duration from filenames.")
         same = sum(a.get('first_answered_at') == a.get('updated_at') for a in d['answers'].values() if a['overall'])
         if same == completed:
@@ -122,7 +126,7 @@ def analyze():
     OUT.mkdir(exist_ok=True)
     (OUT/'summary.json').write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n')
     def pct(n,d):return f'{n}/{d} ({n/d:.1%})'
-    lines=['# Human evaluation：当前回复分析','','## 数据范围','',f"完成 {len(rows)}/200 份评审，覆盖 {len(by_pair)}/150 个不同论文对；42 对已有双评。所有已完成记录自报查看了两个版本。任务哈希、材料哈希、论文分配和选项均校验通过。",'','## 整体改善','', '| 自动标签 | 评审数 | 明显改善 | 略有改善 | 无实质差别 | 任意改善 | 改善率 95% CI |','|---|---:|---:|---:|---:|---:|---|']
+    lines=['# Human evaluation：当前回复分析','','## 数据范围','',f"完成 {len(rows)}/200 份评审，覆盖 {len(by_pair)}/150 个不同论文对；{len(shared)} 对已有双评。所有已完成记录自报查看了两个版本。任务哈希、材料哈希、论文分配和选项均校验通过。",'','## 整体改善','', '| 自动标签 | 评审数 | 明显改善 | 略有改善 | 无实质差别 | 任意改善 | 改善率 95% CI |','|---|---:|---:|---:|---:|---:|---|']
     for label,x in by_label.items():
         c=x['overall'];ci=x['improved_ci95_pair_cluster_bootstrap']
         lines.append(f"| {label} | {x['ratings']} | {c.get('clearly_better',0)} | {c.get('slightly_better',0)} | {c.get('no_meaningful_difference',0)} | {pct(x['improved'],x['ratings'])} | {ci[0]:.1%}–{ci[1]:.1%} |")
@@ -134,11 +138,11 @@ def analyze():
     for name,x in reviewers.items():
         parts=['/'.join(str(x['by_label'][label].get(k,0)) for k in ['clearly_better','slightly_better','no_meaningful_difference']) for label in by_label]
         lines.append(f"| {name} | {x['completed']}/40 | {parts[0]} | {parts[1]} |")
-    lines+=['','不能因为尺度严格而排除某位评审。缺失回复仍需补齐，双评分歧适合进行独立复核。','', '## 描述准确性','',f"共 {sum(accuracy.values())} 个维度判断：" ,'']
+    lines+=['','不能因为尺度严格而排除某位评审。双评分歧适合进行独立复核。','', '## 描述准确性','',f"共 {sum(accuracy.values())} 个维度判断：" ,'']
     for k,v in accuracy.items():lines.append(f'- {k}: {pct(v,sum(accuracy.values()))}')
     lines+=['','这是评审对候选描述的认可率，包含“没有变化”的描述；不是经独立金标准证明的客观准确率。当前人工评估可以在网页版 LLM 辅助下完成，且评审已看到 GPT 生成的描述，因此应称为允许 LLM 辅助的人工核验，不应描述成完全独立、无辅助的专家判断。JSON 没有记录各人实际使用了什么 LLM 或使用程度。','', '## 需要复核的论文对','']
     for d in disagreements:lines.append(f"- {d['pair_id']} / arXiv:{d['arxiv_id']} / {d['label']}："+'；'.join(f'{k}: {v}' for k,v in d['ratings'].items()))
-    lines+=['','所有非“属实”的维度判断、分会议结果、未覆盖论文对和文件哈希见 `summary.json`。','', '## 结论边界','', '- 当前样本支持修改描述具有较高人工认可率，且 major 组比 minor 组更常被认为有明显改善。','- major 的“有任何改善”认可率超过 90%，不等于超过 90% 被认定为“明显改善”，也不等于超过 90% 的精确分类一致率。','- 样本按会议和 major/minor 均衡抽取；不代表所有论文或所有候选类别的分布，不能估计完整分类器的召回率。','- 目前仍缺 12 份评审；这些不是负面判断，也不能假定与已回收结果相同。','- 文件时间戳不是实际投入时间或是否使用工具的可靠证据。']
+    lines+=['','所有非“属实”的维度判断、分会议结果、未覆盖论文对和文件哈希见 `summary.json`。','', '## 结论边界','', '- 当前样本支持修改描述具有较高人工认可率，且 major 组比 minor 组更常被认为有明显改善。','- major 的“有任何改善”认可率超过 90%，不等于超过 90% 被认定为“明显改善”，也不等于超过 90% 的精确分类一致率。','- 样本按会议和 major/minor 均衡抽取；不代表所有论文或所有候选类别的分布，不能估计完整分类器的召回率。',f'- 当前完成 {len(rows)}/200 份评审，缺失 {200-len(rows)} 份；缺失项不作为负面判断。','- 文件时间戳不是实际投入时间或是否使用工具的可靠证据。']
     (OUT/'summary.md').write_text('\n'.join(lines)+'\n')
     print(json.dumps({k:result[k] for k in ['completed_ratings','unique_observed_pairs','by_label','accuracy','accuracy_by_machine_dimension_label','pairs_all_descriptions_accurate_in_all_observed_ratings','agreement','metadata_notes']},ensure_ascii=False,indent=2))
 
