@@ -1,0 +1,132 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Addresses an important and practical problem: efficient initialization/training of diffusion models when target model sizes or hardware constraints differ from available pre-trained models.",
+        "Proposes a technically plausible method: factorizing DiT weights into shared singular-vector-like components U and V (learngenes) and layer-specific Sigma, then adapting only Sigma on a small target subset for task/size-specific initialization.",
+        "Extends the learnGene framework to diffusion image generation and provides a benchmark for evaluating initialization methods across multiple DiT depths.",
+        "Reports consistent empirical gains on ImageNet-1K across depths L4-L12: FINE after 10K steps improves FID/sFID/IS over direct initialization, knowledge transfer, and adapted learnGene baselines, and outperforms 30K-step direct pre-training in Table 1.",
+        "Demonstrates task-specific transfer to CelebA-HQ, LSUN-Bedroom, and LSUN-Church, improving FID/sFID over all baselines while transferring a moderate number of parameters (~23M).",
+        "The paper is generally well organized, with clear motivation, method overview, and a useful comparison table across methods and model depths."
+      ],
+      "weaknesses": [
+        "The central 'variable-sized' claim is not fully supported: experiments vary only depth (L4-L12), not width or other architectural size dimensions. Since shared U/V dimensions depend on hidden width, the method as presented likely does not directly generalize to width-varying models, which is a common deployment scenario.",
+        "Missing comparison to WAVE (Feng et al., 2024b), a closely related learnGene method for variable-sized model initialization. KIND and SVDiff are discussed but not experimentally compared. The state-of-the-art claim is therefore unsupported.",
+        "The efficiency claim 'reducing training steps by approximately 3N×' appears mathematically incorrect. If direct training costs N*30K steps and FINE costs 30K + N*10K steps (plus Sigma optimization), the savings ratio is 3N/(N+3), not 3N. For N=1, FINE uses more compute than direct training. No break-even analysis is provided.",
+        "In Table 1, the auxiliary model and target models are both ImageNet-1K. FINE uses 30K auxiliary steps on the same dataset before 10K target steps, so the comparison to 30K direct pre-training is not equal-compute or equal-data. Direct pre-training at the same total compute (e.g., 40K or 80K steps) is not reported.",
+        "No ablation studies on core design choices: sharing U/V across layers vs. independent SVD per layer, the effect of the Sigma sharing interval, the chosen rank r, the amount of target data, and the number of Sigma optimization steps. It is unclear which components drive the gains.",
+        "Reproducibility is limited: rank r, U/V dimensions, how the auxiliary model is trained under the factorization constraint, how Sigma is initialized/optimized for different target depths, the exact target subset size, the optimizer/learning rate for Sigma, and code are not specified. No variance or standard deviations are reported despite n=5 runs.",
+        "Baselines originally designed for ViT classification (Heur-LG, Auto-LG, TLEG) are adapted to DiTs, but the adaptation details are insufficient. Fairness of these baselines is unclear, and a strong direct competitor (WAVE) is omitted.",
+        "Evaluation uses only 10K training steps and high FID values remain, so it is unclear whether the initialization advantage persists to full convergence. The paper should clarify that 'state-of-the-art' refers only to the proposed initialization benchmark, not final generation quality.",
+        "No auxiliary model performance is reported. If the constrained auxiliary model is substantially worse than a standard DiT, the extracted learnGenes may encode degraded knowledge; the method's success then depends on an unverified assumption.",
+        "The factorization is described as SVD-like, but orthogonality of U and V is not enforced or discussed. Without orthogonality, the decomposition is a general low-rank factorization rather than an SVD, so the 'singular vector' interpretation and sharing rationale are weakened.",
+        "The evaluation is narrow: only DiT-B at 256x256 resolution and three relatively small downstream datasets. Generalization to larger DiTs, higher resolutions, or text-to-image generation is untested.",
+        "The task-specific adaptation step optimizes Sigma on target data, which is a form of fine-tuning. Baselines are not given the same target-data adaptation budget, so the multitasking comparison may be asymmetric."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a practical and underexplored problem: efficiently initializing diffusion models of arbitrary sizes when no pre-trained model of the target scale exists, which is relevant for real-world deployment on heterogeneous hardware.",
+        "Clean and well-motivated method: decomposing DiT weights into shared singular vectors U and V (size-agnostic learnenes) and layer-specific singular values Σ, with an auxiliary model that enforces cross-layer sharing, is a coherent and technically reasonable design.",
+        "The task-specific initialization step (optimizing only Σ with a small amount of downstream data) is a genuinely useful extension to prior learngene work, enabling multitask adaptation at low data and compute cost.",
+        "Consistent empirical gains across variable depths (L4–L12) and three downstream datasets, with reported FID/sFID reductions and IS improvements, and the method outperforms several direct, knowledge-transfer, and learngene baselines.",
+        "The efficiency story (reduced training steps and storage) is practically meaningful and is quantified in Table 1.",
+        "The paper is clearly written, well-structured, and supported by informative figures and tables that communicate the framework and results effectively."
+      ],
+      "weaknesses": [
+        "Evaluation is limited to a single backbone (DiT-B). Claims about 'diffusion models' and 'variable-sized diffusion models' broadly are not substantiated across other architectures or larger DiT scales, which weakens the generality of the conclusions.",
+        "Methodological novelty is moderate. Sharing singular vectors across layers is a natural extension of prior SVD-based methods (SVDiff, KIND) and learngene methods (TLEG), and the authors explicitly acknowledge inspiration from TLEG; the specific factorization itself is incremental.",
+        "The closest related work (SVDiff and KIND) is discussed but not directly compared against as a baseline, so the claimed advantage over SVD-based decomposition approaches is not empirically demonstrated.",
+        "The claim of establishing 'the first comprehensive evaluation benchmark for image generation' is overstated relative to the actual scope (one backbone, three downstream datasets, 10K-step evaluations).",
+        "Convergence and efficiency claims rest on only 10K training steps; it is unclear whether the reported advantages persist under full-length training or when scaling to larger models.",
+        "Reproducibility is under-supported: no code release is mentioned, and key details (auxiliary model training recipe, the Σ-sharing scheme with r=10, and the number of optimization steps for Σ) are insufficiently specified.",
+        "Only FINE reports variance (std) in the tables, so the statistical significance of the reported comparisons against baselines is not established."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "Targets a genuine and practically relevant gap: pre-trained diffusion checkpoints exist at few fixed sizes, while deployment (edge devices vs. cloud) needs variable sizes, and pre-training every size is impractical. The paper correctly identifies this and frames it as an initialization problem rather than a PEFT problem.",
+        "The proposed factorization is simple and cheap: W_*^(l) = U_* Σ_*^(l) V_*^T with U_*, V_* shared across layers of the same component and only Σ_*^(l) layer-specific. Table 1 shows the transferred parameter count is 23.9M regardless of depth, which gives a concrete amortized-efficiency story (condense once for 30K steps, adapt only Σ per size/task).",
+        "The empirical study spans more than a single setting: five depths (DiT-B L4–L12) and three downstream datasets (CelebA-HQ, LSUN-Bedroom, LSUN-Church), with a reasonable set of initialization baselines (He-Init, Mimetic, Share Init, LiGO, Heur-LG, Auto-LG, TLEG). Improvements are directionally consistent across sizes and tasks.",
+        "The two-stage pipeline (knowledge factorization -> learngene inheritance) is described clearly and Fig. 2 communicates the framework well; core settings (30K condensing steps, batch 256, lr 1e-4, AdamW, EMA 0.9999, cfg 1.0, 50K images for FID) are reported, which is a good starting point for reproducibility."
+      ],
+      "weaknesses": [
+        "The paper's central claim - that sharing U and V across layers is what captures 'size-agnostic knowledge' - is never isolated experimentally. There is no ablation comparing the shared-U/V factorization against per-layer SVD (precisely the KIND/SVDiff formulation the paper criticizes), no ablation on the decomposition rank, and no ablation on the Σ-sharing interval. Without these controls one cannot attribute the reported gains to the proposed sharing mechanism rather than to the Σ adaptation step or to low-rank regularization.",
+        "KIND (Xie et al., 2024), the most closely related prior work (SVD-based learngene knowledge transfer in diffusion models), is discussed in Related Work but is missing from both Table 1 and Table 2. Omitting the single most informative comparison weakens the novelty claim considerably.",
+        "The 'state-of-the-art' framing is misleading. The reported FID values are ~73-90 on ImageNet-1K 256x256 (Table 1) and ~10-22 on the downstream sets (Table 2), i.e., far from published SOTA on those datasets. The claim holds only inside the paper's own benchmark of under-trained (10K-step) models, and the abstract's 'achieving state-of-the-art results across variable model sizes' will mislead readers.",
+        "Evaluation only measures early-training convergence: all models are trained 10K steps and compared to a 30K-step from-scratch baseline. No converged/final quality is reported, so it is unknown whether the initialization advantage persists (or disappears) at realistic training budgets - the practically decisive question.",
+        "The 'task-specific' step is effectively low-parameter fine-tuning of Σ on target-task data ('leveraging a small amount of data from target datasets'). This makes comparisons in Table 2 against baselines that never see target data (He-Init, Mimetic, Share Init, LiGO, Heur-LG, Auto-LG, TLEG) unfair and inflates FINE's apparent advantage; the distinction between this step and PEFT (which the paper positions itself against) is also not well motivated.",
+        "Size variation is depth-only (L4-L12), on a single backbone (DiT-B, patch size p=2) and a single condensing dataset (ImageNet-1K). Width and patch-size variation - the more common axes for real deployment constraints, and arguably where 'size-agnostic' knowledge matters most - are not tested, weakening the generality of the variable-size claim.",
+        "Key hyperparameters are missing or inconsistent. The rank r of the factorization is never reported; the symbol r is also used for the Σ-sharing interval ('the parameters in Σ are shared every r = 10 intervals'), which conflicts with its use as the rank; the number of Σ optimization steps is only 'a few hundred'. This blocks reproduction and prevents assessing the capacity/compression trade-off the method depends on.",
+        "The efficiency accounting is loose and partly inconsistent. The abstract/conclusion claim ~3Nx training-step savings and 5x storage savings, but Table 1 shows one one-time 30K condensing cost plus a few hundred steps per model, which scales as ~Nx, not 3Nx; the 5x storage figure has no explicit baseline. Additionally, in the L6 column Table 1 appears to show TLEG (82.83) with a lower FID than FINE (83.79) while FINE is highlighted as best - if the numbers are as displayed, this directly contradicts the 'consistently outperforms' claim and should be verified.",
+        "Overclaiming of 'firsts': 'the first method to accelerate diffusion model training through model initialization' (Sec. 6) is plainly false given the cited literature (GHN, LiGO, Mimetic Init, ShareInit, etc.), and 'the first learngene-based method capable of multitasking' is asserted without adequate support.",
+        "Statistical rigor is thin: Table 2 reports no variance, the meaning of 'n = 5' and of the 'Step'/'Cost' columns in Table 1 is ambiguously described, and the margins over the strongest learngene baseline (TLEG) are small in several columns, so the significance of the reported differences is unclear."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Proposes a genuinely novel pre-training paradigm for diffusion models: representing each layer's weights as U_* Σ^(l)_* V_*^T with shared singular vectors (U_*, V_*) across layers, enabling flexible, size-agnostic initialization of DiTs of varying depths without re-training from scratch.",
+        "Comprehensive empirical evaluation: ImageNet-1K initialization benchmark across 5 model depths for both DiT-B and DiT-L, plus 6 downstream datasets (CelebA, LSUN-Bedroom/Church, Hubble, MRI, Pokemon) and an extension to classification with DeiT-Ti/DeiT-S, consistently showing FINE outperforms direct, transfer, and learngene-based baselines in FID/sFID/IS (and FDD).",
+        "Well-designed ablations (Table 4 factorization ablation, Table 5 Σ initialization strategies, Figure 5 PCA visualization of Σ) that isolate the contribution of cross-layer weight sharing versus per-layer SVD and rule-based initialization.",
+        "The paper makes a clear and useful contribution by being, to my knowledge, the first to systematically adapt learngene-style initialization to diffusion transformers, and it constructs a corresponding evaluation protocol/benchmark that could be useful to the community.",
+        "Reproducibility is reasonably supported by the supplementary material: Algorithm 1 gives the factorization procedure, Tables 6–8 give dataset characteristics and hyperparameters, and the factorization is a one-time cost that can be amortized across many target model sizes (Figure 3b)."
+      ],
+      "weaknesses": [
+        "Notational/dimensional inconsistency in the factorization: the text states V_* ∈ R^{r×m2}, but Eq. (6) uses V_*^T to reconstruct W ∈ R^{m1×m2}, which requires V_* ∈ R^{m2×r}. This should be corrected for clarity, and the paper should clarify how shared U_*/V_* are defined for weight matrices of different shapes (qkv, o, in, out, adaLN).",
+        "The choice of rank r in the SVD-style factorization is not discussed. Since r controls the compactness of the learnable parameter space and the expressiveness of the shared components, the paper should report how r is selected and provide a sensitivity study, otherwise the efficiency claims are hard to assess.",
+        "Some claims appear overstated: 'the first comprehensive benchmark to evaluate the initialization capability of learngenes in image generation' and repeated 'state-of-the-art' language are strong relative to the scope of the baselines (mostly adapted from ViT/general NN literature), and would benefit from more careful phrasing.",
+        "The very large margins on small downstream datasets (e.g., MRI DiT-B FDD 0.041 vs. next-best 0.057; Hubble 0.101 vs. 0.119; Pokemon 0.407 vs. 0.428) are striking given dataset sizes of only 833–3753 images. No variance, multiple seeds, or statistical tests are reported, so these numbers warrant additional scrutiny.",
+        "Generality is demonstrated only on DiT (and DeiT for classification). U-Net-based latent diffusion models (e.g., Stable Diffusion), which dominate practical deployment, are not evaluated, weakening the generality claim of 'variable-sized diffusion models'.",
+        "The theoretical justification for why shared singular vectors should capture 'size-agnostic knowledge' across layers is thin; the argument rests largely on empirical observations from ViT literature (Mimetic Init, TLEG, ShareInit) rather than analysis of DiT denoising dynamics.",
+        "The 'one-time cost' framing could be clearer: the factorization pre-training itself consumes 300K steps on ImageNet-1K, and the amortization argument (3n× speedup) only holds when many target sizes are needed. The paper should more explicitly state the break-even point and the practical regimes where FINE is beneficial."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "The paper targets a practical and timely problem: initializing diffusion models of variable sizes when size-matched pre-trained checkpoints are unavailable. This is valuable for deployment under heterogeneous compute and memory budgets.",
+        "The proposed FINE factorization—shared singular vectors U_* and V_* across layers with layer-specific singular values Σ_*^(l)—is a simple, flexible, and effective way to encapsulate size-agnostic knowledge and adapt it to different depths.",
+        "The experimental evaluation is broad: DiT-B and DiT-L across ten depths (L4–L12), multiple downstream datasets (CelebA, LSUN-Bedroom/Church, Hubble, MRI, Pokemon), and an extension to DeiT classification. FINE consistently improves FID/sFID/IS/FDD over direct, transfer, and learn-gene baselines.",
+        "Ablations on knowledge factorization (Table 4), Σ initialization strategies (Table 5), and PCA visualization of Σ across layers (Figure 5) provide useful evidence for the design choices.",
+        "The paper is generally clear, with a well-articulated framework figure, algorithm in the supplement, and hyperparameter tables that support reproducibility.",
+        "The one-time pre-training cost and subsequent efficient adaptation could be practically useful when many target model sizes must be initialized."
+      ],
+      "weaknesses": [
+        "The 'variable-sized' claim is mainly validated for depth variation within a fixed width. The method shares U_* and V_* across layers of the same weight type, but if model width changes, those shared factors are dimensionally incompatible; the paper does not demonstrate cross-width initialization. This limits the practical scope and makes the title/abstract somewhat overbroad.",
+        "The efficiency claim in Section 5.2 states that FINE achieves 'roughly a 3n× speedup' over full pre-training. This is mathematically inconsistent with the stated costs: direct = 300K×n, FINE = 300K+100K×n, so the asymptotic speedup is at most 3×, not 3n×. This is a material overstatement of the computational benefit.",
+        "Although the paper describes U_* and V_* as 'singular vectors' and the factorization as SVD-like, the optimization does not impose orthogonality (U_*^T U_* = I, V_*^T V_* = I). The resulting factors are shared low-rank components with a diagonal Σ, not true singular vectors/singular values. This weakens the mathematical analogy and may affect interpretation.",
+        "The paper does not report the generation quality of the pre-trained factorized FINE model itself relative to a full-rank DiT pre-trained for the same 300K steps. Without this control, it is harder to tell whether downstream gains come from preserved knowledge or from beneficial regularization/constraints during adaptation.",
+        "Key implementation details—such as the rank r used for each weight type, the source model depth used for pre-training, and the number/type of adaptation steps for Σ on target models—are only partially specified. This makes exact reproduction harder and could affect the reported speed/quality trade-off.",
+        "Downstream gains are sometimes small (e.g., FID improvements of 0.28, 0.24, 0.011, 0.008 in Table 2), and no variance/error bars or multiple-seed results are provided. Given the known variance of FID/FDD, the statistical significance of some improvements is unclear.",
+        "The cross-layer sharing assumption—that layers share meaningful principal subspaces—is justified mainly empirically by final performance; the paper provides limited direct analysis showing that U_* and V_* are actually similar across layers (the PCA visualization focuses on Σ, not U/V)."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "Addresses a practically relevant and under-explored problem: initializing diffusion models of arbitrary sizes when no size-matched pretrained checkpoint exists, which matters for heterogeneous deployment.",
+        "The core factorization (W = U_* Σ^(l)_* V_*^T with shared singular vectors and layer-specific singular values) is simple, clean, and elegantly turns initialization into a small, compact optimization over Σ, enabling manual-free depth adaptation.",
+        "Experiment breadth is reasonable for a workshop/niche topic: 10 ImageNet-1K configurations (DiT-B and DiT-L, L4–L12), six downstream datasets (CelebA, LSUN-Bedroom/Church, Hubble, MRI, Pokemon), an extension to DeiT classification, and ablations on factorization and Σ initialization (Tables 1–5).",
+        "The paper is clearly written and well organized; the supplementary provides Algorithm 1, dataset statistics, and hyper-parameters (Tables 6–8), which aids reproducibility.",
+        "The ablation on Σ initialization (Table 5, Random/Identical/Linear vs Trainable) is informative and supports the claim that lightweight trainable Σ is beneficial."
+      ],
+      "weaknesses": [
+        "Incremental novelty relative to closely related prior work. Shared low-rank bases across layers, SVD-style weight factorization, and structural constraints for scalable initialization are already present in WAVE [11] (Kronecker/Tucker constraints for scalable initialization), SVDiff [16], PiSSA [32], TLEC [51] (linear relationships across layers), and Mimetic Init [43]. The combination is new for diffusion, but the conceptual step is small.",
+        "The closest prior work, WAVE [11], is described in Related Work as the directly competing paradigm for scalable model initialization but is conspicuously absent from all quantitative comparisons (Tables 1–3). Without this baseline, the repeated 'state-of-the-art' claims over 'existing initialization and learngene methods' are not established.",
+        "The assumption that all layers of the same weight type share identical U_* and V_* is very strong and is justified mainly by analogy to ViT observations (Mimetic Init, TLEC) and a qualitative PCA visualization (Fig. 5). No direct analysis of DiT weight statistics is provided to justify cross-depth subspace sharing, and the depth-mismatch case (e.g., L4 layer 1 vs L12 layer 1) is not examined.",
+        "Several reported gains are marginal and plausibly within run-to-run noise, yet are presented as 'notable': CelebA FID 7.99 vs 8.27 (↓0.28), Pokemon FDD 0.407 vs 0.412 (↓0.005), MRI FDD 0.049 vs 0.052, Church 17.29 vs 19.30. No error bars or multiple seeds are reported anywhere.",
+        "The 'w/o Factorize' ablation (Table 4) is counterintuitive: independent per-layer SVD (62.86 FID) is far worse than the constrained shared-basis model (51.58 FID), even though independent SVD is at least as expressive. The explanation ('poor reusability') is asserted, not demonstrated, and the experiment appears to conflate model capacity with the sharing mechanism, weakening the central ablation.",
+        "Evaluation protocol is weak for diffusion: all initialization quality is measured after only 100K training steps, and the claim that FINE 'reaches comparable FID up to 200K steps earlier' (Fig. 3c) is only loosely supported; the direct-PT curves appear to converge at longer budgets, which would shrink the practical advantage.",
+        "The efficiency claim is overstated: the '3n× speedup' is only asymptotic. With the reported n = 10 target models the realized saving is ~2.3×, and the one-time factorization pre-training (300K steps of ImageNet-1K DiT-B/L training) is a substantial cost that is not included in most comparisons.",
+        "Scope is limited to class-conditioned DiT at 256×256. No text-to-image or large-scale experiments are provided, even though two baselines (BK-SDM, Laptop-diff) are Stable-Diffusion based; this undercuts broad claims about initialization for 'real-world deployments.'",
+        "Overselling of contributions: 'the first comprehensive benchmark to evaluate the initialization capability of learngenes in image generation' amounts to re-implementing a handful of existing learngene methods; and the parameter counts in Table 3 (1.4M/4.4M transferred) suggest the mechanism is far smaller in scope than the framing implies."
+      ]
+    }
+  }
+}

@@ -1,0 +1,126 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Addresses an important and timely problem: improving GPU utilization for LLM serving under bursty online loads while harvesting idle resources for offline inference.",
+        "Proposes a coherent system design with several novel mechanisms for LLM serving, including layer-granular preemption, incremental KV-cache checkpointing, background prefetching, and SLO-aware scheduling.",
+        "Evaluation uses a real-world online load trace (BurstGPT) and a realistic offline workload (LongBench summarization), with synthetic workload sweeps over burstiness and request rate.",
+        "Ablation in Figure 8 helps isolate the contributions of preemptive scheduling, incremental checkpointing, and background prefetching.",
+        "Implementation is described in reasonable detail atop vLLM, including CUDA stream management, safepoints, and adaptive checkpointing policy."
+      ],
+      "weaknesses": [
+        "Evaluation is limited to a single NVIDIA A100-40G GPU and one model (Llama-2-7B), despite the design claiming support for tensor and pipeline parallelism. No multi-GPU, larger-model, or multi-model results are provided, so scalability claims are unsupported.",
+        "Baselines are weak and outdated. The paper only compares against vLLM and a custom vLLM++ priority scheduler, not against recent LLM serving systems such as Sarathi-Serve, DistServe, Splitwise, Llumnix, AlpaServe, or offline systems like S3/FlexGen/DeepSpeed ZeRO-Inference. Claims of state-of-the-art performance are therefore not substantiated.",
+        "Several central claims are not clearly supported by the presented data. For example, the abstract claims 2.35x higher throughput than state-of-the-art online serving systems, but Figure 5 reports ConServe at 3702 tokens/s versus Online-Only at 1999 tokens/s (about 1.85x); vLLM++ actually achieves higher raw overall throughput (4308 tokens/s) while violating SLOs. The 84x latency reduction claim is likewise not directly traceable to a single reported comparison.",
+        "Algorithm 2 appears to contain an inverted condition: line 10 breaks when t_remain + t_exec > t_TTFT, which would skip preemption exactly when preemption is needed. As written, the pseudocode does not implement the described preemption behavior and harms reproducibility.",
+        "The offline throughput comparison to Online-Only is not apples-to-apples because Online-Only is not designed to serve offline requests. A fair comparison should include an offline-capable baseline run under the same SLO constraints.",
+        "Key system overheads are not sufficiently measured: host memory footprint, PCIe bandwidth consumption, checkpointing overhead over time, and the cost of discarding/recomputing uncheckpointed KV blocks. The adaptive checkpointing policy (e.g., 50% threshold) is heuristic and lacks sensitivity analysis.",
+        "No sensitivity analysis for different SLO tightness, model sizes, sequence lengths, or GPU types. The paper sets SLOs from vLLM Online-Only P99 measurements, which may be loose and may not generalize to stricter production targets.",
+        "The system's preemption safepoint overhead is reported as 4% of model execution time in offline batching mode, but the effect on offline throughput and tail latency under diverse model/layer sizes is not systematically studied.",
+        "Reproducibility is limited: no artifact or open-source release is mentioned, and many implementation choices (8-layer preemption granularity, 50% memory threshold, Ray vs. shared-memory backend) are tuned without public configuration or scripts."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a genuinely timely and important problem: GPU underutilization in LLM serving driven by bursty, heterogeneous (online + offline) workloads, with a coherent co-serving vision rather than cluster repartitioning.",
+        "The design is well-composed and internally consistent: a unified preemptive scheduler, layer-granularity preemption, incremental KV-cache checkpointing, background prefetching, and an SLO-aware batching policy that fit together around the online/offline split.",
+        "The incremental-checkpointing insight is elegant: because autoregressive decode emits exactly one token (and one KV slice) per iteration, the device-host traffic is small, bounded, and amortizable, which directly addresses the 'swap-out blocks online requests' problem in Figure 4.",
+        "Evaluation uses a real-world trace (BurstGPT, Fig. 1) plus synthetic sweeps over burstiness (CV) and request rate, and reports appropriate and distinct metrics (TTFT/TPOT for online, tokens/s for offline).",
+        "The paper is largely honest about some limitations (e.g., the 4% safepoint overhead and its PyTorch-barrier source, the compatibility discussion for disaggregated and long-context settings)."
+      ],
+      "weaknesses": [
+        "The evaluation is narrow relative to the claims: a single NVIDIA A100-40G GPU and a single model (Llama-2-7B), despite claiming tensor/pipeline parallelism and targeting 'popular models.' There is no scaling study, so the multi-GPU claims are unsupported.",
+        "The headline numbers rest on weak/trivial comparisons. The '84× tail-latency reduction' is against vLLM++, a self-implemented priority scheduler whose P99 TTFT reaches ~83 seconds, suggesting a poorly tuned strawman rather than a fair state-of-the-art co-serving baseline. The '2.35× higher throughput' is against Online-Only, which by construction produces zero offline throughput, making the comparison uninformative for the core claim.",
+        "No comparison to other co-serving or phase-disaggregated systems (e.g., DistServe, Splitwise) or to a properly tuned co-serving scheduler; the only meaningful co-serving baseline is the authors' own vLLM++.",
+        "Preemption mechanics the paper depends on are not cost-free: the reported 988µs-per-safepoint and ~4% end-to-end overhead (attributed to PyTorch's distributed barrier and explicitly deferred to future work) directly undercut the latency-isolation guarantees that are central to the paper's thesis.",
+        "Key mechanisms are evaluated only indirectly. Figure 8 attributes 14.0% and 13.6% throughput recoveries to incremental checkpointing and prefetching, but there is no direct measurement of checkpointing overhead or sensitivity analysis for the adaptive checkpointing policy, which is described only qualitatively.",
+        "Reproducibility is weak: no code/artifact release is indicated for a 4,165-line system built atop vLLM, baseline implementation details (vLLM++ scheduling, swapping behavior) are sparse, and the trace-sampling procedure is only loosely specified.",
+        "Claims are overstated relative to the evidence (abstract: 'state-of-the-art online serving systems'; '84× reduction'), which conflicts with an evaluation that primarily demonstrates 'co-serving beats online-only' and 'we fare better than an untuned priority scheduler.'"
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Targets a real and important problem: GPU underutilization caused by bursty online LLM inference and separate online/offline clusters.",
+        "Proposes a coherent system design with three well-motivated components: a unified preemptive scheduler, incremental asynchronous KV-cache checkpointing with background prefetching, and an SLO-aware adaptive scheduler.",
+        "Reports strong empirical results on BurstGPT and LongBench: ConServe keeps P99 TTFT/TPOT below SLOs while improving overall throughput over Online-Only vLLM (reported 3702 vs. 1999 tokens/s) and avoiding the severe latency violations of vLLM++.",
+        "Design drill-down provides useful evidence for each mechanism: preemptive/SLO-aware scheduling reduces P99 TTFT by 71.4%, and incremental checkpointing plus background prefetching recover 14.0% and 13.6% of throughput loss, respectively.",
+        "Evaluates robustness under ON/OFF phased workloads and varying burstiness/request rates, showing ConServe stays close to ideal online latency while still harvesting idle resources for offline serving.",
+        "Implementation is described in reasonable detail (4165 LoC on vLLM 0.4.2, layer-wise safepoints, separate CUDA streams for I/O overlap, tensor/pipeline parallelism support), and the approach is largely orthogonal to disaggregated serving and long-context optimizations."
+      ],
+      "weaknesses": [
+        "The abstract's central claim of 2.35× higher throughput than state-of-the-art online serving systems is not supported by the main experiment: §6.2 reports Online-Only at 1999 tokens/s and ConServe at 3702 tokens/s, which is about 1.85×, not 2.35×.",
+        "The evaluation is limited to a single NVIDIA A100-40G GPU and Llama-2-7B. Despite claiming tensor and pipeline parallelism support and motivating large-scale LLM serving, there is no multi-GPU, multi-node, or larger-model evaluation, so scalability claims remain unsubstantiated.",
+        "The baseline comparison is weak for claims about 'existing co-serving systems.' vLLM++ is a custom priority-scheduler extension implemented by the authors, and there is no comparison to published preemption/co-serving or disaggregated systems such as Sarathi-Serve, DistServe, Splitwise, AlpaServe, Reef/Shepherd, or Llumnix.",
+        "Algorithm 2 appears logically inconsistent: line 10 breaks out of the handler when the estimated serving time exceeds the TTFT objective, which would skip preemption in exactly the case where preemption is needed. Combined with typos such as 'ix_empty' and 'prefetch' vs. 'prefill', this makes the scheduling logic hard to verify and raises reproducibility concerns.",
+        "The SLO-aware scheduler relies on an offline profiler, but the paper does not give the calc-budget function, profiling overhead, sensitivity to hardware/model/batch/sequence-length changes, or robustness when profiling assumptions are violated. The 50% GPU-memory threshold for checkpointing is also presented without justification or ablation.",
+        "Incremental checkpointing and background prefetching are evaluated only through end-to-end throughput/latency. There is no direct measurement of host-memory capacity/usage, PCIe/NVLink bandwidth utilization, checkpointing rate, swap-in latency distributions, or worst-case I/O contention.",
+        "Preemption overhead is non-trivial: each safepoint costs on average 988µs, and instrumenting every 8 layers adds 3.99ms, about 4% of model execution for Llama-2-7B. The claim of negligible overhead may not hold for smaller models, larger batches, or multi-GPU deployments; this is not evaluated.",
+        "Reproducibility is limited: no code or artifact release is mentioned, the custom vLLM++ baseline is unavailable, several scheduler/profiler/checkpointing parameters are unspecified, and the sampling procedure for the BurstGPT trace is only briefly described.",
+        "The offline workload evaluation covers only LongBench summarization, and synthetic workloads are generated by the authors' own load generator. This does not demonstrate generalization across diverse offline LLM workloads, such as analytics, benchmarking, or RAG/tool-use pipelines.",
+        "The paper lacks an explicit limitations section and failure analysis. It does not examine scenarios where offline throughput cannot be harvested, host DRAM is exhausted, checkpointing falls behind memory consumption, or SLO targets are chosen differently. SLO targets are derived from Online-Only P99 results, which could favor ConServe relative to alternatives."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Addresses an important and timely problem: GPU underutilization in LLM serving due to bursty online traffic, via co-serving latency-critical online requests with best-effort offline batch inference.",
+        "Proposes three concrete, well-motivated techniques: SLO-aware token-level scheduling, layer-wise preemption, and incremental KV cache management. Each targets a specific limitation of prior coarse-grained serving systems.",
+        "Extensive evaluation on three models (Llama-3.1 8B, Qwen-2.5 14B, Llama-3.1 70B with TP), four strong baselines, and both synthetic and real-world workloads. Results show consistent and substantial improvements (e.g., 2.9× P99 latency reduction and 2.2× offline throughput).",
+        "Ablation and sensitivity analyses (burstiness, input/output lengths, SLO scales) strengthen the empirical case and show robustness across workload variations.",
+        "Clear system design and implementation details atop vLLM 0.8.4, including the token-level scheduler, safepoint mechanism, and KV cache checkpointing design.",
+        "The paper delivers a practical system contribution with immediate relevance to production LLM serving infrastructure."
+      ],
+      "weaknesses": [
+        "The core performance model Latency(P,C) = k1P + k2P(P+C) + k3P + k4(P+C) + k5 is theoretically questionable for batched decode and mixed prefill/decode batches. The P(P+C) term effectively assumes cross-request attention (quadratic in total compute tokens), but in LLM serving each request attends only to its own KV cache. For batched decode with B requests and total context C, true attention cost is roughly O(C), not O(B(B+C)). The paper reports <4% prediction error but does not validate the model across heterogeneous batch compositions, which is critical for SLO-safe scheduling.",
+        "Incremental KV cache management is primarily described for decode. It is unclear how prefill KV is checkpointed, especially when an offline prefill is preempted mid-chunk (partial prompt KV), or whether prompt-token checkpointing incurs additional overhead. The claim of near-zero-cost preemption/resumption may not hold for prefill-heavy offline tasks.",
+        "Layer-wise preemption implementation details are incomplete: how the GPU reads the host-side preemption flag, how safepoint synchronization works under tensor parallelism without deadlocks, and how conditional CUDA graph nodes interact with host-side flags are not fully specified. Reported safepoint overhead also varies (21 µs vs. 167.2 µs on 4 GPUs) without explanation.",
+        "No code or artifact release is mentioned, which limits reproducibility. Evaluation is on a single hardware setup (8×H100 DGX); host-memory pressure and the claimed graceful degradation via token-level recomputation are not evaluated.",
+        "Some claims are overbroad (e.g., “first LLM co-serving system”) without comparing against all relevant prior co-serving or priority-based scheduling work. The DistServe-P baseline, tuned with static prefill/decode ratios, may not represent the strongest disaggregated baseline.",
+        "Presentation issues: typos and extraction artifacts (e.g., “pref111”, “conefﬁcients”), minor formatting problems in tables/figures, and occasional unclear notation reduce polish."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "Addresses a timely and important problem: GPU underutilization in LLM serving due to bursty online traffic and the opportunity to co-serve latency-tolerant offline batch workloads.",
+        "Proposes three concrete techniques—SLO-aware token-level scheduling, layer-wise preemption, and incremental KV cache checkpointing—with reasonable technical motivation and novelty in the LLM serving context.",
+        "Implements the system on vLLM 0.8.4 with substantial code (9169 lines), demonstrating engineering feasibility.",
+        "Evaluates across three model sizes (Llama-3.1 8B/70B, Qwen-2.5 14B), four real-world datasets, and synthetic workloads, showing consistent improvements over the custom baselines in the reported setup."
+      ],
+      "weaknesses": [
+        "Overstates SLO guarantees: the paper claims \"strong online latency guarantees,\" but at the strictest SLO scale (s=1) ConServe achieves only 86% attainment, far below the 99% required for a P99 SLO. No formal or worst-case latency guarantee is provided, and the claim is unsupported by the evidence.",
+        "The performance model uses aggregate P and C with a term k2 P(P+C). This does not match the actual per-request attention cost sum_i P_i(P_i+C_i); the approximation can be inaccurate for mixed batches. The paper reports <4% error but does not validate on dynamic mixed workloads, undermining the scheduler's reliability.",
+        "The claim that incremental checkpointing's host memory footprint is \"strictly bounded by the total physical GPU memory\" is not justified. Paused requests can accumulate KV checkpoints far exceeding GPU capacity over time, and the fallback to recomputation when host memory is exhausted is not evaluated.",
+        "Baseline fairness is questionable: Sarathi-P and DistServe-P are custom extensions of existing systems rather than the original systems or other co-serving approaches. DistServe is designed for disaggregated online serving, not co-serving, and its extension may be a strawman. No comparison to relevant offline/co-serving systems (e.g., BlendServe, PSM, Llumnix, FlexLLM).",
+        "Reproducibility is limited: no code or artifact release is mentioned, baselines are custom, and evaluation depends on a specific DGX H100 setup with manual tuning (DVFS and GC disabled), making independent replication difficult.",
+        "Presentation is poor: numerous typos and formatting errors (e.g., \"pref111\" for prefill, \"conefﬁcients\", garbled Table 2 columns, unclear figure captions) significantly hinder readability.",
+        "The evaluation reports offline throughput but does not analyze offline job completion times, fairness, or starvation under sustained online load, which is critical for batch APIs with turnaround deadlines.",
+        "The claim of being the \"first LLM co-serving system\" is unsubstantiated and overclaims prior work on workload colocation and LLM serving."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Addresses a timely and important problem: co-serving latency-critical online LLM requests with latency-tolerant offline batch inference to harvest idle GPU cycles, motivated by real traffic burstiness and GPU underutilization.",
+        "Introduces a coherent set of three techniques—SLO-aware token-level scheduling, layer-wise preemption, and incremental token-level KV cache checkpointing—that directly target scheduling, execution, and state-management bottlenecks.",
+        "Evaluation is broad: three models (Llama-3.1 8B/70B, Qwen-2.5 14B), real traces and datasets, multiple baselines (Non-Preemptive, Sarathi-P, DistServe-P), synthetic sweeps over load/SLO/burstiness/lengths, and component ablations. Results show near-optimal online latency and 78–88% of optimal offline throughput, with clear gains over prior systems.",
+        "Implementation is described concretely (vLLM 0.8.4, 9169 LOC, CUDA graph and tensor-parallel considerations, safepoint overhead measurements), which increases confidence in practical feasibility.",
+        "The paper identifies and explains concrete failure modes of coarse-grained scheduling/preemption/KV management, and the proposed granularities map well to those failure modes."
+      ],
+      "weaknesses": [
+        "Originality is mostly systems integration and adaptation: token-level scheduling, layer-wise/preemptive execution, and append-only KV checkpointing build on existing ideas (chunked prefill, paged KV, safepoints, CPU co-location). The paper does not fully establish why these particular combinations are necessary beyond a strong engineering effort.",
+        "Key algorithmic details are under-specified: the polynomial performance model is stated, but regression methodology, feature normalization, validation across models/hardware, and the full scheduling algorithm (especially memory-pressure handling and offline batch sizing) are only sketched. Algorithm 1 only covers TTFT-triggered preemption. This limits reproducibility and makes it harder to assess generality.",
+        "The evaluation lacks statistical rigor: no confidence intervals, variance, or significance tests, and no released artifact/code despite the large implementation. Baseline tuning is asserted but not fully documented, especially for DistServe-P; fair comparison is difficult to verify.",
+        "Incremental KV checkpointing is described for newly generated decode tokens; it is unclear how partial prefill chunks are handled when preemption occurs mid-prefill. The paper claims near-zero-cost preemption/resumption, but recomputation of partially processed long prefill chunks may still waste compute, and this case is not analyzed in detail.",
+        "SLO guarantees are empirical and depend on profiler accuracy and runtime jitter; there are no formal bounds or worst-case analyses. The '>99% attainment when s>1' claim is based on one setup and may not hold under sharper burstiness or adversarial kernel timing.",
+        "Layer-wise preemption correctness in tensor-parallel/CUDA-graph settings, including flag coherence, cleanup of partially computed hidden states, and interaction with continuous batching, is not fully detailed; this could be fragile in practice.",
+        "Offline-fairness/starvation and the handling of limited host memory are acknowledged only briefly. The system can degrade to recomputation but this regime is not evaluated, and there is no discussion of privacy/security of checkpointed KV states in host memory."
+      ]
+    }
+  }
+}

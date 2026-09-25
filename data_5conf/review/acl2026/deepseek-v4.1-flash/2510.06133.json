@@ -1,0 +1,128 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3.5,
+      "strengths": [
+        "Clear and well-motivated problem: the paper identifies redundant remasking and history-agnostic decoding as key inefficiencies in diffusion LLM parallel decoding, and supports this with empirical analyses of token confidence/stabilization (Figures 1–3, 6).",
+        "Simple, training-free method: Trace Credit is an intuitive token-level historical prior, and CreditDecoding is orthogonal to existing inference optimizations (KV cache, early stopping, PyTorch compiler, FP8). The algorithm is provided and is easy to integrate.",
+        "Extensive experimental evaluation: eight benchmarks, two dLLM backbones (LLaDA-8B-Instruct and LLaDA-MoE-Instruct), comparisons with LLaDA and Fast-dLLM, hyperparameter/block-length ablations, scalability to long contexts, and orthogonality experiments.",
+        "Practical relevance: dLLM inference acceleration is timely and important; the method is plug-and-play and the paper reports substantial throughput improvements with little or no average accuracy loss.",
+        "Reproducibility is partially addressed: public model weights, OpenCompass evaluation, detailed evaluation configs, and algorithm pseudocode are provided."
+      ],
+      "weaknesses": [
+        "The headline speedup claim is based on Tokens-Per-Forward (TPF), not wall-clock throughput (TPS). TPF ignores the extra computation introduced by credit updates and logits fusion, and the appendix TPS results show much smaller speedups (e.g., Table 3: LLaDA-8B TPF 15.39× vs TPS 4.39×). The abstract's '5.48× speedup' is therefore potentially misleading unless qualified as TPF rather than actual latency reduction.",
+        "The average accuracy gains are very small (+0.48 on LLaDA-8B, +0.15 on LLaDA-MoE) and are not supported by multiple seeds or statistical significance tests. Some individual benchmarks show notable drops (GSM8K −0.76, LCB −0.61), so the claim of consistent performance improvement is not fully established.",
+        "The value of the hyperparameter γ is not reported in the main paper even though it is part of the credit update; this hurts reproducibility and makes the hyperparameter ablation incomplete.",
+        "There is no quantitative comparison to the closely related history-aware decoding method of Wang et al. (2025). The related-work discussion is also somewhat inconsistent: it cites history-aware methods but then claims existing score-based methods are 'largely history-agnostic,' leaving the novelty claim ('for the first time') insufficiently supported.",
+        "The method can accumulate credit for incorrect top-1 tokens that persist across steps, potentially propagating errors; this failure mode is not systematically analyzed or guarded against beyond global decay.",
+        "No code release is mentioned, and several implementation details (e.g., exact treatment of full-vocabulary credit storage and fusion overhead) are unclear, which limits confidence in reproducibility and practical deployment."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3,
+      "strengths": [
+        "The paper addresses a relevant and practical problem: inefficient parallel decoding in diffusion LLMs due to repeated remasking of stable tokens.",
+        "The proposed CreditDecoding is simple, training-free, and plug-and-play; trace credit is an intuitive temporal prior that can be combined with existing inference optimizations.",
+        "The empirical study spans two dLLM backbones (LLaDA-8B and LLaDA-MoE), eight benchmarks, and multiple analyses (hyperparameter ablation, block length, scalability, orthogonality).",
+        "The paper reports substantial TPF speedups and some average accuracy gains, and the orthogonality experiments include TPS evidence for wall-clock gains.",
+        "The analysis of temporal gaps between top-1 stabilization and final decoding provides useful insight into dLLM decoding behavior.",
+        "The writing is clear, with helpful figures and an algorithm that make the method easy to follow."
+      ],
+      "weaknesses": [
+        "The main speedup claims (5.48x/4.11x) are based on TPF (tokens per forward), not wall-clock latency; TPF ignores the overhead of credit updates and logit fusion. The appendix TPS results indicate actual speedup over Fast-dLLM is much smaller, so the acceleration claim is overstated in the main text.",
+        "Performance improvements are small and inconsistent: average gains are +0.48/+0.15, with several benchmarks degrading (e.g., LCB, GSM8K, Math, DROP, KorBench). No variance, multiple seeds, or significance tests are reported, so small average gains may not be reliable.",
+        "The empirical comparison is limited to Fast-dLLM and the base model; several related parallel decoding/acceleration methods (PC-Sampler, DPaD, path planning, adaptive token ordering, etc.) are cited but not compared.",
+        "Novelty is moderate and the relationship to prior work on temporal/historical dynamics (e.g., Wang et al., 2025) is not sufficiently differentiated; the claim of leveraging past predictions 'for the first time' may be overclaimed.",
+        "Reproducibility details are incomplete: the value of gamma is not specified, no code is released, and the computational/memory overhead of full-vocabulary credit accumulation is not analyzed.",
+        "Evaluation is restricted to the LLaDA model family; other dLLM families are not tested, limiting generality.",
+        "Long-context scalability is only tested up to 4K and performance degrades; maintaining credits only within the current block may limit the method's benefits and is not fully ablated.",
+        "The paper lacks theoretical analysis of why trace credits improve convergence or when they could fail; the 'ideal decoding boundary' is diagnostic rather than a rigorous bound.",
+        "Minor notation inconsistencies (t vs. k in equations/algorithm) and numerical inconsistencies (e.g., 4.10x vs. 4.11x, '10% lower speed') reduce clarity."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2.0,
+      "strengths": [
+        "Addresses a timely and relevant problem: inference acceleration for diffusion large language models, which suffer from high latency due to iterative denoising.",
+        "The proposed CreditDecoding is training-free and designed to be orthogonal to existing inference optimizations (e.g., KV caching, early stopping, PyTorch compilation), making it potentially easy to integrate.",
+        "Evaluates on two diffusion LLMs (LLaDA-8B-Instruct and LLaDA-MoE-Instruct) and eight benchmarks, with additional ablations on hyperparameters, block length, scalability, and orthogonality.",
+        "Provides useful visualizations and analysis of token confidence dynamics, including the temporal gap between top-1 stabilization and actual decoding.",
+        "Reports average speed and accuracy gains over the sequential LLaDA baseline and shows some improvement over Fast-dLLM on several tasks."
+      ],
+      "weaknesses": [
+        "The core method is not rigorously justified. Trace credit is updated using the current top-1 prediction and then fused with the same logits, effectively double-counting the current prediction; the paper calls this 'historical' information without explaining or analyzing why this is sound. This risks reinforcing early errors and contradicts the stated motivation.",
+        "There are serious reproducibility issues: Equation 6 and Algorithm 1 are inconsistent (using x_t vs. x_{k+1}), the value of gamma is not reported, hyperparameter selection is not fully specified, no code is released, and no error bars or multiple seeds are provided despite small average differences (e.g., +0.48).",
+        "The speed claims rely on TPF (tokens per forward), which is not clearly defined and appears inconsistent (e.g., TPF changes with KV cache in Table 3). TPF does not account for the extra O(L*|V|) credit-update overhead, so reported speedups may not translate to wall-clock latency. Wall-clock TPS is relegated to the appendix and shows smaller gains.",
+        "The main comparison is misleading: the abstract emphasizes 5.48x speedup over LLaDA-8B, but Fast-dLLM already provides 4.31x; the actual gain over Fast-dLLM is only about 27% TPF and +0.53 average score, with performance drops on LCB, GSM8K, Math, and DROP.",
+        "Empirical evaluation is limited: only Fast-dLLM is compared among parallel decoding methods; other relevant approaches (PC-Sampler, DPaD, path planning, etc.) are discussed but not evaluated. Only LLaDA-family models are used, limiting generality.",
+        "The analysis of the 'ideal decoding boundary' is oracle-based and does not establish that early top-1 predictions are reliable. The paper does not quantify how often the early top-1 token is actually the final correct token, so the motivation for accelerating commitment remains unproven.",
+        "The CreditDecoding* variant yields negligible accuracy gains (e.g., +0.01 average on LLaDA-8B) at a notable speed cost, and the claimed '10% lower speed' understates the observed ~13-26% TPF reduction in some settings.",
+        "The paper overclaims: phrases such as 'significantly reduces redundant iterations' and '5.48x speedup' are not adequately qualified, and the contribution over Fast-dLLM is incremental without statistical validation."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "The paper identifies and empirically characterizes two concrete inefficiencies in dLLM parallel decoding: computational redundancy (tokens are predicted early but decoded late) and history-agnostic decoding. The analysis in Figures 3-5 is clear and motivates the method well.",
+        "The proposed CreditDecoding is simple, training-free, and plug-and-play: it maintains a token-level trace credit via an EMA-style update and fuses it with current logits to boost underconfident correct tokens. The minimum-logit-gain derivation in Appendix C.1 gives useful theoretical grounding.",
+        "The empirical evaluation is broad: eight benchmarks, multiple dLLM families and architectures (LLaDA, LLaDA-MoE, SDAR, LLaDA2-Mini/Flash), parameter scales from 8B to 100B, long-context scalability, orthogonality with existing optimizations, Top-K decoding, and several ablation studies.",
+        "The method achieves substantial TPF speedups over standard LLaDA decoding and generally improves average benchmark scores. Appendix Table 9 provides end-to-end TPS results, which help connect TPF gains to practical wall-clock efficiency.",
+        "The limitations section and failure-mode analysis are candid, acknowledging dependence on denoising steps, hyperparameter variation, and performance drops on reasoning-heavy tasks.",
+        "Reproducibility is reasonably supported: the algorithm, hyperparameter choices, block sizes, benchmarks, metrics, and ICL settings are specified, and model weights are public."
+      ],
+      "weaknesses": [
+        "The headline speedup of up to 5.48x is relative to standard LLaDA-8B-Instruct, not to the strongest baseline Fast-dLLM. Against Fast-dLLM, the average TPF gain is +27% and the end-to-end TPS gain is only about +19% (Appendix Table 9). The abstract and introduction should state this more carefully.",
+        "Accuracy improvements are small and uneven. The average gain on LLaDA-8B-Instruct is +0.48, but several benchmarks degrade (DROP -0.08, LCB -0.61, GSM8K -0.76, MATH -0.06). The claim of 'consistently improves performance' is overstated; gains are mainly average-level, not per-task.",
+        "The main experiments use fixed hyperparameters (alpha=0.65, beta=0.7, gamma=0.2) tuned on LLaDA-8B-Instruct, and it is unclear whether this tuning used held-out validation data or the evaluation benchmarks. The proposed tuning-free schedule is not used for the main results; the adaptive variant appears only in the generalization table.",
+        "Results are reported as single-run numbers without variance, confidence intervals, or significance tests. Given the small average improvements (e.g., +0.13 on MoE), the empirical evidence for accuracy gains is not strong enough to rule out noise.",
+        "Generalization claims are not fully supported. On LLaDA2-Flash, CreditDecoding has lower TPF than Fast-dLLM (2.48 vs. 2.79), and CD-Adaptive also remains lower (2.68). The 'universal' efficiency claim needs qualification.",
+        "The TPF metric is normalized and may not fully capture overhead from credit updates and logit fusion. Although TPS is reported in the appendix, the main paper leans heavily on TPF and should foreground wall-clock latency comparisons against Fast-dLLM.",
+        "Some claims about orthogonality and seamless integration are supported by mixed results: Table 5 shows several combinations with only modest or no gains, and the interaction with some accelerations is not uniformly beneficial."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Clear and well-motivated problem analysis: the paper identifies computational redundancy and history-agnostic decoding as key bottlenecks in threshold-based parallel decoding for diffusion LLMs, supported by confidence-trajectory visualizations (e.g., Figure 5).",
+        "Simple, training-free method: CreditDecoding uses an EMA-style trace credit as a historical prior fused with current logits, making it a plug-and-play post-processing module without retraining.",
+        "Strong empirical validation: extensive experiments across four dLLM architectures (LLaDA-8B-Instruct, LLaDA-MoE-Instruct, SDAR-Chat-b32, LLaDA2-Mini/Flash), eight benchmarks, multiple baselines, and ablations for hyperparameters, block length, and credit scope.",
+        "Significant efficiency gains: reports up to 5.48x TPF speedup and +0.48 average score on LLaDA-8B-Instruct, with end-to-end TPS improvements and consistent TPF gains on LLaDA-MoE-Instruct.",
+        "Demonstrated generality and orthogonality: method integrates with KV cache, PyTorch Compiler, FP8 quantization, early stopping, and threshold/Top-K decoding strategies, with a tuning-free adaptive variant for deployment.",
+        "Scalability evidence: evaluations at generation lengths up to 4096 show sustained relative speedup, supporting practical long-context acceleration.",
+        "Theoretical framing: includes derivation of minimum logit gain and discussion of ideal decoding boundaries, connecting the method to a temporal-consistency property of denoising traces.",
+        "Good reproducibility practices in the paper: public model weights, detailed benchmark configurations, algorithm pseudocode, and appendices covering derivations and additional experiments."
+      ],
+      "weaknesses": [
+        "Main benchmark results appear to be single-run without variance estimates or significance tests, while several average-score gains over the strong Fast-dLLM baseline are small (e.g., +0.53 on LLaDA-8B-Instruct and +0.13 on LLaDA-MoE-Instruct). This makes the accuracy claims less statistically robust than the speedup claims.",
+        "Hyperparameters (alpha, beta, gamma) are tuned on LLaDA-8B-Instruct, and although the adaptive variant mitigates this, optimal performance still often requires dataset/model-specific tuning; the tuning-free claim is therefore only partially supported.",
+        "Performance is not uniformly better across benchmarks: Table 1 shows drops on DROP and GSM8K for LLaDA-MoE-Instruct and on LCB for LLaDA-8B-Instruct. The abstract/introduction claim of consistent improvement should be qualified.",
+        "The core idea of accumulating historical confidence via EMA is relatively incremental; the paper does not fully position it against related momentum/confidence-prior approaches outside dLLM parallel decoding.",
+        "No code release is mentioned in the main text, and single-run reporting limits independent verification of exact numbers, despite detailed configuration descriptions.",
+        "Evaluation is concentrated on the LLaDA family and closely related diffusion variants; broader dLLM architectures and denoising schedules are untested, so generality beyond this ecosystem remains uncertain.",
+        "The method has acknowledged weaknesses on reasoning-heavy tasks with strong causal dependencies and unstable confidence convergence; the failure mode analysis explains but does not fully solve this limitation.",
+        "The main comparison table uses early stopping and no KV cache by default; while the orthogonality experiments help, some baseline configurations may not represent the strongest possible comparisons in every setting."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a practically important problem (dLLM inference latency) with a simple, training-free, plug-and-play method that operates only on output logits and is shown to be orthogonal to mainstream optimizations (KV cache, PyTorch compiler, FP8, early stopping) in Table 5 and Figure 1.",
+        "Empirical coverage is broad and above the bar for the venue: eight benchmarks across five categories, four dLLM models of different paradigms and scales (LLaDA-8B, LLaDA-MoE, SDAR, LLaDA2-Mini/Flash), plus ablations on hyperparameters (Figs. 6-7), block size (Fig. 11), enhancement strategy (Table 8), long-context scalability (Fig. 8), and end-to-end TPS verification (Table 9) to back the TPF metric.",
+        "The diagnostic analysis motivating the method is clear and useful: Figures 3-5 and 9-10 convincingly illustrate the 'computational redundancy' (early prediction, late decoding) and 'history-agnostic decoding' problems, and the derivation of the minimum required logit gain X_min in Appendix C.1 is correct and justifies why naive logit boosting is unsafe.",
+        "The paper is candid about limitations and failure modes (Limitations, Appendix C.11), explicitly acknowledging degradation on reasoning/coding tasks and identifying strong causal dependency and unstable confidence convergence as causes.",
+        "Reproducibility is reasonably supported: all models have public weights, metric/ICL configurations are specified (Table 4), a hardware-robust metric (TPF) is used, and single-run deterministic decoding is disclosed."
+      ],
+      "weaknesses": [
+        "The headline speedup is framed in a way that overstates the contribution. The reported 5.48x is relative to the naive LLaDA baseline (TPF normalized to 1), but the relevant SOTA baseline Fast-dLLM already attains 4.31x (Table 1). The marginal contribution of CreditDecoding over Fast-dLLM is only about +27% TPF and roughly +0.5 average accuracy. The abstract and introduction do not make this baseline explicit, which risks misleading readers about the size of the gain.",
+        "A decisive ablation is missing: there is no comparison against a threshold-swept Fast-dLLM baseline (i.e., the accuracy-TPF Pareto frontier obtained by varying the decode threshold tau). Since the method effectively lowers the confidence bar for persistent tokens, it must be demonstrated that the gains stem from principled, history-dependent token selection rather than from an effectively lower threshold. The Top-K results in Table 3 partially mitigate this (accuracy improves even when TPF is fixed), but the direct threshold-equivalence experiment is absent.",
+        "There is an internal inconsistency about the operating configuration. Section 4.3 proposes a tuning-free schedule with gamma = 1 and step-dependent beta_t = alpha_t = 1 - eta_t, but Section 5.1 states that the main experiments use fixed alpha = 0.65, beta = 0.7, gamma = 0.2 tuned on LLaDA-8B-Instruct. It is unclear which setting produces the numbers in Table 1, and the relationship between the 'tuning-free' variant (CreditDecoding-Adaptive, Table 2) and the main method is not clearly delineated.",
+        "The claim of 'consistently improves performance' is overstated. Table 1 shows accuracy regressions on DROP (-0.08), LCB (-0.61), GSM8K (-0.76) and MATH (-0.26); the positive average (+0.48) masks a mixed and task-dependent picture, with systematic weakness on reasoning-intensive tasks.",
+        "Novelty is modest and the differentiation from prior temporal/historical-signal decoding work is thin. Trace credit is essentially an EMA of top-1 predictions fused into the logits, and the related-work section itself cites closely related temporal-signal work (Wang et al., 2025) without a substantive conceptual or empirical comparison.",
+        "Statistical support for the accuracy claim is weak: results are single-run with no variance or error bars, and a +0.48 average accuracy gain is plausibly within noise on several benchmarks; TPF is also reported without confidence intervals.",
+        "The theoretical framing of credit as a 'low-pass filter' is heuristic rather than rigorous, and the paper does not provide a formal analysis of why the credit-fused distribution should preserve or improve the target distribution, beyond the empirical motivation."
+      ]
+    }
+  }
+}

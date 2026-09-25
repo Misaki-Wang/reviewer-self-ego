@@ -40,6 +40,84 @@
         "Significance is unclear: there are no GPU/optimized-kernel measurements, no memory measurements in realistic settings, and no evidence that the method improves downstream model quality in practice.",
         "Presentation and notation are sometimes ambiguous, including convolution indexing, cache definitions, and filter-length assumptions, which makes the technical contribution harder to verify."
       ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Provides an exact method for autoregressive generation from convolutional sequence models without approximations, retraining, or distillation.",
+        "Derives clear asymptotic improvements: O(K√(L log L)) for generating K tokens from scratch and O(L log L + K^2) with O(K) cache for prompt-based generation, improving over standard O(KL) decoding and O(L) cache.",
+        "The approach is broadly applicable to convolutional models such as SSMs, Hyena, STU, LongConv, and SGConv, and the proofs are simple and easy to follow.",
+        "The online-learning extension yields amortized O(√(L log L)) per iteration and, if correct, would preserve spectral filtering regret bounds.",
+        "The synthetic timing experiments qualitatively match the predicted asymptotic behavior for a single-layer CPU setting."
+      ],
+      "weaknesses": [
+        "Limited novelty: precomputing future convolution contributions via FFT is essentially an overlap-add/overlap-save style caching trick, and its adaptation to deep autoregressive sequence models is straightforward rather than conceptually new.",
+        "Evaluation is very weak for a top-tier AI conference: only synthetic timing on a single layer and CPU, with no real language modeling, perplexity, downstream tasks, or accelerated-hardware measurements.",
+        "No comparisons to existing fast-generation approaches such as SSM distillation, speculative decoding, or optimized convolution libraries; the only baseline is naive exact convolution.",
+        "Claims of applicability to 'any convolutional sequence model' are not demonstrated for multi-layer models with interleaved nonlinearities such as Hyena, where caches across layers and channels must interact nontrivially; complexity and memory scaling with depth/channels are not analyzed.",
+        "Several algorithmic details are ambiguous or incorrect: Algorithm 1 uses φ ∈ R^{L+K} while the context length is stated as L (zero-padding beyond L is not explicitly stated); Algorithm 2 has an apparent off-by-one in cache indexing and missing cache initialization; Algorithm 3's update M^{t+1} ← ∇ℓ_t(M^t) omits the gradient step size/subtraction, undermining the claimed regret guarantee.",
+        "Reproducibility is limited: no code, dataset, hyperparameters, or detailed experimental setup are provided.",
+        "Practical impact remains unclear because FFT overhead, constant factors, memory bandwidth, and hardware-specific optimizations may erode the asymptotic gains in realistic large-model generation."
+      ]
+    }
+  },
+  "v3": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Introduces a simple and intuitive FutureFill primitive that enables exact online convolution via FFT, avoiding approximations.",
+        "Provides two algorithms with theoretical guarantees: Epoched-FutureFill offering a memory/runtime trade-off and Continuous-FutureFill achieving quasilinear O(L log^2 L) generation time, improving over the previous O(L^2) best-known result for convolutional models.",
+        "Extends the approach to prompt-based generation, reducing the prefill cache size to O(K) when generating K tokens, which is significantly smaller than O(L+K) caches required by standard convolutional or attention-based models for long prompts.",
+        "Includes rigorous theoretical analysis, including correctness proofs and complexity bounds for the proposed algorithms.",
+        "Experiments on controlled synthetic tasks and deep convolutional/hybrid models up to 826M parameters demonstrate sub-quadratic scaling and speedups up to 1.7x without prefill and 2x with prefill.",
+        "The paper is generally well written and clearly positions the work relative to related literature, including concurrent independent work."
+      ],
+      "weaknesses": [
+        "The main Continuous-FutureFill algorithm is essentially equivalent in asymptotic runtime to concurrent independent work [24] (relaxed polynomial interpolation), limiting the novelty of the central theoretical claim.",
+        "Algorithm 3 for prompt generation appears to have an off-by-one indexing mismatch between the FutureFill definition and the output computation; the cache size is stated as O(K) but the FutureFill call would naturally produce length L+K-1, requiring clarification/truncation.",
+        "Table (a) reports memory as '1' for standard convolution and standard attention, which is misleading: attention requires an O(L) KV cache and convolutional models require storing past inputs/filters; this is inconsistent with the paper's own discussion and Table (b).",
+        "Theorem 2 contains a typographical error in the runtime bound (L^3 log L/K instead of L^2 log L/K), and the proof of Proposition 1 has a minor summation typo; these should be corrected.",
+        "The empirical evaluation uses randomly initialized filters rather than trained models, so the practical speedups on real trained convolutional language models are not fully established; downstream generation quality is not evaluated.",
+        "The speedups are modest (up to 1.7x without prefill, 2x with prefill) and only compared against naive online convolution; no comparison to other exact fast generation methods or optimized baselines (e.g., block-FFT variants) is provided.",
+        "The claim of being applicable to 'any sequence prediction algorithm based on convolutional operators' is broad; nonlinear/gated convolutional models such as Hyena are not formally analyzed or experimentally tested, and integration details for deep multi-layer models with nonlinearities are limited.",
+        "No code release or detailed pseudocode for integrating FutureFill into deep multi-layer models is provided, which may hinder reproducibility."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Addresses an important and timely problem: efficient autoregressive generation from convolutional sequence models, where naive decoding is quadratic.",
+        "Provides exact online convolution algorithms with theoretical runtime/memory trade-offs, including a quasi-linear O(L log^2 L) method and a memory-efficient O(L^{3/2} sqrt(log L)) variant.",
+        "The FutureFill primitive is simple and has clear intuition; it may be practically useful for convolutional/SSM-style architectures.",
+        "Includes proofs of correctness and empirical sanity checks on synthetic online convolution and some deep convolutional/hybrid models, showing sub-quadratic scaling and speedups."
+      ],
+      "weaknesses": [
+        "Significant novelty concerns: independent work [24] already presents a very similar algorithm with the same O(L log^2 L) runtime for convolutional inference; the main Continuous-FutureFill result is therefore largely concurrent/redundant.",
+        "The theoretical contribution of the Epoched-FutureFill trade-off is incremental and not sufficiently differentiated from existing online convolution techniques; its practical advantage is not convincingly established.",
+        "There is a technical inconsistency in Theorem 2: the stated bound contains L^3 log L / K, but the proof and final claimed rate use L^2 log L / K; this undermines confidence in the analysis as written.",
+        "Evaluation is limited: speedups are only up to 1.7x on academic-sized models, baselines are naive convolution, and there is no comparison to the most relevant independent method [24] or other exact fast-convolution baselines.",
+        "Deep-model experiments use randomly initialized convolutional filters rather than trained models, so downstream generation quality or real language-modeling behavior is not assessed.",
+        "The paper claims broad applicability to any convolutional model, but experiments cover a narrow family (FlashSTU-T and a hybrid variant); robustness across architectures/hardware is unclear.",
+        "Cache-size benefits are theoretically attractive, but prefill computation and temporary memory requirements are not fully analyzed; practical OOM issues are mentioned and only partially addressed."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Introduces FutureFill, a simple and intuitive primitive for exact online convolution, and uses it to design two algorithms for auto-regressive generation from convolutional sequence models: Continuous-FutureFill with O(L log^2 L) runtime and O(L) memory, and Epoched-FutureFill with an explicit runtime/memory trade-off culminating in O(L^{3/2} sqrt(log L)) time and O(sqrt(L log L)) memory.",
+        "Extends the method to prompt-based generation, achieving O(L log L + K log^2 K) generation time with an O(K) cache, which is a meaningful improvement over the O(L+K) caches typical for convolutional and attention-based models.",
+        "The theoretical results are clearly stated and supported by proofs, and the approach applies broadly to many convolutional sequence models, including Spectral Transform Units, Hyena-style models, and SSM-derived convolutions.",
+        "Provides empirical validation both on controlled online convolution tasks and on large FlashSTU-T and hybrid convolution/attention language models up to 826M parameters, showing subquadratic scaling and speedups up to 1.7x without prefill and about 2x with prefill at tested lengths.",
+        "The paper is generally well written, the algorithms are described clearly, and implementation details are sufficiently provided for reproducibility."
+      ],
+      "weaknesses": [
+        "The core asymptotic result for Continuous-FutureFill overlaps substantially with concurrent independent work [24], which already gives O(L log^2 L) inference for long convolutional models. The paper acknowledges this, but the differentiation is mostly about simplicity and practical variants, making the theoretical novelty more incremental than it first appears.",
+        "The empirical evaluation relies only on naive online convolution as the main baseline. It does not compare against the concurrent exact method [24], optimized exact block/FFT-based generation strategies, or distilled recurrent approximations. This weakens the claim of substantial practical efficiency gains.",
+        "The deep-model experiments use randomly initialized convolution filters rather than trained STU filters, so the timings may not fully reflect realistic trained models. The paper also does not empirically verify that FutureFill outputs exactly match naive convolution outputs in the deep-model setting, despite claiming exact generation.",
+        "Observed speedups are modest (up to 1.7x without prefill and about 2x with prefill) relative to the much larger asymptotic improvement, likely due to implementation overheads and the fact that other model components dominate runtime. The hybrid-model comparison does not fully isolate the effect of FutureFill on the convolutional portions.",
+        "Theorem 2 in the main text contains an apparent typo: it states O(L^3 log L / K + K L), whereas the proof, abstract, and tables use O(L^2 log L / K + K L). The prompt-generation cache construction and the slicing needed to obtain an O(K) cache from FutureFill are also not described in enough detail in the main text.",
+        "The paper does not address numerical stability or precision issues for long-sequence FFT-based online convolution beyond casting to float32 for FFT compatibility, and quantization/hardware-specific considerations are only mentioned briefly in the limitations."
+      ]
     }
   }
 }

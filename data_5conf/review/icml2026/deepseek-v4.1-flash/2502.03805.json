@@ -1,0 +1,64 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Introduces a novel formalization of critical KV cache selection as minimizing attention output perturbation, deriving an upper bound that incorporates both attention weights and projected value state norms. This provides a principled explanation for why attention-weight-only selection is insufficient.",
+        "The theoretical analysis in Appendix E shows that previous attention-only selection optimizes a relaxed version of the proposed bound, giving a clear conceptual distinction between the two approaches.",
+        "Proposes a simple two-stage greedy algorithm that can be integrated into existing SOTA eviction methods (SnapKV, AdaKV) without modifying their core accumulation mechanisms.",
+        "Comprehensive empirical evaluation: two models (Llama-3.1-8B, Mistral-7B), two compression scenarios (regular and context-only), Needle-in-a-Haystack, and 16 LongBench datasets.",
+        "Demonstrates substantial improvements in the challenging context-only compression scenario, e.g., Mistral with 40% cache size improves single retrieval from 53 to 100 and multi-retrieval from 21.75 to 96 when integrated with AdaKV.",
+        "Empirical perturbation analysis supports the motivation: lower output perturbation in >92% of attention heads for Llama, with benefits accumulating across layers and consistent across budgets."
+      ],
+      "weaknesses": [
+        "Significant theory-practice gap: the theoretical bound is derived for a single query and a single attention layer, but the practical algorithm uses accumulated attention over an observation window and multiple queries, and the end-to-end effect across layers is not theoretically analyzed. This weakens the claimed formal grounding.",
+        "Assumption 3.4 (σ > 0.5) is not universally guaranteed. Although validated on >99% of heads, for the remaining heads the algorithm may increase perturbation, and no mechanism is provided to handle these exceptions.",
+        "Hyperparameter inconsistency: Algorithm 1 lists α = 0.25 as input, but the text and experiments set α = 0.5. Additionally, ε in Algorithm 1 line 3 is undefined and unexplained.",
+        "Integration details are unclear: Algorithm 2 applies max pooling to attention, but Algorithm 1 does not specify how pooled attention is used, nor how grouped-query attention (GQA) in Llama-3.1-8B and Mistral-7B is handled. This hinders reproducibility.",
+        "No code release or detailed implementation is provided. Hyperparameters (e.g., ε) and exact handling of multi-query accumulation and pooling are not fully specified.",
+        "No statistical significance tests or error bars are reported. In regular compression, gains are marginal (e.g., Llama SnapKV 20%: 48.29 → 48.73), so the practical benefit in that setting is unclear.",
+        "Limited comparison: only SnapKV and AdaKV with/without the method are evaluated, plus StreamingLLM as a reference. Other strong KV eviction methods (e.g., H2O, Scissorhands, PyramidKV) are not compared.",
+        "No analysis of computational overhead. Computing VW^O and L1 norms for all KV entries at each eviction step may add non-trivial cost, which is not measured or discussed.",
+        "The main paper lacks a limitations section. The impact statement is generic and does not address potential risks or broader societal implications beyond a boilerplate note.",
+        "Presentation issues: repeated placeholder text ('Title Suppressed Due to Excessive Size') disrupts readability, and minor notation errors exist (e.g., Top_b vs. Top_k, missing 1/sqrt(d) in softmax)."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Provides a clean and correct formalization of critical KV cache selection as minimizing output perturbation (Definition 3.1); the derivations of Theorem 3.2 ($A' = \\mathcal{N}\\odot A/\\sum \\mathcal{N}_i A_i$) and Theorem 3.3 (the upper bound $\\theta = C - (2 - 1/\\sum\\mathcal{N}_i A_i)\\sum\\mathcal{N}_i A_i\\|v_i\\|_1$) are algebraically sound, and the bound is a genuine, valid ($\\ge \\mathcal{L}$) triangle-inequality bound.",
+        "Theorem E.1 is a nice conceptual result: it shows that the prior attention-weight-only selection is equivalent to minimizing a relaxed (looser) version of the derived bound, giving a principled re-interpretation of existing heuristics rather than a purely ad hoc new score.",
+        "The evaluation is broad and reasonably systematic: two models (Llama-3.1-8B, Mistral-7B), two base methods (SnapKV, AdaKV), Needle-in-a-Haystack plus 16 LongBench datasets, and two compression regimes, with consistent (if sometimes small) directional improvements.",
+        "The empirical perturbation analysis (head-, layer-, and budget-wise; Figures 5-7, 9-11) is a sensible attempt to connect the theory to observed behavior, and the paper is honest about the first-layer heads that violate Assumption 3.4 and about the fact that optimizing a bound need not improve the true objective."
+      ],
+      "weaknesses": [
+        "Limited algorithmic novelty. The final selection score $A_i\\|v_i W^O\\|_1$ is essentially the same 'activation-norm times weight' importance criterion as Wanda ($|W|\\cdot\\|x\\|$, already cited by the authors), so the practical algorithm is largely a known pruning heuristic transplanted into KV eviction; the contribution rests mostly on the perturbation framing, not a new method.",
+        "The theoretical bound is loose and only weakly connected to the observed improvements. It is derived via a per-entry triangle inequality that discards all cancellation in the vector sum, and the authors themselves note (Theorem E.1 discussion) that minimizing the bound 'does not guarantee a strictly better solution.' The paper never quantifies how tight $\\theta$ is relative to $\\mathcal{L}$, so the claimed causal link between bound optimization and better generation is not established.",
+        "Empirical significance is not established. In the realistic regular-compression setting most LongBench differences are at noise level (e.g., Llama Ave. 49.06 vs 49.20; many per-domain gaps < 0.5 point), yet the paper claims improvements in '19 of 24 task domains' without any variance estimates, seeds, or significance tests. This does not support the strength of the stated conclusions.",
+        "Internal inconsistency in a key hyperparameter. Algorithm 1 lists $\\alpha = 0.25$ in its input, while Section 3.5 and Section 4.3 state $\\alpha = 0.5$ is used throughout and Assumption 3.4 is justified for 0.5. This is not a cosmetic issue because the whole stage-1/stage-2 guarantee depends on $\\alpha$.",
+        "The '>92% of heads' perturbation-reduction claim is in tension with the paper's own statement that only '<1%' of heads are problematic. Figure 5 shows roughly 8% of head/layer cells where the method is worse, so the reconciliation ('their negative impact is easily offset') is asserted rather than demonstrated.",
+        "Some reported gains are implausibly large for a change in the selection criterion (e.g., Mistral multi-retrieval NIAH rising from 21.75 to 96 at 40% cache in Figure 2d). Such a jump at a generous 40% budget suggests possible baseline miscalibration or undocumented implementation differences, and no analysis is provided to rule this out.",
+        "Ablation is incomplete and the design is ad hoc. The two-stage split with a fixed $\\alpha$ is not motivated beyond satisfying the $\\sigma>0.5$ assumption, and there is no ablation isolating the value of the two-stage scheme versus a single $A_i\\|v_i\\|_1$ score, nor of $\\|v_i\\|_1$ alone (vs. the product $A_i\\|v_i\\|_1$), nor of the choice of $\\epsilon$.",
+        "The term 'worst-case output perturbation' is imprecise: the bound is worst-case only in the sense of the triangle inequality for a fixed query, not across queries or data, which may mislead about the guarantee being provided. No code/artifact is released, limiting reproducibility."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Formalizes critical KV-cache selection as an output-perturbation minimization problem and derives an upper bound that explicitly includes projected value-state norms, providing a useful theoretical counterpoint to attention-weight-only heuristics.",
+        "Proposes a simple two-stage perturbation-constrained selection algorithm that can be integrated into existing eviction pipelines (SnapKV/AdaKV) without changing the underlying accumulation or budget-allocation procedures.",
+        "Evaluation is broad: Needle-in-a-Haystack (single/multi-retrieval, regular/context-only compression) and 16 LongBench datasets across Llama-3.1-8B and Mistral-7B, with consistent improvements over the base methods in most settings.",
+        "Empirical perturbation analysis is a strong addition: reductions are observed in >92% of attention heads, across layers, and across cache budgets, supporting the practical motivation of the method.",
+        "The paper acknowledges key limitations, including first-layer heads that violate Assumption 3.4, and justifies the fixed α=0.5 choice as a robust deployment trade-off."
+      ],
+      "weaknesses": [
+        "The theoretical guarantee is loose and conditional: the bound relies on Assumption 3.4, the two-stage greedy algorithm does not directly optimize the true perturbation, and no guarantee is given that actual per-head perturbation will decrease in all cases.",
+        "The core selection score A_i ||V_i W^O||_1 is conceptually close to activation/weight-aware pruning criteria such as Wanda; novelty is mainly in the KV-cache framing rather than in a fundamentally new selection mechanism.",
+        "There are reproducibility and presentation issues: Algorithm 1 states α=0.25 while the text and experiments use α=0.5, ε is unspecified, no code is provided, and A/\\mathcal{A} usage in the pseudocode is ambiguous.",
+        "Regular-compression gains are often marginal (e.g., Llama SnapKV average 49.06→49.20 at 40% budget), and no variance, error bars, or statistical significance tests are reported; only two model families are evaluated.",
+        "The additional computational overhead of computing projected value-state norms for all KV entries at eviction time is not analyzed, and runtime/memory costs are not reported, which matters for a cache-efficiency method.",
+        "The integration into SnapKV/AdaKV under context-only compression is under-described: it is not fully clear how the query state q used in Algorithm 1 relates to the accumulated observation-window attention used by the base eviction methods."
+      ]
+    }
+  }
+}

@@ -1,0 +1,132 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Genuinely novel architectural contribution: the Functional Basis Decoder (FBD), which interprets the SSM's final hidden output as coefficients of a continuous basis (e.g., Legendre polynomials) and samples at an adjustable interval, is a clean and well-motivated idea that enables continuous-time forecasting and variable target lengths without retraining. The connection to HiPPO's coefficient interpretation is thoughtfully drawn.",
+        "Strong empirical results with extreme parameter efficiency: FlowState-9.1M reports SOTA MASE/CRPS on GIFT-ZS and MASE/WQL on Chronos-ZS, outperforming baselines up to ~192x larger (TiRex 35M, TimesFM-2.0 500M). The 2.6M variants still match or beat much larger models, which is a meaningful practical result.",
+        "The data-leakage analysis is a valuable and careful contribution: the authors identify that the Chronos pretraining corpus overlaps with GIFT-Eval tasks and construct a cleaner GIFT-ZS subset, explicitly separating models with and without test-data leakage (TDL) in Table 3. This is exactly the kind of rigor TSFM benchmarking needs.",
+        "The causal normalization formulation (Eqs. 8-10) correctly identifies the information-leakage problem that vanilla RevIN introduces under parallel/multi-horizon prediction and provides a principled fix. This is a subtle but important technical detail that many works overlook.",
+        "The parallel-forecast pretraining scheme is well motivated (produces up to ~2028 forecasts per sample in parallel) and the ablation (Table 4) shows its removal degrades MASE from 0.733 to 0.757, supporting the claim.",
+        "Ablations are informative and cover core components (time-scale adjustment, parallel predictions, decoder basis choices, CPM/MPI), and the controlled Loop Seattle subsampling experiment directly probes the sampling-rate generalization claim."
+      ],
+      "weaknesses": [
+        "The central 'sampling rate invariant' claim is weaker than advertised. The temporal scaling factor s_delta is computed from a dataset-specific 'seasonality' value (s_delta = 24 / seasonality), which requires per-dataset domain knowledge to set. This is effectively a per-dataset hyperparameter, not true invariance. The paper does not explain how seasonality is determined for arbitrary unseen datasets, nor does it quantify sensitivity to errors in this estimate. The ablation 'w/o time-scale adjustment' conflates removing this mechanism with removing all scale handling, so the causal effect of the *automatic* adjustment is unclear.",
+        "Margins over the strongest baseline (TiRex) are very small and no statistical significance is reported. On GIFT-ZS the difference is 0.719 vs 0.733 MASE (FlowState(T)-9.1M vs TiRex); on Chronos-ZS, 0.755 vs 0.778. With no confidence intervals, variance across tasks, or seed variation, it is hard to establish that the ranking is robust rather than within noise.",
+        "Efficiency claims are asserted but not substantiated. The abstract/intro emphasize 'computationally efficient' and 'reduced data requirements,' yet no FLOPs, training wall-clock, memory, or inference-latency comparisons are provided against baselines. Parameter count alone is an incomplete proxy, particularly for SSMs versus patched transformers.",
+        "Reproducibility is incomplete. Critical pretraining details are missing: number of training tokens/steps, optimizer, learning rate schedule, batch size, hardware, and how many seeds/models were run. The 'augmentation techniques introduced in Auer et al. (2025)' are referenced but not described, and the synthetic GP/KernelSynth generation parameters are not given. This limits the ability to reproduce the headline numbers.",
+        "The FBD is claimed to be 'a separate component [that] can be combined with other encoder architectures as well,' but this generality is never demonstrated; all results use the SSM encoder, so the decoder's portability remains an unsupported assertion.",
+        "The training scheme and FBD are only evaluated at two very small scales (2.6M, 9.1M). There is no scaling analysis showing behavior at larger capacities, so the claim that this is a general foundation-model recipe is under-tested, and it is unclear whether the small-model advantage persists as capacity grows.",
+        "The framing of 'generalize across all possible temporal resolutions' is not fully supported: the model still depends on a supplied scale factor at inference, and the Loop Seattle experiment only covers 5-65 minute subsampling of a single dataset, which is a narrow test of the invariance claim."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Proposes a coherent and reasonably original architecture that pairs an S5-based SSM encoder with a Functional Basis Decoder (FBD), enabling continuous-time output and dynamic sampling-rate adaptation—an underexplored direction for TSFMs.",
+        "The parallel-forecasting training scheme (producing many forecasts per context-target pair from increasing context lengths) is a genuinely useful idea that plausibly improves efficiency and robustness to varying context lengths, and is applicable beyond FlowState.",
+        "Introduces a causal form of RevIN (running mean/std) to avoid information leakage under parallel forecasting—a thoughtful and necessary fix that the paper correctly identifies.",
+        "Empirical results, if taken at face value, are striking: a 2.6M-parameter model claimed to be on par with or better than 35M–500M baselines, and the ablation and robustness experiments (unseen sampling rates on Loop Seattle) target practically important questions.",
+        "The paper is generally well organized and the motivation (generalizing across context/target lengths and sampling rates) is well articulated."
+      ],
+      "weaknesses": [
+        "Comparison fairness is the central problem. The per-dataset scale factor s_Δ (derived from each dataset's seasonality) is effectively test-time tuning that baselines do not receive, and the ablation shows removing it costs a large amount (MASE 0.733 → 0.808). It is never explained how the seasonality of a new, truly zero-shot dataset is determined without inspecting it, so a substantial part of the reported gain may be an oracle artifact rather than architectural superiority.",
+        "The headline SOTA claim rests on the authors' self-defined benchmark (GIFT-ZS = 79/97 tasks, further excluding Solar/H short/medium/long) and on their own assertion that competitors such as TiRex leak GIFT-Eval evaluation data via the Chronos corpus. This leakage claim is asserted rather than rigorously demonstrated, and it conveniently reframes the comparison. On the full GIFT-Eval (Table 3), TiRex (0.724) beats every FlowState variant (0.728–0.752), so 'outperforms all other models' is only true under the authors' leakage-conditioned subsetting.",
+        "Reproducibility is inadequate. There are no pretraining hyperparameters, optimization details, training compute, or architectural dimensions (number of S5 layers, hidden state size n, output size, number of basis functions, evaluation interval [a,b], embedding sizes). The FBD construction (Eqs. 3–5) is under-specified, making it hard to reimplement or verify.",
+        "The FBD is theoretically thin: it uses only the final timestep's encoder output o_L^N as coefficients of a Legendre basis and then samples the resulting continuous function. There is no justification that a low-dimensional coefficient vector from a single timestep can represent the entire forecast horizon, nor a derivation linking SSM hidden states to forecast-generating basis coefficients. The similarity of results across Legendre/Fourier/Half-Legendre bases further suggests the specific 'functional basis' framing is not doing the claimed work.",
+        "Ablations undercut key claims. 'No CPM training, longer target' recovers MASE to 0.731, slightly better than the 0.733 baseline, weakening the necessity of the CPM/MPI mechanism for point accuracy; only CRPS degrades. Decoder-basis variants perform nearly identically, so the decoder's specificity is not well supported.",
+        "The sampling-rate robustness experiment (Fig. 3) is based on a single dataset (Loop Seattle), and baselines are evaluated with a fixed 480-step target while FlowState uses scale-adjusted effective horizons—so the comparison is not clearly controlled. The claim of 'superior robustness and adaptability to unseen sampling rates' is therefore thinly evidenced.",
+        "Effective context/horizon lengths (L_eff = L/s_Δ, T_eff = T/s_Δ) vary per dataset, which changes the amount of usable history and the horizon across tasks, further complicating comparability with baselines that operate at fixed lengths.",
+        "Presentation issues: the S5 discretization is written as B̄ = A^{l-1}(Ā − 1)B (apparently erroneous/confusing notation), ỹ is overloaded between normalized inputs and the continuous forecast, and the figure/equation cross-references are jumbled."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Novel and well-motivated architecture: combines an S5-based SSM encoder with a functional basis decoder to enable continuous-time forecasting, dynamic horizon adjustment, and sampling-rate adaptation.",
+        "The parallel forecasting training scheme and causal normalization are principled innovations that improve robustness to varying context lengths and avoid information leakage.",
+        "Strong empirical results: FlowState achieves state-of-the-art performance on GIFT-ZS and Chronos-ZS, outperforming much larger models (e.g., 9.1M vs 500M parameters) and matching or beating TiRex on zero-shot benchmarks.",
+        "Thorough ablation study validates key components, including time-scale adjustment, parallel predictions, decoder basis choices, and CPM/MPI.",
+        "Evaluation carefully addresses data leakage by constructing GIFT-ZS and using Chronos-ZS only for models without overlap; robustness to unseen sampling rates is demonstrated on Loop Seattle.",
+        "The model is compact and efficient, with potential for practical deployment in resource-constrained settings."
+      ],
+      "weaknesses": [
+        "Reproducibility is limited: no code, hyperparameters, model dimensions (layers, hidden sizes), optimizer settings, loss weighting for parallel forecasts, or compute details are provided. Pretraining data splits and synthetic data generation are not fully specified.",
+        "The 'sampling rate invariant' claim is overstated: the method requires setting s_Delta based on known seasonality, which is an external input and not automatically inferred online. The robustness experiment likely relies on manual scale factors per frequency, so invariance is conditional.",
+        "Claims of 'reduced data requirements' and 'accelerated training' are not empirically validated; no data-efficiency or runtime comparisons are provided.",
+        "The custom GIFT-ZS subset, while motivated by leakage, makes comparison less standard; baselines are ranked on full GIFT-Eval but evaluated on the subset. On full GIFT-Eval, TiRex (with leakage) still slightly outperforms FlowState on MASE and CRPS.",
+        "FBD details are incomplete: interval [a,b] selection, sampling procedure, number of basis functions, coefficient normalization, and how the continuous forecast maps to the future horizon are not fully specified.",
+        "No uncertainty quantification or error bars are reported; results may be sensitive to random seeds. Ablation shows removing CPM with a longer target slightly improves MASE, suggesting CPM's benefit is mainly for CRPS and needs further analysis.",
+        "Notation inconsistencies in the SSM equations (e.g., A^{l-1} vs inverse, P/H vs m/n) and some typos reduce clarity.",
+        "No dedicated limitations or broader impact discussion; potential societal impacts and failure modes of forecasting are not addressed."
+      ]
+    }
+  },
+  "v3": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Novel architecture combining an S5-based SSM encoder with a functional basis decoder (FBD) that enables continuous-time forecasting and sampling-rate equivariance, a capability largely absent in existing TSFMs.",
+        "Strong parameter efficiency: FlowState-18.6M achieves MASE 0.701 on GIFT-Eval, matching or slightly surpassing TimesFM-2.5 (200M) and other much larger baselines.",
+        "Thorough ablation study isolating the contributions of key components (equivariance mechanism, parallel forecasts, output gate, real vs. complex SSM, selective Δ, fixed linear decoder, Fourier/Legendre basis, time noise, causal RevIN), providing clear evidence for design choices.",
+        "Theoretical analysis of sampling-rate equivariance with a ZOH discretization error bound for a single-layer SSM and a sketch of the multi-layer extension, which formalizes the intuition behind the approach.",
+        "Empirical demonstration of robustness to unseen sampling rates (Figure 4) shows FlowState consistently outperforming baselines, especially at uncommon sampling intervals where baselines degrade sharply.",
+        "Introduction of causal RevIN to prevent information leakage during parallel forecasting, with ablation showing a measurable improvement.",
+        "Honest limitations section acknowledging reliance on seasonality heuristics and lack of native multivariate support."
+      ],
+      "weaknesses": [
+        "The main GIFT-Eval results rely on a heuristic scale factor derived from dataset-level seasonality and domain knowledge, providing extra information not given to baselines. The automatic scale-factor selection variant degrades performance from 0.725 to 0.746 MASE, calling into question the claim of strong zero-shot generalization.",
+        "The reported state-of-the-art gains are marginal: MASE 0.701 vs. 0.705 for TimesFM-2.5 and CRPS 0.487 vs. 0.488 for TiRex, with no statistical significance testing provided.",
+        "FlowState processes each channel independently in univariate mode and does not natively support multivariate data or covariates, limiting its applicability relative to many baselines that handle multivariate inputs.",
+        "Missing architectural details hinder reproducibility: it is unclear how the SSM encoder output (dimension 512 for larger models) maps to 256 basis coefficients, and how the interval [a,b] for the basis functions is determined.",
+        "The theoretical equivariance bound is only rigorously proven for a single SSM layer; the multi-layer extension is sketched without full proof. Empirical validation of equivariance is limited to one dataset (ETT) and a hidden-state correlation analysis.",
+        "The link between HiPPO initialization and using the final SSM outputs as coefficients for future forecasting is heuristic and lacks a theoretical justification for why these coefficients predict the future.",
+        "The parallel forecasting training scheme, while effective, is conceptually similar to multi-horizon training and its novelty is somewhat overstated.",
+        "On standard long-term forecasting benchmarks (Table 3), FlowState is competitive but not state-of-the-art on most datasets; large gains on Traffic and Electricity may stem from evaluation protocol differences (univariate vs. multivariate), raising fairness questions."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Introduces FlowState, an SSM-based TSFM with a functional basis decoder that enables continuous-time forecasts and flexible sampling-rate/horizon adjustment, an interesting and potentially useful architecture.",
+        "Achieves strong zero-shot results on GIFT-Eval with very small models (3M, 10.6M, 18.6M parameters), reporting best aggregate MASE and CRPS, which is notable if the gains are robust.",
+        "Includes a systematic ablation study covering encoder, decoder, training, and evaluation variants, with some seed variance estimates for the 3M/2k model.",
+        "Provides a theoretical sketch of approximate sampling-rate equivariance and empirical validation via hidden-state correlations and a qualitative ETT1m/h example.",
+        "Details pretraining data, hyperparameters, and training infrastructure in the appendix, and acknowledges limitations such as univariate-only modeling and heuristic scale-factor selection."
+      ],
+      "weaknesses": [
+        "The central sampling-rate equivariance claim is overstated: the model is only approximately equivariant, the formal analysis is limited to a single layer with strong Lipschitz/stability assumptions, and the multi-layer extension is only sketched, so the claimed equivariance error bound is not rigorously established for the full model.",
+        "The model requires a manually chosen scale factor s_delta based on dataset-level seasonality/domain heuristics, so it is not a purely sampling-rate-equivariant or metadata-free foundation model. The robustness experiment likely relies on such metadata, undermining the claim of generalizing to unseen sampling rates without retraining.",
+        "The main GIFT-Eval improvements are marginal (e.g., MASE 0.701 vs. 0.705; CRPS 0.487 vs. 0.488) and the main results lack statistical significance tests or error bars. Given the tiny margins and the reported seed variance in ablations, the state-of-the-art claim is not convincingly supported.",
+        "The 'w/o equivariance' ablation likely conflates removing the scale-factor adjustment mechanism with removing equivariance itself, making it unclear whether the benefit comes from equivariance or simply from using an appropriate temporal scaling. The FBD ablation also shows only a modest gain over a fixed linear decoder, and alternative bases perform similarly, questioning the specificity and necessity of the FBD design.",
+        "There is a technical issue in the causal RevIN variance formula (Eq. 15): subtracting μ_{r,i} rather than μ_{r,t} does not compute the variance of the prefix and likely severely underestimates it, which affects soundness and reproducibility.",
+        "Reproducibility is limited: no code release, unclear exact scale-factor selection in the sampling-rate robustness experiment, missing details on the FBD interval [a,b] and time-noise implementation, and no analysis of potential overlap between the Chronos pretraining data and GIFT-Eval tasks.",
+        "Appendix A.1 compares a univariate/channel-independent FlowState against multivariate baselines on multivariate benchmarks without clarifying whether the baselines are adapted to a comparable univariate setting, making those comparisons difficult to interpret.",
+        "The lack of native multivariate and covariate support limits the model's practical significance as a general time-series foundation model, even though this limitation is acknowledged."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Introduces a novel TSFM architecture that pairs an S5-based SSM encoder with a functional basis decoder (FBD), enabling continuous-time forecasting and flexible output sampling rates without changing the model weights.",
+        "Provides a formal single-layer ZOH-based analysis of approximate sampling-rate equivariance, supplemented by empirical encoder-correlation and ETT1h-to-ETT1m forecasting examples.",
+        "Demonstrates strong parameter efficiency: FlowState-10.6M outperforms much larger baselines such as TimesFM-2.5 (200M) and TiRex (35M) on GIFT-Eval MASE, and FlowState-18.6M obtains the best MASE/CRPS in Table 1.",
+        "Shows robustness to unseen sampling rates in Figure 4, with consistent advantages across 15-135 minute sampling intervals, especially at uncommon frequencies.",
+        "Includes a thorough ablation study covering core components (equivariance, parallel forecasts), encoder choices (output gate, S5-real, selective Delta), decoder choices (fixed linear, Fourier, full-Legendre), and training choices (time noise, causal RevIN).",
+        "The causal RevIN and parallel-forecast training scheme are well motivated and address information leakage and context-length robustness in a principled way.",
+        "The limitations section is honest about the scale-factor heuristic and the univariate-only design, and additional standard benchmark results (Table 3) show competitive transfer.",
+        "The paper is generally well written and the architectural diagrams clearly communicate the main components."
+      ],
+      "weaknesses": [
+        "The state-of-the-art improvement is marginal: MASE 0.701 vs. 0.705 for TimesFM-2.5, and CRPS 0.487 vs. 0.488 for TiRex. No significance tests or per-task win/loss statistics are reported for the main 10.6M/18.6M models; only the smaller 3M model has seed-variance estimates.",
+        "Sampling-rate equivariance in practice depends on manually selecting the scale factor s_Delta from dataset-level seasonality and domain metadata. The automatic scale-selection method degrades MASE from 0.725 to 0.746, below TiRex/Chronos-2 levels, so the abstract claim of inherently generalizing across all temporal resolutions is overstated.",
+        "The evaluation protocol is ambiguous: it defines effective context and forecast lengths via L_eff = L/s_Delta and T_eff = T/s_Delta, but it is unclear whether baselines use the same raw context or FlowState is evaluated with a different effective context. The note that all FlowState variants use a 4k context length conflicts with the L_eff definition if L is the raw context length.",
+        "No code release or model checkpoints are mentioned. Reproducibility depends on listed datasets, hyperparameters, and descriptions; exact data balancing, augmentation details, and preprocessing may be difficult to reproduce, especially given the 4xA100 48-hour training run.",
+        "The theoretical equivariance bound is rigorously established only for a single SSM layer; the multi-layer extension is sketched with additional assumptions and may be loose. It also does not account for scale-factor selection, which is central to practical performance.",
+        "FlowState is univariate-only and does not natively support multivariate inputs or covariates. Treating channels independently may ignore cross-channel dependencies and limits the model's applicability to many real-world forecasting problems.",
+        "The parallel-forecast training scheme is related to standard multi-horizon/prefix training and masked sequence modeling; its novelty is incremental, and the claimed training-efficiency benefits are not quantified with wall-clock or sample-efficiency comparisons.",
+        "There are presentation and reference issues: matrix dimensions in Eqs. (1)-(3) appear inconsistent (e.g., C-bar dimensions, state/output sizes P/H vs. m/n), and some citations are erroneous or ambiguous (e.g., Ansari et al. 2025 uses the same arXiv ID as Chronos 2024; multiple Gu et al. papers from the same year are not distinguished)."
+      ]
+    }
+  }
+}

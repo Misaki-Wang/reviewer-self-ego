@@ -1,0 +1,128 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Addresses an important and timely problem: improving inference efficiency of MLLMs via token sparsity.",
+        "Proposes a simple post-training RL framework that combines GRPO with an efficiency reward and accuracy reward, building on existing sparse attention (ZipVL).",
+        "Evaluates on a broad set of 13 image and video benchmarks across three Qwen-VL model variants, with results showing substantial token ratio reduction at modest accuracy cost.",
+        "The use of a KL term to a frozen full-attention reference model is a reasonable approach to preserve output quality while encouraging sparsity."
+      ],
+      "weaknesses": [
+        "Limited novelty: the method is largely an incremental combination of existing sparse attention (ZipVL) and existing RL (GRPO) with a handcrafted reward; no fundamentally new architecture, optimization, or theoretical insight is introduced.",
+        "The central efficiency claims are not supported by actual efficiency measurements. The paper reports token ratios but no wall-clock latency, throughput, FLOPs, memory usage, or KV-cache memory savings, so claims about alleviating computation and memory bottlenecks remain unsubstantiated.",
+        "Evaluation lacks appropriate baselines. It compares only full attention and ZipVL, without comparisons to other token reduction/sparse attention methods (e.g., FastV, SparseVLM, etc.), making it impossible to assess relative standing or practical impact.",
+        "No ablation studies: the effects of reward components, KL coefficient, group size N, sampling distribution, and efficiency/performance reward weighting are not analyzed.",
+        "The reward design is potentially flawed: efficiency reward is not conditioned on correctness, so incorrect but highly pruned responses can receive positive reward, possibly encouraging wrong answers in some groups. This issue is not analyzed or mitigated beyond the KL term.",
+        "Method details are inconsistent and unclear: the paper states p_n ~ U(0,1) for sampling during training, but experiments use p in [0.94,0.975] and inference p=0.975. The relationship between p, token ratio, and training behavior is not clearly explained.",
+        "Reproducibility is weak: training hyperparameters, number of samples N, batch size, learning rate, number of training steps, compute resources, and implementation details are largely missing; no code or supplementary material is provided.",
+        "Technical presentation has issues: the definition of token budget b and token ratio tau is not rigorous; masks are applied to Q and K but equation 2 omits masking of V; notation and equations would benefit from clearer derivation and justification.",
+        "Some benchmark drops are non-trivial (e.g., EgoSchema 66.0 to 64.2, MMMU-Pro 33.2 to 32.5), and no variance, confidence intervals, or statistical significance tests are provided.",
+        "Clarity and positioning are limited: there are typos ('RL-baseed', 'well-posed MLLMs'), and related work/discussion does not adequately situate the contribution relative to existing sparse attention and RL post-training literature."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 1,
+      "strengths": [
+        "Targets an important and timely problem: actively reducing visual token redundancy in MLLMs for inference acceleration.",
+        "Combines sparse attention (ZipVL) with GRPO-style RL in a post-training framework, which is an interesting direction if formulated correctly.",
+        "Evaluates on 13 image and video benchmarks across several Qwen-VL variants, giving broad coverage of multimodal tasks.",
+        "Reports a large reduction in token ratio, which, if valid, would be practically significant."
+      ],
+      "weaknesses": [
+        "Fundamental flaw in the RL formulation: the efficiency reward r_eff = 1 - τ is a function of the internal attention masks/token ratio, not of the generated answer o_n. In the GRPO/REINFORCE estimator, a reward that is independent of the sampled action has zero expected gradient. Thus the efficiency reward cannot drive the policy update as claimed; only the answer-accuracy term (and possibly indirect effects on attention via accuracy) has a direct gradient signal.",
+        "The random threshold p_n ~ U(0,1) is used to generate responses but is not included as part of the action or conditioned in the likelihood ratio πθ(o_n|x). The objective therefore does not properly account for the varying sparse-attention configuration that produced each response, making the policy-gradient update unsound.",
+        "The central claim that ZipR1 explicitly optimizes the efficiency-performance tradeoff is unsupported by the method and analysis. The paper provides no gradient derivation, no ablation on the efficiency reward, and no evidence that the efficiency term—rather than accuracy training or random threshold variation—causes the token-ratio drop.",
+        "Baseline comparison is unfair/insufficient: ZipR1 is compared to ZipVL at the same threshold p=0.975, but the key question is whether ZipR1 outperforms ZipVL when ZipVL is tuned to the same token ratio (e.g., lower p). Without matching token budgets, the reported 80%→25% reduction does not establish a genuine efficiency-performance advantage.",
+        "No comparison to other sparsity/post-training baselines (e.g., MOBA, NSA, attention regularization, SFT/distillation) despite discussing them in the introduction, so the novelty and relative gains are unclear.",
+        "Evaluation is incomplete and not fully credible: no actual latency/memory measurements, no throughput or KV-cache savings, no statistical significance or error bars, and several benchmarks show drops (e.g., EgoSchema 66.0→64.2, OCRBench 784→774). 'Minimal accuracy reduction' is asserted rather than quantified.",
+        "Training and reproducibility details are missing: no hyperparameters (N, β, ε, learning rate, batch size, compute), no reward exact-match details for open-ended video QA, no code, and no description of how sparse attention gradients are handled through non-differentiable Top-p selection.",
+        "Mathematical presentation is inconsistent/ambiguous: mask zero-norm definitions imply b can exceed ℓ and token ratio definitions do not match the reported 100% for full attention; Eq. (3) constraints and Eq. (2) row-wise softmax with zeroed query rows are unclear.",
+        "The writing has multiple typos and presentation issues ('RL-baseed', 'Qwen2.5-7B-instruct' missing VL, low-quality figure), and the method section lacks enough detail to verify the approach."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3,
+      "strengths": [
+        "Interesting and timely idea: applying RL/GRPO as a post-training method to actively encourage token sparsity in MLLMs, aligning training with inference-time sparse attention.",
+        "Practical framework: builds on existing Top-p sparse attention (ZipVL) and does not require training sparse MLLMs from scratch.",
+        "Broad empirical evaluation across 13 image and video benchmarks, three Qwen2/2.5-VL model sizes, and comparisons to full attention and ZipVL.",
+        "Reward design combining answer accuracy and token-reduction ratio is intuitive, and the KL-to-reference term is a reasonable attempt to preserve full-attention behavior.",
+        "Results show large token-ratio reductions (to roughly 22–24%) with generally small average accuracy changes, which could be impactful if supported properly."
+      ],
+      "weaknesses": [
+        "The core RL formulation is technically questionable. The efficiency reward depends on the token ratio tau, which is a deterministic function of model parameters and a randomly sampled threshold p, not of the generated answer tokens. The standard GRPO/REINFORCE update uses only answer log-probabilities, so it is unclear how (or whether) gradients correctly optimize the efficiency reward through the non-differentiable sparse-attention mask selection. This undermines the central claim of directly optimizing the efficiency-performance tradeoff.",
+        "There is a significant inconsistency in the sampling range for p: the method states p_n ~ U(0,1), while experiments use p in [0.94, 0.975] and inference uses p=0.975. It is also not explained how the same inference threshold p=0.975 yields ~80% token ratio for ZipVL but ~23% for ZipR1 after training.",
+        "The main empirical comparison is not matched for sparsity. ZipR1 at ~23% token ratio is compared against ZipVL at ~70–80% token ratio. A fair evaluation should compare methods at the same token ratio (e.g., by tuning ZipVL's p to 23%) to demonstrate a genuine improvement in the accuracy-efficiency Pareto frontier.",
+        "Missing ablations: no isolation of the efficiency reward, performance reward, and KL term; no accuracy-only RL baseline; no reward-weight sensitivity; no analysis of N, beta, training steps, or training overhead. Without these, it is difficult to attribute the token-ratio reduction to the proposed reward design rather than to incidental RL fine-tuning or other factors.",
+        "Limited baselines: only ZipVL is compared. Other token-sparsification or sparse-attention methods for MLLMs (e.g., FastV, SparseVLM, VisionZip, etc.) are not evaluated, nor are alternative post-training/efficiency approaches.",
+        "Reproducibility is insufficient: no code, no detailed hyperparameters (batch size, learning rate, number of training steps, hardware, reward normalization details), and the use of the Video-R1-260k calibration dataset is not clearly specified.",
+        "Technical presentation issues: Eq. (2) does not correctly implement sparse attention with binary masks under a standard softmax, since masked rows can become zero and produce uniform attention rather than pruning; the token-budget definition is inconsistent; notation in Eqs. (4)–(5) is sloppy (e.g., A_i vs n); several typos remain.",
+        "The paper lacks analysis of why training changes the token ratio: no attention visualization, entropy analysis, or layer-wise sparsity analysis, and no qualitative examples. This makes the mechanism behind the reported gains unclear.",
+        "The claim of 'minimal accuracy reduction' is slightly overstated on some benchmarks, e.g., EgoSchema drops from 66.0 to 64.2 for Qwen2VL-7B, and several video benchmarks show non-trivial degradation."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Novel and timely problem framing: treats token sparsity in MLLMs as an RL post-training objective using GRPO, directly rewarding efficiency and correctness rather than SFT-time proxy objectives.",
+        "Broad empirical evaluation across 13 image/video benchmarks, multiple Qwen2-VL/Qwen2.5-VL and LLaVA-Video backbones, and comparisons to training-free sparse attention methods.",
+        "Strong reported efficiency-accuracy trade-off: retained token ratios around 23-26% with minimal average accuracy drop, plus up to 3.3x decoding speedup and 3x memory reduction on long sequences.",
+        "Post-training, architecture-agnostic design: no training from scratch and compatible with existing top-p sparse attention such as ZipVL.",
+        "Useful ablation studies on sparse attention type, p range/group size, layer-wise sparsity, and HallusionBench robustness, providing practical insights into training dynamics."
+      ],
+      "weaknesses": [
+        "Causal attribution is not established: the gains may come primarily from RL/SFT fine-tuning on Video-R1-260k rather than from sparsity forcing. A control with the same post-training data but no efficiency reward, or the same reward under standard attention, is missing.",
+        "No multiple runs, error bars, or statistical significance tests. Reported accuracy differences are often small, so single-seed RL results are not sufficient for strong claims.",
+        "The optimization mechanism is under-analyzed. The token budget threshold p is sampled externally and fixed to 0.975 at inference; it is not theoretically justified how the GRPO update causally sharpens attention and lowers token ratio at fixed inference p.",
+        "Reward design details and edge cases are not fully addressed, e.g., all rewards equal within a group, no correct rollouts, and the group-level indicator C potentially allowing incorrect but efficient answers to receive non-trivial reward signal.",
+        "Baseline fairness and coverage are limited. MOBA and sharpness-loss baselines are adapted to MLLMs with few tuning details, and there is no comparison to same-data supervised/efficiency fine-tuning or broader recent efficient MLLM methods such as token merging/eviction approaches.",
+        "Reproducibility is incomplete: no code release, missing implementation details for reward scaling, prompts, evaluation protocol, exact training cost, and LMMs-Eval configuration. Notation is also inconsistent (e.g., p used as both probability threshold and integer index, and Eq. 2 masking of V is unclear).",
+        "Runtime and memory analysis extrapolates to 200k-token sequences while training/evaluation use much shorter contexts (typically 16k-20k tokens), which may overstate practical deployment gains.",
+        "Training overhead of sequential multi-budget rollouts is acknowledged but not quantified, making it difficult to assess practical scalability relative to SFT or training-free methods."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Addresses an important and practical problem: reducing visual token redundancy in MLLMs to improve long-context inference efficiency.",
+        "Proposes a simple post-training framework that combines GRPO-style RL with dynamic top-p sparse attention, without requiring architecture changes or training from scratch.",
+        "Evaluates on a broad set of 13 image and video benchmarks across multiple MLLM backbones, and reports strong token reduction with limited average accuracy drop.",
+        "Includes runtime and memory measurements, ablations over sparse attention mechanisms and budget ranges, and a robustness check on HallusionBench.",
+        "The method is conceptually intuitive: multiple rollouts over token budgets and contrastive advantage assignment to encourage correct-and-efficient answers."
+      ],
+      "weaknesses": [
+        "The reward design is flawed: r_i = r_per + C * r_eff allows an incorrect but highly efficient rollout to obtain the same reward as a correct but inefficient rollout when C=1. For example, a correct answer with zero efficiency reward gets 1, while an incorrect answer with maximum efficiency reward also gets 1. This can reinforce incorrect but sparse outputs and undermines the claimed joint optimization of correctness and efficiency.",
+        "A critical control baseline is missing: RL fine-tuning with only the correctness reward (or vanilla GRPO without efficiency reward). Without this, the observed sparsity gains cannot be cleanly attributed to the proposed efficiency reward rather than to general post-training on the same data.",
+        "The policy-gradient optimization of token ratio is theoretically questionable. The token ratio is a deterministic, non-differentiable function of the policy parameters through top-p/top-k selection, but the GRPO update only uses ∇ log πθ(o) and ignores ∇θ τ. No differentiable relaxation, straight-through estimator, or explicit budget action is described, so the claim that the method “directly optimizes token saving” is insufficiently supported.",
+        "There are serious notation and mathematical errors. Eq. (5) uses p simultaneously as an integer token count and as a probability threshold. The token-ratio definition divides by d (embedding dimension) while summing over J layers, which should likely be 1/J. Eq. (11) has a malformed expectation subscript. These errors hurt clarity and reproducibility.",
+        "The method description and implementation are inconsistent: the text says p_n ~ U(0,1), but the experiments set p ∈ [0.94, 0.975] with step 0.005. This changes the exploration strategy and must be fixed and justified, since it directly affects the claimed ability to explore minimal token budgets.",
+        "Correctness evaluation across the diverse benchmarks is not described. Many benchmarks are not simple exact-match tasks, and there is no detail on how binary correctness rewards are computed for MME, ChartQA, VideoMME, etc. Without this, reproducibility is limited.",
+        "No error bars or statistical significance tests are reported, despite many average differences being small (e.g., <0.5 points). Single-run point estimates make it difficult to assess whether the accuracy preservation is robust or due to noise.",
+        "Baseline comparisons are incomplete and potentially unfair. Training-free sparse methods are compared against a trained method, while training-based baselines such as MOBA and sharpness loss lack training details and may be handicapped. The ZipVL† baseline is not clearly defined. Runtime comparisons focus mainly on FlashAttention-2 rather than the strongest sparse-attention baselines.",
+        "Potential data contamination/overlap is not addressed: training uses Video-R1-260k and LLaVA-Video-178k, then evaluates on video benchmarks such as VideoMME, MLVU, and others that may overlap in domain or source data. This weakens the generalization claims.",
+        "Efficiency claims are incomplete. Memory and latency measurements are only on LLaVA-Video-7B, not the Qwen models, and the reported 3.3×/3.0× gains are versus FlashAttention-2 rather than versus the most competitive sparse-attention methods. The speedup relative to ZipVL is not clearly isolated.",
+        "Novelty is limited: the method mostly combines existing GRPO-style RL fine-tuning with existing top-p sparse attention (ZipVL). The core technical contribution is incremental, and the paper does not sufficiently isolate why this combination should outperform prior approaches beyond empirical results."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Proposes a clear and practical RL-based post-training framework that explicitly enforces token sparsity in MLLMs via GRPO, with a joint efficiency-performance reward that is aligned with inference-time token pruning and KV-cache management.",
+        "Uses multi-budget rollouts by sweeping top-p thresholds to explore the accuracy-efficiency frontier, avoiding rigid handcrafted sparsity patterns and enabling input/layer-adaptive token selection.",
+        "Extensive evaluation on 13 image and video benchmarks across Qwen2-VL, Qwen2.5-VL, and LLaVA-Video, comparing against training-free sparse attention methods (FastV, VisionZip, ZipVL, Minference) and post-training baselines (MOBA, sharpness regularization).",
+        "Demonstrates substantial practical gains: token retention ratio reduced to roughly 20-30% with minimal accuracy drop, plus up to 3x memory reduction and 3.3x decoding speedup, supported by runtime and long-context analyses.",
+        "Clear writing and implementation details, including training data, hyperparameters, and GPU setup; no architecture changes or training from scratch are required, making the method broadly applicable."
+      ],
+      "weaknesses": [
+        "Novelty is somewhat incremental: the core technical components (GRPO and top-p/ZipVL sparse attention) are existing, and the main contribution is the reward formulation and multi-budget rollout strategy rather than a fundamentally new algorithm.",
+        "Evaluation lacks variance estimates, confidence intervals, or statistical significance tests; most ablations are only on Qwen2.5-VL-7B, and important sparse-attention baselines such as SparseVLM and SeerAttention are not empirically compared.",
+        "The reward design can degenerate when no rollout in a group is correct: all rewards become zero and the efficiency signal vanishes, potentially slowing learning; binary correctness rewards may also be sensitive to answer parsing or reward-model quality.",
+        "Several technical/notational issues reduce clarity: p is used both as an integer token budget in Eq. (5) and as an attention-retention threshold elsewhere; Eq. (11) omits conditioning on the sampled threshold p, and the KL term between differently attended policy/reference models is not fully justified.",
+        "The training scheme requires sequential multi-budget rollouts, which the authors acknowledge as slow, but no wall-clock training cost or compute comparison is provided; code is not released, limiting reproducibility."
+      ]
+    }
+  }
+}

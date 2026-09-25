@@ -1,0 +1,135 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Addresses an important and timely problem: memory-bounded KV cache management for long-context and long-horizon LLM inference.",
+        "Proposes a learnable retention gate that predicts token importance at creation time, with an exponential decay inspired by the Ebbinghaus forgetting curve, and trains only lightweight gates via distillation and capacity regularization.",
+        "Extensive empirical evaluation across math reasoning (GSM8K, MATH-500, AIME24), procedural generation (LongProc), long-memory chat (LongMemEval), and long-context understanding (LongBenchV2, SCBench).",
+        "Reports consistent improvements over strong eviction and retrieval baselines, sometimes surpassing full-cache models, and provides qualitative evidence that learned retention patterns recover known heuristics (sink tokens, sliding windows, gist compression).",
+        "The method is plug-in to pretrained LLMs and adds negligible inference overhead; detailed hyperparameters and reproducibility statement are provided."
+      ],
+      "weaknesses": [
+        "Fundamental technical flaw in the core formulation: Eq. (1) and Eq. (3) place the retention score inside the exponential as a multiplier of the query-key dot product. For an evicted token, \\alpha=0 yields exp(0)=1, so the token is not removed. For \\beta in [0,1], low retention reduces positive logits but increases negative logits, which is the opposite of eviction. Thus the training-time retention-gated attention does not simulate inference-time eviction, and the training/inference objectives are misaligned.",
+        "The capacity loss L_cap penalizes the sum of retention scores, which is not equivalent to the number of cached tokens. It is a loose proxy that may not enforce the intended memory budget, especially since the infinite sum of \\beta_i^{t-i} is bounded by 1/(1-\\beta_i) and can remain below M even for high \\beta.",
+        "The empirical results contain inconsistencies and unclear notation. For example, in LongMemEval, 'Full KV32768' is listed with a KV budget, while full KV should be unbounded; TRIM-KV with a 4096 budget surpasses full KV by 8.5 points, but this is not adequately explained or controlled.",
+        "Limited novelty: learnable token-importance scoring and KV eviction have been explored in prior work (e.g., NACL, Attention-Gate, LocRet). The specific exponential-decay parameterization and end-to-end gate training are incremental over these methods.",
+        "Missing baselines: the main long-generation experiments do not compare against recent learnable eviction methods such as NACL or Attention-Gate, despite discussing them in related work. LocRet is only evaluated in the appendix under a chunked-prefill setting.",
+        "Claims that TRIM-KV surpasses full-cache models are not sufficiently supported. The paper attributes this to regularization but provides no controlled experiment isolating the effect of selective retention from evaluation noise or truncation.",
+        "Reproducibility is incomplete: code is not provided in the manuscript, and several evaluation details (exact prompts, decoding parameters, pass@1 computation, LongMemEval protocol) are missing or ambiguous.",
+        "Clarity issues: several typos ('Patero' for Pareto), confusing table notation, and low-resolution figures make the paper harder to follow."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Addresses an important and timely problem: memory-bounded KV cache management for long-context LLM inference.",
+        "Proposes a novel direction: learning token-intrinsic retention scores at creation time via lightweight per-layer/head gates, rather than relying only on attention-based heuristics.",
+        "Combines exponential retention decay with distillation and a capacity loss, and keeps the base LLM frozen, making the approach relatively lightweight in principle.",
+        "Reports extensive experiments across math reasoning, long procedural generation, long-memory chat, and long-context understanding benchmarks, with multiple Qwen3 and DeepSeek-R1-Distill model sizes.",
+        "Shows strong empirical gains in several low-memory regimes and provides interesting qualitative visualizations of emergent patterns such as sink tokens, sliding windows, and head specialization.",
+        "Includes an appendix with additional ablations on objectives, gate architecture, training memory capacity, and cross-domain training data."
+      ],
+      "weaknesses": [
+        "The core mathematical formulation is incorrect. In Eq. (1), alpha in {0,1} is placed inside the exponent: exp(alpha * q^T k). Setting alpha=0 gives exp(0)=1, so an 'evicted' token still contributes to attention rather than being removed. The same issue appears in Eq. (3): beta_i^{t-i}=0 gives exp(0)=1, so low-retention tokens are not actually suppressed as claimed. For negative q^T k, shrinking the logit toward 0 can even increase attention. Thus the proposed retention-gated attention does not mimic inference-time hard eviction and creates a serious train/inference mismatch.",
+        "The capacity loss in Eq. (5) uses the sum of decayed retention scores as a proxy for the number of cached tokens, but this does not directly correspond to the hard eviction rule used at inference. It is unclear why optimizing this soft quantity should produce the intended memory-bounded behavior.",
+        "Evaluation inconsistencies undermine confidence. The main Table 3 reports LongMemEvalS Full KV at 65.5 and TRIM-KV at 74.0, while Appendix Table 7 reports Full KV at 49.4 and TRIM-KV at 48.2 for the same benchmark. The objective ablation table also appears mismatched with the text: Section 5.3 says it reports AIME24, but the table content is LongMemEvalS-style results.",
+        "Important learnable eviction baselines are missing from the main comparisons, such as AttentionGate, NACL, and LocRet. LocRet appears only in the chunked-prefill appendix. Quantization/offloading methods are discussed but not empirically compared under matched memory budgets.",
+        "The comparison to SeerAttn-R is potentially unfair or at least apples-to-oranges: SeerAttn-R is a retrieval/offloading method that keeps the full cache in host memory, whereas TRIM-KV is a pure eviction method. Comparing at the same GPU budget does not necessarily equalize available information or orchestration overhead.",
+        "Claims that TRIM-KV sometimes surpasses full-cache models are surprising and not supported by statistical tests or error bars. AIME24 has only 30 problems, and pass@1 differences may be noise. No confidence intervals are reported for the main results.",
+        "Reproducibility is incomplete. Training uses OpenR1-Math-220k (564M tokens) on 4 H100 GPUs, but key details such as gate parameter counts, per-head sharing, tie-breaking in eviction, and exact loss weighting are not fully specified. The paper also has multiple typos and reference errors (e.g., 'Patero', 'Lllam', Lrap vs. Lcap, inconsistent figure/table references).",
+        "The interpretability claims are based on qualitative visualizations of a few examples and are not rigorously validated; retention scores trained for eviction may not directly provide reliable layer/head interpretability."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3,
+      "strengths": [
+        "Addresses the important and timely problem of memory-bounded KV-cache inference for long-context and long-generation LLMs.",
+        "Proposes a plug-in learnable retention gate that predicts token importance at creation time, requiring only gate fine-tuning rather than full model retraining.",
+        "The exponential-decay retention formulation is intuitive and connects nicely to forgetting-curve theory; the capacity loss is a reasonable way to encourage sparsity.",
+        "Extensive experiments across math reasoning, long procedural generation, long-context understanding, and long-memory chat benchmarks, with many strong empirical results in low-budget regimes.",
+        "Qualitative analyses are interesting and suggest layer/head-specific specializations, emergent heuristics such as sink tokens, sliding windows, and gist-like period tokens.",
+        "Inference overhead appears low, and the paper reports throughput/latency comparisons showing practical efficiency.",
+        "The paper is generally well written and provides many implementation details, datasets, and hyperparameters, supporting reproducibility in principle."
+      ],
+      "weaknesses": [
+        "The core mathematical formulation is incorrect as written. In Eq. (1), replacing the eviction mask with α_{ti} inside exp(α_{ti} q_t^T k_i) does not implement eviction: α=0 gives exp(0)=1, so the token is not removed. Likewise, Eq. (3) uses exp(β_i^{t-i} q_t^T k_i), which scales logits rather than attention weights. To model exponential decay of attention, one should multiply attention weights by β_i^{t-i} or add (t-i) log β_i to the logits. As written, the central mechanism does not perform the claimed retention/forgetting.",
+        "Because of the above issue, the capacity loss L_cap also does not correspond to the actual inference-time eviction rule; it penalizes a quantity that is not the effective attention mass or cache occupancy. This undermines the claimed connection between training and memory-bounded inference.",
+        "There is a train-inference mismatch: during training, retention gates modulate attention (even if corrected), but at inference they are used only as eviction scores while standard attention is applied to the retained tokens. The gates are not directly optimized for the hard-eviction inference policy, and no exact hard-eviction simulation or theoretical guarantee is provided.",
+        "The LongMemEval evaluation uses Qwen3-4B-Instruct itself as the judge to assess whether outputs match ground-truth responses. This self-evaluation setup is likely biased and can overestimate performance, especially for the striking claim that TRIM-KV surpasses full-cache inference.",
+        "Most main results lack variance, confidence intervals, or significance tests. Claims such as '58.4% pass@1 gain' and 'surpasses full-cache models' may be within noise, particularly for sampled math benchmarks and small long-context evaluations.",
+        "Baseline comparisons are not fully convincing: SeerAttn-R is a KV-retrieval/offloading method, not a pure eviction method, so comparing at the same nominal KV budget is not apples-to-apples. Strong recent eviction baselines such as PyramidKV, KIVI, Quest, NACL, AttentionGate, and LocRet are missing from the main tables or only partially evaluated in the appendix.",
+        "Novelty is moderate: learnable token-importance scores for KV-cache eviction have been explored in prior work (e.g., AttentionGate, LocRet, NACL), and the exponential-decay idea is closely related to forgetting-attention mechanisms. The paper's contribution is mostly an incremental combination of these ideas.",
+        "Qualitative interpretability claims are based on a single AIME24 example and lack quantitative validation across tasks, models, or datasets. Statements about alignment with human intuition and emergent gist compression remain anecdotal.",
+        "Reproducibility is incomplete: the 'Source Code' link is blank in the manuscript, code is not yet released, and some details such as random seeds, judge prompts, and exact evaluation protocols are missing."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Novel and practical idea: learning per-layer/head token retention scores at creation time for KV eviction, using an exponential decay inspired by the forgetting curve, and plugging into pretrained LLMs by training only lightweight gates.",
+        "Extensive empirical evaluation across math reasoning (AIME24, GSM8K, MATH-500), long procedural generation (LongProc), long-memory chat (LongMemEval), and long-context understanding (SCBench, LongBench-V2, LongBench), with multiple model sizes and strong heuristic and learnable baselines.",
+        "Strong low-budget performance: TRIM-KV consistently outperforms eviction baselines in many settings, sometimes surpassing full-cache models, and achieves competitive or better decoding throughput than heuristic methods.",
+        "Well-motivated training objective combining distillation, next-token prediction, and a capacity loss; ablations show each component contributes, and gate architecture, training data, and memory capacity are analyzed.",
+        "Qualitative analyses reveal emergent eviction heuristics (attention sinks, sliding windows, gist compression) and layer/head specialization, offering interpretability insights and diagnostic value.",
+        "Good reproducibility effort: detailed hyperparameters, datasets, training setup, and a promise to release code, checkpoints, and scripts."
+      ],
+      "weaknesses": [
+        "Potential training data contamination: retention gates for math benchmarks are trained on OpenR1-MATH-220k and evaluated on AIME24/MATH-500/GSM8K, which may overlap with AIME24 problems. This could inflate results and undermine the claim that TRIM-KV surpasses full-cache models. No decontamination analysis is provided.",
+        "Train-test mismatch: during training, attention weights are softly modulated by beta_i^{t-i}, but at inference the method uses hard eviction and standard attention over retained tokens. The gate is not directly trained to minimize hard-eviction loss, so the soft relaxation may learn to compensate for downweighting rather than optimal eviction. A straight-through or hard-eviction-aware objective is absent.",
+        "The capacity loss is ad hoc and computationally non-trivial: L_cap = (1/T) sum_t (1/t) max(0, sum_i beta_i^{t-i} - M) is O(T^2) per head/layer if computed naively. The paper claims minor overhead but provides no detailed complexity or implementation analysis of this term, and the 1/t weighting and soft constraint may not guarantee top-M eviction quality.",
+        "Claims of 'consistently outperforms' and 'surpasses full-cache' are stronger than the evidence: some tasks show worse performance (e.g., LongProc Pseudo to Code, SCBench Retz KV/Code.RepoQA/Math.Find, LongMemEval below full-cache). Surpassing full-cache on AIME24 and LongBench-V2 may be due to regularization or contamination rather than pure compression, and is not fully explained.",
+        "Limited novelty over existing learnable eviction/retention methods (e.g., LocRet, Attention-Gate, NACL): the core idea of learned token importance for KV eviction is known; the specific exponential decay and capacity loss are incremental. The paper does not sufficiently differentiate from closely related learnable eviction work beyond LocRet.",
+        "Evaluation inconsistencies and missing details: LongBench-V2 full-KV performance discrepancies due to chat templates, some baseline results not fully comparable, lack of statistical significance/variance for main results, and no direct comparison to several recent learnable eviction methods in the main experiments.",
+        "Minor writing and formatting issues: typos (e.g., 'Patero' for Pareto, 'Lllam', lambda_exp vs lambda_cap), equation typos in the preliminaries, and citation formatting errors."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Addresses an important and timely problem: memory-bounded KV cache for long-context LLM inference.",
+        "Proposes a simple, intuitive learnable retention gate with exponential decay, integrated into attention during training.",
+        "Combines distillation, next-token prediction, and a capacity loss to train lightweight gates while keeping the backbone frozen.",
+        "Extensive experiments across math reasoning, long procedural generation, long-memory chat, long-context understanding, and chunked-prefill settings.",
+        "Reports strong empirical gains over heuristic eviction baselines (H2O, SnapKV, StreamingLLM, R-KV) and a learnable retrieval baseline (SeerAttn-R), especially in low-budget regimes.",
+        "Sometimes surpasses full-cache models, suggesting selective retention may act as a regularizer.",
+        "Qualitative analyses show emergent patterns such as sink tokens, sliding windows, and gist compression, hinting at layer/head specialization.",
+        "Includes throughput and latency comparisons showing efficiency benefits over full-cache and SnapKV in some settings."
+      ],
+      "weaknesses": [
+        "Training/inference mismatch: training uses retention-gated attention with soft decay weights on all tokens, while inference uses standard attention over a hard-evicted subset. The paper does not adequately justify why the soft proxy faithfully optimizes the actual inference computation.",
+        "The capacity loss is not aligned with the hard cache constraint. Eviction already enforces the budget M, so penalizing a soft sum of retention scores is not clearly necessary or well-motivated, and its interaction with top-M eviction is not analyzed.",
+        "Implementation ambiguity: the retention gate outputs per-KV-head scores, but Algorithm 1 and the inference description use a scalar beta for eviction. It is unclear how per-head scores are aggregated or whether eviction is per-head or global. The paper admits efficient per-head variable-length caches are left to future work, raising reproducibility concerns.",
+        "Limited novelty: learning token importance for KV eviction has been explored in prior work (e.g., LocRet, Attention-Gate, NACL). The specific combination of exponential decay and distillation is incremental, and the main long-generation experiments do not compare against recent learnable eviction baselines.",
+        "Evaluation lacks statistical rigor: no error bars, confidence intervals, or significance tests are reported, especially for the surprising claims of surpassing full-cache models on AIME24 and LongBench-V2. Small sample sizes and high variance make these gains hard to trust.",
+        "Baseline comparisons are not fully apples-to-apples: SeerAttn-R is a retrieval/offloading method that preserves full KV memory and only sparsifies attention, so comparing it under a 'KV budget' is misleading. Some heuristic baselines may also not be optimally tuned for long-generation tasks.",
+        "Interpretability claims are overhyped: only qualitative visualizations on a single AIME24 example are provided, with no quantitative validation, user study, or systematic analysis. The claim of a 'new path toward LLM interpretability' is unsupported.",
+        "The retention score is fixed at token creation time, which may be too restrictive when a token's importance depends on future context. The paper does not analyze failure cases or limitations of this assumption.",
+        "Missing details hinder reproducibility: code is only promised, not provided; the number of added parameters, memory overhead, and exact per-head eviction implementation are unclear. There are also minor mathematical typos (e.g., Eq. 1 uses q_i instead of q_t).",
+        "The claim that selective retention acts as a regularizer is not deeply investigated. The gains could be due to evaluation variance, training data overlap, or other confounds, and the paper does not provide controlled experiments to isolate this effect."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Proposes a novel learnable retention gate that assigns each token an intrinsic importance score at creation time, using exponential decay to model long-term utility for KV cache eviction. This is a clean and intuitive formulation that moves beyond attention-guided heuristics.",
+        "Extensive empirical evaluation across diverse benchmarks: math reasoning (GSM8K, MATH-500, AIME24), long procedural generation (LongProc), conversational long-memory (LongMemEval), long-context understanding (LongBenchV2, SCBench), and chunked-prefill settings. Results consistently show strong improvements over eviction and retrieval baselines, especially in low-memory regimes.",
+        "Demonstrates practical efficiency: the retention gate adds negligible inference overhead, achieves ~2x higher decoding throughput than full-cache decoding at 32K context, and is faster than SnapKV in some settings.",
+        "The training approach jointly optimizes gates across all layers and heads via distillation plus a capacity loss, avoiding greedy layer-wise decisions. Ablations validate the importance of the quality loss, capacity loss, gate architecture, and training memory capacity.",
+        "Provides qualitative insights showing that learned retention scores recover human-intuitive patterns (e.g., sink tokens, sliding windows, gist compression) and reveal layer/head specialization, suggesting a useful diagnostic tool for interpretability.",
+        "Well-written and clear, with detailed implementation and hyperparameter descriptions. The ethics statement and reproducibility statement are included, and the method is positioned well against related work."
+      ],
+      "weaknesses": [
+        "Training and inference are only loosely aligned: during training, retention scores softly modulate attention via beta_i^{t-i} and a capacity loss penalizes total retention mass, but at inference the model uses standard attention with hard top-M eviction. The capacity loss does not directly optimize the actual eviction objective (e.g., differentiable top-M or ranking loss), so the connection between the training proxy and inference policy is indirect.",
+        "Main experiments train with a fixed capacity M (e.g., 256) but evaluate across a wide range of budgets (e.g., 128 to 32768). While the paper claims flexible inference budgets, this mismatch makes it unclear whether gains come from the intended capacity constraint or simply from a learned ranking. Training with matched budgets and reporting budget sensitivity more systematically would strengthen the claims.",
+        "The claim that TRIM-KV sometimes surpasses full-cache models is intriguing but not fully substantiated. The paper acknowledges full-KV discrepancies in some settings (e.g., LongBench-V2, likely due to chat templates), and the regularization explanation is speculative. More controlled analysis or statistical evidence is needed to rule out evaluation artifacts.",
+        "Novelty is moderate: learnable token importance for KV eviction has been explored in prior work (e.g., LocRet, AttentionGate, SeerAttn-R). The specific combination of exponential decay and capacity loss is effective but incremental. The paper could better articulate its unique contributions beyond existing learnable eviction methods.",
+        "Qualitative interpretability results are compelling but mostly illustrated on a single AIME24 example. Broader quantitative or multi-example evidence would make the interpretability claims more convincing.",
+        "No explicit limitations section. Important practical concerns—such as scalability to much larger models, dependence on distillation data, and the cost of training gates per model—are not thoroughly discussed.",
+        "Minor presentation issues: typographical errors (e.g., 'Patero' for Pareto, 'Retz KV'), inconsistent notation for KV budgets, and code not yet available for review despite the reproducibility statement."
+      ]
+    }
+  }
+}

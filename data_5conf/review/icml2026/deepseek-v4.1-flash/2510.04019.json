@@ -1,0 +1,182 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Addresses an important and timely problem: adapting RL post-training, especially GRPO-style methods, to diffusion language models (dLLMs), which lag behind autoregressive LLMs in reasoning.",
+        "Proposes a conceptually simple and useful idea: reinterpret the GRPO token-sum as an expectation over timesteps and estimate it with Monte Carlo/low-discrepancy sampling, making the objective tractable without one-step biased approximations.",
+        "Provides practical implementation details for online RL with dLLMs, including caching partially masked states, memory-efficient gradient accumulation, EOS handling, and float64 Gumbel sampling.",
+        "Reports substantial empirical gains on GSM8K (+7.6% over baseline) and Countdown (40.0 vs 10.4 baseline), and shows improved inference compute/quality tradeoffs with fewer sampling steps.",
+        "Includes an honest limitations section acknowledging compute cost, entropy collapse, and possible variance-reduction alternatives.",
+        "Reproducibility statement and appendix provide hyperparameters, datasets, and implementation notes."
+      ],
+      "weaknesses": [
+        "The central claim of an 'unbiased policy gradient estimate' is not formally supported. There is no theorem, proof, or explicit statement of assumptions showing unbiasedness for the full AGRPO objective, including clipping and the KL term.",
+        "The derivation glosses over a key mismatch: dLLM generation often unmasks multiple tokens per sampling step, but the objective writes a single token probability per timestep. The action at each step should be a block/set of tokens with a joint probability; the paper does not define this rigorously, so the relation to the original GRPO objective is ambiguous.",
+        "Even if the Monte Carlo estimator is unbiased for the GRPO surrogate, GRPO itself is a clipped surrogate objective, not the true policy gradient. Calling it an unbiased policy gradient overstates the theoretical contribution.",
+        "The per-timestep KL penalty is also heuristic and not justified as the correct divergence for the sequential unmasking process, despite the paper criticizing prior work for heuristic approximations.",
+        "Empirical comparisons may be confounded: UniGRPO numbers likely come from a different base model (MMaDA) rather than LLaDA-8B-Instruct, and diffu-GRPO numbers may be taken from the original paper under different training/evaluation conditions. No controlled reimplementation is reported.",
+        "No error bars, confidence intervals, or multiple seeds are reported, so the reported RL gains could be noisy and are difficult to assess statistically.",
+        "Key design choices such as low-discrepancy sampling, choice of k, and random vs. low-confidence remasking are not ablated, making it unclear which components drive the improvements.",
+        "MATH gains are modest (40.8 vs 35.6 baseline and 39.2 diffu-GRPO) and remain far below autoregressive GRPO (51.7), so claims about broad reasoning gains are somewhat premature.",
+        "No code or model checkpoints are released, limiting reproducibility despite the reproducibility statement.",
+        "Experiments use LoRA and fixed response lengths, so scaling to full fine-tuning and longer reasoning traces is not demonstrated."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "The core methodological idea is genuinely novel and clean: reinterpreting GRPO's inner token sum as an expectation over timesteps w.r.t. the uniform measure and estimating it with Monte Carlo sampling (Eq. 3, Sec. 4.1). This yields a tractable estimator that requires only k << m forward passes per gradient step, and the estimator is unbiased for the surrogate objective it targets.",
+        "The paper correctly and clearly diagnoses the theoretical flaws of prior dLLM RL methods (diffu-GRPO's single-step token-probability approximation and UniGRPO's averaged random-masking approximation), explaining why they are biased and inconsistent with the multi-step, context-dependent nature of dLLM generation (Sec. 3.3).",
+        "Empirical results show real gains across three tasks, most convincingly on Countdown (40.0 vs 31.3 for diffu-GRPO and 10.4 for the LLaDA-8B-Instruct baseline) and GSM8K (87.3 vs 79.8). The compute/quality frontier analysis (Fig. 3) is a useful addition, showing the trained model matches baseline accuracy with ~4x fewer sampling steps.",
+        "The practical implementation discussion is thoughtful and grounded: caching partially masked states via the unmasking order (Sec. 4.3.1), low-discrepancy sampling to reduce variance (Sec. 4.2), memory-efficient per-sample backward passes (Sec. 4.3.2), float64 Gumbel sampling, and EOS-timestep handling (Sec. A.4)."
+      ],
+      "weaknesses": [
+        "The theoretical claims are oversold. The 'unbiased policy gradient estimate' is unbiased only for the Monte Carlo estimator of the surrogate inner-sum; GRPO itself (clipping, group-relative advantages, outcome-only reward) is not the true policy gradient, so calling AGRPO 'the first principled, faithful adaptation' overstates the soundness result.",
+        "There is a notational/logical gap at the heart of the derivation. Eq. 3 replaces |o^i| with m (number of sampling steps) and indexes o_t^i by timestep, yet the paper unmaskes 2-3 tokens per step. When multiple tokens share a timestep, the per-token ratio pi_theta(o_t^i | q, o_<t^i) is ill-defined, and the step-level objective is a modified objective rather than the original GRPO objective. This weakens the 'faithful adaptation' claim and needs explicit clarification.",
+        "No variance or error bars are reported for any result, and each configuration appears to be a single run. The MATH gain (40.8 vs 39.2 over diffu-GRPO) is small enough that it could be within noise, so the central empirical claim is not robustly supported on that task.",
+        "Possible comparison confound: GSM8K accuracies are reported on GSM8K-Platinum (a cleaned split), while the autoregressive and possibly the prior dLLM baselines may originate from standard GSM8K splits. It is unclear whether all baselines were re-run under the identical evaluation protocol, which undermines the headline comparison.",
+        "The empirical study is thin on ablations: no analysis of the effect of k, G, or low-discrepancy sampling, and no comparison to simpler unbiased alternatives (e.g., REINFORCE-style estimators), which would substantiate the claim that the MC-over-timesteps design is the right choice.",
+        "Training uses LoRA with fixed response lengths (n=384/256), and the reported entropy collapse is noted but not analyzed; these constrain the generality of the conclusions. Minor presentation issues (missing footnote text for superscripts 4 and 5 in Sec. 5.1, the 'GPRO' typo) also detract from clarity."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3,
+      "strengths": [
+        "Timely and novel problem: adapting GRPO/RLVR to diffusion LLMs, with a simple Monte Carlo timestep-sampling idea and a clear contrast to biased one-step approximations in diffu-GRPO/UniGRPO.",
+        "Practical implementation: Algorithm 1 plus caching of partially masked states, low-discrepancy timestep sampling, and gradient accumulation makes the method tractable with k << m.",
+        "Strong empirical gains on three reasoning tasks: GSM8K 79.7 -> 87.3, MATH 35.6 -> 40.8, Countdown 10.4 -> 40.0, outperforming reported diffu-GRPO and UniGRPO numbers.",
+        "Demonstrates improved inference compute/quality frontier: on GSM8K, AGRPO retains high accuracy with far fewer sampling steps (roughly 4x fewer than baseline), leveraging a key dLLM advantage.",
+        "Honest limitations discussion: acknowledges compute cost, entropy collapse, alternative MC estimators, and dLLM inference bottlenecks such as KV caching and EOS handling.",
+        "Reproducibility effort: provides pseudocode, hyperparameters, dataset choices, and sample responses; builds on open-source LLaDA-8B-Instruct."
+      ],
+      "weaknesses": [
+        "Central theoretical claim is not sound as written: replacing the token-level sum (|o| terms) in GRPO with a uniform expectation over m sampling steps is only equivalent if each step unmasks one token or if tokens per step are constant and correctly reweighted. The paper uses 2-3 tokens per step, so Eq. 3/4 does not faithfully implement token-level GRPO, undermining the 'principled' and 'unbiased' claims.",
+        "The action probability ratio for a diffusion sampling step should involve all tokens unmasked at that step, e.g. a product or sum of per-token ratios, but Algorithm 1 uses a singular ρ_t^i without specifying how multiple tokens in a step are handled. This is a critical ambiguity in both derivation and implementation.",
+        "The statement 'as k approaches m, we fully recreate the original GRPO objective' is false when multiple tokens are unmasked per step, because the original objective sums over |o| tokens, not m steps.",
+        "The 'unbiased policy gradient' claim is imprecise: PPO/GRPO clipping makes the surrogate objective biased for the true policy gradient; MC sampling over timesteps only gives an unbiased estimate of the chosen, possibly step-level and clipped, objective.",
+        "Experimental comparisons are not controlled: diffu-GRPO/UniGRPO numbers appear taken from prior work rather than reproduced under identical data, model, compute, and hyperparameters; AGRPO uses LoRA while baselines may use full fine-tuning. The AR baseline is DeepSeekMath-Base while the diffusion baseline is LLaDA-8B-Instruct, making the 'similar gains' comparison misleading.",
+        "Missing ablations and error bars: no study of k, low-discrepancy vs i.i.d. sampling, or training with different tokens per step; no seeds or confidence intervals, so reliability of the reported single-run accuracies is unclear.",
+        "Reproducibility gaps: no code release is stated; training steps, batch size, hardware, wall-clock, exact per-task hyperparameters, and evaluation sample counts are not fully specified, and some n/m settings are inconsistent between training and evaluation.",
+        "Overclaims and limited scope: 'first tractable, faithful adaptation', 'completely redefining the frontier', and '1.3x performance gains' only on Countdown exceed the evidence. Experiments are limited to LLaDA-8B-Instruct and math tasks, with a train/test generation mismatch: random remasking in training, low-confidence at evaluation, which is not theoretically justified."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Proposes a principled multi-step MDP formulation for reinforcement learning with diffusion language models, using exact per-step action likelihoods and an unbiased Monte Carlo estimator over timesteps, thereby avoiding ELBO-like approximations used by prior dLLM RL methods.",
+        "Introduces practical algorithmic components: low-discrepancy timestep sampling, entropy-based importance sampling, memory-efficient gradient accumulation, EOS handling, and a proof of unbiasedness for the unclipped estimator, making the approach tractable for long reasoning tasks.",
+        "Reports strong empirical gains over base LLaDA on four reasoning tasks (e.g., +59.4% on Countdown at n=256, +69.7% on Sudoku at n=256) and generally competitive results against prior dLLM RL methods such as diffu-GRPO, wd1, and SPG.",
+        "Provides a useful analysis of the inference compute/quality tradeoff, showing that AGRPO-trained models can match baselines with roughly 4x fewer sampling steps, and includes ablations on the number of Monte Carlo samples k and variance reduction techniques.",
+        "Reproducibility is supported by detailed hyperparameters, implementation notes (e.g., Gumbel sampling precision, gradient accumulation, inference/training alignment), and a stated plan to release code."
+      ],
+      "weaknesses": [
+        "Comparisons to prior dLLM RL methods are not fully controlled: baseline numbers for diffu-GRPO, wd1, and SPG are taken from their original papers rather than retrained under the same system prompt, parser, and hyperparameters. The paper itself notes that its reproduced base LLaDA accuracies are higher than those reported in prior work, so the claimed superiority over prior methods is not cleanly established. For example, SPG is better on MATH-500 at n=256 and nearly matches AGRPO on Sudoku.",
+        "The main results select the best checkpoint among the last 150 training steps based on test accuracy, which is a form of test-set tuning and likely inflates reported performance. There is no validation-based checkpoint selection, and no multiple-seed statistics or error bars for the main table.",
+        "For MATH-500, the reported AGRPO result comes from a GSM8K-trained model, not the MATH-trained model (which achieved a lower 38.0% at n=256). This is only disclosed in Appendix B.2, making the main table's MATH-500 entry misleading about the method's performance when trained on the corresponding dataset.",
+        "The PPO/clipping/importance-sampling machinery is effectively unused because the implementation sets μ=1, making the method on-policy REINFORCE with group-normalized advantages and Monte Carlo timestep sampling. The claimed 'unbiased' property also applies only to the unclipped objective; the clipped objective actually used in training is biased.",
+        "There is a mismatch between training and inference: training uses random remasking and semi-autoregressive block sampling, while evaluation uses confidence-based unmasking. The policy being optimized is therefore not the same as the inference procedure, so the exact-likelihood guarantee applies to a different generation process than the one used for final results.",
+        "Efficiency claims are not fully substantiated: the paper shows higher wall time per gradient step for AGRPO than diffu-GRPO/SPG, but does not provide a wall-clock comparison to baselines for reaching target accuracy, so the claimed sample-efficiency advantage is not directly demonstrated.",
+        "Ablations are limited in scope (k only on GSM8K, variance reduction only on Countdown) and do not establish statistical significance or robustness across tasks and models."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The multi-step MDP framing of dLLM generation is clean and internally consistent: by treating individual unmasking steps as actions, the method obtains exact per-step action likelihoods and thereby avoids the ELBO-like surrogates used by prior dLLM RL work. This is conceptually appealing and correctly implemented.",
+        "The Monte Carlo timestep amortization (Eq. 5, Theorem A.1) is a simple, correct, and practical device for making the multi-step objective tractable for long reasoning trajectories, and the paper clearly explains the amortization-vs-compute tradeoff (Fig. 3, Table 2).",
+        "The empirical results are reasonable in magnitude: AGRPO improves over the base LLaDA model and beats prior dLLM RL methods on most tasks, with a particularly large margin on Countdown (82.4 vs 70.3 at n=512).",
+        "The inference compute/quality frontier analysis (Fig. 2) showing ~4x faster sampling with minimal loss is a genuinely useful and underexplored practical finding for dLLM post-training.",
+        "The paper is largely well-organized, and the appendices contain useful practical details (state caching, gradient accumulation, EOS handling, float64 Gumbel sampling) plus an honest discussion of entropy collapse and future directions."
+      ],
+      "weaknesses": [
+        "Limited originality. The multi-step denoising MDP formulation is explicitly borrowed from DDPO/Flow-GRPO, and the central new element—drawing a random timestep to unbiasedly estimate the per-step sum—is a standard importance-sampling/Rao-Blackwell-style estimator. The unbiasedness proof (Thm A.1) is a two-line algebraic identity and is not a substantive theoretical contribution.",
+        "The \"unbiased vs. biased\" framing is oversold. (i) Optimizing an ELBO is a valid objective, not simply an incorrect one; (ii) the paper never isolates unbiasedness as the cause of the observed gains—no controlled experiment distinguishes the MDP objective from the sequence-level objective; (iii) the paper does not show that the exact multi-step objective differs in any meaningful way from what ELBO-based methods optimize, so the theoretical selling point is not connected to the empirical results.",
+        "Comparison fairness is a serious concern. AGRPO and its base model are evaluated under the authors' own system prompt and symbolic parser, while diffu-GRPO, wd1, and SPG numbers are taken verbatim from other papers with different setups. The authors themselves report (Table 3) that their reproduced LLaDA-8B-Instruct base is ~2-4% higher than in prior work, which inflates AGRPO's apparent margin. Accounting for this base inflation, the GSM8K gap over SPG (88.1 vs 84.5) may be within noise, and the paper provides no significance testing or confidence intervals to rule this out.",
+        "Test-set model selection. Accuracies are reported as the \"best accuracy among the last 150 checkpoints,\" which is a form of selection on the test split and systematically inflates results. With a single seed and no variance estimates, the headline numbers are not reliable evidence of superiority.",
+        "Internal inconsistencies and noise. MATH-500 results are taken from a GSM8K-trained model rather than a MATH-trained one (which is worse), which is surprising and unexplained. Base-model accuracies are non-monotone in sequence length (e.g., Sudoku 25.5 at 256 vs 18.8 at 512), indicating high evaluation variance that is not quantified.",
+        "Scope and cost. Evaluation is limited to a single base model (LLaDA-8B) with LoRA only. AGRPO incurs roughly 2x the per-step wall time of diffu-GRPO/SPG (Table 2), yet no compute-matched comparison is presented, so it is unclear whether the gains come from the method or from additional compute.",
+        "Minor but telling errors—\"Sodomu\" for Sudoku, the malformed row label \"wd1†wd\" in Table 1, and \"GPRO\"—suggest insufficient proofreading of the camera-ready text and tables."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Provides a well-motivated multi-step MDP formulation for masked diffusion language model post-training, aligning policy gradients with the iterative unmasking process rather than relying on sequence-level likelihood approximations or ELBO-like bounds.",
+        "Derives a tractable, unbiased Monte Carlo estimator of the PPO-style objective via timestep sampling, with a proof in Appendix A and practical variance-reduction techniques such as low-discrepancy sampling and entropy-based importance sampling.",
+        "Reports strong empirical gains on several reasoning tasks, especially Countdown and Sudoku, and generally improves over prior dLLM RL methods such as diffu-GRPO, wd1, and SPG in the reported table.",
+        "Investigates an important and under-explored inference tradeoff: AGRPO post-training allows much faster sampling (e.g., 4x fewer steps) with limited accuracy loss, which is a useful practical finding for dLLM deployment.",
+        "Includes useful implementation details in the appendix, including memory-efficient gradient accumulation, caching of partially masked states, and handling of EOS tokens and train/inference mismatches."
+      ],
+      "weaknesses": [
+        "The core technical novelty is moderate: the method largely adapts existing multi-step denoising policy-gradient ideas from continuous diffusion (e.g., DDPO/Flow-GRPO) to discrete masked diffusion, and the main algorithmic contribution—viewing the inner sum over timesteps as an expectation and sampling timesteps—is simple.",
+        "The empirical comparison to prior methods is not fully controlled: baseline numbers are taken from other papers, the evaluation uses GSM8K-Platinum and custom prompts/parsing, and base-model accuracies differ substantially across works. No retrained baselines under the authors' setup are provided, which weakens the claim of outperforming prior dLLM RL methods.",
+        "The evaluation protocol selects the best checkpoint from the last 150 training steps based on test-set accuracy, with no validation set and no multiple seeds. This can inflate reported results, especially for small differences such as MATH-500 at 256 steps, and leaves run-to-run variance unclear.",
+        "Efficiency claims are only partially supported. Table 2 shows AGRPO has a higher wall-clock cost per gradient step than diffu-GRPO and SPG, and the paper does not directly compare sample efficiency or total time-to-target-reward against those baselines.",
+        "Ablations are limited: the variance-reduction techniques are tested only in combination on one task (Countdown), so their individual effects are not isolated, and the k ablation is also restricted to a single setting.",
+        "There are some overclaims and presentation issues: the paper claims to extend multi-step denoising RL to dLLMs 'for the first time,' but DCoLT also uses a multi-step denoising view; the GSM8K improvement cited in the text (+1.4%) does not match Table 1 (+3.6% over SPG at n=512); and there are typos such as 'Sodomu' and 'wd1†wd'."
+      ]
+    }
+  },
+  "v3": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "The paper gives a clean MDP formulation of dLLM denoising as a step-level decision process, which yields tractable stepwise likelihoods and avoids the biased ELBO-based sequence-level approximations used by prior dLLM RL methods. The connection to DDPO/Flow-GRPO is clearly explained.",
+        "It proposes a practical amortized timestep estimator: instead of computing the full m-step trajectory objective, it samples k << m timesteps and uses Monte Carlo estimation. Theorem A.1 proves unbiasedness of the entropy importance-sampling variant with respect to the full stepwise objective, and the method is scalable for long reasoning traces.",
+        "Two variance-reduction techniques are introduced (low-discrepancy sampling and entropy importance sampling). Figure 4 shows lower gradient norms and faster reward convergence for the variance-reduced variant on Countdown, supporting the practical utility of these components.",
+        "The empirical results show large gains over the base LLaDA model across four tasks. For example, Countdown improves by +59.4% and Sudoku by +69.7% absolute accuracy. The paper also demonstrates an improved inference compute/quality frontier: at m=32, AGRPO reaches 59.7% on GSM8K while sampling many tokens per step, suggesting that reasoning learned with AGRPO is robust to fewer denoising steps.",
+        "The implementation is described with substantial detail (LoRA rank, batch sizes, clipping, μ=1, β=0, caching of unmasking order, wall-time analysis), and the authors state that code is released. This makes the work relatively reproducible.",
+        "The paper honestly discusses several limitations, including the train-test mismatch between random unmasking during training and confidence-based unmasking at evaluation, entropy collapse, and open questions around the optimal k."
+      ],
+      "weaknesses": [
+        "The comparison to prior dLLM RL methods is not fully fair. Results for diffu-GRPO, wd1, and SPG are taken from their original papers, while the authors use a more favorable system prompt and robust answer parser that raises their own LLaDA base numbers (e.g., GSM8K 79.9 vs 76.7/77.2, MATH 36.6 vs 32.4). Because these baselines are not re-run under the same evaluation protocol, the claimed improvements over prior methods (e.g., +3.6% GSM8K, +12.1% Countdown at n=512) may be partly due to evaluation setup rather than algorithmic superiority.",
+        "The MATH-500 results are reported from a model trained on GSM8K, not MATH, because the GSM8K-trained model achieved higher accuracy (39.4% vs 38.0% at n=256, Appendix B.3). This is non-standard and makes the MATH comparison to baselines less meaningful, since those baselines likely trained on MATH. It also weakens the claim of consistent gains on the target reasoning task.",
+        "There is a train-test mismatch that is not fully resolved. Training uses random unmasking so that position selection can be treated as exogenous, but evaluation uses confidence-based unmasking, which is the common inference strategy and depends on the policy. The paper argues this is analogous to beam search, but the optimized policy is not the same as the deployment policy, so the claim of aligning training with inference is only partially supported. Including position selection in the MDP would be needed to optimize confidence-based decoding exactly.",
+        "The off-policy extension for μ>1 is theoretically questionable. The objective sums per-step importance ratios multiplied by the final group advantage. For μ>1, a correct trajectory-level off-policy correction would require the product of per-step ratios, not the sum. The main experiments use μ=1, so the central results are on-policy and exact, but the algorithm as presented and the μ=4 ablation are not well justified theoretically.",
+        "The variance-reduction ablation in Section 5.5 tests both low-discrepancy sampling and entropy importance sampling together against a baseline, without isolating the contribution of each. Final reward is similar between the two runs; the reported benefit is mostly faster convergence and lower gradient norms, which is a weak validation of the proposed variance-reduction methods.",
+        "Some claims are overstated. For example, 'unbiased policy updates' holds for the stepwise objective under random unmasking, but not for the actual confidence-based inference policy. Similarly, the claim that AGRPO 'consistently outperforms previous ELBO-based methods' is contradicted by MATH-500 at n=256, where SPG (40.0) exceeds AGRPO (39.4).",
+        "The cost analysis in Proposition B.1 relies on simplifying assumptions (learning signal proportional to sqrt(k), affine cost in k) without empirical verification. The optimal k is acknowledged to be task-dependent and is left to future work, so the practical guidance on choosing k remains heuristic."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The core derivation is technically sound: framing dLLM denoising as a multi-step MDP yields exact, tractable stepwise likelihoods, and the Monte Carlo timestep estimator is a clean, provably unbiased way (Theorem A.1) to amortize the inner sum over m steps. The math checks out.",
+        "The method is simple and easy to implement, and the practical notes in Appendix F (state caching, gradient accumulation inside the MC loop, float64 Gumbel sampling, EOS handling, train/inference mask consistency) show genuine implementation care that could help others reproduce the setup.",
+        "The inference compute/quality frontier result (Figure 2) is the most interesting finding: a checkpoint trained at a fixed (n, m) retains accuracy at much smaller m (e.g., m=32, 12 tokens/step), which is a genuinely dLLM-specific capability that AR models cannot realize.",
+        "The ablation on the sampling budget k (Figure 3, Table 2b) provides a useful empirical characterization of the rollout-cost vs. gradient-quality tradeoff, and the wall-time breakdown is transparent about where compute goes."
+      ],
+      "weaknesses": [
+        "Baseline comparison validity is the decisive problem. All dLLM baselines (diffu-GRPO, wd1, SPG, VRPO) are taken from their own papers rather than reproduced under a single setup, while the paper's own reproduced LLaDA base is higher than in those papers (Table 2). The authors admit using a 'more amenable system prompt and robust parsing,' so the headline gains (e.g., Countdown 70.7 -> 79.7) cannot be cleanly attributed to AGRPO versus setup differences. This directly undermines the central efficacy claim.",
+        "The gains over the strongest baseline (SPG) are marginal on most tasks: GSM8K 88.0 vs 86.1 (n=256) and 88.1 vs 84.5 (n=512); Sudoku 95.2 vs 94.0/93.1 (both near ceiling); and on MATH-500 AGRPO is actually lower than SPG at n=256 (39.4 vs 40.0). Only Countdown shows a large gap, and that is the comparison most plausibly confounded by prompt/parsing choices.",
+        "The variance-reduction contribution (Section 4.2, 5.5) does not deliver on its promise: the paper states 'both models reach a similar final reward level,' and the gradient-norm evidence is noisy with a large outlier. If low-discrepancy and entropy importance sampling only affect early convergence and not final performance, their status as a core contribution is weak.",
+        "Novelty is limited and the paper is somewhat candid about it: the denoising-MDP view is inherited from DDPO/Flow-GRPO (continuous diffusion) and already adopted for dLLMs by DCoLT/TraceRL/MDPO, as the authors acknowledge. The remaining novel piece is subsampling timesteps with a variance-reduction scheme—a small, straightforward idea—and the entropy-importance-sampling extension is speculative, borrowed by analogy from token-level findings rather than justified for timesteps.",
+        "The efficiency claims are not well supported. Table 6 shows AGRPO is slower per gradient step than diffu-GRPO and SPG (53.3s vs 43.8/44.6s at k=8), and the 'sample efficiency' argument is asserted qualitatively rather than demonstrated with matched compute. Proposition B.1 is a trivial minimization of C/sqrt(k) + D*sqrt(k) with hand-tuned constants and an informal 'forward cost ~ backward cost' assumption, which is not evidence.",
+        "The train/test protocol introduces a confound: training uses random unmasking but evaluation uses confidence-based unmasking, which the paper itself shows substantially boosts the base model (Table 3: LLaDA 66.6 -> 79.9 on GSM8K). Best-of-last-150-checkpoint selection on the test split also risks optimistic bias, and results are reported as single numbers without variance across seeds.",
+        "Reproducibility is only partially addressed: the code link in the abstract appears truncated, several key results depend on external paper numbers, and there is no reported seed-level variance for the main table, making it hard to assess whether differences are within noise."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Principled and well-motivated formulation: casting dLLM generation as a multi-step denoising MDP yields tractable stepwise likelihoods and avoids the biased ELBO approximations that plague sequence-level dLLM RL. The connection to DDPO/Flow-GRPO is clearly articulated, and the diagnostic figure (Figure 1) cleanly contrasts the sequence vs. stepwise views.",
+        "The timestep-estimation idea is simple, elegant, and effective: reinterpreting the inner sum over timesteps as an expectation and Monte Carlo sampling k << m timesteps makes the stepwise objective scalable for long reasoning traces. Theorem A.1 provides a clean unbiasedness proof for the entropy-weighted estimator, and Appendix F gives concrete, reproducible implementation recipes (state caching, memory-efficient per-sample backward, float64 Gumbel sampling, EOS handling).",
+        "Strong and consistent empirical results: AGRPO achieves the best accuracy in nearly all settings, with large gains on Countdown (+59.4%) and Sudoku (+69.7%) over the base LLaDA model and improvements over diffu-GRPO, VRPO, and SPG. The inference compute/quality frontier (Figure 2) showing parity with baselines at ~4x fewer sampling steps is a genuinely interesting and useful result.",
+        "Thorough ablation suite: the sampling budget k tradeoff (Figure 3, wall-time table), variance-reduction techniques (Figure 4), unmasking strategy (Table 3), number of denoising steps (Table 4), and off-policy reuse μ (Table 5) together give a reasonably complete picture of the method's behavior and sensitivity.",
+        "Good reproducibility practices: public code, use of HF TRL, explicit hyperparameters (G=8, ε=0.2, μ=1, LoRA r=64), and an honest discussion of the train/eval unmasking mismatch and entropy-collapse observations."
+      ],
+      "weaknesses": [
+        "Novelty is modest. The denoising-MDP view for diffusion RL is well established (DDPO, DPPO, and the closely related DCoLT/MDPO for dLLMs), and the paper's own related work concedes this. The genuinely new element is the Monte Carlo timestep subsampling plus two variance-reduction heuristics; the underlying objective (Eq. 5) is a fairly direct adaptation of PPO/GRPO to the stepwise MDP.",
+        "Baseline comparability is not fully controlled. diffu-GRPO, wd1, and SPG numbers are taken from the respective papers rather than reproduced under identical conditions, and the authors note their own LLaDA baselines are higher than those reported elsewhere due to a different system prompt and parsing. GSM8K is additionally evaluated on GSM8K-Platinum (a cleaned split) rather than the standard test set, which further complicates head-to-head comparison. Table 2 partially addresses this but does not resolve it.",
+        "Reporting protocol raises variance concerns: results are the best accuracy among checkpoints from the last 150 steps, and no multi-seed results or error bars are given for the main tables. Given the noise inherent in RLVR and the small margins on some tasks (e.g., MATH 42.0 vs SPG 41.8; Sudoku 95.2 vs 94.0), single-run best-of-checkpoint reporting weakens confidence in the headline deltas.",
+        "Train/test mismatch: models are trained with random unmasking but the primary results use confidence-based unmasking, and the base model itself gains substantially from confidence unmasking (Table 3). While the authors argue this is an annealing heuristic and show random-unmasking eval also improves, the headline numbers are reported under a decoding schedule never seen in training, which deserves more scrutiny.",
+        "The gains are concentrated on Countdown and Sudoku; on MATH-500 AGRPO essentially ties SPG (42.0 vs 41.8) and still lags AR models. The strong claim of 'consistently outperforming' is therefore task-dependent, and the paper's own discussion (Appendix B.3) notes weaker MATH-trained gains.",
+        "The variance-reduction techniques (low-discrepancy and entropy importance sampling) are validated only on a single task (Countdown), in a single run, and the observed benefit is mainly faster convergence to a similar final reward (Figure 4). This does not strongly support the claim that they are decisive, and the entropy-prioritization scheme (upweighting high-entropy timesteps) is not theoretically justified beyond an unbiasedness argument.",
+        "The cost model for choosing k (Proposition B.1) is very informal, relying on unverified assumptions (σ ∝ 1/√k, learning signal ∝ √k), and the practical guidance (k ≈ m/4) is only weakly connected to the theory. The stated 'interior optimum at k* ≈ m/2' also disagrees with the empirically recommended k ≈ m/4, which the paper does not reconcile."
+      ]
+    }
+  }
+}

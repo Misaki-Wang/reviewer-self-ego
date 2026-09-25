@@ -1,0 +1,119 @@
+{
+  "v3": {
+    "exp1_quality": {
+      "oa": 6,
+      "strengths": [
+        "Addresses an important and timely problem: efficient long-context LLM inference via KV cache retrieval, where existing retrieval methods suffer from selection/recall overhead and offloading bottlenecks.",
+        "Proposes a coherent algorithm-system co-design: speculative retrieval, fine-grained correction, group-consistent page selection on the algorithmic side, and hybrid NHD/HND layouts plus double-buffered streamed recall on the system side.",
+        "Evaluation covers multiple models (Llama-3.1-8B, Qwen-2.5-7B/14B, DeepSeek-R1 variants) and diverse tasks (LongBench v2, LongGenBench, MATH500, AIME24, GPQA) with comparisons against relevant SOTA baselines including RazorAttention, RaaS, Quest, ArkVale, and ShadowKV.",
+        "Reported results support the main claims: near-lossless accuracy on many benchmarks and substantial end-to-end speedups (up to 13x over ArkVale and 8.4x over ShadowKV), with efficiency ablations quantifying contributions of hybrid layouts, double buffering, and speculative retrieval.",
+        "The observation that adjacent query vectors are highly similar is well-motivated with empirical measurements, and it provides a clear basis for the speculative design."
+      ],
+      "weaknesses": [
+        "Novelty is moderate/incremental: reusing KV pages from the previous decoding step and engineering better offload/recall are natural extensions of existing retrieval methods; the core idea relies on an intuitive similarity observation without formal guarantees on selection overlap or error bounds.",
+        "The fine-grained correction mechanism is central to accuracy preservation but lacks a dedicated accuracy ablation: there is no analysis of correction trigger frequency, threshold sensitivity, or correlation between query cosine similarity and actual selected-page divergence. The threshold is tuned per task (e.g., 0.8/0.9), which weakens robustness claims.",
+        "Efficiency evaluation is somewhat narrow: it uses a single hardware setup (A100 40GB, PCIe Gen4), limited batch/context settings, and does not convincingly compare against fully optimized full-KV/full-attention inference in the same offloading regime. Some baseline modifications (e.g., ShadowKV SVD updates, group-consistent Quest/RaaS) may affect fairness.",
+        "Accuracy improvements are not uniformly near-lossless: several reasoning metrics (e.g., AIME24 avg@k, MATH500 avg@k) show drops versus full KV, and LongGenBench results show RaaS sometimes outperforms FreeKV in CR×Acc, so the Pareto-frontier claim needs more nuance.",
+        "Reproducibility and deployment details are incomplete: no code/artifact release is mentioned, and the controller scheduling overhead, memory footprints, and interaction between correction and streamed recall are not fully quantified.",
+        "The system optimizations, especially double buffering and layout conversion, are fairly standard engineering techniques; their novelty relative to existing inference systems could be better positioned."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Addresses an important and timely problem: reducing the efficiency bottleneck of KV retrieval methods under long-context LLM inference.",
+        "The motivating observation that query vectors and selected KV pages are highly similar across adjacent decoding steps is plausible and empirically supported.",
+        "The proposed co-design combines algorithmic ideas (speculative retrieval, fine-grained correction) with system-level optimizations (hybrid CPU/GPU layouts, double-buffered streamed recall).",
+        "Evaluates on multiple models and benchmarks, including long-input, long-generation, and reasoning tasks, which is broader than many KV-cache papers.",
+        "Reports substantial efficiency improvements over prior KV retrieval methods and includes an ablation study for the system optimizations."
+      ],
+      "weaknesses": [
+        "Novelty is limited. Reusing the KV pages selected at the previous decoding step is closely related to prior KV reuse/sharing/caching ideas (e.g., hierarchical KV sharing), yet the paper does not compare against or sufficiently discuss such work. The so-called speculative retrieval is essentially stale retrieval with heuristic correction, not a fundamentally new retrieval paradigm.",
+        "The correction mechanism critically depends on the threshold tau, but there is no ablation or sensitivity analysis for tau, no analysis of how often corrections are triggered, and no accuracy-efficiency trade-off curve. This makes the method's robustness and practical tuning burden unclear.",
+        "The evaluation does not measure GPU memory footprint or peak memory usage, despite offloading and O(B) GPU memory being central claims. There is no batch-scaling or OOM analysis, and only a single A100 40GB setup is used.",
+        "Baseline adaptations raise fairness concerns. RaaS, Quest, and ShadowKV are modified in non-trivial ways (e.g., group-consistent pooling, periodic SVD updates), which may disadvantage them. Some reported baseline results are surprisingly poor (e.g., ArkVale on LongGenBench) without sufficient explanation or validation.",
+        "End-to-end efficiency comparisons lack a full-KV baseline in the main latency experiments and provide no detailed latency breakdown for FreeKV. The claimed 13x speedup is therefore difficult to contextualize, and it is unclear whether gains persist at larger batch sizes or when full attention is feasible.",
+        "Accuracy claims are overstated. FreeKV is described as near-lossless, but it is sometimes below full KV and not consistently best across metrics; in some LongGenBench and reasoning settings it trails RaaS, Quest, or ShadowKV, and the LongGenBench LLM-based evaluator is not validated.",
+        "Long-context evaluation is incomplete: LongBench v2 inputs are truncated to 64K tokens, while modern contexts reach 128K--1M tokens. The paper does not demonstrate behavior at the extreme context lengths that motivate the work.",
+        "Reproducibility is insufficient. Key implementation details are missing, including exact controller scheduling, correction trigger rates, threshold selection, baseline adaptation details, and code availability. Some writing and formatting issues further reduce clarity."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Addresses an important and timely problem: efficient KV cache retrieval for long-context LLM inference, where existing retrieval methods suffer from selection and recall bottlenecks.",
+        "Proposes a clear algorithm-system co-design: speculative retrieval shifts selection/recall off the critical path using adjacent-step query similarity, while fine-grained correction mitigates stale selections.",
+        "System optimizations are well motivated and practical: hybrid NHD/HND layouts eliminate fragmented CPU-GPU transfers, and double-buffered streamed recall overlaps transfer with layout conversion.",
+        "Evaluation is extensive across long-input, long-generation, and reasoning tasks, with multiple models, strong baselines, and ablations isolating the contributions of each optimization.",
+        "Results show substantial efficiency gains (up to 13x over ArkVale and 8.4x over ShadowKV) while maintaining accuracy competitive with full KV cache in most settings.",
+        "The paper is generally well written, with clear motivation, informative figures, and a useful comparison table positioning FreeKV against prior KV dropping and retrieval methods."
+      ],
+      "weaknesses": [
+        "Algorithmic novelty is moderate: reusing KV pages selected in the previous decoding step and triggering correction via query similarity is intuitive and may be viewed as an engineering refinement over existing retrieval/caching approaches rather than a fundamentally new paradigm.",
+        "Hyperparameters such as the correction threshold τ, sink/window sizes S/W, and budget B are chosen per task/model, with limited sensitivity analysis; the frequency and overhead of correction are not thoroughly characterized.",
+        "The accuracy claim of 'near-lossless' is mostly supported but not uniform: for example, on AIME24 with DeepSeek-R1-Qwen-14B, FreeKV is below full KV cache in both pass@k and avg@k, so the phrasing slightly overstates the empirical coverage.",
+        "Efficiency evaluation is on a single hardware setup and limited batch sizes; it lacks detailed memory/throughput analysis and does not compare against an optimized full-KV no-offload baseline under the same conditions in the main plots.",
+        "Reproducibility could be improved: no code/artifact release is mentioned, and some system-level implementation details and baseline adaptations may be difficult to reproduce exactly.",
+        "The headline speedup is primarily against ArkVale and ShadowKV; broader comparisons to other retrieval/offloading systems or highly optimized full-KV inference would strengthen the efficiency claims."
+      ]
+    }
+  },
+  "v4": {
+    "exp1_quality": {
+      "oa": 8,
+      "strengths": [
+        "Addresses a critical bottleneck in long-context LLM inference: KV retrieval methods preserve accuracy but suffer from expensive selection and CPU-GPU recall, making practical deployment difficult.",
+        "Proposes a coherent algorithm-system co-optimization framework with speculative retrieval, fine-grained correction, hybrid CPU/GPU KV layouts, and double-buffered streamed recall.",
+        "The speculative retrieval idea is simple but effective: it leverages high query similarity between adjacent decoding steps to move selection and recall off the critical path, while fine-grained correction mitigates accuracy loss.",
+        "The system optimizations directly target the recall bottleneck: HND CPU layout and NHD GPU layout avoid fragmented transfers, and double buffering enables overlap of transfer and layout conversion.",
+        "Evaluation is broad: multiple models, long-input, long-generation, and long-reasoning benchmarks, with comparisons to strong KV dropping and retrieval baselines, plus detailed ablations and hyperparameter studies.",
+        "Reported results are strong: near-lossless accuracy in many settings and up to 13x speedup over SOTA retrieval methods, establishing a better accuracy-efficiency Pareto frontier."
+      ],
+      "weaknesses": [
+        "Algorithmic novelty is moderate: the core speculative retrieval mechanism reuses the previous step's selected KV pages, and the correction scheme is a threshold-based heuristic rather than a learned or theoretically grounded solution.",
+        "Efficiency evaluation focuses on long-input and long-generation scenarios, but does not directly measure latency for long reasoning tasks even though correction rates there can be as high as 0.52, leaving the overhead of correction under reasoning workloads insufficiently validated.",
+        "Accuracy results, though strong overall, are not uniformly best: FreeKV trails ArkVale/Quest/ShadowKV/RaaS on some metrics, so the claim of consistently outperforming prior methods should be stated more cautiously.",
+        "Some baselines are adapted to ensure group-consistent selection or to support long-generation (e.g., modifying ShadowKV), which may affect their behavior and makes the fairness of comparisons somewhat uncertain.",
+        "The correction threshold tau is tuned per scenario and is not adaptive; the sensitivity of runtime overhead to tau and correction rate is not fully explored.",
+        "The evaluation covers models up to 14B and truncates inputs to relatively moderate context lengths (e.g., 64K), while frontier deployment now involves 128K-1M contexts and larger models; generalization to extreme contexts and larger scales remains less demonstrated."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Targets an important and timely problem: efficient long-context LLM inference with KV cache retrieval, where accuracy and latency tradeoffs matter.",
+        "The observation that adjacent decoding steps have high query similarity is measured across multiple models, tasks, and architectures, providing a plausible basis for speculative retrieval.",
+        "The proposed speculative retrieval plus fine-grained correction is simple, training-free, and designed to move selection/recall off the critical path; group-consistent selection and correction are well motivated.",
+        "System contributions (hybrid NHD/HND layouts, double-buffered streamed recall, and overlap with computation) address real CPU-GPU transfer and layout inefficiencies.",
+        "Evaluation covers multiple benchmarks and models, with near-full-KV accuracy in several settings and substantial reported speedups, plus useful ablations on pooling, thresholds, and efficiency optimizations."
+      ],
+      "weaknesses": [
+        "Algorithmic novelty is limited: speculative reuse of previous-step KV pages is conceptually close to caching/prefetching/overlap ideas such as InfiniGen, and the system-side contributions are largely engineering on standard paged KV layouts.",
+        "Efficiency is not evaluated on the reasoning tasks where correction rates are highest (up to 0.43-0.52), so the claimed speedup may not hold in the scenarios that most stress fine-grained correction; the latency overhead of correction is not broken down.",
+        "The O(B) GPU memory claim is questionable: page summaries are kept on GPU and scale with L/p per KV head, which can become comparable to or larger than the selected KV cache for long contexts; no memory measurements are reported.",
+        "Accuracy results lack statistical rigor: stochastic sampling and LLM-based evaluation are used, but no confidence intervals, variance, or significance tests are reported; some FreeKV accuracy numbers exceed the full-KV baseline, indicating noise and weakening the near-lossless claim.",
+        "Baseline comparisons are not fully fair: several baselines are modified to be group-consistent, ShadowKV is altered for long generation, RazorAttention's 0.15 sparsity may not match B=2048, and Quest is excluded from efficiency for OOM reasons.",
+        "Hyperparameter selection is tuned using the evaluation benchmarks themselves: the correction threshold τ is chosen per scenario (0.8 vs 0.9) based on the same tasks, so reported gains may be partially tuned to the test sets.",
+        "Reproducibility is incomplete: the code URL appears truncated, and several implementation details (kernel-level scheduling, synchronization, actual memory usage) are not fully specified."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "The paper tackles an important and timely problem: efficient KV cache retrieval for long-context LLM inference, where existing retrieval methods suffer from selection and recall bottlenecks.",
+        "The algorithm-system co-design is well motivated and integrated: speculative retrieval hides selection/recall by reusing previous-step KV pages, while fine-grained correction preserves accuracy; system optimizations such as hybrid NHD/HND layouts and double-buffered streamed recall effectively reduce CPU-GPU transfer overhead.",
+        "The empirical evaluation is extensive across models (Llama-3.1, Qwen-2.5, DeepSeek-R1), tasks (LongBench v2, LongGenBench, MATH500, AIME24, GPQA), and strong baselines (RazorAttention, RaaS, Quest, ArkVale, ShadowKV, InfiniGen).",
+        "Accuracy is near-lossless compared with full KV cache across most settings and often exceeds prior KV compression/retrieval methods, including on long-generation and reasoning tasks.",
+        "Efficiency results are compelling, with up to 13x speedup over SOTA KV retrieval baselines and latency comparable to non-offloading KV dropping methods; ablations clearly isolate the contributions of algorithmic and system components.",
+        "The paper is well written, includes detailed experimental settings, ablation studies, correction-rate analyses, and indicates code availability, supporting reproducibility."
+      ],
+      "weaknesses": [
+        "The core algorithmic novelty is moderate: speculative reuse of previous-step KV pages follows naturally from observed temporal query similarity, and the correction mechanism is largely threshold-based; the main strength is the co-designed system and empirical integration rather than a fundamentally new retrieval principle.",
+        "Evaluation is limited to models up to 14B and contexts up to 64K/16K, despite motivating much longer contexts of 128K to 1M tokens; scalability to larger models and longer contexts remains unclear.",
+        "The paper reports latency but does not provide measured GPU/CPU memory usage or throughput, which are important for assessing the practical benefits of offloading-based KV retrieval in serving systems.",
+        "Several baselines are modified (e.g., enforcing group-consistent selection, updating ShadowKV SVD for long generation), which may affect fairness, though the adaptations are reasonable and disclosed.",
+        "The correction threshold τ is manually set per scenario (0.8 for long-input and 0.9 for long-generation), introducing tuning burden; a more adaptive or principled correction criterion would strengthen the approach."
+      ]
+    }
+  }
+}

@@ -1,0 +1,121 @@
+{
+  "v3": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Inference-only, model-agnostic planner requiring no retraining and applicable to multiple masked diffusion LMs (LLaDA, Dream, DiffuCoder).",
+        "Simple deterministic dilation schedule reduces denoiser calls per block from O(B) to O(log B), with a clear algorithmic description in Section 3.5.",
+        "Empirical results across math, code, and general knowledge benchmarks often show substantial gains over the self-confidence baseline (e.g., GSM8K B=64: 35.18 vs 8.04 for LLaDA-Base).",
+        "Ablation study in Table 3 suggests the incremental dilated schedule is particularly beneficial for random unmasking, supporting the intuition that spacing reduces mutual information.",
+        "Qualitative example in Figure 1b/c illustrates that DUS can preserve a coherent chain-of-thought where the self-confidence planner truncates prematurely."
+      ],
+      "weaknesses": [
+        "Inconsistent definition of the key experimental parameter k: the text states the self-confidence baseline uses fixed k = log2 B, but the reported speedup factor B/log2 B implies the baseline must use k = B/log2 B to share the same NFE budget. Section 4.4 also says the dilated-incremental average remains k = log2 B, which would not unmask all B tokens. This makes the fairness of the central comparisons unclear and harms reproducibility.",
+        "Theoretical analysis relies on strong and unrealistic assumptions (stationary, ergodic, first-order Markov chain with fast mixing) for natural language, with no empirical validation. Lemma 1's proof uses an unproven conditional mutual-information bound and the approximation H(X_i1) ≈ H(X_i1|S_t). The claim that minimizing the sum of marginal entropies is equivalent to minimizing joint entropy, and that this improves generation quality, is not rigorously established.",
+        "No comparison to relevant planner baselines such as EB-Sampler (Ben-Hamu et al. 2025) or Path Planning (Peng et al. 2025), despite discussing them. The evaluation only compares to a self-confidence planner, so the claimed superiority is narrow and does not establish state-of-the-art performance among inference-time planners.",
+        "Experimental protocol lacks reproducibility details: no generation hyperparameters (temperature, top-p, etc.), no exact prompts, no code release, no random seeds or variance estimates, and no statistical significance tests. Results on DiffuCoder may be unfair because the model was not trained with semi-AR blocks, yet block diffusion is applied; the authors themselves note that semi-AR inference is 'off' for DiffuCoder without DUS.",
+        "Several claims are overstated or inconsistent: the paper says DUS 'consistently improves or matches' the baseline, but Table 1 shows regressions for DiffuCoder-Instruct at B=32 and B=64. Reported improvements ('up to 27%', 'up to 40%') conflate percentage points with relative percentages.",
+        "Presentation is poor: numerous typos and grammatical errors (e.g., 'unmasked them', 'instroduced', 'knoeledge', 'with out'), confusing notation, and no dedicated limitations section. The paper does not discuss negative societal impacts or ethical considerations."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "The core idea is simple, intuitive, and practically appealing: spacing out unmasked tokens via a deterministic dilated pattern to reduce mutual information so that parallel unmasking becomes viable, with no retraining or architecture change.",
+        "The method is evaluated across an unusually broad set of models (LLaDA-Base/Instruct-8B, Dream-Instruct-7B, DiffuCoder-Base/Instruct-7B) and tasks (GSM8K, MATH500, HumanEval, MBPP, BBH, MMLU-Pro), and it consistently improves over the self-confidence baseline at matched block sizes.",
+        "The ablation in Table 3 (fixed-k vs. dilated-incremental for confidence/random planners) is a genuinely informative diagnostic that isolates the schedule from the selection signal, and the block-size sweep in Appendix A.2 is a useful observation.",
+        "The paper is honest that absolute gains on general-knowledge benchmarks (BBH, MMLU-Pro) are small, and it correctly frames the method as inference-only and model-agnostic, which is a real practical advantage."
+      ],
+      "weaknesses": [
+        "The theoretical analysis is flawed in ways that undercut the central 'guarantee.' Lemma 2's definition of the Hirschfeld–Gebelein–Rényi maximal correlation (Eq. 9) is mathematically incorrect: the supremum is taken over f and g in L^2 of the *same* marginal P_{X_{i_m}} and the objective is E[f(X_{i_m}) g(X_{i_m})], i.e., it correlates a variable with itself. The associated constraints also have malformed quantifiers. As written, the object is not the maximal correlation between two positions and cannot support the decay bound in Eq. 10.",
+        "The proof of Lemma 1 has an unjustified step. Transition (a) reduces I(X_{i_j}; X_{i_1},...,X_{i_{j-1}} | S_t) to I(X_{i_j}; X_{i_{j-1}} | S_t) via 'first-order Markov,' but first-order Markov gives conditional independence given the immediately preceding token in sequence order, not equality of MI with the full prefix, and this does not hold conditional on the arbitrary state S_t. The premise that 'each pair is separated by at least D' also contradicts the actual DUS schedule: at the final iteration s_R = 1, so the remaining tokens are adjacent, not D-separated. The result is stated only as an approximation (≈), not a bound, so the advertised 'theoretical guarantee' is weak and rests on assumptions (fast-mixing, ρ<1) that are unrealistic for natural language.",
+        "The empirical comparison omits the strongest relevant baselines. Related work discusses P2/BERT-guided planning (Peng et al. 2025), entropy-bounded EB-Sampler (Ben-Hamu et al. 2025), and learned planners (Liu et al. 2025), yet only a naive top-k self-confidence planner and random unmasking are compared. The claim that DUS 'outperforms confidence-based planners' is therefore a comparison against a weak straw man, and 'reveals the true speed-quality frontier' is unsupported.",
+        "The experimental setup contains a definitional inconsistency that threatens the fairness of the main comparison. Section 4.1 states the self-confidence baseline uses k = log_2 B fixed, while DUS unmasks on average k = B/log_2 B; these differ for B ≠ 16 and imply different per-block NFE, contradicting the repeated claim that 'both planners use the same B and NFE budget.' Table 3 also labels fixed-k as k = log_2 B, which is inconsistent with matching DUS's average. It is therefore unclear whether the baseline is given a comparable budget, and the very large gaps (e.g., GSM8K B=32 LLaDA-Base 29.0 → 49.4) raise suspicion of an unfair comparison rather than a genuine planner advantage.",
+        "There is no statistical rigor: no seeds, error bars, or significance tests, while several evaluations use small subsets (HumanEval n=164, BBH n=540, MMLU-Pro n=560, GSM8K ablations n=300). The MMLU-Pro numbers are non-monotonic in block size (LLaDA-Instruct: Conf 25.71 at B=16 vs 31.07 at B=32), which is implausible if larger blocks are strictly harder and suggests noise or errors.",
+        "Presentation and reproducibility are poor. There are numerous typos ('unmasked them in parallel,' 'instroduced,' 'knoeledge,' 'variate speedup factors,' 'maximum probability,' 'uncurtained tokens') and figure-panel labeling that is inconsistent with the caption text (Fig. 1b/1c). The 'skip mechanism' is presented as a core feature (Section 3.6, feature 3) but is never evaluated or specified (no threshold given). No code link is provided and key hyperparameters are unspecified, limiting reproducibility.",
+        "Several claims are overstated relative to the evidence. The conclusion states DUS shows 'a new path toward diffusion-based LMs that surpass AR approaches in both efficiency and performance,' yet at the reported speedups code accuracy is ~6–15% (HumanEval) and the paper never substantively compares against the AR LLaMA3-8B reference. Similarly, 'minimizes the joint conditional entropy at each step' is not established; the argument only shows the sum of individual entropies approximates the joint entropy under strong assumptions, which is a different objective."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3,
+      "strengths": [
+        "The method is genuinely practical: DUS is inference-only, model-agnostic, and training-free, making it a drop-in planner for existing MDLMs (LLaDA, Dream, DiffuCoder) without architecture or retraining changes.",
+        "The empirical evaluation is broad, covering five model checkpoints across math (GSM8K, MATH500), code (HumanEval, MBPP), and general knowledge (BBH, MMLU-Pro) benchmarks at multiple block sizes/speedups, and DUS consistently outperforms the self-confidence and random baselines at matched NFE budgets.",
+        "The ablation in Table 3 is informative: it separates the effect of the incremental/dilated schedule from the selection criterion, showing that even random unmasking recovers much accuracy under dilated-incremental scheduling, which strengthens the case that the spacing pattern itself matters.",
+        "Reducing per-block denoiser calls from O(B) to O(log B) is a concrete and useful efficiency contribution, and the speedup accounting (NFE = G/B · log2 B) is clearly laid out."
+      ],
+      "weaknesses": [
+        "The theoretical analysis, presented as a core contribution ('Theoretical Guarantees'), is not sound. In the proof of Lemma 1, step (a) asserts I(X_{i_j}; X_{i_1},...,X_{i_{j-1}} | S_t) = I(X_{i_j}; X_{i_{j-1}} | S_t) 'by the first-order Markov property.' This is invalid: the Markov property gives I(X_{i_j}; X_{i_1},...,X_{i_{j-1}}) = I(X_{i_j}; X_{i_{j-1}}) only unconditionally, not when conditioning on S_t, which contains other unmasked tokens and generally breaks the chain structure. The subsequent use of the distance-based bound in Eq. (11) also requires consecutive selected indices to be separated by at least D, which DUS's dilation does not guarantee within a block of size B.",
+        "The central 'independence' premise is unjustified at realistic block sizes. Lemma 2 requires pair distances d >= D for the MI bound I <= O(rho^{2d}) to be negligible, but DUS selects positions only within a block of length B (e.g., {1,5},{3,7},{2,4,6,8} for B=8). For plausible rho (e.g., 0.9), rho^{2d} is far from negligible at these distances, so the claim that the joint entropy 'equals' the sum of marginals is not established.",
+        "There is a logical tension in the entropy framing. The objective in Eq. (4) is the sum of individual conditional entropies, and by the chain rule H(joint) <= sum of marginals, with equality only under independence. Minimizing the sum of marginals would actually favor the low-entropy/confidence planners, not DUS. The paper's argument that confidence planners are 'suboptimal' relies on correlations, yet the objective it optimizes ignores them, so the theoretical justification for why DUS is better is circular/unclear.",
+        "Key competing planners discussed in Related Work are not compared empirically. EB-Sampler (entropy-bounded unmasking) and P2 (BERT-guided path planning) are directly relevant and reported to give 2-3x speedups, but the experiments only include self-confidence and random baselines, so the claimed superiority of DUS over the state of the art is not established.",
+        "Presentation quality is poor and would impede reproducibility. There are numerous typos and grammatical errors ('unmasked them in parallel', 'instroduced', 'knoeledge', 'variate', 'curtained tokens'), Eq. (9) defining rho is garbled (it writes E[f(X_{i_m})g(X_{i_m})] instead of g(X_{i_n}), and the sup definition is malformed), notation is inconsistent (H(X_{i_1}) vs H(X_{i_1}|S_t)), and no link to the authors' own code is provided.",
+        "The headline claim of 'improving quality while accelerating' is only relative to other parallel planners at the same NFE. At high speedups absolute performance is very low (e.g., HumanEval pass@1 in the 6-10% range), and DUS does not exceed the token-by-token SOTA; the framing overstates the practical benefit.",
+        "No variance/seed reporting is given for the accuracy numbers, and the DiffuCoder results in Table 1 show non-monotonic behavior (e.g., DiffuCoder-Base at B=16 DUS = 38.41 vs B=32 = 21.95), which raises questions about stability that are not addressed."
+      ]
+    }
+  },
+  "v4": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Simple, inference-only, model-agnostic planner requiring no retraining or architecture changes; easy to implement as a drop-in scheduler.",
+        "Deterministic coarse-to-fine dilated schedule reduces denoiser calls per block from O(B) to O(log B), giving predictable speedups controlled by block size B.",
+        "Extensive empirical evaluation across five MDLM variants (LLaDA-Base/Instruct-8B, Dream-Instruct-7B, DiffuCoder-Base/Instruct-7B) and multiple benchmarks (GSM8K, MATH500, HumanEval, MBPP, BBH, MMLU-Pro, IFEval).",
+        "Consistent gains over self-confidence planners at matched block sizes, sometimes large (e.g., GSM8K B=32: 49.36 vs. 29.04; MBPP B=32: 22.6 vs. 8.2), supporting the main empirical claim that dilated spacing improves parallel decoding quality.",
+        "Demonstrates a useful complementary result: applying dilated spacing as a post-filter to EB/CB adaptive samplers improves their accuracy at modestly higher NFE.",
+        "Provides wall-clock measurements, NFE accounting, spatial-token-distance analysis, and an available codebase, which aids reproducibility.",
+        "Discusses limitations, including the fast-mixing assumption, failure under strong long-range dependencies, and block-size trade-offs."
+      ],
+      "weaknesses": [
+        "Theoretical guarantees are not rigorous. Lemma 3.5 requires a conditional mutual-information bound given an arbitrary state S_t, but Lemma 3.6 only establishes unconditional MI decay for a stationary VLMC. Conditioning on the prompt and previously generated tokens can break fast mixing and induce long-range dependencies, so the bound does not directly justify DUS in practice.",
+        "The proof of Lemma 3.6 is flawed as written: the MI-TV inequality introduces dependence on the future block length M and on min(P_B), so the claimed constant C independent of M is not established. The lemma may be salvageable via the Markov property, but the manuscript's proof does not provide a valid uniform bound.",
+        "The central framing overclaims: DUS is a fixed, predefined heuristic schedule, not an instance-adaptive planner that actually minimizes the entropy gap at each step. The abstract and introduction state that DUS unmasks tokens 'so as to minimize an upper bound on joint entropy gain,' but this is not what the algorithm does.",
+        "Baseline NFE accounting is inconsistent and unclear. The text states self-confidence uses k = log2 B, which would imply NFE_block = B/log2 B, not log2 B; yet the tables report the same speedup factor B/log2 B for both self-confidence and DUS. This makes it ambiguous whether comparisons are at matched NFE or whether the confidence baseline used more compute. The DiffuCoder baseline description ('disable semi-AR inference' while applying DUS block-wise) further complicates fairness.",
+        "No variance, confidence intervals, or multiple seeds are reported. Many benchmark improvements, especially on BBH and MMLU-Pro, are small and may not be statistically significant.",
+        "The headline speedup over token-by-token decoding is largely due to semi-AR block-wise decoding, which is not novel to DUS. DUS's actual contribution is improved accuracy at a given block size, not the speedup itself; the abstract's attribution of up to 5.8x wall-clock speedup to DUS is misleading.",
+        "The strongest adaptive baselines (EB/CB samplers) achieve higher accuracy at higher NFE, and DUS is not uniformly better. The main tables focus on the weaker self-confidence baseline, which may overstate DUS's relative standing.",
+        "Presentation and reproducibility issues: the appendix contains corrupted/irrelevant tables (e.g., repeated 'S2 dataset' tables) that are unrelated to the paper, and some pseudocode/figure references are incomplete. This undermines confidence in the manuscript's careful preparation and reproducibility.",
+        "Limited novelty: dilated/coarse-to-fine scheduling and entropy-gap arguments are conceptually related to existing work in diffusion and semi-AR block decoding; the specific deterministic pattern is an incremental contribution."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "Simple, inference-only, model-agnostic planner that requires no retraining or architecture changes, making it practically appealing as a drop-in scheduler.",
+        "Evaluated across multiple 7-8B masked diffusion models (LLaDA, Dream, DiffuCoder) and diverse benchmarks (GSM8K, MATH500, HumanEval, MBPP, BBH, MMLU-Pro, IFEval), with several ablations on block size, skip threshold, dilation base, token spacing, runtime, and wall-clock speed.",
+        "At matched block sizes, DUS improves over the paper's fixed-k self-confidence baseline on many tasks, and the dilated-spacing post-filter shows that spacing can complement adaptive samplers such as EB and CB.",
+        "The paper honestly discusses limitations, including the strong fast-mixing VLMC assumption and the heuristic nature of DUS when long-range dependencies are strong.",
+        "Provides code and evaluation details (though the code URL is incomplete in the manuscript)."
+      ],
+      "weaknesses": [
+        "The central empirical comparison is against a weak fixed-k self-confidence baseline. When compared to adaptive EB/CB samplers in Appendix B.9 and Table 4, DUS is often dominated: e.g., on HumanEval with LLaDA-Instruct, EB achieves 24.4% at 35 NFE while DUS B=8 achieves 25.6% at roughly 192 NFE; on MATH500, EB achieves 24.8% at 47 NFE while DUS B=16 achieves 22.8% at roughly 128 NFE. The main text hides these stronger baselines, making the method appear more competitive than it is.",
+        "Theoretical claims are overstated and not rigorous. Assumption 3.1 (optimal estimator) is unrealistic for learned denoisers. Lemma 3.5 relies on unconditional MI decay from Lemma 3.6, but needs conditional MI given S_t, which is not established. Late DUS iterations have spacing s_t=1, where no conditional independence holds, so the claim that DUS 'approaches the joint entropy bound at each iteration' is false. The theory also does not actually justify DUS because DUS ignores the tractable surrogate (sum of marginal entropies) and selects positions independent of content/confidence.",
+        "The algorithm's formula for step sizes is incorrect: s_t = floor(R/a^t) contradicts the worked example. For B=8 and a=2, the formula gives s_1=1, s_2=0, s_3=0, but the example uses s_1=4, s_2=2, s_3=1. The correct expression appears to be a^{R-t} or floor(B/a^t). This error impairs reproducibility.",
+        "The post-filter results (Table 4) do not show accuracy gains at matched compute. NFE increases substantially (e.g., HumanEval EB: 35→59, MATH500 EB: 47→81, IFEval EB: 91→132), so the framing of 'matched or modestly higher NFE' is misleading; the gains are largely bought by additional denoiser calls.",
+        "High-speed regimes still suffer large accuracy drops relative to token-by-token decoding (e.g., GSM8K LLaDA-B 35.18% at B=64 vs 72.63% token-by-token; HumanEval 6.71% vs 34.76%), so the abstract's claim of recovering 'most of the performance lost under traditional parallel unmasking' is overstated.",
+        "The DiffuCoder baseline protocol is unclear: the text says baselines disable semi-AR inference while DUS uses block-wise semi-AR scheduling, confounding comparisons. Hardware is inconsistent (V100 in Appendix A.3 vs RTX 6000 Ada in Tables 10/12), and the code URL is missing, hindering reproducibility.",
+        "Novelty is limited: coarse-to-fine or dilated unmasking schedules are conceptually similar to existing non-uniform or cosine schedules, and the theoretical contribution does not provide reliable insight because it relies on assumptions that do not hold in practice."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Inference-only and model-agnostic: DUS requires no retraining, architecture changes, or external planner model, making it a practical drop-in method for existing masked diffusion LMs.",
+        "Simple, deterministic schedule: the dilated coarse-to-fine unmasking pattern reduces denoiser calls per block from O(B) to O(log B), and the paper motivates it with an entropy-gap decomposition (Lemma 3.3, Corollary 3.4).",
+        "Extensive empirical validation across 5 MDLMs (LLaDA-Base/Instruct, Dream-Instruct, DiffuCoder-Base/Instruct) and multiple benchmarks (GSM8K, MATH500, HumanEval, MBPP, BBH, MMLU-Pro, IFEval), showing consistent improvements over self-confidence planners and useful complementarity with EB/CB samplers.",
+        "Strong ablation suite: block-size effects, skip threshold, dilation base, level-skip, parallelism schedules, runtime overhead, token-spacing statistics, and wall-clock throughput all help characterize when and why DUS works.",
+        "Reproducibility is generally supported by detailed dataset/settings descriptions, public models, and released code (though the URL is redacted/missing in the manuscript).",
+        "Limitations are discussed honestly, including the fact that the VLMC fast-mixing assumption is an analytical device and that late iterations with spacing 1 are not covered by the guarantee."
+      ],
+      "weaknesses": [
+        "The theoretical guarantee is partial: Lemma 3.5 covers only sufficiently spaced early iterations, while late DUS iterations use spacing 1 and are not guaranteed to have a small entropy gap. The claim that DUS 'minimizes an upper bound on joint entropy gain' is therefore not fully established for the actual schedule.",
+        "Notational/presentation inconsistencies reduce clarity and reproducibility. Equation (8) defines s_t = floor(R/a^t), but the worked example B=8,a=2 requires s_t = floor(B/a^t) (or a^{R-t}). Similarly, the paper says self-confidence uses k=log2 B while DUS has average k=B/log2 B, making the claimed matched-NFE comparisons ambiguous.",
+        "Main tables primarily compare against a self-confidence planner, which is a relatively weak baseline. Stronger adaptive baselines (EB-Sampler and CB-Sampler) are mostly relegated to the appendix; where shown, they can outperform DUS at similar or higher NFE, so the main results do not fully establish DUS as the strongest inference-time scheduler.",
+        "Some claims are stronger than the evidence. For example, DUS still shows large accuracy gaps to token-by-token decoding on several benchmarks, so 'recovers most of the performance' is task- and speedup-dependent. The headline speedup is relative to token-by-token MDLM decoding, not necessarily to the strongest adaptive samplers at the same NFE.",
+        "Minor reproducibility concerns: Appendix A.3 says experiments used NVIDIA Tesla V100 GPUs, while Appendix B.6/B.8 report runtime on an RTX 6000 Ada; the code URL is missing; and some qualitative examples are difficult to parse.",
+        "The proposed dilated-spacing post-filter improves adaptive samplers but generally at higher NFE, so it is a trade-off rather than a free improvement. The paper acknowledges this, but it weakens the 'drop-in' framing."
+      ]
+    }
+  }
+}

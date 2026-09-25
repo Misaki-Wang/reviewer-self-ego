@@ -1,0 +1,130 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 1,
+      "strengths": [
+        "Addresses an important and timely problem: reliable LLM-as-a-judge with selective prediction and statistical risk control.",
+        "Clear high-level framework combining conformal/linearized risk control with a bidirectional uncertainty signal (BPE) for pairwise judging.",
+        "Extensive empirical evaluation across MT-Bench, RewardBench, and Chatbot Arena with four judge scales and 1000 random calibration/test splits.",
+        "BPE often improves uncertainty ranking metrics (AUROC/AUPRC) over predictive probability and verbalized confidence, and is compared against a strong simulated-annotator baseline.",
+        "Reproducibility details are relatively thorough: prompt templates, logit extraction, baseline configurations, and infrastructure are provided.",
+        "Limitations are explicitly discussed, including exchangeability, white-box logit access, binary pairwise formulation, and computational overhead."
+      ],
+      "weaknesses": [
+        "The central finite-sample guarantee (Theorem 2.1) is unsupported and likely false. The proof uses Eq. 13, which claims E[L(Z_{n+1}, \\hat{\\lambda})] equals E[(1/(n+1)) \\sum_{i=1}^{n+1} L(Z_i, \\hat{\\lambda})] for the data-dependent threshold \\hat{\\lambda}. This exchangeability step does not hold in general because \\hat{\\lambda} is a function of the calibration set. A simple counterexample: n=10, \\alpha=0.1, independent Bernoulli errors with p=0.2; if calibration is all correct, the condition \\sum L \\le -1 is satisfied and \\hat{\\lambda} accepts all test points, yielding marginal FDR = 0.2 > 0.1. Thus the claimed risk control is invalid.",
+        "Because the theorem is the paper's main theoretical contribution, the central claim that SCOPE provides finite-sample FDR control under exchangeability is not established. The empirical results showing risk near \\alpha may reflect conservative behavior on these datasets rather than the stated guarantee.",
+        "Novelty is limited: SCOPE is largely an application of existing linearized expectation constraints/conformal risk control to pairwise LLM judging, and BPE is a simple average of forward/reverse preference probabilities followed by binary entropy. Bidirectional swapping is a standard position-bias mitigation.",
+        "BPE lacks theoretical justification for why averaging forward and reverse probabilities removes systematic bias or yields a better uncertainty signal beyond empirical correlation. The invariance claim is asserted rather than proved.",
+        "Baselines are not fully convincing. The heuristic thresholding baseline is described as accepting when the uncertainty score exceeds 1-\\alpha (or an equivalent near-trivial rule), which trivially retains high coverage and high risk; this is a weak comparison for selective prediction.",
+        "The simulated-annotator comparison is only run on Qwen-7B and Qwen-14B, not the full judge set, so the strongest uncertainty baseline is not evaluated comprehensively.",
+        "The paper uses 'FDR' for P(error | accepted), which is a conditional error rate rather than the usual false discovery rate E[FP/(FP+TP)]. This terminology can obscure what is actually controlled and may overstate the connection to false-discovery control.",
+        "The guarantee is marginal over the joint calibration/test randomness and does not provide per-instance, group-wise, or conditional coverage; this limits practical interpretability for high-stakes evaluation.",
+        "Experiments subsample N=2,000 non-tied instances per benchmark. It is unclear whether conclusions hold on the full benchmarks, on ties, or under distribution shift, despite exchangeability being acknowledged as a limitation.",
+        "BPE requires two forward passes and white-box logits, which limits deployment in API-only/black-box judge settings; no practical approximation or fallback is provided.",
+        "The proof contains a further red flag: after Eq. 16 it derives E[L(Z_{n+1}, \\hat{\\lambda})] \\le -\\alpha/(n+1) < 0, which is impossible in many valid configurations and again indicates that the exchangeability/linearized-loss argument is incorrect.",
+        "Presentation has minor inconsistencies and typos (e.g., the heuristic baseline description, Eq. 1's 'FDR' definition, and phrasing such as 'frequently does so by affecting the coverage'), which make the methodology harder to assess."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "Addresses a well-motivated and practically relevant problem: selective LLM-as-a-judge with an explicit, user-specified bound on the error rate among accepted judgments, which is a real need for reliable automated evaluation.",
+        "The SCOPE framework is clearly described and evaluated extensively across three benchmarks (MT-Bench, RewardBench, Chatbot Arena), four judge scales (7B–70B), five risk levels, and 1000 random calibration/test splits, with risk/coverage reported consistently.",
+        "BPE is simple and cheap (two forward passes) and improves calibration/discrimination over predictive probability and simulated annotators in most configurations (e.g., MT-Bench Qwen-7B AUROC 0.685 vs 0.594; RewardBench Qwen-14B 0.809 vs 0.627).",
+        "The limitations section is honest about exchangeability, extra inference cost, white-box logit access, and the binary-pairwise restriction."
+      ],
+      "weaknesses": [
+        "Limited novelty. SCOPE is essentially a direct application of existing linear-expectation-constraint / conformal risk control (Wang et al., 2025a; Angelopoulos et al., 2024) to the pairwise-judging domain, and BPE is standard position-bias mitigation (bidirectional/position swapping, cf. Zheng et al., 2023) followed by a binary entropy. Neither component constitutes a substantial methodological advance over prior work the authors themselves cite (e.g., Coin, SConU, Conformal Alignment).",
+        "Soundness of the central theorem. The exchangeability step in Eq. 13, E[L(Z_{n+1}, λ̂)] = E[(1/(n+1))Σ_{i=1}^{n+1} L(Z_i, λ̂)], is not generally valid: λ̂ = λ̂(Z_{1:n}) is a function of the calibration points and is therefore correlated with Z_1,…,Z_n, whereas the test point Z_{n+1} is not. The standard argument requires leave-one-out thresholds (E[L(Z_{n+1}, λ̂)] = (1/(n+1))Σ_i E[L(Z_i, λ̂_{-i})]), and the calibration constraint in Eq. 14 is stated only for Z_{1:n}. As written, the finite-sample FDR guarantee — the paper's headline claim — is not rigorously established.",
+        "The key theoretical reference is questionable: 'Wang et al. (2025a), LEC' is cited with arXiv ID 2512.01556, which is implausible, so the result the proof leans on cannot be verified.",
+        "Weak/mis-implemented uncertainty baselines. Verbalized confidence yields AUROC ≈ 0.5 (e.g., 0.497, 0.496, 0.477, 0.450) across essentially all models and datasets, i.e., no discrimination at all, which is implausible and suggests a parsing/implementation problem. This makes the claimed superiority of BPE much less meaningful. Moreover, no baseline isolates the benefit of bidirectionality from the benefit of simply spending two forward passes (e.g., a two-pass single-direction confidence, or min-over-orders).",
+        "The headline result is cherry-picked. The '2.4× more judgments' claim comes from the single cell where the Naïve baseline happens to violate the bound and has anomalously low coverage (MT-Bench Qwen-7B: 0.102). In most other cells SCOPE's coverage is comparable to Naïve (e.g., RewardBench Qwen-32B 0.983 vs 0.957; Llama-70B 0.935 vs 0.872), so the practical gain is modest and the framing overstates it.",
+        "The guarantee is only marginal (population-level) rather than conditional, and the empirical risk sits at 0.097–0.099 — i.e., right at the budget — so there is effectively no safety margin under the distribution shift the paper itself acknowledges. The method's behavior is essentially 'spend the entire risk budget,' which limits its practical robustness.",
+        "Presentation/reproducibility issues that undermine confidence: pervasive citation year mismatches (Clopper & Pearson 1934↔2024, Geifman & El-Yaniv 2017↔2024, Naeini et al. 2015↔2025, several inconsistent 'Wang et al.' entries with wrong years/labels), suggesting careless reference handling for a paper whose central value is statistical rigor."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Clear and practically important problem framing: reliability of LLM-as-a-judge is framed as selective prediction with a finite-sample risk bound on the accepted set, which is a well-motivated and timely objective.",
+        "The theoretical core (SCOPE calibration) is sound: the linearized loss L(x,λ)=S(x,λ)(E(x)-α), the finite-sample condition Σ S(E-α) ≤ -1, and the largest-feasible-threshold rule follow established conformal risk control / linear expectation constraint theory, and Theorem 2.1's argument (exchangeability + the L ≤ 1-α bound) yields the marginal FDR ≤ α result. The degenerate case is handled explicitly.",
+        "BPE is a simple, well-justified idea: querying both response orders, aligning to the same underlying preference, and averaging to obtain a permutation-invariant probability before taking entropy is a sensible way to reduce position-induced overconfidence at only 2× inference cost.",
+        "Extensive and reasonably rigorous empirical evaluation: three benchmarks (MT-Bench, RewardBench, Chatbot Arena), four judge scales (7B–70B), five risk levels, and 1,000 random 50/50 splits, with the risk bound consistently met (≈0.097–0.099 at α=0.10) and coverage that scales smoothly with α and model strength.",
+        "Good reproducibility: prompt templates, token-level logit extraction (softmax over 'A'/'B'), greedy decoding, baseline configurations, and infrastructure (2×A100) are documented, with seeded splits.",
+        "Honest limitations section that correctly identifies exchangeability assumptions, white-box/logit dependence, binary-only scope, and residual biases beyond position effects."
+      ],
+      "weaknesses": [
+        "Limited methodological novelty: SCOPE is essentially a direct application of existing conformal risk control (Angelopoulos et al., 2024) and the linear expectation constraint framework (Wang et al., 2025a) to the pairwise-judging setting, and BPE is a straightforward average-then-entropy construction. The paper's value is mostly empirical rather than conceptual.",
+        "The 'Naïve' baseline behaves counterintuitively: on MT-Bench/Qwen-7B it attains coverage 0.102 while still violating the bound (risk 0.116), and similarly low coverage elsewhere. A method that maximizes coverage subject to an (uncorrected) empirical risk constraint would normally over-cover relative to the conservative SCOPE, so this pattern is unexplained and raises questions about whether the efficiency comparison ('2.4× more judgments') is fair.",
+        "The guarantee holds for any scoring function s(x), so BPE contributes only to coverage/efficiency, not validity. The central 'bias-neutral uncertainty' claim is therefore supported only empirically, and BPE does not always dominate (e.g., Llama-70B MT-Bench ECE 0.145 vs. verbalized 0.096), so the 'mostly better' framing is doing real work.",
+        "Minor presentation/technical issues: Table 1 headers say 'ROC'/'PRC' where AUROC/AUPRC are meant; the exchangeability step in the proof (Eq. 13) is written with a single threshold λ̂ for all terms, which glosses over the leave-one-out structure and is loose as stated; and the use of 'FDR' for what is a conditional error rate (selective risk) is somewhat nonstandard.",
+        "Position-bias mitigation is only partial: averaging p_fwd and p_rev enforces order invariance in the aggregated probability but can flip the predicted label and does not address other systematic biases (verbosity, self-preference), which the authors acknowledge but do not quantify.",
+        "The bound is marginal (not conditional on x), so per-instance reliability is not guaranteed, and coverage on the hardest benchmark (MT-Bench) remains modest (~0.25–0.55 at α=0.10), limiting practical reach."
+      ]
+    }
+  },
+  "v3": {
+    "exp1_quality": {
+      "oa": 2,
+      "strengths": [
+        "Novel and well-motivated combination of conformal risk control with a bidirectional preference entropy (BPE) uncertainty estimator for selective pairwise LLM judging.",
+        "BPE is simple yet effective: it queries the judge under both response orders and averages the preference probabilities, then uses binary entropy as the uncertainty score. It improves calibration (ECE) and discrimination (AUROC/AUPRC) over strong baselines across multiple benchmarks and model scales.",
+        "Extensive experiments: three main benchmarks plus two extended ones, four judge models, 1000 random 50/50 splits, and multiple risk levels. The empirical risk consistently stays near the target alpha (e.g., 0.097–0.099 at alpha=0.10) while achieving higher coverage than naive thresholding.",
+        "Practical drop-in framework: requires only two forward passes per instance, works with any judge that exposes preference-token probabilities, and exposes a single user-tunable knob alpha.",
+        "Thorough appendices covering label noise, calibration set size, cross-benchmark transfer, and deployment on a specialized critic.",
+        "Honest limitations section discussing exchangeability, computational overhead, white-box requirement, and binary pairwise scope.",
+        "Good reproducibility details: prompt templates, logit extraction, baseline configurations, and infrastructure are clearly described."
+      ],
+      "weaknesses": [
+        "The proof of Theorem 2.1 contains a flawed exchangeability step. It claims that E[L(Z_{n+1}, \\hat{\\lambda})] = E[(1/(n+1)) \\sum_{i=1}^{n+1} L(Z_i, \\hat{\\lambda})], but this identity is invalid because \\hat{\\lambda} is a function of the first n calibration points, so evaluating the loss on those same points at the same threshold introduces bias. The correct conformal argument requires leave-one-out thresholds.",
+        "The finite-sample condition \\sum_{i=1}^n S(x_i,\\lambda)(E(x_i)-\\alpha) \\leq -1 is not sufficient to guarantee FDR \\leq \\alpha. A simple counterexample: with n=2, alpha=0.5, and a judge that always accepts and has a constant error rate of 0.6, the condition is satisfied when both calibration points are correct (probability 0.16), leading to a test FDR of 0.6 > 0.5. The unconditional expected FDR is also 0.6, violating the claimed bound.",
+        "The central claim of a finite-sample statistical guarantee is therefore unsupported. The empirical results showing risk near alpha may be due to the conservativeness of the condition (which often causes near-total abstention) rather than a valid guarantee.",
+        "The paper does not discuss the negative-loss issue in conformal risk control. The linearized loss can be negative, and the standard CRC proof for bounded losses in [0, B] does not directly apply. A correct finite-sample correction for losses in [A, B] with A < 0 would need to be different.",
+        "Some baseline comparisons are not entirely fair: the 'Naïve' baseline uses empirical thresholding without finite-sample correction, so its violations are expected. However, the comparison does not isolate the effect of the flawed correction from the effect of the uncertainty score.",
+        "The coverage gains over 'Naïve' are substantial, but the absolute coverage on hard benchmarks (e.g., MT-Bench with Qwen-7B: 0.246) is low, which may limit practical utility in some settings."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Clear, well-organized presentation with an intuitive framework figure (Figure 1) and a self-contained pipeline (judging -> BPE -> conformal calibration); the method is easy to follow.",
+        "Addresses a genuinely important and timely problem: reliability and calibrated abstention for LLM-as-a-judge, with an explicit user-tunable risk knob alpha.",
+        "Empirically consistent results: BPE outperforms Predictive Probability, Verbalized Confidence, Swap-and-Aggregate, and Simulated Annotators on ECE/AUROC/AUPRC across four judges and five benchmarks, and strictly improves over Swap-and-Aggregate in every model-dataset cell (Table 1), which is a clean, interpretable comparison.",
+        "The finite-sample correction does real work: the Naive baseline exceeds the target on MT-Bench (0.116, 0.124) and Chatbot Arena (0.114), whereas SCOPE stays at/below alpha (Table 3), demonstrating a concrete advantage over uncorrected empirical thresholding.",
+        "Honest and useful limitations/appendix analysis, including cross-benchmark calibration transfer failures (Appendix H, risk up to 0.20), label-noise robustness (Appendix F), calibration-set-size ablation (Appendix G), and drop-in deployment on a specialized critic (Appendix E).",
+        "Reproducibility is reasonably strong: prompt templates, logit-extraction procedure, softmax-over-A/B, temperature T=0, baseline configurations, and 1000 random 50/50 splits with seeded determinism are all specified."
+      ],
+      "weaknesses": [
+        "Limited originality: the statistical core (linearized loss S(E-alpha), the -1 finite-sample condition, largest-feasible-threshold selection) is directly borrowed from Wang et al. 2025b (LEC) and Angelopoulos et al. (Conformal Risk Control), and the paper itself frames SCOPE as adapting these. The contribution is essentially an application/adaptation rather than a new method.",
+        "BPE is a minor variant of an existing technique: the paper acknowledges Swap-and-Aggregate (Zheng et al., 2023) 'shares BPE's bidirectional prediction rule'; the only change is probability-level averaging plus binary entropy instead of a discrete agreement vote. This is a thin increment over prior swap-agreement work.",
+        "Overstated headline claim: 'accepts up to 2.4x more judgments' is measured only against the weak Naive baseline and only holds for MT-Bench/Qwen-7B (0.246 vs 0.102). Against the principled baseline (Trust-or-Escalate) gains are smaller and are only evaluated on MT-Bench (Appendix D.2). The abstract's 'vanilla baselines' wording is imprecise.",
+        "Potential gap in the central proof: Eq. 13 asserts E[L(Z_{n+1}, lambda_hat)] = E[(1/(n+1)) sum_{i=1}^{n+1} L(Z_i, lambda_hat)] using the single calibration threshold lambda_hat for all n+1 points. The standard split-conformal argument requires leave-one-out thresholds lambda_hat^{(-i)} for each i; as written the identity does not obviously hold because Z_{n+1} is treated asymmetrically with respect to lambda_hat. This is the linchpin of Theorem 2.1 and needs scrutiny.",
+        "The risk-control result is somewhat self-fulfilling: empirical FDR is reported as almost exactly alpha (0.097-0.099) for every judge/dataset, which is expected whenever calibration and test are exchangeable random splits and the threshold consumes the full budget. The genuine value-add is coverage, which is limited in several key cells (e.g., MT-Bench Qwen-7B coverage 0.246; JudgeBench Qwen-7B 0.023), so practical utility is modest.",
+        "Non-standard terminology: the quantity controlled is the selective/conditional risk P(y_hat != y* | s(x) <= lambda), not the multiple-testing false discovery rate; labeling it 'FDR' throughout risks misleading readers.",
+        "The 'bias-neutral' claim for BPE is loose. Averaging p_fwd and p_rev symmetrizes position effects but does not eliminate them (a systematically position-biased judge collapses to p_bar ~ 0.5 and is scored as maximally uncertain rather than corrected), and no experiment directly measures position-bias reduction as a function of BPE versus alternatives.",
+        "The uncertainty signal is fixed to entropy of the averaged probability with no justification for optimality or comparison against other aggregations (e.g., variance, min-probability, KL between the two orders), so it is unclear why this particular score is preferred beyond the empirical tables.",
+        "BPE requires white-box logit access (explicitly noted as a limitation), which restricts deployment to API-only/black-box judges, and the two-pass requirement doubles inference cost."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Addresses a timely and important problem: reliability of LLM-as-a-judge, with a practical framework for selective pairwise evaluation.",
+        "Provides a finite-sample FDR guarantee via conformal risk control, adapted to pairwise judging with a clear linearized loss and calibration constraint.",
+        "Introduces Bidirectional Preference Entropy (BPE), a simple yet effective uncertainty score that averages probabilities across both response orders and uses entropy, mitigating position bias.",
+        "Extensive and rigorous empirical evaluation: three main benchmarks plus two extended benchmarks, four judge models plus a specialized critic, 1000 random splits, multiple risk levels, and strong baselines (Simulated Annotators, Trust-or-Escalate, Self-Consistency).",
+        "Comprehensive ablations: label noise on the calibration set, calibration set size, and cross-benchmark transfer, which probe practical robustness.",
+        "Well-written and clear presentation, with detailed reproducibility information (prompts, logit extraction, infrastructure).",
+        "Limitations and broader impact are thoughtfully discussed, including exchangeability assumptions and white-box access requirements."
+      ],
+      "weaknesses": [
+        "The theoretical guarantee has a subtle gap: the threshold is defined as the supremum of the feasible set, but if that set is not closed (as is typical for non-monotone risks), the supremum may not satisfy the calibration constraint used in the proof. No discretization or alternative handling is discussed.",
+        "Novelty is limited: the conformal risk control method is largely adapted from Wang et al. (2025b), and BPE is a straightforward combination of existing ideas (swapping + entropy). The main contribution is the application to pairwise LLM judging rather than a fundamentally new method.",
+        "The claim that BPE is 'bias-neutral' is somewhat overstated; averaging over positions reduces but does not eliminate position bias, and no theoretical analysis of bias mitigation is provided.",
+        "Some presentation issues: the description of the 'Heuristic' baseline (accepting predictions whose uncertainty score exceeds 1-α) is confusing and appears backwards, and no code release is mentioned for full reproducibility.",
+        "The improvement in uncertainty quality over the closely related Swap-and-Aggregate baseline is consistent but modest in several settings (e.g., ECE and AUROC gains are small for some model–dataset pairs).",
+        "The computational overhead of BPE (two forward passes) is acknowledged but not analyzed in detail (e.g., wall-clock cost vs. baselines)."
+      ]
+    }
+  }
+}

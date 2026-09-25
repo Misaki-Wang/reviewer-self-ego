@@ -1,0 +1,134 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a timely and practical problem: reducing communication overhead in DiLoCo-style LLM pre-training by studying inner optimizers, compression, and error feedback together.",
+        "Provides a systematic empirical comparison of Muon vs AdamW inner optimizers under Top-k sparsification and quantization, with and without error-feedback accumulators.",
+        "If the results hold, the main empirical finding is useful: MuLoCo with 2-bit quantization and error feedback can match or outperform uncompressed DiLoCo while communicating roughly 8x less and using comparable accumulator memory (Figure 1).",
+        "Extends the ablation beyond the main text with DCT Top-k, random-k, quantization, and EF studies in the appendix, and reports detailed hyperparameter sweeps.",
+        "Builds on a known DiLoCo scaling-law setup, which makes the comparisons more controlled than an entirely ad hoc experimental configuration.",
+        "Highlights an important practical point: error feedback appears necessary for aggressive compression in DiLoCo-style training, and Muon deltas may be more compressible than AdamW deltas.",
+        "The paper is concise and mostly clear about its experimental choices and hyperparameters, with useful appendix tables."
+      ],
+      "weaknesses": [
+        "The error-feedback update in Algorithm 1 appears inconsistent: line 15 reads E_i(t-H), while line 17 stores the residual at E_i(t+1). At the next communication round, t-H refers to the previous round's t, not t+1, so the stored residual is never read. As written, the method does not implement standard error feedback, undermining the central EF claims unless this is corrected.",
+        "The empirical evaluation is narrow: a single 220M-parameter model, one dataset (FineWeb-EDU), one K=8/H=30 setting, and 3.6B tokens. The claims about 'significantly outperforming' DiLoCo and being 'practical' are not supported at larger scales or longer training horizons.",
+        "No random seeds, error bars, or statistical significance tests are reported, so small final-loss differences (e.g., between compressed and uncompressed runs) may not be robust.",
+        "No wall-clock, throughput, or compute-overhead analysis is provided. Muon includes Newton-Shulz orthogonalization, so claiming Muon is a 'practical' inner optimizer without measuring compute cost is an overclaim.",
+        "The memory-complexity claim of 'identical memory complexity' is imprecise. Table 1's headers are confusing, and MuLoCo applies AdamW to embeddings/output layers, so exact accumulator memory is not identical to DiLoCo; error feedback also adds memory.",
+        "Hyperparameters are tuned mostly on uncompressed runs, with only EF beta tuned under compression. Compressed runs may therefore be disadvantaged by non-optimal learning rates, and the comparison may not isolate the effect of compression.",
+        "Quantization details are insufficiently specified (codebook, scaling, per-tensor vs. per-group, outlier handling, etc.), making reproduction difficult. Top-k results are plotted by compression percentage without clearly accounting for sparsity-pattern communication overhead in the bits-communicated comparison.",
+        "No code or reproducibility statement is provided, and compute details (hardware, runtime, number of runs) are missing.",
+        "The paper overclaims with terms like 'unprecedented' 2-bit compression and 'LLMs' despite the 220M-parameter scale; the results may not transfer to genuinely large language models.",
+        "There is no dedicated limitations, broader impact, or research-ethics discussion, despite the practical significance of the claims."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "The paper addresses a practically relevant question: whether Muon can serve as the inner optimizer in DiLoCo and how compression interacts with the inner optimizer and error feedback. This is a timely combination given recent interest in Muon for LLM pretraining.",
+        "The empirical study is relatively systematic within its chosen scale. It ablates two inner optimizers (AdamW, Muon), two main compression families (top-k sparsification, quantization), error feedback on/off, and several compression levels, plus DCT top-k and random-k in the appendix.",
+        "The memory-complexity table usefully highlights that MuLoCo + error feedback can match the accumulator memory of DiLoCo without error feedback, while reducing communicated bits.",
+        "The paper uses a public dataset (FineWeb-EDU) and standard implementations (Optax Muon), which is a reasonable starting point for reproducibility.",
+        "The finding that Muon deltas remain much more usable under aggressive quantization than AdamW deltas is potentially useful for low-communication distributed training, even if the paper overstates the absolute quality of the 2-bit result."
+      ],
+      "weaknesses": [
+        "The central quantitative claims are overstated and appear inconsistent with the reported evidence. The abstract/conclusion state that 2-bit quantization with error feedback gives 'next to no performance degradation' and that MuLoCo 'significantly outperforms DiLoCo while communicating 8x less,' and the introduction claims that MuLoCo at 2 bits 'reaches a lower loss than vanilla DiLoCo in the same number of steps.' However, Figure 2 (right) appears to show MuLoCo at 2 bits + EF with a final test loss noticeably above the MuLoCo no-compression baseline (roughly 3.78 vs 3.66), and also above the DiLoCo no-compression dashed line (roughly 3.72). If so, the 2-bit result has a non-negligible degradation, and it does not clearly beat vanilla DiLoCo. This needs to be resolved and honestly discussed; as written, the headline claims are not reliably supported.",
+        "Reproducibility is seriously limited by missing details of the quantization scheme. The paper only says quantization maps entries to a smaller representable range with an offset and codebook, but never specifies whether quantization is uniform or non-uniform, per-tensor/per-row/per-block, how scale/offset are computed, whether stochastic rounding is used, or how the codebook is designed. Without these details, the 2-bit results cannot be reproduced or compared against other methods.",
+        "No seed variance or error bars are reported for any pretraining result. Since the key comparisons involve small differences (e.g., ~0.05 loss or less between some conditions), single-seed runs make it impossible to judge whether the reported advantages are statistically meaningful.",
+        "The empirical scope is very narrow relative to the paper's claims: a single model size (220M parameters), a single token budget (3.6B tokens), and a single setting of K=8 workers and H=30 local steps. There is no scaling study to support the title's claim that Muon is 'practical' for DiLoCo or to show that the compressibility advantage persists at larger scales, more local steps, or different worker counts.",
+        "The paper provides no analysis or theoretical insight into why Muon's deltas are more compressible. The hypothesis is stated, but no measurements of delta properties (e.g., entry distributions, effective rank, singular-value spectra, clipping behavior) are provided to explain the effect. This limits the originality and usefulness of the finding.",
+        "Baseline comparisons are incomplete. The most closely related work, Streaming DiLoCo, is not compared against in the main experiments; other communication-efficient pretraining methods are also absent. There is no comparison to standard 2-bit quantized data-parallel training. Moreover, wall-clock time is not measured at all, despite 'practical' in the title and the explicit importance of speed in distributed training.",
+        "The error feedback variant is non-standard (an EMA with decay beta) and is not justified or ablated against standard error feedback. In addition, beta is tuned separately for DiLoCo (0.7) and MuLoCo (0.9), which may confound the comparison between the two optimizers.",
+        "Presentation issues reduce clarity: several typos and awkward phrases ('we very the inner optimizer', 'Tuning our attention', 'the relatively, small-scale'), a table with duplicated and misleading column headers ('Mem. OuterOpt' repeated for what appear to be inner and outer memory), algorithm notation that is ambiguous or inconsistent (e.g., the delta update line), and figure captions that are too sparse to interpret without the appendix. The main text only shows final-loss scatter plots for compression, relegating training curves to the appendix, which makes it hard to assess stability and convergence behavior."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Timely and useful combination of Muon with DiLoCo, filling an under-explored gap: compression with error feedback in DiLoCo-style LLM pre-training across inner optimizers.",
+        "Clear empirical finding that error feedback consistently improves compressed DiLoCo and MuLoCo updates for both top-k sparsification and quantization (Figure 2).",
+        "Demonstrates that Muon as an inner optimizer converges faster and to lower final loss than AdamW DiLoCo, with and without compression (Figure 3).",
+        "Shows strong compressibility of Muon deltas: MuLoCo with 2-bit quantization + error feedback reaches lower loss than uncompressed AdamW DiLoCo while communicating 8x less, and nearly matches its 16-bit MuLoCo baseline (Figure 1).",
+        "Memory analysis is practically relevant: MuLoCo + error feedback has the same accumulator memory as uncompressed AdamW DiLoCo, due to Muon's single momentum state versus AdamW's two states (Table 1).",
+        "Includes a systematic study with multiple compression schemes (top-k, quantization, DCT top-k, random-k) and detailed hyperparameter sweeps in the appendix.",
+        "Algorithm 1 clearly describes the modified DiLoCo procedure, making the method relatively easy to understand and implement."
+      ],
+      "weaknesses": [
+        "Limited experimental scale: a 220M-parameter model trained on 3.6B tokens with K=8 and H=30 provides useful signal but does not establish that the conclusions hold for larger models or longer training runs.",
+        "The paper claims practicality, but there is no wall-clock, throughput, or real network measurement; communication-bit savings alone do not guarantee practical speedups.",
+        "Main results appear to come from a single seed without error bars or statistical significance testing, so small final-loss differences (e.g., 2-bit MuLoCo versus its 16-bit baseline) could be within run-to-run noise.",
+        "Reproducibility is incomplete: the quantization scheme (per-tensor vs. blockwise, scaling, codebook details), treatment of top-k index overhead, exact error-feedback EMA implementation, and random seeds are not fully specified, and no code is provided.",
+        "The outer optimizer hyperparameters (SGD with Nesterov momentum, beta=0.9, eta=0.8) are inherited from AdamW DiLoCo and not tuned for MuLoCo, which may affect the fairness of the inner-optimizer comparison.",
+        "No direct comparison to closely related compressed DiLoCo methods such as Streaming DiLoCo or CocktailSGD, so the incremental advantage over prior compression work is unclear.",
+        "For top-k sparsification, it is not clear whether the communicated bits include the sparsity-pattern indices; if not, comparisons against quantization may overstate top-k compression efficiency.",
+        "There is no explicit limitations section, and claims such as 'unprecedented quantization' and 'practical' are stronger than the small-scale, single-seed evidence supports."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Large-scale, systematic empirical study spanning 150M–15B parameter models, multiple worker counts, synchronization intervals, compression schemes, streaming updates, and wall-clock analyses.",
+        "Provides a practically useful finding: replacing DiLoCo's inner AdamW with Muon improves performance and worker scaling, especially relative to each method's data-parallel baseline at K>2.",
+        "Includes 15B runs and scaling-law extrapolations, giving rare large-scale evidence for communication-efficient optimizer choices in LLM pre-training.",
+        "Offers a mechanistic analysis of pseudogradient alignment, interference gap, and step Frobenius norms, connecting Muon's orthonormalized updates to more stable pseudogradient construction.",
+        "Demonstrates practical benefits beyond accuracy: lower memory complexity, negligible optimizer-step overhead, compatibility with quantization/streaming, and larger critical batch sizes.",
+        "Hyperparameter tuning is extensive across scales, and the paper provides algorithms, hyperparameter ranges, and implementation details.",
+        "Limitations are acknowledged honestly, including dense-transformer-only scope and lack of 15B hyperparameter sweeps."
+      ],
+      "weaknesses": [
+        "The core methodological novelty is modest: MuLoCo is essentially DiLoCo with the inner optimizer changed to Muon. The theoretical result in Proposition 4.2 is largely an algebraic identity about nuclear norms and does not prove that Muon yields better convergence or a causally better pseudogradient.",
+        "Some central claims are overclaimed. At 15B, MuLoCo K=1 has worse evaluation loss than DP Muon (1.8839 vs. 1.8642), and K=16 MuLoCo is not close to single-worker loss (1.9168 vs. 1.8839), though mean downstream accuracy is similar.",
+        "Critical batch size definitions and claims are inconsistent. Section 7.2 states B_crit <= 0.01 B_opt (likely a typo) whereas the earlier definition is loss-based; the paper also claims larger CBS at all K but later excludes K>1 from CBS scaling-law fits due to insufficient sweeping.",
+        "The scaling-law projections depend strongly on the chosen shared irreducible loss L_irr=1.711, which the authors themselves note likely underreports 15B performance and may be unrealistic. High-K projections are therefore speculative.",
+        "Normalizing DiLoCo by DP AdamW and MuLoCo by DP Muon complicates interpretation because the two baselines have different strengths; the study cannot fully separate inner-optimizer effects from outer-optimizer tuning effects.",
+        "The pseudogradient analysis is mostly correlational. Cosine similarity to a K=1 pseudogradient and spectral interference gaps are suggestive, but the paper does not establish a direct causal link to final loss or isolate alignment from step magnitude and outer momentum effects.",
+        "Reproducibility is only partially supported: no code release or artifact is mentioned, total compute is not reported, and some important implementation choices are only briefly described.",
+        "Presentation has numerous errors and inconsistencies: mislabeled/confusing references (e.g., 'BeepSeek-AI', 'Woodal' for Nocedal), inconsistent table/figure numbering, typos such as 'Robuts', and mismatched citation years/names.",
+        "The study is limited to dense Gemma3-style transformers trained at 20 tokens-per-parameter; it does not test MoE, SSM, hybrid architectures, much longer training horizons, or scales beyond 15B, limiting generality."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "The paper conducts an unusually large empirical study, sweeping hyperparameters across 150M, 416M, 914M, 1.76B, and 3.1B models, multiple worker counts, synchronization intervals, compression schemes, and streaming communication.",
+        "The practical contribution is relevant: MuLoCo is shown to be compatible with quantization, top-k sparsification, error feedback, and partitioned/streaming updates, and it has lower memory complexity than DiLoCo.",
+        "The paper reports extensive hyperparameter tables and algorithmic details, which improves reproducibility relative to many large-scale empirical papers.",
+        "The empirical pseudogradient analysis is interesting and provides some evidence that Muon inner steps produce more aligned pseudogradients and more stable per-step Frobenius norms than AdamW.",
+        "The limitations section honestly acknowledges that the study is restricted to dense transformers, a 20 TPP regime, and scales up to 15B."
+      ],
+      "weaknesses": [
+        "The core method is incremental: MuLoCo is simply DiLoCo with Muon replacing AdamW as the inner optimizer. There is no new algorithm, and the paper's main novelty is an empirical combination of existing ideas.",
+        "The central claim that MuLoCo scales better than DiLoCo even when normalized by their respective data-parallel baselines is contradicted at the largest scale. Table 7 shows that at 15B, MuLoCo K=16 is +1.4% relative to DP Muon, whereas DiLoCo K=16 is only +0.4% relative to DP AdamW. Table 3 also shows MuLoCo K=16 has worse evaluation loss (1.9168) than DiLoCo K=16 (1.9062). This directly undermines Finding 8 and the abstract's worker-scaling claim.",
+        "Normalizing MuLoCo by DP Muon and DiLoCo by DP AdamW is not an apples-to-apples comparison. Since DP Muon is generally stronger than DP AdamW, relative percentages can make MuLoCo appear better than it is; the paper relies on this normalization for a key claim.",
+        "The 15B experiments are single runs without hyperparameter sweeps, and the authors admit that the 3.1B-optimal batch size for K=1 MuLoCo was later found to be a local minimum. Strong conclusions at scale are therefore weakly supported.",
+        "The theoretical contribution is thin. Proposition 4.2 is essentially the identity ||Psi||_* = <Psi, Psi*>_F, and the corollaries simply note that orthonormal steps have constant Frobenius norm sqrt(r). This does not prove that Muon pseudogradients are better or causally link alignment to improved optimization.",
+        "The paper overclaims in several places. For example, at 15B, DP Muon has lower evaluation loss (1.8642) than MuLoCo K=1 (1.8839), yet the text says MuLoCo K=1 matches the best-performing baseline; the claim rests on a small mean-accuracy difference while ignoring the primary loss metric.",
+        "Critical-batch-size and wall-clock extrapolations rely on power laws fit to limited scales and are speculative. The 15B results themselves are mixed and do not clearly validate the predicted Pareto-optimal tradeoff.",
+        "There are internal inconsistencies: the text says MuLoCo has 'larger' alpha values than DiLoCo, while Table 6 shows MuLoCo exponents are generally more negative; later the paper says Muon-based methods have smaller exponents. Such inconsistencies make the scaling-law discussion hard to trust.",
+        "Presentation issues and typos are frequent, including incorrect references (e.g., 'Woodal' for Nocedal, 'BeepSeek-AI'), misspellings ('Extropolating', 'Robuts', 'Netotron-CC'), and inconsistent notation, which reduce clarity.",
+        "No code release or reproducibility artifact is mentioned, and the large-scale experiments are not practically reproducible by most reviewers or researchers."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Large-scale, systematic empirical validation: over 2,200 pretraining runs across 150M–15B parameters, K in {1,2,4,8,16}, four optimizers, and extensive hyperparameter sweeps at all scales except 15B; the experiments consistently compare MuLoCo against DiLoCo and their respective DP baselines across worker count, synchronization interval, quantization, sparsification, streaming, and wall-clock settings.",
+        "Practical significance: replacing DiLoCo's inner AdamW with Muon yields a simple, compatible recipe with larger critical batch sizes, better normalized worker scaling for K>2, <1% optimizer-step overhead, lower memory complexity, and compatibility with compression and streaming; this is directly useful for communication-constrained LLM pretraining.",
+        "Useful mechanistic analysis: the paper introduces the top-S interference gap and pseudogradient alignment measurements, and Proposition 4.2 gives a clean nuclear-norm decomposition relating pseudogradient quality to per-step alignment and step Frobenius norms, supported by cosine-similarity, spectrum, and step-norm experiments.",
+        "Reproducibility is generally strong: algorithm blocks, model and token-budget tables, dataset/tokenizer choices, implementation details, hyperparameter search ranges, and optimal hyperparameters are reported; the limitations section honestly scopes the study to dense transformers in a 20TPP setting and notes untested architectures.",
+        "Originality in combination and analysis: although the core algorithmic change is simple, the paper provides new understanding of how inner-optimizer geometry affects local-update pseudogradients and worker scaling, which is a useful direction beyond simply benchmarking Muon versus AdamW."
+      ],
+      "weaknesses": [
+        "The theoretical link is not causal: Proposition 4.2 is largely a norm decomposition and does not prove that Muon's orthonormal steps lead to better pseudogradients or lower final loss. The alignment, interference-gap, and Frobenius-norm evidence is correlational, and the pseudogradient analysis resumes from DP checkpoints for only H=30 steps rather than following full training trajectories.",
+        "The 15B no-sweep results weaken the headline scaling claims: in Table 3/7, K=16 MuLoCo (eval loss 1.9168, mean accuracy 65.94) is worse than DP AdamW (1.8873, 66.18), and its relative gap to DP Muon (+1.4%) is larger than DiLoCo K=16's gap to DP AdamW (+0.4%) at 15B, contrary to the claimed normalized K>2 advantage. The authors acknowledge that 15B was not swept, but this means the largest-scale evidence does not fully validate the central scaling story.",
+        "Scaling-law and critical-batch-size extrapolations are fragile: the shared irreducible-loss fit underreports 15B performance, 15B hyperparameters are extrapolated from smaller scales and from a known local minimum for K=1 MuLoCo at 3.1B, and the critical-batch-size definition contains an apparent typo/ambiguity (B_crit <= 0.01 B_opt rather than a loss-based threshold). Claims of Pareto optimality and the 16M-token batch size rely substantially on these extrapolations.",
+        "Effect sizes are often small and variance is not reported: many final-loss differences are around 0.01–0.03, downstream 15B mean accuracies differ by less than 1.3%, and the smoothed EMA final loss is used without confidence intervals or seed variance. This makes it difficult to judge whether some reported advantages, especially K=1 and large-batch comparisons, are robust.",
+        "Presentation and consistency issues reduce clarity: there are typos ('robusts', 'extropolating', 'calnges'), some mislabeled or confusing figure/table references (e.g., Fig. 6(a) vs Fig. 1(a), Table 9 vs Fig. 9), and questionable notation in the hyperparameter ranges (e.g., lambda in {1^{-1}, 1^{-2}, ...}). These are not fatal but detract from an otherwise detailed manuscript."
+      ]
+    }
+  }
+}

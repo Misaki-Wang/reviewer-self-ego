@@ -1,0 +1,65 @@
+{
+  "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Novel idea of optimally scaling low-rank adapters to accumulate high-rank weight updates without restarting optimization, addressing a key limitation of LoRA and ReLoRA.",
+        "Rigorous theoretical analysis: Theorem 3.2 establishes necessary and sufficient conditions for optimal low-rank adapters (rank-2r SVD of gradient), and Theorems 3.5 and 3.7 provide analytical solutions for scalar and column-wise scaling.",
+        "Efficient computation of moment estimators for scaled adapters (Lemmas 3.3 and 3.6), enabling seamless integration with adaptive optimizers like AdamW without resetting.",
+        "Comprehensive experiments on multiple models (DeBERTaV3-base, LLaMA2-7B, LLaMA3-8B, Gemma-3-12B) and diverse tasks (GLUE, commonsense reasoning, math), showing consistent improvements over LoRA and high-rank variants like MoRA and HiRA.",
+        "Proposal of intermittent variant ScaLoRA-I that amortizes computational overhead, with empirical validation of a favorable trade-off between efficiency and performance.",
+        "Empirical validation of theoretical assumptions, including gradient rank ≥ 2r and the non-negativity condition for column-wise scaling.",
+        "Clear demonstration of high-rank weight updates and faster convergence, supporting the core claim of the method."
+      ],
+      "weaknesses": [
+        "The optimal scaling is derived assuming gradient descent, but experiments use AdamW. The theoretical optimality may not hold for AdamW, creating a gap between theory and practice.",
+        "Performance gains are modest (around 1% absolute) and in some cases only marginally better than simply increasing LoRA rank (e.g., r=32), while the computational overhead is not drastically lower.",
+        "No comparison with full fine-tuning on larger models (LLaMA, Gemma) to substantiate the claim of closely approximating full fine-tuning; only synthetic and GLUE (with a small model) include full FT comparisons.",
+        "The method requires storing the entire merged weight matrix for checkpointing, which is a storage overhead compared to LoRA's adapter-only checkpoints (though the authors acknowledge this).",
+        "The paper claims 'significant margin' in commonsense reasoning, but the actual margin is about 1% absolute, which is not particularly large.",
+        "Some typos and unclear notation (e.g., 'O(9′)' and 'v_t^{n 1/2}' in Theorem 3.7) reduce readability.",
+        "The non-negativity condition for column-wise scaling is only empirically validated (~80%), and when not met, the fallback to scalar scaling may be suboptimal.",
+        "No code release mentioned, though pseudocode and hyperparameters are provided for reproducibility."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "Introduces a mathematically non-trivial and well-motivated idea: instead of only adding a fresh low-rank term, it rescales the existing adapters so that the per-step update better matches a full-fine-tuning GD step, and it derives closed-form scaling factors (Theorems 3.5 and 3.7, with Lemmas 3.3 and 3.6 showing moment estimators can be rescaled in O((m+n)r)).",
+        "The high-rank accumulation mechanism is demonstrated empirically: Figure 2b and Table 3 show the cumulative update rank growing to ~54 (vs. r=4/8 for LoRA), and Figures 1-2 show faster loss reduction than vanilla LoRA.",
+        "Evaluation is broad, covering DeBERTaV3-base, LLaMA-2-7B, LLaMA-3-8B and Gemma-3-12B on GLUE, commonsense reasoning and math (MetaMathQA/GSM8K/MATH), with an overhead comparison (Figure 3, Table 5) and useful ablations (scalar-only scaling, choice of I).",
+        "The complexity analysis is honest and the intermittent variant ScaLoRA-I is a sensible way to amortize cost, with an ablation (Table 10) showing I=10 gives a reasonable trade-off."
+      ],
+      "weaknesses": [
+        "Central theoretical claim is overstated. The abstract/conclusion promise 'rigorous performance guarantees', but Theorems 3.2/3.5/3.7 only characterize the minimizer of a one-step Lipschitz quadratic surrogate under a restricted (scaled) family; there is no convergence rate, no guarantee that the loss decreases over iterations, and no bound on the gap to full fine-tuning. Calling these 'performance guarantees' misrepresents what is proven.",
+        "The word 'optimal' is heavily qualified in the paper itself. Theorem 3.7 is global only when the 2r x 2r linear system has a non-negative solution (only ~80% of layers), otherwise the method silently falls back to scalar scaling; the scalar solution in Theorem 3.5 is split across cases depending on the signs of C^A, C^B. So the method is not solving (7) globally; it is a heuristic within a restricted family.",
+        "The empirical gains are marginal and often within noise, contradicting the claim of a 'consistent' and 'significant' advantage. On commonsense reasoning (Table 2), ScaLoRA-I (74.75) barely exceeds LoRA r=32 (74.52) and ReLoRA (74.40), with overlapping standard deviations; on LLaMA3-8B, ScaLoRA 77.85 vs. LoRA r=32 77.54 with overlapping error bars. The column-scaling ablation (Table 11) adds only 0.72% over the scalar-only variant, so the headline component of the method contributes very little.",
+        "Novelty over prior art is limited. The merge-and-refactor mechanism is essentially ReLoRA's, and the paper itself notes that Theorem 3.2 reduces to LoRA-GA as a special case. The remaining contribution (per-iteration rescaling of A and B) is a relatively small delta whose practical benefit is not clearly separated from these baselines.",
+        "Comparison protocol has confounds that undermine attribution of the gains. Learning rates are grid-searched per method per dataset (Table 9), the Lipschitz constant L is also tuned by grid search, and the number of epochs is changed for ScaLoRA ('epochs are reduced due to the fast convergence of ScaLoRA'). HiRA/LoRA-GA learning rates are multiplied by 10 and 1/10 respectively. With this much per-method tuning it is hard to attribute the small deltas to the proposed scaling rather than to hyperparameter budget.",
+        "The 'alignment with full fine-tuning' motivation is internally undercut: on GLUE, full FT (88.25) is worse than ScaLoRA (88.98), which the authors attribute to overfitting. If matching full FT is the theoretical objective, a benchmark where full FT is not the target weakens the story, and the surrogate is never validated against full FT directly.",
+        "Admitted limitations erode the PEFT value proposition: ScaLoRA must store the full merged W_t and modifies W^pt in place, which conflicts with the low-memory, swappable-adapter appeal of LoRA and with quantized (e.g., QLoRA-style) workflows. This is noted but not quantified beyond 'disk space is abundant'.",
+        "Presentation and correctness-of-detail problems: the Theorem 3.7 statement in the main text contains garbled notation ('v_t^{n 1/2}'), there are typos ('Admist'), malformed citations ('yang Liu et al.'), and Table 2/3 labels the LLaMA-3-8B rows as 'LLaMA2-7B'. These make the paper harder to reproduce faithfully."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Introduces a novel way to accumulate high-rank updates from low-rank increments by optimally scaling existing adapters, avoiding optimizer restart and re-warmup.",
+        "Provides rigorous theoretical analysis for optimal scalar and column-wise scaling under Lipschitz smoothness, with analytical solutions and clear conditions for global optimality.",
+        "Extensive experiments across multiple models (DeBERTaV3-base, LLaMA-2-7B, LLaMA-3-8B, Gemma-3-12B) and diverse tasks (GLUE, commonsense reasoning, math) show consistent gains over LoRA and strong high-rank variants like MoRA and HiRA.",
+        "Efficiency analysis and the intermittent variant ScaLoRA-I effectively amortize overhead, with negligible memory growth compared to HiRA and no optimizer reset unlike ReLoRA.",
+        "Good ablation studies (scalar vs. column scaling, choice of interval I, rank analysis) and an honest discussion of limitations such as storage and computational cost."
+      ],
+      "weaknesses": [
+        "The theoretical guarantees are derived for a per-step quadratic upper bound under gradient descent, not for the actual loss or the AdamW optimizer used in practice; the abstract's claim of minimizing the loss function is overstated.",
+        "No convergence guarantee or formal proof that the accumulated updates become high-rank; the high-rank claim is demonstrated empirically rather than theoretically.",
+        "Performance gains are modest (often within 1% or within standard deviations) and the advantage over LoRA with r=32 is marginal, which weakens the practical significance.",
+        "Missing ablation isolating the effect of frequent merging versus optimal scaling: ReLoRA with a similar merge frequency is not compared, so it is unclear how much of the gain comes from scaling rather than simply merging more often.",
+        "The Lipschitz constant L is treated as a hyperparameter, but its tuning procedure and sensitivity are not reported, adding an extra hyperparameter and hindering reproducibility.",
+        "No code release is provided, and some implementation details (e.g., how often ScaLoRA-I applies scaling, how the linear system is solved numerically in practice) are not fully specified.",
+        "The argument that HiRA's high Euclidean rank is misleading due to its low intrinsic rank is plausible but not conclusively tied to performance; the practical benefit of ScaLoRA's higher rank over HiRA remains small.",
+        "Minor writing issues and notation typos (e.g., 'Admist', 'the the', inconsistent use of tilde W_t^p) reduce polish."
+      ]
+    }
+  }
+}

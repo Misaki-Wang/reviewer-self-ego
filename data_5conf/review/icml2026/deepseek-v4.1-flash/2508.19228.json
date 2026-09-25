@@ -1,0 +1,128 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Well-motivated and cleanly presented method: relaxing MTP's hard exact-future-token objective into a listwise ranking (ListNet) objective over upcoming tokens is intuitive and simple, and the paper explains it clearly with pseudocode (Algorithm 1) and a schematic (Figure 1).",
+        "Parameter efficiency relative to MTP is a genuine practical advantage: TOP adds only a single extra unembedding head and no extra transformer layers, and window size can be changed without adding parameters, unlike MTP where each future offset requires a full extra layer.",
+        "Non-trivial empirical effort: three model scales (340M, 1.8B, 7B), three objectives (NTP, MTP, TOP), and eight standard benchmarks, with full training hyperparameters reported in Table 1 and an implementation using a fused Triton kernel for target construction and loss.",
+        "The reported gains over NTP are fairly consistent across scales and tasks (e.g., TOP beats NTP on 6/8 tasks at 340M, 8/8 at 1.8B, and 6/8 at 7B; TriviaQA +7.07 at 1.8B and +6.63 at 7B; SciQ +4.90 at 340M, +3.00 at 7B), which is a suggestive signal rather than a single cherry-picked result.",
+        "The diagnostic in Figure 2, showing MTP head losses degrading monotonically with look-ahead distance, is a reasonable motivating illustration for why the exact-prediction objective may be too hard."
+      ],
+      "weaknesses": [
+        "Effect sizes are small and mixed, with no seeds, variance estimates, error bars, or significance tests. Many claimed wins are under ~1 point (e.g., 7B PIQA -0.60 and Social IQa -0.46 are regressions; HellaSwag +0.40 at 1.8B), and the 7B models are trained on only 104B tokens, so differences could easily be run-to-run noise. The central claim that TOP 'improves language modeling' is therefore not solidly established.",
+        "Parameter-matching is ambiguous and confounds the comparison. TOP adds a full V×D unembedding matrix (~131M parameters at 7B with V=32k, D=4096), while MTP is compensated by removing 3 trunk layers to match parameter count. The paper only says parameters are matched 'excluding embedding parameters,' and never reports actual parameter counts, so it is unclear whether TOP models simply have more capacity than the NTP/MTP baselines. This directly undermines the claim that TOP is the better *objective* rather than the larger model.",
+        "No ablation studies. The window size is fixed at 4096, equal to the sequence length, so the window never actually restricts the target and the claimed window hyperparameter is never tested; there is also no study of the loss weighting between NTP and TOP, and no separation of TOP's effect from a pure regularization effect.",
+        "The most puzzling result is left unexplained: TOP exhibits higher NTP training loss than NTP yet better downstream scores, and the authors hand-wave a 'regularizer' explanation ('this claim may need further investigation'). No control experiments (dropout, weight decay, an extra untrained head, or an auxiliary loss with a random target) are run to support or refute this, leaving the mechanism of improvement unclear.",
+        "The motivating argument rests on a 16M toy model with 16 MTP heads (Figure 2), and the claim that MTP fails to help smaller models contradicts prior work; it is based on a single reproduction using a fixed MTP configuration (N=4) that may be suboptimal. The paper does not show that its own MTP baseline was tuned comparably to TOP.",
+        "Limited methodological novelty: the approach combines an existing auxiliary-objective motivation (MTP), an existing listwise ranking loss (ListNet), and existing fused cross-entropy kernels, and the empirical study is small relative to the strength of the abstract's claims.",
+        "Presentation and framing issues: a table row (perplexity) is unlabeled; the abstract's code link is truncated; Section 7 is titled 'Future Additions' and the conclusion calls the results 'preliminary,' which sits awkwardly with the abstract/introduction's confident claim that TOP 'overall outperforms' NTP and MTP even at scale."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "Proposes a novel auxiliary objective, TOP, that uses listwise ranking to predict the proximity order of future tokens, potentially offering a more tractable alternative to exact multi-token prediction.",
+        "Conducts pretraining experiments at three scales (340M, 1.8B, 7B) and compares NTP, MTP, and TOP on eight standard NLP benchmarks, which is a substantial empirical effort.",
+        "TOP shows some consistent improvements over NTP on several benchmarks (e.g., SciQ +4.90/+1.50/+3.00, TriviaQA +7.07/+6.63 at 1.8B/7B, Lambda perplexity improvements) and avoids MTP's regression at 7B on standard tasks.",
+        "The method adds only one unembedding head and no extra transformer layers, and the TOP head is removed at inference, so the inference architecture is unchanged.",
+        "Provides implementation details (Flame, flash-linear-attention, fused triton kernel) and claims minimal overhead, suggesting practical feasibility."
+      ],
+      "weaknesses": [
+        "The central claim that TOP improves language modeling is not supported by the NTP training loss: TOP has higher NTP training loss than NTP (e.g., 2.40 vs 2.39, 2.07 vs 2.06, 1.88 vs 1.87), and no held-out validation perplexity is reported. The 'regularizer' explanation is speculative and untested.",
+        "No statistical rigor: there is a single run per configuration, no error bars, no multiple seeds, and no significance tests. Many reported gains are below 1 point and could be noise; large gains on TriviaQA and SciQ may reflect variance or benchmark contamination.",
+        "Parameter confound is not controlled: TOP adds a V x D unembedding head (roughly 131M parameters at 7B and 33M at 340M), while MTP is parameter-matched by reducing trunk layers. Total parameter counts are not reported, so gains may be due to extra parameters rather than the TOP objective.",
+        "Missing critical ablations: no window-size sensitivity analysis (only W=4096 is tested), no loss-weight tuning, no alternative target score functions, and no comparison to other multi-token relaxations such as bag-of-words cross-entropy. Thus the paper cannot attribute gains specifically to 'order prediction.'",
+        "Numerical/design flaw: target scores W-d passed through softmax produce exponential decay; in float32/bfloat16, tokens beyond roughly 90-100 steps underflow to zero, so the claimed W=4096 window is not actually realized. This is neither acknowledged nor analyzed.",
+        "Inconsistent motivation: the paper argues MTP is too difficult for small models, yet their own MTP reproduction is competitive at 340M and 1.8B. They do not reconcile this contradiction, which weakens the stated motivation for TOP.",
+        "Incomplete MTP comparison: only one MTP configuration (N=4, parallel heads) is tested; there is no DeepSeek-style sequential MTP, no ablation on N, and evaluation excludes coding/summarization tasks where MTP was shown to help. The comparison is therefore not conclusive.",
+        "Evaluation protocol is underspecified: no few-shot/zero-shot setting, prompt templates, tokenizer details, or contamination checks for QA benchmarks such as TriviaQA and NQ Open. This limits reproducibility and validity of the reported gains.",
+        "Overclaims relative to evidence: 'overall outperforms' is not quantified; TOP loses on Social IQa at all sizes, PIQA at 7B, and TriviaQA at 340M. 'Even at scale' is based on a 7B model trained on 104B tokens, which is far from modern large-scale pretraining.",
+        "Presentation issues: Table 2 is confusing (unlabeled Lambda perplexity row, unclear green/red coding, no aggregate metric); 'Future Additions' replaces a proper limitations section; the code URL is missing. There is no limitations or ethics discussion.",
+        "Lack of analysis of why TOP helps: no probing, representation analysis, validation curves, or compute/memory measurements despite the claim of 'minimal overhead.' The mechanism remains unverified.",
+        "Reproducibility concerns: missing code link, unspecified evaluation details, no random seeds, no hyperparameter search, and no compute reporting."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3,
+      "strengths": [
+        "Introduces TOP, a simple and novel auxiliary objective that replaces exact multi-token prediction with listwise ranking of upcoming tokens; it requires only one extra unembedding head and preserves the original inference architecture.",
+        "Provides a relatively large-scale empirical comparison: pretraining 340M, 1.8B, and 7B models under NTP, MTP, and TOP with shared data/configuration, which is valuable for assessing scaling behavior.",
+        "TOP generally improves over MTP across model sizes and often over NTP on the eight standard NLP benchmarks, with notable gains on TriviaQA, SciQ, and LAMBADA perplexity at 7B.",
+        "The motivation is clear and grounded in an observed weakness of MTP: the toy 16-head MTP loss curves illustrate the difficulty of exact far-ahead token prediction.",
+        "The method is parameter-efficient relative to MTP at inference time and potentially during training, and the authors describe an optimized Triton kernel for the TOP target/loss.",
+        "Training hyperparameters, dataset (FineWeb-Edu sample-100BT), and model sizes are reported, which supports partial reproducibility."
+      ],
+      "weaknesses": [
+        "The central claim that TOP 'overall outperforms' NTP and MTP is not fully supported: evaluation is limited to eight standard NLP benchmarks, with no generative tasks such as coding or summarization where MTP is known to be competitive; these are listed only as future work.",
+        "Parameter matching is potentially confounded: TOP adds an extra V x D unembedding matrix, which is large (e.g., ~33M params at 340M and ~134M at 7B), and the paper does not clearly compensate for this in the NTP baseline or state whether this head is excluded from the matching criterion. Some gains could reflect extra capacity.",
+        "There is no statistical rigor: only one run per configuration is reported, with no seeds, error bars, confidence intervals, or aggregate significance tests; many reported improvements are below 1%, making it unclear whether they are meaningful.",
+        "Key ablations are missing: no sensitivity analysis for TOP window size, loss weighting between NTP and TOP, target formulation, or choice of ranking loss; the paper also offers no evidence for the speculative 'regularizer' explanation of why TOP has higher NTP loss yet better downstream performance.",
+        "Reproducibility is incomplete: the code link is absent in the manuscript, evaluation prompts/protocols are not specified, compute/hardware details are missing, and the Triton kernel is not described in enough detail to reproduce the claimed negligible overhead.",
+        "The MTP baseline may not be fully representative: it fixes N=4 and reduces the trunk by 3 layers, but does not compare against sequential DeepSeek-style MTP or other MTP variants, and its underperformance relative to NTP could be implementation- or hyperparameter-specific.",
+        "Presentation issues remain: the LAMBADA perplexity row in Table 2 is unlabeled, several references are malformed, and Section 7 is 'Future Additions' rather than a limitations/ethics discussion, making the paper read as preliminary.",
+        "No limitations or broader-impact discussion is provided; the work does not address potential data biases in FineWeb-Edu or the environmental cost of the 7B pretraining runs."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Introduces TOP, a simple and efficient auxiliary ranking objective for LLM pretraining that adds only one unembedding layer, requires no inference-time changes, and is shown in a complexity analysis to be cheaper than MTP/DS-MTP in FLOPs and parameters.",
+        "Conducts an extensive empirical study across 340M, 1.8B, and 7B parameter models pretrained on up to 104B tokens, comparing NTP, MTP, DS-MTP, and TOP on nine standard NLP benchmarks, continued math/code training, and a synthetic star-graph task.",
+        "The star-graph results are compelling: TOP achieves perfect accuracy on G(5,5) where NTP, MTP-2/4, and DS-MTP-2/4 fail, even though the MTP/DS-MTP baselines are given larger parameter counts in that setting, supporting the lookahead benefit of the proposed objective.",
+        "Includes useful ablations over window size and loss weighting, and reports self-speculative decoding results honestly, acknowledging that TOP is weaker than MTP/DS-MTP in that setting.",
+        "Training configurations and code are claimed to be available, and the method is clearly described with an algorithm for target construction."
+      ],
+      "weaknesses": [
+        "Parameter matching between NTP and TOP is unclear and likely unfair: TOP adds a large unembedding head (DV parameters) without reducing the trunk, while MTP/DS-MTP reduce the shared trunk by three layers. If embedding parameters are excluded from matching, TOP has extra non-embedding parameters, so improvements over NTP may come from added capacity rather than the ranking objective.",
+        "The DS-MTP baseline performs catastrophically poorly on math and code (e.g., GSM8K 2.65 at 1.8B vs. NTP 39.20), indicating implementation or hyperparameter issues. Comparisons against DS-MTP are therefore unreliable, and the claim that TOP outperforms DS-MTP is substantially weakened.",
+        "The TOP target construction with window size equal to sequence length appears to require tokens beyond the model's context: Algorithm 1 receives 2× the sequence length, while the model context is 4096. It is unclear how targets near the sequence end are computed; if they depend on tokens outside the model's context, the auxiliary task is ill-posed for many positions, and if the model actually sees longer sequences, the setup is misreported.",
+        "No random seeds, error bars, or statistical significance tests are reported. Many benchmark differences are small (e.g., 340M MMLU 30.09 vs. 29.81; TOP underperforms NTP on TriviaQA at 340M), so the reported gains could be noise.",
+        "The motivation comparing averaged MTP loss to TOP loss is not apples-to-apples: the two losses are different objectives with different target distributions and scales. A lower TOP loss does not establish that TOP is an 'easier' task in a meaningful sense.",
+        "The window-size ablation overstates the results: the claim that 'All window sizes however outperform the NTP baseline' is false for TriviaQA and ARC (e.g., window 128 ARC 28.50 < NTP 28.84; windows 16–4096 TriviaQA < NTP 4.93).",
+        "The paper does not isolate whether the ranking objective or simply the extra auxiliary head drives the gains; there is no control with a different auxiliary head (e.g., bag-of-words prediction) or a parameter-matched NTP+extra-head baseline.",
+        "Loss weighting is inconsistently described: Equation 10 uses L_NTP + L_TOP, while Section 5.5.2 uses (1−α)L_NTP + αL_TOP and calls α=0.5 'equal weighting'. The main experiments' effective α is unclear.",
+        "Evaluation uses 0-shot MMLU and other benchmarks, which can be noisy for base models, and there is no validation split for hyperparameter selection or model selection.",
+        "Reproducibility is only partially addressed: the code URL is missing in the manuscript text, details of the Triton kernel and target construction are sparse, and no seeds or variance information are provided."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Introduces a clean, simple, and cheap auxiliary objective: TOP adds only a single extra unembedding head (no extra transformer layers), with a clear complexity analysis (Table 1) showing large parameter/FLOP savings versus MTP and DS-MTP, and an amortizable cost via a fused Triton kernel.",
+        "Substantial empirical effort: matched-compute pretraining at 340M/1.8B/7B across NTP, MTP, DS-MTP, and TOP, plus continued training on math/code and a synthetic star graph task, with code released and training hyperparameters documented.",
+        "The star graph result is genuinely striking and is the strongest evidence for the core hypothesis: TOP is the only method to reach 100% on G(5,5) where MTP-4 and DS-MTP-4 fail, and it does so with fewer parameters than the MTP/DS-MTP models (14.2M vs 19.6M/20.7M).",
+        "Reasonable honesty: the negative result on self-speculative decoding (Table 6) is reported rather than hidden, and a limitations section acknowledges compute/data constraints."
+      ],
+      "weaknesses": [
+        "The central claim that TOP 'overall outperforms' NTP/MTP/DS-MTP rests on small single-run deltas with no seeds, variance, or significance testing. Many margins are tiny (e.g., 340M MMLU 29.81->30.09, LAMBADA 36.35->37.07; 1.8B NTP vs TOP SciQ 86.4->87.9), and some benchmarks go the other way (e.g., 340M NQ-Open and TriviaQA favor MTP), so the improvements may be within run-to-run noise.",
+        "The DS-MTP reproduction collapses to near-random performance on general and math benchmarks (e.g., 1.8B GSM8K 2.65 vs NTP 39.20; HumanEval ~20), far below what DeepSeek-V3 reports for the same mechanism. The post-hoc 'overfitting' explanation is unsubstantiated (losses look 'normal'), which undermines confidence in the fidelity of all baseline reproductions and therefore in the comparative conclusions.",
+        "The motivating argument (Figure 2) directly compares MTP cross-entropy loss against the TOP ListNet ranking loss. These are different loss functions on different scales, so observing that 'TOP loss is lower' does not establish that the TOP objective is easier or that it provides a better learning signal; the comparison is not apples-to-apples.",
+        "The mechanism is left unexplained. There is no theory or probing analysis for why ranking upcoming tokens by proximity should improve general language modeling. The loss-weighting ablation (best at alpha=0.9 while the default is 0.5) further suggests the design space is not well understood.",
+        "Methodological inconsistency in parameter matching weakens cross-method comparisons: main experiments remove 3 trunk layers for MTP/DS-MTP, but the star graph experiments remove only 1 layer, giving MTP/DS-MTP more parameters than NTP/TOP, so the toy-task comparison conflates objective with capacity.",
+        "The 'even at scale' framing is overstated: the largest model is 7B trained on 104B tokens, and ablations over window size and alpha are single-run at 340M only. Comparisons are limited to MTP variants; no other look-ahead or ranking-style objectives are included as baselines."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Introduces token order prediction (TOP), a simple and novel auxiliary ranking objective that predicts the proximity order of upcoming tokens rather than exact future tokens. TOP requires only one extra unembedding head and no additional transformer layers, with no inference-time overhead.",
+        "Provides a substantial empirical study: pretraining 340M, 1.8B, and 7B models on up to 104B tokens with NTP, MTP, DS-MTP, and TOP, evaluating on nine standard NLP benchmarks plus continued training on math and code.",
+        "TOP generally outperforms NTP and MTP on the main NLP benchmark suite, especially at 1.8B and 7B scales, and the star graph pathfinding experiments are compelling: TOP is the only method with perfect test accuracy on G(5,5), where NTP, MTP, and DS-MTP fail.",
+        "Includes useful ablations on window size and loss weighting, and a complexity analysis showing that TOP is more parameter- and FLOP-efficient than MTP/DS-MTP for training.",
+        "The paper is clearly written, with helpful figures, algorithm pseudocode, and training hyperparameters that make the method understandable.",
+        "The limitations section honestly acknowledges compute constraints and the weaker self-speculative decoding performance of TOP."
+      ],
+      "weaknesses": [
+        "No multiple seeds or statistical significance tests are reported. Many benchmark differences are small, and TOP sometimes regresses relative to NTP (e.g., 7B PIQA and Social IQa, 340M TriviaQA), so the central claim that TOP 'overall outperforms' is not statistically robust.",
+        "The DS-MTP baseline performs anomalously poorly on math and code (e.g., 1.8B GSM8K 2.65 vs. NTP 39.20) and some NLP tasks. The authors suspect overfitting but do not diagnose or fix it, making comparisons against DS-MTP unreliable and weakening a key baseline.",
+        "Parameter matching is ambiguous. TOP adds an extra unembedding head (e.g., roughly 131M parameters for 7B), which does not appear to be offset by reducing the trunk, while MTP/DS-MTP trunks are reduced. Training-time gains may therefore be partly confounded by extra trainable capacity.",
+        "Code results are mixed and do not fully support the abstract's claim that TOP models 'prevail in generative tasks': 7B HumanEval is lower than NTP, and 1.8B MBPP is lower than MTP.",
+        "Reproducibility is only partially demonstrated. The code link is missing in the manuscript, and some details of the Triton target-construction kernel and baseline tuning are not fully specified.",
+        "The limitations discussion omits important issues such as lack of seed variance, the anomalous DS-MTP results, and broader ethical/societal impacts of improving LLM pretraining objectives."
+      ]
+    }
+  }
+}

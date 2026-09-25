@@ -1,0 +1,143 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Proposes a forward-only, token-level coreset selection method that avoids expensive per-sample gradients and uses attention-derived token saliency plus hidden-state fingerprints, addressing a practical problem in instruction-tuning data selection.",
+        "Reports strong empirical results across several tasks and models: TRIM achieves the best average on CommonsenseQA/SocialIQA/Hellaswag, nearly matches full-data fine-tuning on GSM8K, and transfers coresets selected by a 1B scorer to Llama-3.1-8B and Mistral-7B.",
+        "Includes a useful computational-cost analysis showing lower asymptotic scoring cost than gradient-based methods such as LESS, and provides pseudocode, hyperparameters, and ablations in the appendix.",
+        "Provides an honest limitations section acknowledging dependence on the target validation set and the method's unsuitability for pretraining data curation.",
+        "The length-distribution and task-adaptive selection analyses are interesting and suggest the method selects different data subsets for different downstream tasks."
+      ],
+      "weaknesses": [
+        "The central claim that TRIM captures structural/token-level task-defining patterns rather than lexical overlap is not sufficiently supported. The GSM8K experiment is labeled 'low-overlap out-of-domain', but the candidate pool contains the CoT dataset, which is reasoning- and math-adjacent. No lexical baselines (e.g., BM25/DSIR) are compared on GSM8K, so the gains may largely reflect token-level lexical matching rather than structural transfer. There is also no analysis of which tokens or fingerprints drive selection.",
+        "The attention-derived saliency component, which is central to the method's name and claimed novelty, is not ablated. There is no comparison to uniform token weighting, row-only/column-only saliency, or different w_Q/w_K settings. Thus it is unclear whether the attention saliency actually contributes to performance.",
+        "Efficiency claims are overstated and not empirically measured. The abstract and introduction claim 'orders of magnitude faster', but the asymptotic table shows only about a 3x scoring speedup over TAGCOS (and shared warmup cost); the appendix explicitly declines to report wall-clock time or GPU-hours. For an efficiency-focused paper, runtime measurements are needed to support the 'orders of magnitude' claim.",
+        "The length-bias claim is questionable. Max-pooling over tokens (Eq. 13) can favor longer sequences, and Figure 3 shows TRIM selects longer samples on average (446 tokens vs. 323 for LESS and 259 for TAGCOS). The paper does not analyze score-vs-length correlation or ablate the max term for length bias. The coverage term in Appendix Eq. 15, absent from the main Eq. 13, further complicates the claim.",
+        "The full-data fine-tuning baseline may be under-tuned: TRIM surpassing full-data fine-tuning on SocialIQA and Hellaswag without learning curves or a compute-matched comparison is suspicious, and no statistical significance tests are provided for the small improvements on general tasks.",
+        "Reproducibility and presentation issues: no code release is mentioned; several citations are incorrect (e.g., the Mistral reference points to an unrelated CLIP-to-DINO paper, and several years are wrong); row saliency Eq. 2 divides by log(|{j: A_ij > 0}|), which is undefined for single-key rows; and there is an inconsistency between main Eq. 13 and Appendix Eq. 15 (coverage term).",
+        "Novelty is limited relative to recent token-centric data-selection work (e.g., T-SHIRT, LADM). The paper does not empirically compare against these token-centric baselines, and the claim of being 'the first' token-level representation-centric method is overstated.",
+        "Experimental scope is narrow: only three multiple-choice commonsense tasks plus GSM8K, with LoRA on 1B/7B/8B models and a 270k-example pool. The claimed scalability to 'massive instruction corpora' is not demonstrated, and broader instruction-following benchmarks are absent."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Genuine efficiency angle: TRIM is forward-only and avoids per-sample gradients, and the asymptotic cost analysis (Table 4) reasonably positions it as the cheapest method in its comparison set for large N.",
+        "Token-level, representation-centric selection is a timely and plausible direction, and the two-stage fingerprint pipeline is clearly described with pseudocode (Algorithms 1-3).",
+        "The cross-model/cross-scale transfer experiment (Table 3) and the task-adaptive source-distribution analysis (Fig. 4 / App. H) are interesting qualitative signals that the selected coresets are not purely topical.",
+        "The paper is reasonably complete (appendices on datasets, evaluation, hyperparameters, partial ablations, and an honest limitations note) and the GSM8K low-overlap setup is a sensible stress test of the core hypothesis."
+      ],
+      "weaknesses": [
+        "The headline mechanism (attention-derived row/column saliency used to weight fingerprints) is never ablated. Table 8 varies OOV penalty, pooling, checkpoint, and number of layers, but not the saliency weighting itself. Without comparing against uniform (unweighted) hidden-state averaging, there is no evidence that the central novelty contributes anything; the method may reduce to a token-level variant of RDS.",
+        "The premise that attention entropy/mass is a valid proxy for token importance is asserted, not justified, and conflicts with well-known critiques that raw attention is a poor saliency/explanation signal (e.g., Jain & Wallace 2019; Serrano & Smith 2019). The cited attention-flow work (Abnar & Zuidema 2020) itself warns against naive use of raw attention.",
+        "The 'up to 9%' claim is cherry-picked from a single GSM8K setting (Table 2) whose full-data baseline is unusually weak (30.25% for a 7B model). On the main benchmark (Table 1) TRIM's average advantage over the strongest baseline, LESS, is ~1.1% (45.37 vs 44.21), and on Hellaswag it is 49.08 vs 49.01 - essentially within noise. The 'consistently outperforms' framing overstates the evidence.",
+        "'Length-agnostic' is claimed from one correlational length histogram (Fig. 3). Selecting longer samples is not the same as removing length bias, and the pipeline explicitly includes a length-related coverage term (Eq. 15, kappa(c)=|M(c)|/|c|), with no causal test of the bias claim.",
+        "The transferability result is internally paradoxical: TRIM-Transfer (coreset selected by the 1B scorer) beats TRIM-Oracle (selected with the target model itself) on both Llama-3.1-8B and Mistral-7B. This is unexplained and undermines the oracle as a reference point, suggesting the reported differences are within run-to-run noise.",
+        "The described OOV 'penalty' factor lambda is misleading: the ablation shows the best setting is lambda=1.0, i.e., no down-weighting at all (36.27 -> 40.76), so the penalty mechanism the paper advertises is actually harmful and the default is effectively a no-op.",
+        "Key hyperparameters (w_Q=w_K=0.5, w_mu=w_m=0.5, equal weighting) are fixed 'for simplicity' with no sensitivity analysis, despite the aggregation scheme being central to the score; and efficiency - the main selling point - is reported only asymptotically, with the authors explicitly declining to report wall-clock time or GPU-hours.",
+        "Baseline coverage is incomplete for an originality claim of being 'the first token-level representation-centric' method: the cited token-level methods (LADM, T-SHIRT) and diversity-aware selection methods are not compared against, and the full-data fine-tuning baselines look undertuned (48% on CSQA for a 1B model; 30% on GSM8K for 7B), making 'surpasses full-data fine-tuning' easy to achieve.",
+        "Conceptually, per-token-class fingerprint matching scores a candidate token only against the fingerprint of the same vocabulary item, which resembles a bag-of-words/representation-similarity check rather than capturing cross-token 'structural patterns' (syntax, operators) as claimed; no evidence is provided that structure rather than surface token identity drives the gains.",
+        "Reproducibility/bookkeeping concerns: the 5% warmup fine-tuning adds nontrivial compute that is not clearly folded into comparisons, and the notation/pseudocode is inconsistent (e.g., K_i vs \\tilde{K}_i; Q_i described as 'director' in the appendix vs 'row saliency' in the text)."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Introduces a novel token-level, forward-only data selection method that combines attention-derived saliency with token-class fingerprints, avoiding expensive per-sample gradients.",
+        "Demonstrates strong empirical performance: TRIM outperforms state-of-the-art baselines on multiple instruction-tuning benchmarks, with especially large gains on out-of-domain GSM8K (29.52% vs. 20.72% for LESS at 5% coreset).",
+        "Shows effective cross-model and cross-scale transfer: coresets selected by a 1B scorer transfer to 8B and 7B models, even surpassing an in-model oracle in some cases.",
+        "Provides useful analysis of task-adaptive selection, showing TRIM selects CoT data for GSM8K and Flan_v2 data for CommonsenseQA, unlike task-agnostic baselines.",
+        "Includes a length-bias analysis indicating that TRIM selects a broader, longer-sample distribution than gradient-based methods such as LESS and TAGCOS.",
+        "Offers asymptotic computational cost analysis showing TRIM is cheaper than gradient-based and multi-checkpoint alternatives for large candidate pools.",
+        "Well-written and clear presentation, with helpful figures, detailed appendices, pseudocode, hyperparameters, and baseline descriptions.",
+        "Honest limitations section acknowledging dependence on the target validation set and lack of direct applicability to pretraining data curation."
+      ],
+      "weaknesses": [
+        "No ablation of the core attention-derived saliency mechanism: row vs. column saliency, saliency weights, entropy vs. alternative sharpness measures, or uniform weighting are not tested, so it is unclear whether attention saliency is necessary for the reported gains.",
+        "The token-class fingerprint mechanism is not isolated: no control experiments compare it against uniform fingerprints, random fingerprints, input embeddings, or sample-level token pooling, leaving open the possibility that gains are driven by lexical overlap or token frequency rather than structural matching.",
+        "Main text and appendix are inconsistent: the coverage bonus and selective token scoring are described in Appendix B.1 but are absent from the main equations and pseudocode; Algorithm 1 is also ambiguously or incorrectly specified.",
+        "No empirical runtime or wall-clock measurements are provided; the paper relies solely on asymptotic cost analysis, leaving the claim of being 'orders of magnitude faster' unsubstantiated.",
+        "In-domain gains over the strongest baseline (LESS) are modest (average +1.16%), and some differences are within noise (e.g., Hellaswag +0.07), yet no statistical significance tests or confidence intervals are reported.",
+        "The out-of-domain GSM8K setting is not truly low-overlap because the candidate pool includes the CoT dataset, which contains mathematical reasoning examples; the large gain may partly reflect selecting more CoT data rather than purely structural transfer.",
+        "No sensitivity analysis is provided for the target validation set: results are averaged over training seeds, but the effect of different 5-10 sample validation draws is not studied, despite the method's reliance on these samples.",
+        "Claims about surpassing full-data fine-tuning are selective: TRIM remains below full-data on CommonsenseQA and on the overall average, and the small margins on SocialIQA/Hellaswag may not be robust.",
+        "The length-bias analysis is descriptive only; it does not establish a causal link between token-level scoring and reduced length bias, nor does it control for sequence length in performance comparisons.",
+        "No code release or reproducibility artifact is mentioned, and several design choices (e.g., last-6 layers, OOV penalty λ=1.0, saliency weights fixed at 0.5) are not sufficiently justified or ablated.",
+        "Some claims are overstated, such as being the 'first' token-level representation-centric method (given related token-centric work) and 'consistently' outperforming baselines when some gains are marginal or not statistically tested."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Forward-only token-level selection is a practical and well-motivated direction; measured runtime (4.40 h) is substantially lower than LESS (35.76 h), TAGCOS (14.16 h), RDS (20.48 h), and S2L (87.95 h) in Table 5.",
+        "The method is clearly described at a high level, with pseudocode, hyperparameters, dataset descriptions, and public models/datasets, making the pipeline relatively reproducible.",
+        "The GSM8K-from-non-math-pool result is striking: 5% TRIM reaches 29.52% vs LESS 20.72%, TAGCOS 18.72%, and full-data 30.25%; 1% TRIM reaches 22.33% vs LESS 17.34%. This is the strongest evidence for the token-level hypothesis.",
+        "The paper includes useful robustness checks: budget curves, transfer to Llama-2-13B and Mistral-7B, in-domain MATHINSTRUCT selection, ablations over layers/pooling/IDF/NFF/checkpoints, target-set size and noise, and supplementary Llama-3.2-1B experiments.",
+        "The length-distribution analysis (TRIM mean 446 tokens vs LESS 323, TAGCOS 259) highlights a real limitation of sample-level gradient/loss selectors and motivates token-level scoring.",
+        "The impact statement responsibly acknowledges risks of bias amplification, harmful content retention, privacy, and the need for dataset auditing and post-selection evaluation.",
+        "Originality: combining attention-derived row/column saliency with token-class fingerprints for targeted coreset selection is a reasonable new angle in instruction-tuning data selection."
+      ],
+      "weaknesses": [
+        "Main empirical claims are overstated and not statistically supported. Table 1: TRIM average 48.56 vs LESS 48.27 (+0.29); MMLU 49.33 vs 49.23 (+0.10); BBH 39.73 vs 39.45 (+0.28, with TRIM std 0.89); TyDiQA 56.62 vs 56.13 (+0.49). No significance tests; gains are within seed noise. The abstract/contribution claim 'consistently outperform ... by up to 9%' is misleading because 9% comes only from GSM8K, and in-domain Table 4 TRIM does not outperform S2L/LESS.",
+        "The core mechanism is not ablated. There is no comparison of attention-derived saliency against uniform token weighting, random saliency, row-only, column-only, or a simple token-level hidden-state fingerprint. Without this, the paper cannot establish that attention saliency—rather than token-level matching or NFF—drives the gains.",
+        "NFF with lambda=0.9 is nearly unpenalized and is critical to performance: Table 12 shows MMLU drops to 44.79 without NFF, 46.04 at lambda=0.5, but 49.43 at lambda=0.9. This suggests much of the score comes from nearest-input-embedding matching rather than saliency-weighted fingerprints, yet the paper provides no analysis of the fraction of NFF-mapped tokens or why lambda=0.9 is principled.",
+        "Method description is incomplete/inconsistent: Eq. 13 omits the coverage term, while Appendix C/Eq. 15 and the default MMLU ablation use 0.05 coverage; the main text says 'for simplicity' w_mu=w_m=0.5 but the reported default includes coverage. This hurts reproducibility and clarity.",
+        "Efficiency claims are overstated. Measured speedup vs LESS is ~8x, vs TAGCOS ~3x, vs RDS ~5x, and only vs S2L ~20x—not 'orders of magnitude.' The asymptotic analysis assumes all methods use the same scoring-model forward cost f, which is unfair to small-proxy methods like S2L and may overstate TRIM's advantage.",
+        "Attention is used as a saliency proxy without validation. Raw attention is noisy and can be dominated by attention sinks/formatting; the qualitative fingerprints include subword fragments ('ju', 'ds', 'ya') and generic tokens ('solution', 'Furthermore'), not clearly task-defining. Row-saliency text also contains a contradiction: it says broadly spread attention has 'low entropy' when it should be high.",
+        "Closest token-level competitors are not compared. Related work discusses QCS, T-SHIRT, and LADM, but experiments only compare against sample-level baselines. Since TRIM's central claim is the benefit of token-centric selection, these are important missing baselines.",
+        "The 'structural fidelity' claim rests mainly on one GSM8K setting. No other low-overlap reasoning/code/symbolic task is used to show general structural transfer; the appendix out-of-task MMLU/TruthfulQA results only show no degradation.",
+        "Length-bias analysis is descriptive, not causal. Selecting longer samples may be an artifact of max-pooling over more tokens or the coverage term, not proof that token-level scoring mitigates length bias; no length-controlled scoring or ablation is provided.",
+        "No dedicated Limitations section. The impact statement covers ethics well, but the paper does not adequately discuss method limitations such as dependence on warmup quality, tokenizer/model dependence, attention reliability, NFF reliance, target-set sensitivity beyond GSM8K, or potential bias amplification from targeted selection.",
+        "The 'handful of target samples' framing is uneven: GSM8K uses 10 and TyDiQA 9, but MMLU uses 285 target examples. This weakens the claim that TRIM works from a handful of samples across settings.",
+        "Reproducibility is decent but incomplete: no code link, some implementation details (e.g., exact NFF cache construction, coverage weight, multi-checkpoint aggregation) are only in appendices, and main equations do not match defaults."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Introduces a genuinely efficient, forward-only token-level coreset selection method: by avoiding per-sample backward passes and using a single checkpoint, TRIM achieves measured wall-clock selection time of 4.40h vs. 35.76h (LESS), 87.95h (S2L), and 14.16h (TAGCOS), with a clear O(fN) asymptotic advantage over gradient- and multi-checkpoint baselines (Table 5).",
+        "The low-overlap GSM8K setting (Table 2) is a strong and meaningful result: a 5% TRIM coreset reaches 29.52%, close to full-data fine-tuning (30.25%) and ~8.8 points above the next best baseline (LESS, 20.72%), and even at 1% it reaches 22.33% vs. 17.34%. This is the paper's most convincing evidence that token-level matching surfaces structurally relevant data.",
+        "The empirical study is broad and generally well-controlled: four main benchmarks plus math benchmarks, multiple target models (Llama-2-7B/13B, Mistral-7B, Llama-3.2-1B/3.1-8B), cross-scale/architecture transfer, length-bias analysis, an in-domain no-target setting, and a substantial ablation suite (layers, pooling, IDF, NFF penalty, checkpoints, target-set size/noise).",
+        "Reproducibility is reasonable: explicit pseudocode for all stages (Algorithms 1-3), detailed shared hyperparameters (Table 8), dataset provenance and sizes (Table 6), and evaluation protocol (Table 7).",
+        "The attention-derived saliency (row-entropy + column-received attention) and the saliency-weighted token-class fingerprint construction are clearly motivated and described, and the token-level pooling is a sensible way to avoid the length/loss-centric biases of sample-level scoring (Section 4.4).",
+        "The Impact Statement thoughtfully discusses bias amplification, diversity reduction, and safety-auditing responsibilities of data curation."
+      ],
+      "weaknesses": [
+        "The headline claim is overstated. The abstract/conclusion assert that TRIM 'consistently outperform[s] state-of-the-art baselines by up to 9%', but on the primary 4-task suite (Table 1) the gain over LESS is only +0.29% macro-average (48.56 vs. 48.27), and per-task margins (MMLU +0.10, BBH +0.28, TyDiQA +0.49) are within the reported standard deviations. The '9%' comes solely from GSM8K. 'Consistently outperform' is not supported by the main experiments.",
+        "The method described in the main text diverges from the actual implementation. Section 3.2 (Eq. 13) defines S(c) as 0.5·mean + 0.5·max, but the default configuration in Appendix H and Appendix C adds a coverage term (0.5·MEAN + 0.5·MAX + 0.05·COVERAGE). Table 10 shows the main-text formula yields 48.75 while the coverage variant yields 49.43, i.e., the stated method is not the one that produces the reported numbers. Similarly, IDF reweighting is presented in Section 3.1 as a component ('we apply inverse document frequency (IDF) reweighting'), yet the default is no-IDF and the ablation (Table 11) shows IDF does not help (49.31 vs. 49.43). These inconsistencies undermine confidence in what exactly is being evaluated.",
+        "There is no statistical significance testing despite very small margins and only 3 seeds; several claimed advantages (e.g., MMLU 49.33±0.4 vs. LESS 49.23±0.3) are not distinguishable from noise.",
+        "The transfer results (Table 3) are counterintuitive and unexamined: TRIM-Transfer (coreset chosen by the 7B scorer) sometimes exceeds TRIM-Oracle (selected by the target model itself) on Llama-2-13B (e.g., 54.50 vs. 54.10 MMLU), which undercuts the 'oracle' framing and suggests the selection signal is largely insensitive to the scorer, or that differences are noise. This deserves explanation rather than being presented as evidence of transferability.",
+        "The GSM8K result, the paper's strongest, is not dissected for confounds. TRIM selects substantially longer examples (mean 446 vs. 323/259 tokens, Section 4.4), and longer responses plausibly contain more reasoning steps; the causal role of 'structural fidelity' vs. a simple length preference is not isolated. A length-matched control would strengthen (or temper) the central mechanistic claim.",
+        "The mechanistic interpretation is weakly grounded. Qualitative fingerprints for TyDiQA are subword fragments ('ju', 'ds', 'ya'), and the claim that matched tokens are 'transferable proxies for chain-of-thought structure' is asserted rather than tested.",
+        "Presentation errors: the row-saliency description contains a contradiction/typo ('those that spread attention broadly have low entropy and are less informative' should read high entropy), and there is no dedicated Limitations section (only an Impact Statement).",
+        "Novelty is incremental: attention-based token importance (LADM, T-SHIRT) and target-guided coreset selection (LESS) are both established; TRIM mainly recombines them with a token-class fingerprint dictionary, and its main-suite performance is essentially on par with the strongest prior baseline."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Introduces a novel token-level, attention-derived saliency framework for coreset selection, moving beyond coarse sample-level gradients and loss-centric signals. The combination of row/column attention entropy and received attention into salience-weighted token fingerprints is original and well motivated.",
+        "Forward-only design yields substantial practical efficiency: Table 5 reports 4.40 h vs 35.76 h for LESS, 14.16 h for TAGCOS, and 87.95 h for S2L under a shared setup, with asymptotic O(fN) scoring after warmup. This is a meaningful contribution for large instruction corpora.",
+        "Strong result in the challenging GSM8K setting: a 5% TRIM coreset reaches 29.52% vs 20.72% for LESS and 30.25% for full-data fine-tuning, and even a 1% coreset reaches 22.33%. This provides convincing evidence for structural/token-level fidelity.",
+        "Competitive or best average performance on standard benchmarks (Table 1: 48.56 vs LESS 48.27), with small improvements on MMLU, BBH, and TyDiQA, and it surpasses full-data fine-tuning on TyDiQA. Transferability to Llama-2-13B and Mistral-7B and in-domain MATHINSTRUCT results further support usefulness.",
+        "Extensive appendix material: pseudocode, ablations on layers, pooling, IDF, NFF penalty, and checkpoints, plus robustness to target-set size and noise, qualitative fingerprint examples, cost analysis, licenses, and an impact statement. Reproducibility details such as LoRA/optimizer settings and data sources are mostly provided.",
+        "Clear motivation and presentation. The two-stage pipeline is well illustrated, and the paper directly addresses two important practical problems: computational cost and length bias in data selection."
+      ],
+      "weaknesses": [
+        "Main benchmark gains are marginal and often within standard deviation: Table 1 average improvement over LESS is only +0.29, with MMLU +0.10, BBH +0.28, and TyDiQA +0.49. No statistical significance tests are reported. The abstract claim 'consistently outperform state-of-the-art baselines by up to 9%' is misleading because the 9% figure comes only from GSM8K, while standard reasoning tasks show tiny differences.",
+        "The claim of being 'orders of magnitude faster' is unsupported by the measurements: the reported speedup versus LESS is roughly 8x (35.76 h vs 4.40 h) and versus S2L roughly 20x, not orders of magnitude. The abstract and introduction should be tempered.",
+        "Several design choices are heuristic and under-justified. Attention entropy as a saliency proxy may favor punctuation/formatting tokens; token-class fingerprints average polysemous contexts; and weights such as w_Q, w_K, w_mu, w_m, layer count L, and NFF penalty lambda are fixed without systematic validation or theoretical grounding.",
+        "There is an inconsistency between the main text and appendix: Eq. 13 defines pooling as mean + max only, while Appendix C and Table 10 indicate the default includes a 0.05 coverage term. It is unclear which configuration produced the main results, which harms reproducibility.",
+        "Transferability results are puzzling and not explained: TRIM-Transfer sometimes outperforms TRIM-Oracle (e.g., Llama-2-13B TyDiQA 56.70 vs 54.12; Mistral-7B TyDiQA 60.43 vs 59.83). This undermines the oracle as an upper bound and suggests evaluation noise or overfitting to the target validation set.",
+        "The length-bias analysis only compares selected length distributions. It does not establish a causal link between selecting longer examples and improved performance, and it may simply introduce the opposite length bias rather than mitigate bias.",
+        "The in-domain results in Table 4 only match LESS/S2L within <1% and do not outperform them. The practical advantage there is mainly lower selection compute, not better curation quality.",
+        "There is no explicit limitations section. The impact statement discusses ethical risks, but method limitations such as dependence on a target validation set, reliability of attention as an importance signal, tokenizer/model sensitivity, scaling to long contexts, and potential bias amplification are not systematically discussed.",
+        "Reproducibility gaps remain: no code link is provided, the MMLU target set has 285 validation examples rather than the 'handful' implied in the abstract, and some important hyperparameters appear only in the appendix while conflicting with the main text.",
+        "Baselines may not all be equally favorable, but the main comparison rests heavily on LESS; full-data fine-tuning still achieves higher average accuracy than TRIM in Table 1 (48.99 vs 48.56), so the claim that TRIM generally surpasses full-data tuning is limited to specific settings."
+      ]
+    }
+  }
+}

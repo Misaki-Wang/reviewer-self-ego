@@ -1,0 +1,127 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 2,
+      "strengths": [
+        "Provides a generalized attention framework and a simple lemma (Lemma 3.2) that bounds attention coefficients by Θ(1/n) under bounded logits, unifying softmax, linear, focused, and MILA attention.",
+        "Proposes a concrete architecture (SEMA) combining window attention with global arithmetic averaging, showing modest improvements on ImageNet-1K and COCO instance segmentation.",
+        "Includes an ablation study demonstrating that the averaging component contributes 0.2% top-1 accuracy on ImageNet-1K.",
+        "Demonstrates scalability by finetuning to larger image resolutions (384², 672², 768²), where SEMA outperforms VMamba-T by 0.5–0.7%.",
+        "Reports training details, architecture specifications, and compute resources, which aids reproducibility to some extent.",
+        "Includes a limitations section acknowledging the asymptotic nature of the theory and the lack of extensive downstream evaluation."
+      ],
+      "weaknesses": [
+        "The central theoretical claim is flawed: Θ(1/n) for each attention coefficient does not imply that the query assigns equal weights to all keys or that full attention can be approximated by arithmetic averaging. The ratio between maximum and minimum weights can be arbitrarily large (e.g., e^{2M} for bounded logits), so the approximation error can remain O(1).",
+        "The abstract and introduction overstate the result: 'the query assigns equal weights to all keys' is not proven. The proof only shows each coefficient vanishes at rate 1/n, not that coefficients converge to the uniform distribution.",
+        "SEMA's design relies on the invalid approximation softmax(qK^T)V ≈ (1/n)∑v_j. The averaging term is therefore not theoretically justified as an approximation to full attention, undermining the paper's main motivation.",
+        "Empirical gains are marginal: 0.2% top-1 improvement on ImageNet-1K over MILA-T is within noise; larger-resolution results compare only to VMamba-T, not to other strong baselines like MILA or Swin.",
+        "The method is essentially a combination of window attention and global average pooling, both well-known techniques, limiting novelty.",
+        "Experiments are restricted to tiny models (~26M parameters) and only two datasets, with no larger-scale validation on language or other modalities.",
+        "Several equations and notations are sloppy (e.g., Eq. 9, Table 1 bounds), and the proof of Theorem 3.4 relies on a simple bound but is presented with unnecessary complexity.",
+        "No code release is mentioned, and hyperparameter tuning appears limited, reducing reproducibility."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "Provides a unified Φ-normalized attention framework (Def. 3.3) that formally subsumes softmax, linear, focused, MILA, and differential attention, with Table 1 collating their dispersion bounds; this is a mildly useful organizing contribution even if it is largely a generalization of Veličković et al.'s Theorem 2.2, which the authors themselves admit as a special case.",
+        "The observation in Sec. 3.3 that Mamba's exponential forgetting corresponds to a fixed-size attention window (Eq. 11 and the surrounding discussion) is a genuinely insightful connection and gives a principled motivation for pairing window attention with a global term.",
+        "The proposed modification is very simple and cheap: adding a sequence-mean of values to window attention costs O(nd) and requires no extra hyperparameters; the reported results (83.7% ImageNet, 84.1–84.2% at 384²/672²/768², 49.2 APb / 43.9 APm on COCO 3x) are competitive with MILA-T and VMamba-T.",
+        "The Limitations section (Sec. 6) is honest about the finite-n gap between theory and practice, the loose bounds, and the limited experimental scope."
+      ],
+      "weaknesses": [
+        "The central theoretical result (Lemma 3.2, Thm. 3.4) is essentially the standard Θ(1/n) softmax dispersion statement generalized to continuous φ, and the bound φ(b)/(nφ(a)) is practically vacuous. For φ = exp with logits in [−M, M], the bound only becomes meaningful when n ≫ e^{2M}; e.g., M = 10 requires n > 5×10⁸, whereas vision models operate at n ≤ ~1.2×10⁴. The asymptotic regime the design is derived from is never actually approached, which undercuts the claim that 'any global attention mechanism inevitably disperses' justifies replacing full attention by uniform averaging in these models.",
+        "The jump from dispersion of attention weights to replacing the attention output with the arithmetic mean of values is not mathematically justified. The approximation error obeys ||Σ(α_j − 1/n)v_j|| ≤ ||v||∞ · Σ|α_j − 1/n|, and Σ|α_j − 1/n| is bounded by a constant (of order φ(b)/φ(a)) that does not vanish as n→∞, while the values v_j can have arbitrary spread. This is the decisive gap in the paper's main argument; no analysis of the value magnitudes or of the approximation error is provided.",
+        "Empirical support for the key component is thin and within noise. The single ablation on the averaging term is 83.5% → 83.7% (Table 5) and the headline accuracy gain over MILA-T is 0.2–0.4% (83.7 vs 83.5, or 83.3 using the authors' own reproduction of MILA), with no seeds, variance, or significance testing.",
+        "Comparisons are incomplete and potentially unfair. Table 3 (higher-resolution finetuning) compares SEMA only to VMamba-T, omitting MILA-T, which is the natural baseline since SEMA is MILA with a swapped attention block. Moreover, the VMamba-T numbers reported (83.5/83.6/83.5 at 384²/672²/768²) are well below VMamba's published results (~83.9 at 384²), so the claimed '0.5–0.7% better than VMamba on all resolutions' is unreliable. The abstract's claim of outperforming at 'similar model parameter sizes' is also inaccurate (26M vs. 31M, and 26M vs. 25M for MILA).",
+        "The efficiency argument is not meaningful. SEMA attention remains O(nwd) like Swin/MILA, and the advertised O(n²d) → O(1) reduction is relative to full attention, which none of the competing baselines use; measured FLOPs (4.3G) are actually slightly higher than MILA-T (4.2G).",
+        "There is no direct empirical validation of the paper's central theoretical claim. A natural experiment — measuring attention entropy/weight distributions as a function of sequence length, or the error of the mean-approximation against true full attention — is absent, so the link between the dispersion theory and the architectural choice is asserted rather than demonstrated.",
+        "Methodological novelty is limited. The two 'innovations' in Fig. 3 are (i) window attention, which is Swin/CSWin, and (ii) a per-layer sequence mean added to the value stream, akin to global-token/register-token or pooling-based mixing in prior work. The paper's own framing concedes that the distinguishing element is the theoretical justification, whose soundness is questionable as noted above.",
+        "Reproducibility and presentation are weak. No code/artifact release is mentioned, and hyperparameters are insufficient or erroneous (e.g., 'initial learning rate set to 4×10³'; finetuning weight decay 10⁻⁸). The notation contains multiple errors and placeholders (e.g., 'h′(t) = A h t(t) + B x(t)', 'C_i h_i / 1', and the '1 ⊙' identity placeholders in Eqs. 9–10 that are never defined), and Table 1's bound notation is ambiguous, making several claims hard to verify."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3,
+      "strengths": [
+        "Provides a unified generalized-attention framework that covers softmax, linear, focused, differential, and MILA attention, with a formal dispersion result (Theorem 3.4) and a useful summary table (Table 1).",
+        "Proposes a simple linear-complexity attention block (SEMA) that combines window softmax attention for local features with arithmetic averaging for global information, placed in a Mamba-like macro-architecture.",
+        "Reports ImageNet-1K top-1 of 83.7, slightly above MILA-T (83.5 reported / 83.3 reproduced) and VMamba-T (82.6) at comparable parameter/FLOP budgets.",
+        "Shows consistent improvement over VMamba-T when finetuned to larger resolutions (384^2, 672^2, 768^2) by 0.5-0.7% with fewer parameters and FLOPs.",
+        "COCO Mask R-CNN results are competitive and mostly top-2, and the paper includes an ablation showing that the averaging term adds 0.2% top-1.",
+        "The limitations section honestly acknowledges the asymptotic nature of the theory, non-tight bounds, limited compute, and lack of broader downstream evaluation."
+      ],
+      "weaknesses": [
+        "The central theoretical justification for averaging is weak: dispersion only gives each attention weight as O(1/n) under bounded logits, which does not imply softmax(qK^T)V ≈ (1/n)Σv_j without a quantitative error bound depending on value range and query-key-value correlation. No finite-n analysis or empirical validation of attention dispersion is provided.",
+        "The dispersion theorem itself is a straightforward consequence of having bounded positive logits and a bounded positive normalizer; it generalizes the known result in [29] but offers limited new mathematical insight, and the proof is essentially one line.",
+        "Empirical gains are marginal and lack statistical support: 0.2% top-1 over MILA-T on ImageNet and a 0.2% ablation gain for averaging, with no error bars, multiple seeds, or significance tests. The reproduced MILA-T baseline (83.3*) differs from the reported 83.5, making the claimed superiority unclear.",
+        "No comparison to stronger baselines at larger resolutions (e.g., finetuned MILA-T) and no from-scratch training at larger scales; the 'scalability' claim rests only on finetuning experiments.",
+        "Reproducibility is compromised: the initial learning rate is stated as '4 × 10^3', which is almost certainly a typo and impossible as written; no code or model weights are released; key hyperparameters (exact augmentation details, seeds, total batch size) are incomplete.",
+        "The SEMA block is incremental: window attention plus a global average is a known local-global design, and there is no ablation against learnable global tokens, other global mixing mechanisms, or different window sizes for ImageNet.",
+        "Presentation quality is uneven: numerous typos and notation/formatting errors ('Mamba like', 'ourgpu', 'casual' for causal, '3842' for 384^2, inconsistent use of v_i, equations with '/1' placeholders, and unclear algorithm/table formatting).",
+        "The abstract/claims overstate the result by saying generalized attention 'assigns equal weights to all keys' and that 'any global attention mechanism inevitably disperses'; the actual result is Θ(1/n) small weights under compactness, not equality, and excludes non-continuous or unbounded-logit mechanisms."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "The paper offers a coherent theoretical framing: Definition 3.2 (Φ-normalized attention) cleanly subsumes softmax, linear, focused, and MILA attention, which is a useful unifying device.",
+        "The dispersion observation, while simple, gives a principled motivation for the design and connects several existing attention variants (softmax, linear, focused, MILA, differential) under a single lens.",
+        "The scaling experiments (Table 3) at large resolutions (up to 1024²) are a genuinely useful contribution: the no-tuning gap of 7.3% over VMamba-T at 1024² is a meaningful robustness result, and the 0.4–0.7% finetuned margins are consistent across resolutions.",
+        "The runtime comparison (Table 4) shows concrete efficiency gains (up to ~33% faster than MILA at 1024²/2048²), supporting the scalability claim.",
+        "The ablation study (Tables 7, 8) is honest, explicitly acknowledging that the averaging term contributes only +0.2% at 224² and that its benefit grows with resolution.",
+        "The paper is generally well-organized and the design is easy to follow (Fig. 2, Algorithm 1)."
+      ],
+      "weaknesses": [
+        "Theorem 3.3 is essentially trivial. The proof reduces to: on a compact set, φ is bounded between φ(a) and φ(b), so Φ(e_i)_j ≤ (1/n)(φ(b)/φ(a)) → 0. This is the folklore fact that any normalized weighted average of bounded positive quantities decays as 1/n. Framing this as a main contribution ('we prove that any global attention mechanism inevitably disperses') substantially overstates its novelty and depth.",
+        "The inference from 'attention disperses' to 'replace it with arithmetic averaging' is loose. softmax(QK^T)V ≈ (1/n)Σv_j in the large-n limit is the same triviality, and the resulting averaging term is essentially global average pooling with a residual — a well-known technique. The theory therefore does not strongly justify the specific design, and the novelty of the core mechanism is limited.",
+        "The empirical gains are marginal and plausibly within run-to-run noise: SEMA-T 83.7 vs MILA-T 83.3, SEMA-S 84.6 vs MILA-S 84.4, SEMA-B 85.4 vs MILA-B 85.3, and DefMamba-S 83.5. Single-run results with these margins do not establish a reliable improvement, and no variance/seed analysis is provided.",
+        "Parameter counts are not matched (SEMA-T 26M vs MILA-T 25M; SEMA-S 46M vs 43M; SEMA-B 102M vs 96M). Since the authors themselves attribute the main 224² gain to the added value projection (+0.8% vs +0.2% for averaging), the headline comparison conflates architecture changes with a confound in parameter budget.",
+        "The large-resolution comparison (Table 3) is only against VMamba-T, not against MILA, the closest Mamba-like baseline and the architecture SEMA is built upon. This is a selective baseline choice for the paper's strongest result.",
+        "Proposition 3.5 contains an error: the Chebyshev bound gives Var(S_N/N) ≤ 3C/N^{2-α}, so the required N should scale as (3C/ε³)^{1/(2-α)}, but the paper writes exponent 1/(1-α) (negative for α>1). The use of ε³ versus ε² is also internally inconsistent.",
+        "The differential-attention dispersion bounds in Table 1 are questionable, since differential attention is not Φ-normalized in the same way as the other methods and does not follow directly from Theorem 3.3.",
+        "Downstream results are also marginal (COCO 3x APb 49.2 vs MILA 48.8; ADE20K SS 48.2 vs VMamba 47.9), and the COCO comparison is run only for a couple of window sizes with no tuning.",
+        "Reproducibility is only partially addressed: source code is claimed in the supplement, but training details for large-resolution finetuning and downstream tasks are sparse, single runs are used throughout, and Table 5 in the manuscript is garbled (duplicated AP50/AP75 columns), raising presentation concerns."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper presents a clean unified framework (generalized Φ-normalized attention) that subsumes softmax and several linear-attention variants, and derives a simple dispersion bound plus a probabilistic (weak-law) analogue. This is coherent and easy to follow.",
+        "The proposed SEMA block (window softmax attention + homogeneous arithmetic mixing of values, in a MILA-style macro-architecture) is simple, easy to implement, and practically efficient: reported runtime is ~10% faster than MILA at 224²/512² and ~33% faster at 1024²/2048².",
+        "The empirical evaluation is reasonably broad (ImageNet-1K at multiple resolutions, COCO detection/segmentation, ADE20K), and the large-resolution regime (e.g., 64.7 vs 57.4 no-tuning top-1 at 1024² over VMamba) is the most interesting and favorable evidence for the design.",
+        "The manuscript is largely readable, includes a limitations section, architecture details, an algorithm box, and states that source code is provided in the supplement, which are positive for reproducibility."
+      ],
+      "weaknesses": [
+        "The central theoretical contribution is essentially trivial under the stated assumptions. Since inputs/outputs are assumed to lie in a compact set and φ is continuous, the logits are bounded and every normalized attention weight is trivially Θ(1/n). The elaborate 'generalized attention' machinery adds little beyond the observation that a bounded non-negative function divided by its sum over n terms is O(1/n); this is not a deep or surprising result.",
+        "The practical usefulness of the theorem is very limited and is contradicted by the paper's own discussion. The bound depends on the dispersion coefficient φ(b)/φ(a), which for softmax can be astronomically large (they even report values in the 10^5–10^6 range for MILA on ImageNet), so the required n for meaningful dispersion is far beyond realistic token counts. Consequently the claim that 'any global attention mechanism inevitably disperses' is overstated, and the leap from this asymptotic result to the averaging design is not rigorously justified.",
+        "Method novelty is limited. SEMA reduces to window softmax attention plus a global arithmetic mean over value tokens plus a LePE term; averaging over all tokens is essentially global average pooling, a long-established technique (e.g., non-local/global-context modules). The paper does not isolate what is genuinely new beyond composing known components.",
+        "Empirical gains are marginal and within noise. Improvements over MILA are only 0.2–0.4% on ImageNet-1K, and the ablation (Tab. 7/8) shows the averaging component the theory is meant to justify contributes only +0.2% at 224². Results are reported from single runs ('single run in most of the experiments') with no seeds, variance, or significance testing, so the central improvements are not established.",
+        "Comparisons at larger resolutions are not apples-to-apples. SEMA and VMamba are finetuned with different protocols (SEMA for 30 epochs, VMamba for 10 epochs), and the high-resolution comparison omits the closest baseline, MILA, which is the architecture SEMA is actually built on. This undermines the claim of superiority at scale.",
+        "The support for homogeneous mixing on medical data (Tab. 9) is taken from a separate paper (USEMA, Dayag et al., 2026), not from experiments in this submission. Relying on another (very recent, likely unavailable-to-reviewers) work's numbers as evidence for a core component of this method weakens the evidential chain.",
+        "Several technical and notational issues suggest insufficient rigor. In the proof of Prop. 3.5, bounding ∑Var(X_i) by Cn implicitly assumes sup Var(X_i) ≤ C, which is not among the stated assumptions; the claim that the concentration inequality 'holds for all n > N' lacks a union bound over n; the constants in the N and Chebyshev steps (ε² vs ε³) are inconsistent; and the bounds reported for 'Differential' attention in Tab. 1 appear incorrect. The reference list also has multiple year/format inconsistencies.",
+        "Reproducibility is only partial: hyperparameters are largely inherited from MILA, no mention of random seeds, and no error bars. It would be difficult for others to reliably build on the reported gains."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3,
+      "strengths": [
+        "Provides a clean unifying framework (generalized Φ-normalized attention) that subsumes softmax, linear, focused, and differential attention, and uses it to reason about a range of existing methods in one notation.",
+        "The observation that Mamba-like recursive attention does not disperse (due to exponential forgetting via Hadamard products of Â) is an insightful connection between state-space models and the dispersion view, and it motivates the window-attention component naturally.",
+        "The proposed design is simple, easy to implement, and efficient; runtime results (Tab. 4) show ~10% speedup at small resolutions and ~33% at large resolutions versus MILA.",
+        "The large-resolution experiments (Tab. 3) address an under-reported but practically relevant regime, and show that SEMA degrades more gracefully than VMamba at 1024², which is a genuine (if narrow) contribution.",
+        "The paper is honest about limitations (single runs, limited tuning, loose asymptotic bounds) and includes downstream tasks (COCO, ADE20K) plus external medical-segmentation evidence for the averaging term."
+      ],
+      "weaknesses": [
+        "The headline 'main theorem' (Thm 3.3) is essentially a boundedness argument: φ continuous on a compact domain is bounded between φ(a) and φ(b), so each weight lies in [φ(a)/(nφ(b)), φ(b)/(nφ(a))]. The elaborate layer-composition machinery in the statement is unnecessary for the proof and gives a false impression of depth; the result is a near-trivial generalization of known observations (e.g., Veličković et al. 2025, Thm 2.2).",
+        "The theory-to-design link is weak. Dispersion only implies near-uniform weights when the dispersion coefficient φ(b)/φ(a) is close to 1, yet the paper itself reports coefficients of 10^5–10^6 for MILA on ImageNet. In that regime, uniform averaging is a poor approximation of the true attention, so the theoretical justification for the averaging term is not quantitatively supported; the 'softmax is optimal' claim based on homogeneity of φ is asserted without rigorous justification.",
+        "Empirical gains over MILA are marginal and within noise: +0.4 (T), +0.2 (S), +0.1 (B) on ImageNet-1K, mostly from single runs. The ablation (Tab. 7) shows the theoretically motivated averaging term contributes only +0.2% at 224², while the gain is dominated by adding a value projection — an architectural detail, not the claimed mechanism. The paper concedes that at 224² window attention is nearly full attention in later stages.",
+        "The large-resolution scalability claim rests on a single baseline (VMamba) and on non-matched finetuning protocols: VMamba is finetuned for 10 epochs with a whole-network scheme described as 'different from the original settings,' while SEMA is finetuned for 30 epochs. This asymmetry could inflate the headline gap, and no shift-window/Swin or global-context baselines are ablated under the same recipe.",
+        "Proposition 3.5 / B.4 contains proof errors: N is defined as ⌈(3C/ε³)^{1/(1−α)}⌉, but the Chebyshev step requires an exponent of 1/(2−α); moreover 1/(1−α) is negative for α>1, which would make N=1. The chain '3C/(N^{2−α}ε²) ≤ ε' does not follow from the stated N, so the probabilistic result is not correctly established.",
+        "Novelty relative to the closest work (MILA) is limited: the contribution reduces to replacing linear attention with Swin-style window softmax attention and adding a per-head global average of values. Related global-context / average-pooling mechanisms are not compared or discussed, so it is unclear how much is genuinely new versus a recombination.",
+        "Presentation issues: figures are low-resolution and hard to read (especially Figs. 1–2), and several references are malformed or have anomalous dates (e.g., 'Wu & et al, 2024'; Dayag et al. 2026; Vershynin 2026), which undermines confidence in care and reproducibility."
+      ]
+    }
+  }
+}

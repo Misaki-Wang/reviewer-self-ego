@@ -1,0 +1,124 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "The paper proposes a novel and interesting connection between stochastic optimal control, Tweedie's formula for diffusion posterior approximation, and Stein variational inference for training-free diffusion guidance. The idea of adding a Stein correction to the Tweedie-based proposal is original and conceptually appealing.",
+        "It introduces a low-density diffusion sampling objective via a new cost functional and derives a variational upper bound suggesting that Tweedie-only guidance ignores a KL regularization term. This provides a useful conceptual lens for understanding failures of naive training-free guidance.",
+        "The empirical ablation on molecular generation supports the benefit of the Stein correction: on 5ht1b, SDG achieves 25.74 novel hit ratio vs. 2.93 for the same method without Stein correction, and Figure 6 shows improved validity under extreme low-density settings (up to ~40% at α_E=0.7 where the baseline yields 0).",
+        "The method is evaluated on three protein targets with docking-based metrics, novelty, SA, and QED criteria, and the paper includes broader-impact and dual-use discussion plus hyperparameters and architecture details for reproducibility."
+      ],
+      "weaknesses": [
+        "The central theoretical formulation is not sound as presented. Proposition 3.1 defines p_t^u(x_t)=p_t^{1-α}(x_t) exp(β r(x_T)), which is not a valid marginal density over x_t because it depends on the terminal reward r(x_T). This undermines the claimed annealed marginal density and the subsequent value-function derivation.",
+        "The back-and-forth Stein correction in Proposition 3.3 is heuristic rather than a rigorous optimal-control result. The proof avoids the Jacobian terms ∂x_T/∂x_t by mapping to the clean manifold and back, but it does not show that this concatenation equals the optimal controller for the surrogate value function, nor does it provide any error bound or convergence guarantee.",
+        "Algorithm 1 contains ambiguities and inconsistencies. The Stein update uses an unclear union notation over D_t and D_T; after mapping corrected particles forward to M_t, the low-density guidance recomputes x_T via Tweedie rather than using the Stein-corrected sample, which contradicts the claimed use of q^c_{T|t} in Proposition 3.3. There is also a sign inconsistency in the derivation of ∇ log p(x_T|x_t).",
+        "The evaluation is narrow: only molecular graph generation with GDSS is tested. The paper claims SDG 'significantly outperforms standard training-free guidance methods,' but the only training-free comparison is an internal ablation ('SDG w/o Stein correction'); no published training-free guidance baselines (e.g., DPS, Freedom, etc.) are adapted and compared. MOOD is not training-free, and results against it are mixed (jak2: 9.37 vs. 9.20; fa7: FREED 1.11 > SDG 1.01).",
+        "Hyperparameters in Table 2 are tuned per target (different snr, α schedules, and α_max values) without a described validation protocol. This raises concerns about target-specific overfitting and unfair comparison to baselines whose hyperparameters were taken from prior work.",
+        "The method relies on evaluating the score model at clean samples x_T in the Stein correction. This may be unreliable or out-of-distribution, but no ablation or analysis is provided. The nonstandard time convention (x_T clean, x_0 prior) also risks confusion and may complicate reproduction with standard pretrained diffusion codebases.",
+        "Statistical significance is not established for several key comparisons, and only three sampling runs are reported. The 'orders of magnitude' improvement applies to the authors' own no-Stein ablation, not to strong baselines. No code or data-split details are provided, and pseudocode errors further hinder reproducibility."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Timely and interesting framing that unifies stochastic optimal control, Tweedie's formula, and Stein variational inference for training-free diffusion guidance; the SOC-to-Stein connection is conceptually novel and could motivate further work.",
+        "The method is genuinely training-free and practical: it avoids costly SOC trajectory backpropagation and avoids training classifiers on noisy data at multiple noise levels, which is a meaningful practical advantage.",
+        "The empirical results on molecular generation are encouraging: Table 1 shows SDG raises novel hit ratio over the Tweedie-only ablation (e.g., 5ht1b: 25.7 vs 2.9; jak2: 9.4 vs 0.0) and over MOOD, and Figure 6 shows markedly better validity in extreme low-density regimes (alpha_E = 0.7).",
+        "The ablation (SDG without Stein correction) cleanly isolates the contribution of the proposed correction mechanism, and the sampling-dynamics analyses (Figures 5, 9, 10) give some mechanistic insight into reward overestimation and off-manifold drift.",
+        "Limitations and broader impacts are discussed (Appendix A), including dual-use/misuse concerns for molecular design, which is appropriate for this domain.",
+        "Reproducibility is reasonable: the base model (GDSS), regressor training, schedules (Eqs. 19-21), and per-target hyperparameters (Table 2) are reported."
+      ],
+      "weaknesses": [
+        "The theoretical contribution is largely an application of standard tools. The 'new variational bound' in Proposition 3.2 is Jensen's inequality applied to the value function; it is loose and is not tight even at q = p, a point the paper does not address. Proposition 3.1 is a direct substitution into the Feynman-Kac formula, and the Stein correction is a direct use of the SVGD result (Lemma 2.1).",
+        "The annealed 'marginal density' p_t^u(x_t) = p_t^{1-alpha(t)}(x_t) exp(beta(t) r(x_T)) in Proposition 3.1 is ill-defined: a marginal density at time t cannot depend on the endpoint x_T. The notation is used inconsistently throughout (it appears both as a function of x_t and inside expectations over x_T).",
+        "The central decomposition in Proposition 3.3 is asserted rather than derived. The 'back-and-forth correction trick' is a heuristic that avoids the Jacobian-vector products, but it is never shown to be equivalent to the true optimal control. Term (I) is a gradient with respect to the noisy state x_t, whereas the Stein step is applied to the predicted clean state x_T; the claimed equivalence is not rigorously established.",
+        "There is a potential circularity: the Stein correction computes the posterior score via Tweedie's formula (x_t - eta(t)x_T ~= -gamma^2(t)s_theta(x_t)), i.e., it relies on the same Tweedie approximation the paper argues is 'inherently suboptimal'. This tension is not resolved.",
+        "The state cost f(x_s,s) = alpha(s) log p_s(x_s) delta(s-t) uses a delta function that applies the density penalty only at the start of the integration interval, which conflicts with the notion of a continuous annealing schedule and is poorly motivated.",
+        "Experimental comparisons raise fairness concerns: baseline numbers are taken verbatim from Lee et al. [22] rather than re-run under identical conditions, only 3 sampling runs are reported, and the 'SDG w/o Stein correction' ablation appears to use hyperparameters tuned for the full SDG (it underperforms even MOOD on jak2, 0.0 vs 9.2), so the ablation gap may be exaggerated.",
+        "The claim of 'improvements of several orders of magnitude' is not supported by Table 1 (only ~3x for fa7 and ~9x for 5ht1b; the dramatic gap is solely due to a zero baseline on jak2).",
+        "Evaluation is restricted to molecular graph generation; the claimed generality to other modalities and 'broader applications' is not demonstrated.",
+        "Presentation quality is uneven: Proposition 3.2 is numbered twice, the Stein-corrected proposal is written as both q_{T|t}^* and q_{T|t}^c, there is a typo (x_t^t), and the indexing in Algorithm 1 is ambiguous (e.g., summation over D_t union D_T)."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Novel conceptual unification: the paper connects stochastic optimal control, Tweedie-based training-free guidance, and Stein variational inference into a single framework, yielding a genuinely new mechanism (Stein correction) rather than a trivial combination.",
+        "The theoretical analysis (Propositions 3.1-3.3) is well-motivated: the variational upper bound in Proposition 3.2 cleanly exposes the missing KL-regularization term in standard Tweedie-only guidance, providing a principled justification for the correction step.",
+        "Strong and consistent empirical gains on a challenging task: SDG substantially outperforms both the un-corrected ablation and the classifier-based MOOD baseline across three protein targets (e.g., 5ht1b: 25.744 vs 18.673 vs 2.933; jak2: 9.367 vs 9.200 vs 0.000), and the effect is reproduced across multiple metrics (novel hit ratio, top-5% docking scores, radar plots, validity-vs-alpha curves).",
+        "The proposed method is plug-and-play and training-free (off-the-shelf clean-data regressor), and the back-and-forth correction trick is a sensible practical device to avoid costly Jacobian-vector products, making the approach computationally attractive.",
+        "Reproducibility is reasonably supported: architecture, optimizer, learning rate, epochs, hardware, annealing/stepsize schedules, and per-target hyperparameters are provided, and the pretrained model/baselines follow a public prior work.",
+        "Limitations and dual-use/ethical considerations are discussed honestly (single-domain validation, potential misuse for harmful substances)."
+      ],
+      "weaknesses": [
+        "Theory-to-practice gap: the 'concatenation' (⊕) in Proposition 3.3 is asserted rather than derived. The Stein correction uses an approximate posterior score s_θ(x_T) − η(t)s_θ(x_t), and the low-density term then conditions on the corrected proposal q*_{T|t}, so the claimed decomposition is a heuristic approximation to the surrogate optimal control, not a rigorous solution.",
+        "Fairness of the central ablation is questionable: the 'SDG w/o Stein correction' baseline collapses to 0.000 on jak2, which is suspiciously poor for a Tweedie/DPS-style guidance method and suggests the ablation may be under-tuned. A comparison against a standard, well-established training-free guidance baseline (e.g., DPS-style guidance) with matched hyperparameter tuning would strengthen the claim that Stein correction is the decisive factor.",
+        "Limited scope: only molecular graph generation is evaluated. The paper repeatedly claims broader applicability across modalities, but no evidence is provided beyond the single domain, weakening the generality argument.",
+        "Presentation and notation problems: Algorithm 1 contains errors (e.g., 'x_t^t' should be 'x_t^i'; the set-union notation inside the particle-update sum is ambiguous), the appendix has two items numbered 'Proposition 3.2', the posterior-score proof duplicates a line, and several equations have inconsistent indices (∇_{x_T^j} vs ∇_{x_T^i}). These hinder reproducibility.",
+        "Key technical details are underspecified: how the RBF/KSD kernel is applied to permutation-invariant graph node/edge features, the particle count N, and the added cost of the Stein kernel matrix are not analyzed; no computational cost or wall-clock comparison is reported.",
+        "No code/repository link is provided, and evaluation uses only three sampling runs, limiting assessment of statistical robustness despite reported standard deviations."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Addresses an important problem: sampling from low-density regions with desired properties, relevant for drug discovery and scientific discovery.",
+        "Novel combination of stochastic optimal control (SOC) and Stein variational inference for training-free diffusion guidance, with a new cost functional that anneals density and incorporates reward.",
+        "Theoretical analysis provides a variational upper bound on the value function, motivating the need to correct approximate posteriors from Tweedie's formula.",
+        "Strong empirical results on molecular low-density sampling: SDG with Stein correction dramatically outperforms standard training-free guidance (SDG w/o Stein) and improves over the strong baseline MOOD on two of three protein targets (fa7 and 5ht1b) in novel hit ratio.",
+        "Ablation studies confirm the importance of both low-density annealing (α>0) and Stein correction (ε>0), and show that Stein correction is more effective than Langevin correction (ε=0).",
+        "Honest limitations discussion: the paper acknowledges SVGD instability and the need for more robust particle update schemes.",
+        "Broader impact statement addresses potential misuse for harmful substances, showing ethical awareness."
+      ],
+      "weaknesses": [
+        "Theoretical justification for the back-and-forth Stein correction is incomplete. The SVGD update in Equation (6) and (18) mixes particles with different conditioning variables x_t, which does not correspond to minimizing the KL divergence between conditional posteriors as claimed. The proof of Proposition 3.4 does not rigorously establish that the proposed update decreases the KL divergence.",
+        "The forward mapping from corrected x_T to x_t adds noise via N(η(t)x_T, γ^2(t)I), which could degrade the correction; this noise injection is not analyzed and may undermine the theoretical benefits.",
+        "Image guidance results are mixed: on label guidance (Table 1), SDG with Stein correction achieves higher (worse) FID (105.4) than without Stein correction (89.50) and than LGD (102), contradicting the claim of consistent superiority. The paper acknowledges this but still claims 'consistently outperforms'.",
+        "Only three molecular targets are evaluated; comparison to other low-density sampling methods (e.g., Sehwag et al. 2022) is absent. The baselines (MOOD, GDSS) are not training-free, so the comparison is not apples-to-apples for a training-free method.",
+        "The choice of the low-density annealing schedule α(t) and α_max is heuristic and tuned per target (Table 4); no principled method is provided to achieve a desired low-density level.",
+        "Computational overhead: SDG roughly doubles runtime compared to standard training-free guidance (Tables 6 and 7), which is a practical limitation not highlighted in the main text.",
+        "Presentation is dense with heavy notation; Algorithm 1 is cryptic and may hinder reproducibility. Some implementation details (e.g., kernel bandwidth, exact particle update, how the sum over particles is computed) are not fully specified.",
+        "The theoretical bound in Proposition 3.2 is a standard variational upper bound, and the insight that Tweedie's approximation is biased is not new; the novelty lies mainly in the Stein correction, but its theoretical grounding is weak."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Interesting conceptual bridge connecting stochastic optimal control, variational inference, and Stein methods for training-free diffusion guidance; the decomposition in Proposition 3.2 (annealed low-density term + reward term + KL regularization) is a clean way to frame why Tweedie-only guidance is biased.",
+        "The empirical demonstration on molecular low-density sampling is non-trivial and shows the Stein-corrected posterior clearly outperforms the un-corrected variant (Table 2), and the method improves over the pretrained GDSS/MOOD models on two of three protein targets.",
+        "A reasonably complete set of ablations is provided: low-density level α, Langevin special case (ε=0), particle count (Table 3), reward-overestimation and score dynamics (Figs. 5, 9-11), and computational cost (Tables 6-7).",
+        "Reproducibility is decently supported: hyperparameters (Table 4), adaptive step-size and annealing schedules (Eqs. 28-30), dataset/baseline/metric definitions, and hardware are reported; a broader-impact statement is included and limitations are acknowledged honestly."
+      ],
+      "weaknesses": [
+        "The central novelty (Stein correction with repulsive forces) provides only marginal gains over the Langevin special case ε(t)=0, which is a known corrector technique. In Table 2 the full SDG vs. the Langevin variant is 1.156(±0.087) vs 0.956(±0.247) on fa7, 22.690(±0.341) vs 21.722(±0.275) on 5ht1b, and 9.167(±0.282) vs 8.722(±0.218) on jak2—differences that are small and often within error. This undercuts the claim that the Stein correction is 'critical'.",
+        "The 'SDG w/o Stein correction' baseline (purportedly standard training-free guidance) collapses to near-zero hit ratios (0.299/0.033/0.000), far below the existing classifier-guided method MOOD (0.733/18.673/9.200). A baseline this much weaker than prior art suggests it is mis-tuned or broken, which means the large reported gap does not isolate the value of the Stein correction and may inflate the apparent contribution.",
+        "The headline claim that SDG 'consistently surpasses standard training-free guidance methods' is not fully supported: on jak2 SDG (9.167±0.282) is essentially tied with (and nominally below) MOOD (9.200±0.524), and the low-density schedule (α>0) yields only modest gains over α=0.",
+        "Theoretical concerns: the state cost α(s) log p_s(x_s) δ(s−t) in Eq. 3 is mathematically dubious (a Dirac-delta state cost at a single time, involving the controlled density itself), and the derivation of Proposition 3.1 appears to conflate controlled and uncontrolled marginals. Proposition 3.2's bound is a standard Jensen step, but the paper conflates minimizing the bound over the variational family q with the optimal control (a gradient in x_t), so the connection between the KL term and the control component (II) is not rigorous.",
+        "Lemma 3.3's posterior-score approximation s_θ(x_T) − η(t)s_θ(x_t) relies on a one-sample Monte Carlo and a same-sample substitution; its accuracy is never validated, yet it is the basis of the entire Stein update (Eqs. 5-6, 19).",
+        "The 'novel diffusion prior on the order of molecule graphs' (Eq. 27) is an ad hoc heuristic that is not ablated; given that graph order strongly affects docking/QED/SA, it may account for much of the reported improvement rather than the Stein correction.",
+        "The particle-size ablation (Table 3) shows no improvement with more particles, which contradicts the SVGD motivation and the authors' own framing that 'theory guarantees better approximation with more particles'; this indicates the kernel-based update is unstable in this high-dimensional setting, as the authors partly concede.",
+        "Presentation is weak: Algorithm 1 contains garbled notation (nonsensical ∪ symbols in the particle update, Eq. 5), inconsistent indices (i,j) in Eqs. 5-6, typos ('Weiner', 'traceable' for tractable), and an unusual reversed convention (x_0 ~ prior, x_T ~ data) that makes the text hard to follow. The '⊕ concatenation' in Proposition 3.4 is not meaningful for control vectors.",
+        "The image-task comparison (Table 1) is not clearly apples-to-apples (baselines and hyperparameters taken from Ye et al. 2024 while SDG reuses them), and the higher label-guidance FID (105.4 vs 89.5 for the un-corrected variant) is dismissed rather than explained."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "The paper addresses a genuinely important problem: sampling from low-density regions of diffusion models, which is well motivated for drug discovery and rare-sample generation, and the authors provide a principled framing through stochastic optimal control.",
+        "The empirical results on molecular low-density sampling are strong and consistent. SDG improves novel hit ratio from ~0.03-0.30 (Tweedie-only) to 1.16/22.69/9.17 across fa7/5ht1b/jak2, and even surpasses the strong classifier-guided baseline MOOD on two targets (Table 2). The ablation figures (Figs. 5-7, 12-14) show that removing the Stein correction produces off-manifold, invalid molecules, which is a compelling and concrete demonstration of the paper's central claim.",
+        "The theoretical scaffolding is coherent: Proposition 3.1 derives the annealed/reward-guided marginal, Proposition 3.2 provides a Jensen-based variational upper bound that cleanly isolates the neglected KL term, and Lemma 3.3 gives a usable posterior-score approximation. This gives the correction mechanism a clear motivation rather than an ad hoc justification.",
+        "The proposed 'back-and-forth' Stein correction is a sensible engineering solution that avoids the Jacobian-vector products of the direct formulation and connects to Langevin correction in the ε→0 limit (Corollary 3.5), which is a nice sanity check and a useful ablation axis.",
+        "Reproducibility is reasonably supported: hyperparameters (Table 4), step-size and annealing schedules (Eqs. 28-30), pretrained models, hardware, and a computational analysis (Tables 6-7) are all reported. The paper also honestly discusses limitations (particle-count saturation, SVGD instability in high dimensions)."
+      ],
+      "weaknesses": [
+        "The specific contribution of *Stein* over simpler posterior correction is marginal. Table 2 shows the Langevin variant (ε(t)=0, Corollary 3.5) achieves nearly identical performance to the full Stein correction (e.g., fa7 0.956 vs 1.156; 5ht1b 21.72 vs 22.69; jak2 8.72 vs 9.17). Since the paper's headline claim is that the Stein mechanism—particularly particle interaction/repulsion—is what drives the gains, this evidence suggests the dominant effect is simply 'having any posterior correction' rather than the Stein machinery specifically. This undercuts the originality/significance claim and is not adequately discussed.",
+        "Several theoretical steps are heuristic rather than rigorous. Lemma 3.3's 'proof' relies on a single-sample Monte Carlo approximation (Eq. 14) replacing the marginal score with a conditional score, which is a strong and unjustified leap; the resulting posterior-score expression is then treated as exact. Proposition 3.1/3.2 also have notational inconsistencies (e.g., the value function written as an expectation of p_t^u(x)/p_t(x) conditioned on x_t=x, with the implicit dependence on x_T noted only in a parenthetical comment). The link between the upper bound and the actual algorithm (adaptive step size, per-particle updates) is loose.",
+        "The image-domain results (Table 1) are less convincing. The 'SDG w/o Stein correction' variant already beats DPS and LGD on FID (89.5 vs 172.0/102), and the full SDG actually has *worse* FID than the no-Stein variant in label guidance (105.4 vs 89.5). The comparison against DPS/LGD is also not fully apples-to-apples, since the authors modify the TFG framework (removing recurrent and mean-guidance steps). The image experiments thus provide only weak support for generalizability.",
+        "Presentation quality is uneven: multiple typographical/terminology errors ('traceable' for tractable, 'Weiner' for Wiener, 'Radial Basic Function', 'Identity's rule', 'Cororally', 'stronger binding affinity'), some equations are rendered inconsistently, and several figure/table references are hard to reconcile. This impedes confidence in the details.",
+        "Some evaluation choices are under-justified: the reward predictor is trained on a product of normalized SA×DS while QED is ignored, and the 'novel graph-order prior' (Eq. 27) with its offset M=10 is introduced with little motivation or ablation, making it unclear how much of the gain stems from this prior versus the Stein correction."
+      ]
+    }
+  }
+}

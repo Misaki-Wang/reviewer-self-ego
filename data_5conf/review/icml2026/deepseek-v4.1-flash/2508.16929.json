@@ -1,0 +1,128 @@
+{
+  "v2": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Provides a broad empirical characterization of activation geometry: across layers, three model families (Llama-3.1, Gemma-2, Qwen-3), and datasets, attention outputs show lower 99%-variance intrinsic dimension (~60%) than MLP outputs/residual streams (>90%), supported by singular value spectra and downstream loss recovery (Figures 1-2).",
+        "Links this geometry to a practical SAE issue: LlamaScope SAEs show a clear correlation between lower intrinsic dimension and higher dead-feature rates across activation sites/layers (Figure 4).",
+        "Proposes a simple, easy-to-implement initialization (ASI) that aligns SAE decoder directions with top principal directions of activations, with ablations showing random subspaces degrade and near-full-rank sites gain little (Figures 5, 9, 10).",
+        "Scaling experiments from 16K to 1M features compare TopK, AuxK, and ASI, showing ASI improves reconstruction and (with SparseAdam) reduces dead features to <1% at 1M features, plus generalization to Lorsa (Figures 7-8).",
+        "Provides pseudo-code and hyperparameter details for ASI, which aids reproducibility.",
+        "Honest limitations discussion in Section 6 acknowledges unclear causal mechanism and conditions where ASI is less effective."
+      ],
+      "weaknesses": [
+        "Central causal claim is unsupported: the paper repeatedly states low-rank structure is a 'key factor'/'root cause' of dead features, but the evidence is correlational across activation types/layers; the authors admit in Section 6 that 'the causal mechanism remains unclear.' The abstract overclaims relative to the evidence.",
+        "Headline dead-feature reduction (<1% at 1M features) is achieved only when ASI is combined with SparseAdam, an existing optimizer; no experiment isolates SparseAdam alone (or AuxK+SparseAdam). Figure 7b shows ASI alone still retains many dead features at large scale, so the specific effect of ASI on dead features is confounded.",
+        "Attribution of low-rankness to W^O anisotropy is not fully established: they do not report singular values or condition number of W^O, nor intervene on W^O; Figure 3 is suggestive, but the head-overlap argument only gives the trivial bound dim(union) <= d_model and does not quantify overlap.",
+        "Missing related work on attention rank collapse (e.g., Dong et al., 'Attention is not all you need', ICML 2021), which directly studies low-rank attention outputs and weakens the novelty of the core observation.",
+        "Scaling experiments are narrow: only Llama-3.1-8B, layer 15, SlimPajama, attention output. Claims about scaling laws and generality are overstated; no other layers, models, or datasets are used in the scaling study.",
+        "No comparison to common dead-feature mitigations such as resampling (Bricken et al. 2023b) or to PCA-based initialization (Phan et al. 2025), and no interpretability/feature-quality evaluation; only reconstruction and dead counts are measured.",
+        "The method is described as 'subspace-constrained training' in the abstract, but ASI is only an initialization; decoder weights are free to leave the subspace during training. This mischaracterization could mislead readers.",
+        "Reproducibility is incomplete: no code release is mentioned; the SVD of 10M activations is a nontrivial one-time cost that is not fully analyzed; some figure/caption presentation issues reduce clarity."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The core empirical finding is well supported and genuinely interesting: attention outputs are consistently more low-rank than MLP outputs and residual streams, and this holds across three model families (Llama-3.1, Gemma 2, Qwen 3), three datasets (SlimPajama, GitHub, CCI3-Data), and multiple layers (Figures 1, 11). The universality claim is backed by a broad and reasonable experimental matrix.",
+        "The variance-decomposition analysis tracing the tail decay of attention outputs primarily to the anisotropy of W^O (Figure 3) is a useful mechanistic contribution that goes beyond simply reporting the phenomenon.",
+        "Active Subspace Initialization (ASI) is simple, computationally cheap, and empirically effective: it improves the reconstruction-sparsity frontier over TopK and AuxK and substantially reduces dead features across scales from 16K to 1M features (Figures 5–7). The improvement in Figure 7c (loss vs. number of alive features) is a compelling way to show more efficient use of live features.",
+        "Generalization to a sparse replacement model (Lorsa) in Section 5.4, including the alignment of the encoder (W^V) with input-side directions, shows the idea is not tied to a single architecture.",
+        "Reproducibility is decent: PyTorch-style pseudo-code (Appendix I), explicit hyperparameters, activation collection details, and dataset/layer choices are provided, which should allow others to reproduce the main results."
+      ],
+      "weaknesses": [
+        "The headline claim is misleading. The abstract and introduction state that ASI \"reduces dead features from 87% to below 1%\" in 1M-feature SAEs, but Figure 7b shows ASI alone still retains many dead features at large scale; only the combination ASI + SparseAdam reaches <1%. SparseAdam is an orthogonal, previously-known remedy (stale momentum, Bricken et al.), so the paper's own method does not deliver the advertised number.",
+        "Novelty is limited and the paper under-sells the overlap. Initializing the first/decoder layer with top principal components of the data is an established idea (Phan et al. 2025 PCsInit; classical PCA init). The contribution reduces to applying this to the SAE decoder, which is incremental rather than a new method or new understanding.",
+        "The central causal claim is unsupported. Section 5.1 shows only a correlation between intrinsic dimension and dead features (Figure 4), and Section 6 explicitly concedes that \"the causal mechanism remains unclear.\" Yet the abstract/introduction frame low-rank structure as \"a key cause/factor\" of dead features. A correlation plus an intuitive story is not sufficient for the causal framing.",
+        "No evaluation of feature interpretability, which is the actual purpose of SAEs. The paper reports only reconstruction and dead-feature counts. Constraining initialization to a d_init=768 subspace of a 4096-dim space could bias features toward high-variance directions and reduce diversity/monosemanticity, but this is never examined. For an interpretability contribution this is a significant gap.",
+        "The mechanistic argument about head superposition (dim(∪_i span(head_i)) ≤ Σ_i dim(span(head_i)) = d_head·n_head = d_model) is vacuous: the bound simply equals d_model and does not establish low-rankness. The real driver is W^O anisotropy, which is in tension with the superposition narrative offered as intuition.",
+        "The framing overstates how surprising the result is. A ~60% intrinsic dimension at 99% variance is low, but activations broadly exhibit decaying spectra; the genuinely novel part is the comparative result (attention vs. MLP/residual), not the absolute number. The \"surprisingly low-dimensional\" language is not calibrated.",
+        "Practical significance is weakened by the authors' own admission that downstream Delta LM loss improvements are \"less pronounced\" than reconstruction gains (Figure 6 caption), suggesting limited impact on model behavior.",
+        "Method generality is overstated relative to the evidence. SAE experiments are largely confined to a single model (Llama-3.1-8B) and a single layer (layer 15); the JumpReLU result fails under the common high-ℓ0 warm-up schedule (Appendix H), and ASI yields minimal gains on near-full-rank activations (Appendix B.2). The conditions under which ASI helps are narrow.",
+        "The mechanism by which random initialization produces dead features and ASI fixes them is asserted, not demonstrated. There is no analysis (e.g., gradient flow or activation statistics over training) showing that features initialized outside the active subspace never receive gradient, which would be needed to justify the method beyond empirical luck."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "The central empirical finding—that attention outputs are strongly low-rank compared to MLP outputs and residual streams—is demonstrated robustly across multiple model families (Llama 3.1, Gemma 2, Qwen 3), datasets (SlimPajama, GitHub, CCI3), and layers, using multiple complementary metrics (intrinsic dimension, singular value decay, and downstream loss recovery). This triangulation makes the claim credible.",
+        "The mechanistic attribution of the low-rankness to the anisotropy of the output projection matrix W^O, via the variance decomposition Var(Oê)=Var(Zv)·||v||², is a clean and well-reasoned analysis that isolates the source of the phenomenon rather than merely describing it.",
+        "The proposed Active Subspace Initialization (ASI) is simple, requires no additional compute, and the ablation against random-subspace initialization (Appendix B.1) provides a convincing control showing the benefit is specific to the active subspace rather than subspace initialization in general.",
+        "The method is shown to generalize beyond TopK SAEs to other activation functions (JumpReLU), other dictionary-learning settings, and sparse replacement models (Lorsa), which strengthens the practical significance.",
+        "The paper is candid about limitations: it acknowledges the causal mechanism between low-rankness and dead features is unresolved, that ASI yields little benefit on near-full-rank activations (residual stream), and that it fails under high-ℓ0 warm-up regimes. This is appropriate and does not undermine the claims.",
+        "Reproducibility is reasonably supported with hyperparameters, data-collection details, and PyTorch-style pseudo-code in the appendix."
+      ],
+      "weaknesses": [
+        "The headline claim in the abstract ('reduces dead features from 87% to below 1%') conflates ASI with SparseAdam. The scaling results (Fig. 7b) show ASI alone still retains many dead features at large scale, and only the ASI+SparseAdam combination reaches <1%. Framing the abstract around ASI alone overstates the contribution of the proposed method.",
+        "Figure quality is poor throughout the manuscript: several figures are low-resolution or effectively unreadable (e.g., the bar charts in Fig. 1, the spectra in Figs. 2–3), and Fig. 10's caption appears to be an erroneous copy-paste of the Fig. 5/9 caption ('Random subspaces are used as the baseline'), which does not match the described residual-stream experiment. This impairs the reader's ability to verify the central claims.",
+        "The scaling experiments (16K–1M features) are conducted on a single model, layer, and dataset (Llama-3.1-8B, layer 15, attention output, SlimPajama), so the 'optimal scaling characteristics' claim is only weakly supported and its transferability to other sites/models is untested.",
+        "The link between low intrinsic dimensionality and dead features is presented as correlational (Fig. 4) but is then used as the motivating causal story for ASI. The paper acknowledges this gap, but it remains central to the narrative and is not experimentally disentangled from other factors (e.g., optimization dynamics, feature competition).",
+        "There are numerous writing and code errors that reduce confidence in care taken: 'Attention outputs has an intrinsic dimension', 'attention outputs requires only', 'Another wildly used activation fuction', and the pseudo-code uses torch.svd(demeaned_label) with an undefined variable. The 'universality' claim rests on a small set of models/datasets, which is somewhat stronger language than the evidence supports.",
+        "Baseline comparisons are limited: AuxK is included, but stronger dead-feature mitigation methods (e.g., resampling, Ghost/alternative initialization schemes) are not directly compared, making it harder to situate ASI's relative advantage."
+      ]
+    }
+  },
+  "v3": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Identifies and characterizes a clear empirical phenomenon: attention outputs exhibit substantially lower effective rank (~60%) than MLP outputs and residual streams (~90%), robust across layers, datasets, and model families (GPT-2, Llama-3.1, Gemma-2, Qwen-3).",
+        "Provides a useful decomposition analysis showing that the output projection matrix W^O further compresses the attention output into a lower-dimensional subspace, offering mechanistic insight into the observed low-rank structure.",
+        "Proposes a simple, lightweight, and broadly applicable initialization method, Active Subspace Initialization (ASI), which aligns SAE decoder directions with the principal subspace of activations and consistently reduces dead features while improving reconstruction.",
+        "Conducts extensive experiments: scaling from 16K to 1M features, comparisons against TopK and AuxK baselines, statistical significance tests, ablations (random subspace, residual-stream activations), and generalization to Lorsa as a sparse replacement model.",
+        "Reproducibility is reasonably supported: detailed hyperparameters, pseudocode, model/dataset choices, and training configurations are provided in the appendices.",
+        "Includes an honest limitations section that acknowledges unresolved causality between low-rankness and dead features and clarifies when ASI is most beneficial."
+      ],
+      "weaknesses": [
+        "The central causal claim that low-rank structure is a 'key factor' or 'primary driver' of dead features is not fully established. The evidence is largely correlational plus an initialization intervention; alternative explanations such as activation statistics, optimization dynamics, or feature competition are not ruled out, and the paper itself admits the causal mechanism is unresolved.",
+        "The headline result of reducing dead features from 87% to below 1% at 1M features relies on combining ASI with SparseAdam, but the paper does not report a SparseAdam-only baseline. This makes it unclear how much of the reduction is due to ASI versus SparseAdam, and the abstract misleadingly attributes the result to 'our approach' without mentioning SparseAdam.",
+        "The novelty of the core observation may be overstated. Prior work has studied low-rank bottlenecks in attention and representation collapse; while the specific comparison across activation types is useful, the claim of showing this 'for the first time' is too strong without a more thorough discussion of related low-rank attention findings.",
+        "ASI alone still leaves many dead features at extremely large scales (Figure 8b), and the paper does not analyze why SparseAdam is necessary or how much ASI contributes beyond it at that scale.",
+        "The analysis attributing low-rankness to W^O is somewhat informal: it does not directly measure the rank or singular spectrum of W^O, and the superposition argument via a union bound is not a rigorous explanation for the observed low effective rank.",
+        "Presentation issues include typos, inconsistent terminology (e.g., 'Lorsa' vs. 'Lors'), and abstract wording such as 'subspace-constrained training' when the method only changes initialization, not training constraints."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "Addresses an important practical problem in mechanistic interpretability: dead features in sparse dictionary learning waste SAE capacity and computation.",
+        "Proposes a simple, lightweight initialization method (Active Subspace Initialization, ASI) that is easy to implement and compatible with existing SAE training pipelines.",
+        "Provides extensive experiments across models (Llama-3.1-8B, Qwen3-8B), datasets, layers, SAE variants (TopK, JumpReLU, Lorsa), and feature scales up to 1M, including statistical significance tests and ablations.",
+        "The observation that attention outputs exhibit lower effective rank than MLP outputs and residual streams is interesting and potentially useful for understanding transformer geometry and SAE training.",
+        "Good reproducibility effort: hyperparameters, training details, pseudocode, and SVD stability analysis are included.",
+        "The limitations section honestly acknowledges that the causal mechanism between low-rankness and dead features is unresolved and discusses when ASI is most beneficial."
+      ],
+      "weaknesses": [
+        "The central universality claim is contradicted by the paper's own Appendix D: for Qwen3-4B and Qwen3-8B on SlimPajama-Github/CCI3-Data, residual streams have lower effective rank than attention outputs (e.g., Qwen3-4B residual 990 vs attention 1122; Qwen3-8B Github residual 2000 vs attention 2410). The main text does not discuss these exceptions, undermining claims of consistency across model families and datasets.",
+        "The reported effective ranks around 90% for MLP/residual streams are not universal; for Qwen3-4B the residual effective rank is only ~39% of the hidden dimension, and for Qwen3-8B on CCI3-Data it is ~77%. This overstates the quantitative contrast between attention and other activation types.",
+        "The causal claim that low-rank structure is a 'primary driver' of dead features is not established. Only correlation and an initialization intervention are shown; confounders such as activation scale, sparsity, and feature competition are not controlled.",
+        "The abstract describes ASI as a 'subspace-constrained training method,' but it is only an initialization. Features can drift out of the active subspace during training (as the authors themselves note for high-L0 schedules), and no final subspace alignment is reported.",
+        "The headline result of reducing dead features from 87% to below 1% at 1M features relies on combining ASI with SparseAdam, an existing optimizer. ASI alone still leaves many dead features at large scales (Figure 8b), so the abstract may mislead readers about ASI's standalone effect.",
+        "SparseAdam is not a novel contribution, and the stale-momentum citation appears misattributed: Bricken et al. 2023a is about sparse distributed memory, not SAE dead features.",
+        "The Lorsa generalization is confounded by initializing Lorsa Q/K weights from the pretrained MHSA, so the improvement cannot be attributed solely to ASI. No ablation isolates the subspace initialization.",
+        "Method novelty is limited: ASI is essentially PCA-based initialization of the SAE decoder, similar to existing PCsInit. The core empirical phenomenon of low-rank attention has been studied before (e.g., low-rank bottlenecks in multi-head attention, random matrix analyses of transformers).",
+        "Effect sizes on reconstruction and LM loss are small (e.g., L0=50: ASI MSE 0.3168 vs AuxK 0.3224; ΔLM 7.85e-3 vs 7.96e-3), while the dead-feature reduction is large. It is unclear whether the dead-feature reduction translates to meaningful downstream benefits.",
+        "Missing baselines: no comparison to resampling, other dead-feature mitigations, or simply training an SAE on PCA-projected activations with folding; no comparison to standard PCA decoder initialization without the random projection step.",
+        "Presentation issues: some figures are low-resolution and hard to read; the Figure 5 caption describes three panels but the image appears to show only one; axes and legends are sometimes unclear.",
+        "Experimental details are missing: how the SVD activations are collected relative to training data, whether decoder norms are renormalized after projection, final rank/subspace alignment after training, and sensitivity of d_init across models."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "The core empirical finding—that attention outputs exhibit substantially lower effective rank (~60%) than MLP outputs and residual streams (~90%)—is supported by a broad, well-designed study spanning four model families (GPT-2, Llama-3.1-8B, Gemma-2-9B, Qwen3-8B), multiple datasets (SlimPajama and subsets, CCI3-Data, fineweb-edu), and many layers, with an explicit SVD stability/error analysis (Appendix C) and multiple complementary metrics (effective rank, singular-value decay, and fraction of downstream loss recovered). This triangulation makes the phenomenon convincing.",
+        "The proposed Active Subspace Initialization (ASI) is simple, well-motivated, and empirically effective: it reduces dead features dramatically and improves normalized MSE and Delta LM loss, with statistically significant gains (Welch's t-tests, p-values down to 1e-40), scaling experiments from 16K to 1M features, and generalization beyond SAEs to the Lorsa sparse replacement model.",
+        "The evaluation is unusually thorough and honest: ablations include random-subspace initialization, near-full-rank activations (where ASI gives marginal gains as expected), the choice of d_init, JumpReLU and K-annealing variants (where ASI fails), feature-quality/monosemanticity checks, and dead-subspace behavior analysis. The paper is careful not to overclaim that ASI degrades or improves feature quality.",
+        "Reproducibility is adequate: detailed hyperparameters, three-phase LR schedules, optimizer settings, a PyTorch-style pseudocode for both SAE and Lorsa, and multi-seed runs with reported standard deviations.",
+        "The paper is clearly written, and the limitations section responsibly flags the unresolved causal mechanism and the conditions under which ASI is (and is not) beneficial, rather than hiding them."
+      ],
+      "weaknesses": [
+        "The central causal claim in the abstract—that low-rank structure is 'a key factor' of the dead-feature problem—is only supported by correlation (Figure 5, Appendix F). The paper itself acknowledges the causal mechanism is unresolved. Since this causal link is the conceptual backbone connecting the descriptive finding to the method, the strongest claims are not fully established.",
+        "The methodological novelty is modest. ASI is essentially a PCA/subspace-projection initialization closely related to PCsInit (Phan et al., 2025) and standard PCA preprocessing; the contribution is mainly its targeted application to SAE feature dictionaries on attention outputs. This limits the technical originality of the second half of the paper.",
+        "The headline '87% to below 1%' result requires combining ASI with SparseAdam. ASI alone leaves many dead features at extreme scale (Figure 8b), so the most striking number is partly attributable to an orthogonal optimizer change rather than the proposed initialization itself.",
+        "The framing slightly overstates the phenomenon: an effective rank of ~60% is moderate rather than 'surprisingly low', and the claim of showing low-rankness in multi-head attention 'for the first time' sits uneasily with prior work on the low-rank bottleneck in attention (Bhojanapalli et al., 2020) and attention-head superposition (Jermyn et al., 2024; He et al., 2025), even if the specific effective-rank comparison is new. The theoretical argument dim(∪ span(O_i)) ≤ d_model is essentially trivial.",
+        "No code/artifact release is mentioned, which slightly weakens reproducibility for a methods paper, and the SAE-vs-dead-feature comparisons rely on fixed k/d_init settings that vary in benefit across layers (e.g., Layer 7 retains 5308 dead features)."
+      ]
+    }
+  }
+}

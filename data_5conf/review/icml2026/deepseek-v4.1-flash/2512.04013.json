@@ -1,0 +1,147 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a timely and practically important problem: efficient serving of augmented LLM requests that invoke external tools, where existing FCFS scheduling and static batching cause head-of-line blocking and poor goodput under SLOs.",
+        "Proposes a sensible two-stage scheduling design: Stage I uses predicted output length, API call duration, return length, and context-handling policy to compute an initial scheduling value; Stage II corrects it with runtime observations after API return, plus an anti-starvation term.",
+        "The dynamic token batching mechanism adapts the per-iteration token budget using available GPU memory and paused KV-cache memory, with bounded constraints to avoid extreme fluctuations.",
+        "Evaluation breadth is a clear strength: two LLMs (GPT-J-6B, OPT-13B), three hardware settings (RTX 4090, H800, 2×A100), two datasets (Merge, ToolBench), multiple workloads (Poisson, fixed 2k requests, Gamma burstiness), baselines vLLM/InferCept, and metrics including goodput, TTFT, normalized latency, SLO attainment, tail latency, TPOT, ablation, and overhead breakdown.",
+        "The reported gains, if validated, are substantial (up to 33× vs vLLM and 13× vs InferCept in effective throughput), and the prediction module overhead is shown to be low (<1% of request completion time)."
+      ],
+      "weaknesses": [
+        "Several experimental results are internally inconsistent or not reconciled. For example, ToolBench at 4.0 req/s with OPT-13B on H800 shows vLLM goodput 1.09 req/s and AugServe 1.11 req/s in Table 3, but Table 6 reports vLLM 2.81 req/s and AugServe 3.90 req/s for the same model/dataset/GPU/request rate; Table 7 reports vLLM SLO attainment of 98.4% at 4.0 req/s while Table 3 implies much lower effective throughput. The paper does not explain whether this is due to W2 vs W3 workloads, SLO differences, or other factors, which undermines confidence in the central performance claims.",
+        "The core scheduling value is based on heuristic cost equations (Eqs. 9–25) with many simplifying assumptions (e.g., quadratic prefill/decode cost forms, per-token memory scaling, ignoring activations/fragmentation). There is no empirical validation that the scheduling value correlates with actual completion time or that the proposed ranking improves over simpler priority rules beyond the included baselines.",
+        "Predictor accuracy is modest (65% output-length accuracy on Merge, API call duration MSE about 5s on Merge), but there is no sensitivity analysis showing how scheduling performance degrades with prediction error. Since Stage I decisions are made before API return, prediction errors could dominate in the pre-call phase; claiming the accuracy is 'sufficient' is unsupported.",
+        "Reproducibility is limited. Key hyperparameters and implementation details are missing, including alpha, beta_low, beta_high, gamma, target_max, bucket boundaries for output-length prediction, predictor training data/labels, system-parameter measurement (M, T_fwd, N_max, S_out), and tensor-parallel setup for 2×A100. No code or artifact release is mentioned.",
+        "The dynamic token batching mechanism assumes paused KV-cache memory can be preempted (gamma=1 by default), which may evict paused contexts and cause recomputation or thrashing. The paper does not measure preemption/recomputation overhead, memory-safety margins, or impact on paused requests, despite criticizing such recomputation in prior systems.",
+        "The SLO definition is problematic: normalized latency < 10× iteration time depends on iteration time, which itself changes under dynamic token batching and varying system load. This makes the SLO threshold non-stationary and complicates fair comparison across systems and configurations. The exact iteration-time definition is also not clearly specified per experiment.",
+        "The anti-starvation mechanism is introduced but not evaluated. The coefficient alpha is unspecified, and there are no fairness metrics (e.g., waiting-time distribution, starvation rate, maximum queueing delay) to substantiate the claim of ensuring fairness.",
+        "The paper discusses FastServe, Sarathi, and length-prediction scheduling approaches in related work but does not compare against them experimentally. Since these are relevant scheduling baselines, their omission limits assessment of the proposed method's novelty and relative effectiveness.",
+        "There is no explicit limitations section or discussion of threats to validity, and some headline claims (e.g., 4.7–33.1× vs vLLM, 3.3–13.2× vs InferCept) are not clearly tied to the full set of experimental settings."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "Addresses a timely and relevant problem: efficient serving of augmented LLMs with external tool calls, which is increasingly important for web applications.",
+        "Proposes a two-stage scheduling strategy (prediction + runtime correction) and dynamic token batching that are plausible and could improve goodput if validated.",
+        "Evaluates on multiple hardware platforms (RTX 4090, H800, A100), two models (GPT-J-6B, OPT-13B), and two datasets (Merge, ToolBench), showing some generality.",
+        "Reports substantial improvements over baselines, which, if reproducible and fairly compared, would be impactful."
+      ],
+      "weaknesses": [
+        "Weak baselines: vLLM is not designed for augmented LLM inference (it discards context on external calls), making the comparison unfair. The only relevant baseline, InferCept, lacks sufficient configuration and tuning details, so the claimed 3-13x improvement is unconvincing.",
+        "The scheduling value equations (Eqs. 9-25) are heuristic and lack theoretical justification; many terms (e.g., quadratic cost, 1/2 factors) are not derived or explained, and symbols like T^fwd(C_i), T^swap(C_i), S^fwd_out are undefined or unclear.",
+        "The prediction model's accuracy is mediocre (65% on Merge, 85% on ToolBench), yet the paper does not analyze how prediction errors affect scheduling performance or robustness.",
+        "Evaluation metrics are non-standard: the SLO uses 'normalized latency < 10× iteration time' without defining 'iteration time', making results hard to interpret and compare across systems.",
+        "The paper lacks crucial implementation details: no code, no hyperparameter values (α, β_low, β_high, γ, target_max), no training details for the predictor, and no baseline implementation specifics, severely hampering reproducibility.",
+        "Presentation is poor: numerous typos and grammatical errors, confusing figure captions, missing labels, poorly formatted equations, and an algorithm with many undefined variables.",
+        "No ablation of individual components (e.g., Stage I vs Stage II, anti-starvation, prediction quality); only a coarse ablation of dynamic batching vs full system on one configuration.",
+        "No discussion of limitations, overhead, failure modes, or ethical considerations. The claimed 33x improvement over vLLM is likely exaggerated due to the weak baseline."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a timely and important problem: efficient serving of augmented LLMs with external tool calls, where SLO-aware effective throughput is critical.",
+        "Motivation is clear and empirically supported: the paper demonstrates HoL blocking under FCFS, static batch token limits, and the impact of API return length using Figures 2-6 and Tables 1-2.",
+        "Proposes a reasonable integrated system combining request prediction, two-stage scheduling, and dynamic token batching, tailored to augmented LLM inference features such as API call duration and return length.",
+        "Evaluation is broad: two models (GPT-J-6B, OPT-13B), three GPU setups (RTX 4090, H800, 2xA100), two datasets (Merge, ToolBench), multiple workloads, and comparisons against vLLM and InferCept.",
+        "Reports a wide range of metrics including goodput, TTFT, normalized latency, SLO attainment, P95 tail latency, TPOT, robustness under burstiness, and ablation results.",
+        "Shows large empirical gains in many settings, e.g., up to 33x higher effective throughput and up to 96.3% TTFT reduction, with prediction overhead reported as <1% in the time breakdown.",
+        "Ablation indicates that both dynamic token batching and two-stage scheduling contribute to improved goodput.",
+        "The two-stage idea of using predictions initially and correcting with runtime observations is conceptually sound for handling uncertainty in API calls."
+      ],
+      "weaknesses": [
+        "The central two-stage scheduling claim is not fully validated: the ablation only compares the full scheduling strategy against baselines, without isolating Stage I vs Stage II or the anti-starvation mechanism.",
+        "The anti-starvation equation appears inconsistent with the stated goal. Since lower scheduling value means higher priority, adding α·(now - last_schedule_time) would penalize long-waiting requests rather than prioritize them. The sign or sorting direction needs clarification.",
+        "The paper omits comparison to the closest scheduling baselines for augmented LLM inference, especially Shahout et al. [31] ('Fast inference for augmented large language models'), as well as other relevant scheduling works such as FastServe, S3, and Sarathi-Serve. This weakens the claim of outperforming state-of-the-art scheduling.",
+        "There are numerical inconsistencies and apparent overclaims. For example, Table 3 shows ToolBench at 4.0 req/s with vLLM=1.09 and AugServe=1.11 (~1.02x), which contradicts the abstract's claimed lower bound of 4.7x vs vLLM. The text also states AugServe reaches ~2.35 req/s at ToolBench 5.0 on H800, while Table 3 reports 0.71 req/s (though this may correspond to a different workload and needs explicit reconciliation).",
+        "Prediction model details are insufficient: features, bucket definitions, training data splits, and fine-tuning procedure are not fully described. The reported output-length accuracy on Merge is only 65%, yet no sensitivity analysis quantifies how prediction errors affect scheduling performance.",
+        "Key hyperparameters are missing or underspecified, including α, β_low, β_high, target_max, and γ. This limits reproducibility and makes it unclear how robust the reported gains are to tuning.",
+        "The scheduling cost equations (Eqs. 9-25) mix memory and time quantities in an ad hoc way and are not formally derived from latency or SLO objectives. It is unclear why these particular values yield near-optimal ordering.",
+        "The dynamic token batching mechanism uses paused-request memory with γ=1 as available capacity, which may cause preemption and recomputation; the interaction between this and the scheduling value is not rigorously evaluated.",
+        "There is no limitations section. The paper does not discuss failure modes, privacy/cost concerns of external API calls, multi-API or multi-turn behavior, or fairness beyond the anti-starvation heuristic.",
+        "Presentation has several issues: typos such as 'Normalization Latency' and 'prefetch' vs 'prefill', duplicate/inconsistent symbols in Table 5, and figure captions saying 'Lower right is better' for bar charts. Some claims would benefit from clearer labeling of which experiment supports them."
+      ]
+    }
+  },
+  "v3": {
+    "exp1_quality": {
+      "oa": 2,
+      "strengths": [
+        "The paper addresses an important and timely problem: efficient serving of augmented LLMs that invoke external tools under strict SLOs, where goodput is the right metric.",
+        "The proposed design is sensible: it combines state-aware request scheduling, context-handling policies, and dynamic batch-level token budgets to mitigate HoL blocking and improve effective throughput.",
+        "The evaluation spans multiple models (GPT-J-6B, OPT-13B, Vicuna-13B, Llama-3-70B), hardware platforms (RTX 4090, H800, A100), two datasets, multiple workloads, and includes ablations, overhead measurements, robustness tests, tail latency, SLO attainment, memory occupancy, and comparison with MARS.",
+        "The paper includes a theoretical approximation guarantee for a simplified per-iteration knapsack problem and honestly discusses its limited applicability to the full online augmented serving problem.",
+        "Reported scheduling and prediction overheads are small, which is practically important for iteration-level LLM serving."
+      ],
+      "weaknesses": [
+        "Central evidential contradiction: SLOs are defined as TTFT < 1s, yet the ablation in Table 2 reports average TTFT of 3.88s for full AugServe and 14.53s for +S, while also reporting goodput of 1.07 req/s and claiming high SLO attainment. If average TTFT exceeds the SLO, most requests should violate it and goodput should be near zero. This undermines the paper's core goodput claims unless the metric definition differs, which is not clarified.",
+        "Theoretical and algorithmic mismatch: scheduling priority is defined as value density θ = V / C_{i,k}, where C_{i,k} is a space-time cost integral (Eq. 5). However, the actual packing constraint uses instantaneous memory footprint ∑ m_i(t) ≤ M^e (Eq. 3). The 1/2-approximation theorem applies to a 0-1 knapsack with fixed memory costs c_i, not to the implemented priority using space-time cost. Thus the theoretical justification does not apply to the actual scheduler, and the relationship between C_{i,k} and the memory constraint is unclear.",
+        "Notation and unit inconsistency in the dynamic token budget: B_token = (G_free + G_preempt)/μ, but Table 4 defines G_free as the number of free GPU memory blocks and μ as per-token memory footprint. Dividing blocks by bytes/token does not yield a token count. If G_free is intended to be bytes, the notation should say so. Values for β_low, β_high, and T_max are also not specified.",
+        "Inconsistent headline results: the abstract and introduction claim 6.5× and 4.7× higher effective throughput than vLLM and INFERCEPT, while §6.1 reports 7.5× and 5.7×. Such inconsistency in the main quantitative claims needs resolution.",
+        "Reproducibility is weak: no code or data release is mentioned; fine-tuning details for the BERT-based predictor (training data, splits, objectives, hyperparameters) are missing; baseline integration details for vLLM/INFERCEPT are sparse; and there are no random seeds, error bars, or statistical significance tests.",
+        "Metric definitions for augmented requests are ambiguous: it is unclear whether TTFT is measured before or after the external call, how normalized latency is defined across multi-segment requests, and how SLOs apply per segment versus end-to-end. This ambiguity directly affects the interpretation of Figures 4 and 7 and Table 2.",
+        "Algorithm 1 appears inconsistent: after an external call under the Discard policy, the request is pushed to the waiting queue (line 21), even though discarded context requires recomputation/resumption. This raises concerns about the scheduler's correctness and the treatment of resumed requests.",
+        "The prediction module and robustness analysis are not fully convincing: 65% bucket accuracy on INFERCEPT and ~5s MSE for external call duration on ToolBench may be too coarse for reliable priority ordering, and the robustness study injects multiplicative noise without comparing to oracle predictions or reporting actual error distributions.",
+        "Novelty is incremental relative to INFERCEPT and SJF/MARS: the main ingredients—context-handling policies, length-based scheduling, and dynamic token budgets based on free memory—are combined with feedback refinement. The paper does not sufficiently isolate which new component drives the large reported gains beyond the state-aware scheduling ablation.",
+        "The vLLM baseline may be unfairly weak for augmented serving because it discards context during external calls; the more relevant comparison is INFERCEPT, but even that baseline's implementation and configuration are not described in enough detail."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "Addresses a timely and important problem: augmented LLM inference serving where external tool calls introduce pauses, heterogeneity, and SLO challenges.",
+        "Jointly considers request scheduling and dynamic batch-level token budget, targeting both head-of-line blocking and GPU memory pressure.",
+        "Extends INFERCEPT-style context handling with a state-aware cost model that uses pre-invocation predictions and post-invocation runtime feedback to refine priorities across service rounds.",
+        "Evaluation covers multiple models (GPT-J-6B, OPT-13B, Vicuna-13B, Llama-3-70B-Instruct), GPUs (RTX 4090, H800, A100), datasets (INFERCEPT, ToolBench), and Poisson/Gamma workloads.",
+        "Includes useful additional analyses: ablation, scheduling overhead, robustness to prediction errors, tail latency, SLO attainment, memory occupancy, and sensitivity to beta.",
+        "Provides a 1/2-approximation result for a simplified per-iteration 0-1 knapsack subproblem and honestly acknowledges that it does not extend to the full online multi-stage problem.",
+        "The prediction module is designed to run off the critical path with claimed <0.1% overhead, and the feedback-driven refinement is intended to mitigate early prediction errors.",
+        "Reproducibility potential is reasonable in principle: built on vLLM, uses public datasets, compares against standard baselines, and includes pseudocode and additional experimental details in the appendix."
+      ],
+      "weaknesses": [
+        "Headline results are inconsistent: the abstract and introduction claim 6.5x and 4.7x higher effective throughput than vLLM and INFERCEPT, while Section 6.1 reports 7.5x, 5.7x, and 1.9x over vLLM, INFERCEPT, and SSJF respectively. This inconsistency is not explained and undermines trust in the reported gains.",
+        "There is a central mismatch between the problem formulation and the implemented algorithm: Equation 3 constrains memory footprint m_i(t), but the scheduling procedure greedily packs requests by token budget B_token(t) and prioritizes by space-time cost C_{i,k}. The relationship between C_{i,k}, m_i(t), and B_token is never made precise.",
+        "The dynamic token budget in Equation 11 has unit ambiguity: G_free and G_kv_preempt are described as GPU memory blocks, while mu is a per-token memory footprint, yet B_token is in tokens. The selection of beta_low, beta_high, and T_max is also unspecified, hurting reproducibility.",
+        "The theoretical guarantee applies only to a simplified static 0-1 knapsack with fixed values, costs, and budget. It does not cover the actual online, multi-stage, feedback-driven augmented LLM scheduling problem, so the main algorithm remains an unguaranteed heuristic.",
+        "Prediction quality is weak in important settings: output-length bucket accuracy is only 65% on the INFERCEPT dataset, and external-call-duration MSE is about 5s on ToolBench. The robustness experiment injects uniform relative noise rather than realistic bias or distribution shift, so the evidence that mispredictions are harmless is limited.",
+        "The SLO treatment is contradictory: SLOs are stated as TTFT < 1s and normalized latency < 10x single-iteration time, but the ablation table reports AugServe TTFT of 3.88s and baseline TTFT of 306.26s on OPT-13B/H800 at 3.0 req/s. If the SLO is 1s, even AugServe's average TTFT in that setting violates the stated SLO, which needs clarification and may undercut goodput and SLO-attainment claims.",
+        "The delay-aware scheduling term is not well justified: Equation 2 and Equation 4 use beta * w_i with default beta = 5e-5. For waiting times of seconds to hundreds of seconds, beta * w_i is roughly 5e-5 to 5e-3, so the throughput term of 1 dominates. The claim that AugServe balances delay awareness and throughput is therefore weakly supported.",
+        "The most relevant baseline, MARS, is relegated to Appendix D.6 instead of the main results, even though it is the closest memory-based SJF scheduler for augmented LLM inference. Main comparisons against vLLM, INFERCEPT, and SSJF do not fully establish state-of-the-art performance.",
+        "The SSJF baseline is under-specified: it is unclear whether it uses oracle output lengths, the same predictor as AugServe, or a separate speculative predictor. Without this detail, the fairness of the 1.9x comparison is unclear.",
+        "The context-handling policy selection is largely inherited from INFERCEPT's memory-waste formulas. The paper's novelty in that component is therefore limited, and the main contribution reduces to scheduling integration plus a simple dynamic budget heuristic.",
+        "External-call execution details are missing: it is unclear whether real APIs are invoked or whether call durations and return lengths are simulated. This matters because the predictor is trained on call-duration data, and a 5s MSE on ToolBench suggests either high variability or an unrealistic simulation setup.",
+        "The ablation study reports only TTFT and goodput, omitting normalized latency and SLO attainment. Given the large TTFT values, this makes it difficult to verify that the claimed SLO-oriented gains hold in the ablation setting.",
+        "Presentation and notation need work: 'prefetch' and 'prefill' are used inconsistently, Equation 9 uses C_{i,1} where a recomputation or swap-in cost for the current segment seems intended, and several key hyperparameters and implementation details are absent or only partially specified.",
+        "The greedy value-density ranking provides no fairness or starvation analysis beyond the aging term. In production serving, worst-case waiting time and fairness across requests matter, and the paper does not address them.",
+        "No code or artifact release is mentioned, and the reproducibility of the predictor, external-call simulation, and baseline re-implementations is not demonstrated.",
+        "The contribution may be better suited to a systems venue than ICML's main track: the core method is an engineering integration of existing ideas (SJF-style ranking, memory-aware scheduling, dynamic batching, INFERCEPT context policies) with limited new theoretical or methodological insight."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Addresses a timely and important problem: augmented LLM inference with external tool calls, where HoL blocking and SLO-aware goodput are critical for practical serving systems.",
+        "Proposes a coherent state-aware scheduling design that models multi-stage request lifecycles, external-call-induced execution states, context-handling policies, and runtime feedback, going beyond length-based SJF heuristics.",
+        "Introduces a dynamic batch-level token budget that explicitly considers both free GPU memory and reclaimable memory from paused requests under Swap/Discard policies, which is a practical improvement over fixed budgets.",
+        "Provides extensive evaluation across multiple models (GPT-J-6B, OPT-13B, Vicuna-13B, Llama-3-70B), GPU platforms (RTX4090, H800, A100), datasets (INFERCEPT, ToolBench), workloads, and baselines (vLLM, INFERCEPT, SSJF, MARS).",
+        "Ablation study convincingly shows that state-aware scheduling drives most of the goodput/TTFT improvement, while the dynamic token budget provides complementary gains.",
+        "Includes useful additional analyses in the appendix: robustness to prediction error, scheduling overhead, bursty arrivals, tail latency, SLO attainment, and memory occupancy.",
+        "The paper is generally well written and well organized, with clear problem motivation, pseudocode, and a candid discussion of the limits of the theoretical approximation guarantee."
+      ],
+      "weaknesses": [
+        "Reproducibility is not fully adequate: no code or artifact release is mentioned, and several key hyperparameters and implementation details are missing (e.g., beta_low, beta_high, T_max, mu, waste-model constants, predictor training splits/hyperparameters, baseline reimplementation details).",
+        "There are inconsistent headline performance claims: the abstract and introduction report 6.5x and 4.7x goodput gains over vLLM and INFERCEPT, while Section 6.1 reports 7.5x and 5.7x, respectively. These numbers should be reconciled and explained.",
+        "The SLO/goodput definition raises questions: the paper states TTFT SLO is <1s, but the ablation table reports AugServe average TTFT of 3.88s and much higher values for baselines. It is unclear how many requests actually satisfy the TTFT SLO and how goodput is computed under this apparent mismatch.",
+        "The formal scheduling formulation and the proposed greedy heuristic are not fully aligned: Equation 3 constrains instantaneous memory m_i(t), while the value-density ranking uses a space-time cost C_{i,k} defined as the integral of memory over segment duration. The 1/2-approximation guarantee applies only to a simplified fixed-cost 0-1 knapsack subproblem, not the actual dynamic augmented LLM scheduling problem.",
+        "The scheduling value V_i = 1 + beta * w_i uses a default beta = 5e-5, making the waiting-time term very small for typical waiting times (e.g., 300s gives beta*w ~ 0.015). This suggests the aging/delay-awareness term may be nearly inactive at the chosen setting, and the scaling justification is not fully convincing.",
+        "Prediction quality and its impact are not fully characterized: external-call-duration prediction has MSE around 5s on ToolBench and output-length bucket accuracy is 65% on INFERCEPT. Noise-injection experiments are useful, but they do not directly quantify how much of the end-to-end gain depends on prediction accuracy versus feedback refinement.",
+        "The evaluation does not deeply isolate the effects of context-handling policy choices (Preserve/Swap/Discard) on scheduling outcomes, and the main text omits some relevant comparisons (e.g., MARS is only in the appendix).",
+        "The reported geometric-mean improvements lack confidence intervals or statistical significance tests, and the robustness of conclusions to specific request rates, arrival patterns, and hardware conditions could be better quantified.",
+        "The paper does not discuss potential negative societal impacts beyond a generic impact statement, though this is not a major concern for this systems-oriented work."
+      ]
+    }
+  }
+}

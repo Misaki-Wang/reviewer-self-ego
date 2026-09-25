@@ -1,0 +1,126 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Novel thought-adaptive KV cache compression framework that decomposes chain-of-thought into reasoning, transition, and execution thoughts using attention sparsity.",
+        "Hybrid quantization-eviction strategy assigns precision by thought importance and progressively evicts low-importance thought segments, which is a meaningful departure from token-level heuristics.",
+        "Continuous Thinking kernel extends PagedAttention to reuse evicted KV slots in place and avoid gather-based compaction, addressing a real systems bottleneck.",
+        "Extensive empirical evaluation across multiple reasoning models and math/coding benchmarks, with comparisons to several eviction and quantization baselines.",
+        "Includes useful ablations on thought decomposition, quantization precision, refresh rate, layer selection, retention schedule, and data format.",
+        "Provides an attention permutation-invariance argument that justifies avoiding KV reordering under in-place reuse."
+      ],
+      "weaknesses": [
+        "Thought decomposition relies on offline KDE calibration and a fixed refresh interval/segment-length assumption, making it potentially brittle and model- or dataset-dependent; tri-modal sparsity is not universally validated.",
+        "The claim of near-lossless accuracy is overstated: several results show non-trivial drops, e.g., up to ~5 points on LiveCodeBench and ~7.4 points on GSM8K for MobileLLM-R1, and some baselines are more accurate at lower compression.",
+        "The eviction/Continuous Thinking semantics are unclear: evicted tokens are only soft-marked and deferred for overwrite, so it is not clear how unchanged PagedAttention excludes them from attention before overwrite, raising correctness and memory-reclamation concerns.",
+        "Memory footprint accounting may conflate logical token retention with actual physical memory reduction, since reclamation appears restricted to future tokens of the same thought type and not immediate.",
+        "Throughput comparisons may be confounded by a proof-of-concept HuggingFace/Triton integration versus FlashAttention and non-vLLM execution; apples-to-apples efficiency claims are not fully established.",
+        "Evaluation has limited statistical rigor: AIME uses only 30 prompts, calibration uses 100 prompts, and most results lack error bars or significance tests.",
+        "Reproducibility is limited: no code/artifact release is mentioned, pseudocode is incomplete, and calibration overhead is not fully accounted for in the end-to-end pipeline.",
+        "Presentation issues remain, including title/acronym inconsistency (THINKV/ThinKV), some garbled appendix text, and missing implementation details for hyperparameter selection."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Targets a timely and important problem: KV cache memory pressure in long-CoT reasoning models, where both accuracy preservation and system efficiency matter.",
+        "Proposes a hybrid quantization-eviction idea, which is intuitively appealing because quantization and eviction trade off token count and precision differently.",
+        "The observation of tri-modal attention sparsity associated with reasoning/execution/transition thoughts is interesting and could motivate further work.",
+        "The system-side Continuous Thinking design attempts to avoid gather-based compaction by reusing evicted slots in place and integrating with PagedAttention-style block tables.",
+        "Experiments span several reasoning models, math and code benchmarks, and include useful ablations on thought precision, refresh rate, layer selection, and retention rate.",
+        "Reports large throughput gains over eviction baselines in some settings, showing practical potential if the technical claims hold."
+      ],
+      "weaknesses": [
+        "Novelty is limited: hybrid KV quantization+eviction and thought/phase-aware compression have been explored before, and the core thought decomposition relies on heuristic thresholding of attention sparsity rather than a new principled formulation.",
+        "The evaluation omits important hybrid-compression baselines such as Q-Hitter, MiniKV, and other quantization+eviction co-designs, despite the paper's central claim being that a hybrid scheme is superior.",
+        "Accuracy claims are not consistently supported: Table 1 shows ThinKV underperforms FullKV by up to ~5 points on LiveCodeBench, and the main Figure 8 results are not tabulated with confidence intervals or statistical significance, making 'near-lossless' overstatement plausible.",
+        "Throughput comparisons confound multiple factors: larger achievable batch size, custom CT kernel, quantization format, eviction policy, and baseline gather implementation. The iso-batch/iso-compression comparison is only partially reported and does not fully isolate the claimed kernel benefit.",
+        "The system description of Continuous Thinking is incomplete and potentially incorrect. The paper claims the PagedAttention attention kernel remains unchanged, but evicted tokens are soft-marked and deferred, so attention must mask evicted positions; permutation invariance alone does not explain how evicted KV entries are excluded before overwrite.",
+        "Thought decomposition is brittle: it assumes exactly three modes and a fixed layer subset, uses KDE thresholds learned offline, and relies on a fixed refresh interval. Ambiguous layers and distribution shift are acknowledged but not systematically addressed.",
+        "The eviction method uses K-means over post-RoPE key embeddings within thought segments and assumes RoPE drift is negligible within 128 tokens; this is argued informally rather than validated, and it may fail for longer or more complex thought segments.",
+        "Reproducibility is limited: no code release is mentioned, and the custom CUDA/Triton kernels, calibration procedure, and integration with Hugging Face/PagedAttention are not described in enough detail for independent reproduction.",
+        "Clarity and presentation have issues: typos and broken formatting appear in tables and appendix examples, citation entries are malformed, and terms such as 'Mem. ftpnt', 'Gellet Time', and 'MLF' reduce confidence in the implementation details.",
+        "The paper overclaims 'near-lossless' accuracy under <5% KV cache while several reported settings show nontrivial degradation, especially on harder code-generation benchmarks."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Proposes a novel thought-adaptive KV cache compression framework that goes beyond token-level heuristics by decomposing chain-of-thought into reasoning, execution, and transition thoughts based on attention sparsity.",
+        "Combines thought-aware quantization (TBQ) and eviction (TBE) in a hybrid scheme, with empirical support showing better accuracy-compression trade-offs than quantization-only or eviction-only baselines.",
+        "Introduces the Continuous Thinking kernel that extends PagedAttention to reuse evicted token slots in place, avoiding expensive gather-based compaction and yielding significant throughput and batch-size improvements.",
+        "Provides extensive experiments across multiple reasoning models (DeepSeek-R1-Distill, GPT-OSS, QwQ, AceReason, MobileLLM) and benchmarks (AIME, MATH-500, GSM8K, LiveCodeBench), with comparisons to strong eviction and quantization baselines.",
+        "Well-motivated system-algorithm co-design, with ablations on thought count, calibration layers, refresh rate, retention schedule, precision assignment, and block size, supporting the main design choices."
+      ],
+      "weaknesses": [
+        "Thought decomposition relies on offline calibration and attention-sparsity thresholds, but the paper does not validate the inferred thought labels against ground-truth reasoning structure or show robustness to calibration distribution shift.",
+        "The TBE eviction policy is somewhat ambiguously specified: it is unclear whether K-means centroids are synthetic key vectors or selected real tokens, and how values are paired when a centroid is not an actual token, which affects technical soundness.",
+        "The CT kernel's 'soft-marked' eviction defers physical removal until overwritten, so memory may not be freed immediately and attention may continue to include evicted tokens in some cases; the exact memory-saving behavior during generation is not fully analyzed.",
+        "Evaluation uses small benchmarks in places (e.g., 30 AIME prompts) and generally reports single accuracy numbers without variance or confidence intervals, making it difficult to assess statistical significance of accuracy differences.",
+        "The method introduces many hyperparameters (|T|, |L*|, tau, group size, retention schedule, block size, precision mapping) and requires calibration; reproducibility would be strengthened by released code and more sensitivity analyses across model families and datasets."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 8,
+      "strengths": [
+        "Introduces a novel thought-adaptive KV cache compression framework that exploits attention-sparsity patterns to decompose reasoning chains into reasoning, execution, and transition thoughts, enabling structure-aware compression rather than token-level heuristics.",
+        "Combines thought-aware quantization (TBQ) and eviction (TBE) with a PagedAttention extension called Continuous Thinking, which avoids expensive gather-based compaction and improves real system throughput.",
+        "Provides extensive empirical evidence across multiple reasoning models (DeepSeek-R1-Distill, GPT-OSS, QwQ, AceReason, etc.) and benchmarks (AIME, LiveCodeBench, MATH-500, GSM8K), showing near-lossless accuracy at less than 5% KV cache and substantial throughput improvements.",
+        "Includes useful ablations and analyses: refresh rate, number of thought types, number of calibrated layers, precision assignments, retention schedules, block size, recall of important tokens, and overhead breakdowns.",
+        "The paper is clearly written, well motivated, and combines algorithmic insight with system-level implementation, making the contribution relevant to both efficient inference and reasoning-model deployment."
+      ],
+      "weaknesses": [
+        "Thought decomposition relies on heuristic attention-sparsity thresholds calibrated offline with KDE; robustness to domain shift, model family, and calibration-set size is not fully established, and ambiguous layers can violate the tri-modal assumption.",
+        "Accuracy evaluation reports average pass@1 over a limited number of samples without confidence intervals or variance across seeds, making statistical significance and stability of near-lossless claims harder to assess.",
+        "Some throughput comparisons are not strictly iso-batch and iso-compression, which can overstate practical gains relative to baselines; the paper includes some controlled comparisons but not uniformly.",
+        "The method lacks formal guarantees or validation that the three sparsity-derived thought types consistently map to semantically and causally meaningful reasoning categories, despite strong empirical support.",
+        "Reproducibility could be strengthened by releasing code and more detailed calibration/training artifacts; the paper provides hyperparameters and pseudocode but no explicit code availability statement."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Addresses an important and timely problem: KV cache memory pressure in long-CoT reasoning models, where decode-stage compression is underexplored.",
+        "Proposes an interesting hybrid approach that combines thought-adaptive quantization and eviction, rather than treating all tokens uniformly.",
+        "Includes a system co-design component (Continuous Thinking kernel) that attempts to avoid costly gather-based compaction and reuse evicted memory slots in place.",
+        "Evaluates on a broad set of recent LRMs and reasoning/code benchmarks, with comparisons to several eviction and quantization baselines.",
+        "Provides ablations on component contributions, refresh rate, layer selection, retention schedule, and precision formats."
+      ],
+      "weaknesses": [
+        "The central thought-decomposition mechanism is not convincingly validated. Thought labels are approximated by attention-sparsity thresholds calibrated on a small subset of layers, and the semantic interpretation relies on illustrative keywords rather than ground-truth labels. It is unclear whether the three 'thought types' reflect genuine reasoning structure or just sparsity artifacts.",
+        "The attention-sparsity definition is not clearly specified in the main text, and the calibration layer selection is somewhat circular: layers are chosen because their sparsity distribution has three modes, then used to justify three thought categories. The method may be sensitive to calibration data (e.g., calibrated on s1K math prompts but evaluated on code).",
+        "The counterfactual importance and association analyses are based on limited prompts and rollouts. The claimed hierarchy R > E > T has acknowledged outliers where transition thoughts are critical, and the paper does not robustly establish that the same hierarchy holds across models, datasets, and reasoning styles.",
+        "The system contribution has significant unresolved technical ambiguity. The paper claims the PagedAttention attention kernel is left unchanged, but CT uses eviction masks and segment masks to soft-mark evicted tokens. If evicted tokens remain physically present until overwritten, attention must skip them, which requires kernel changes. This inconsistency undermines the claimed seamless integration.",
+        "The K-means eviction procedure is underspecified. It is unclear whether retained centroids are actual keys (medoids) or synthesized averages; if synthetic, permutation invariance does not apply, and key/value pairing may be invalid. If actual keys are selected, the selection rule is not described precisely enough for reproduction.",
+        "The 'near-lossless' claim is overstated. Reported accuracy drops are often 1.4-3.3+ points under high compression (e.g., R1-Qwen-14B on AIME and LiveCodeBench, GPT-OSS-120B), and AIME evaluation uses only 30 prompts without confidence intervals. Fair comparison is also complicated because baselines operate at different average bit-widths and compression ratios.",
+        "Throughput claims are not consistently isolated. The headline 5.8x speedup comes from max-batch scaling, while iso-batch comparisons show much smaller gains (e.g., 1.35x in the vLLM experiment). The abstract and introduction do not clearly distinguish max-batch scaling from algorithmic/system overhead improvements.",
+        "Reproducibility is limited: no code release is mentioned, kernel details are high-level, calibration and hyperparameter choices are spread across appendices, and implementation relies on modified HuggingFace/vLLM stacks without enough detail for independent replication.",
+        "Clarity and positioning are weak: inconsistent naming (THINKV vs. ThinKV), multiple typos and grammatical issues, and some claims in the abstract/introduction that are stronger than the evidence presented. Baselines such as other hybrid KV-cache methods (e.g., Q-Hitter, MiniKV) are discussed but not empirically compared."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Novel problem framing: thought-adaptive KV cache compression for long-CoT reasoning models, moving beyond token-level heuristics to semantic thought categories.",
+        "Leverages attention sparsity for dynamic thought decomposition, with empirical tri-modal sparsity observations and counterfactual thought-importance/association analyses.",
+        "Hybrid TBQ+TBE design jointly allocates precision by thought importance and progressively evicts tokens based on inter-thought dynamics, which is well motivated.",
+        "System contribution is strong: Continuous Thinking extends PagedAttention with eviction masks and in-place slot reuse, avoiding costly gather-based compaction and reducing TPOT.",
+        "Extensive evaluation across multiple LRMs (DeepSeek-R1-Distill, GPT-OSS, Qwen, AceReason, etc.), mathematics and code benchmarks, and many recent baselines.",
+        "Convincing system-level analysis, including gather overhead quantification, vLLM integration, iso-batch/iso-compression comparisons, and ablation studies on refresh rate, layer subset, thought count, retention, formats, and block size.",
+        "Demonstrates substantial practical gains: near-lossless accuracy at <5% KV cache in several settings, larger batch sizes, and throughput improvements, with clear practical relevance for memory-bound LRM serving."
+      ],
+      "weaknesses": [
+        "The central thought decomposition from attention sparsity is not directly validated against semantic thought labels; misclassification rate and sensitivity to sparsity thresholds are not quantified, and some layers are noted as ambiguous.",
+        "The 'near-lossless' claim is overstated for some settings, e.g., MobileLLM-R1-950M on GSM8K drops from 67.5 to 60.1, and several reported drops are around 1.5–2.5 points rather than lossless.",
+        "The handling of soft-marked evicted tokens during attention is under-specified: the paper says the PagedAttention kernel remains unchanged, but eviction masks must somehow exclude those tokens from attention until their slots are overwritten.",
+        "Reproducibility is limited: no code release is mentioned, and key calibration details such as KDE bandwidth, threshold selection, and full hyperparameter settings are only partially described.",
+        "The headline throughput gain ('up to 5.8×') is mostly over sequential R-KV; the overlapped R-KV baseline reduces the gain to ~3.6×, and iso-batch comparisons show ~1.5×, so the presentation should be more carefully contextualized.",
+        "Accuracy results lack statistical significance or variance estimates; AIME uses only 30 prompts and 8 samples per prompt, which may make some comparisons noisy.",
+        "The method is not directly applicable to long-input contexts, as acknowledged, which limits generality."
+      ]
+    }
+  }
+}

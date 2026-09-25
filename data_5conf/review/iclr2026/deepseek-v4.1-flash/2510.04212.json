@@ -1,0 +1,123 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Addresses a practically important and long-standing failure of BF16 flash attention training, with a clear causal narrative and a targeted mitigation.",
+        "Provides a set of controlled interventions to isolate the failure to specific layers/heads and to the low-precision computation of O in δ=rowsum(dO∘O), which is a useful diagnostic methodology.",
+        "Derives how δ errors propagate into dQ/dWQ and links them to low-rank update structure; the proposed mitigation is simple and mathematically equivalent to standard softmax in exact arithmetic.",
+        "Reproducibility is supported by code and deterministic data-batch replay; analysis spans multiple hardware in discussion."
+      ],
+      "weaknesses": [
+        "Evaluation is narrow: only GPT-2 small on OpenWebText, a single failure trajectory, and no larger models, architectures, sequence lengths, or multiple seeds; generalizability of the claimed mechanism is not established.",
+        "Evidence for the low-rank representation claim is largely qualitative (visualizations of PK, X, and their outer products); there is no quantitative rank/similarity metric or ablation showing that this structure is necessary for the failure.",
+        "The rounding-bias argument is not fully rigorous: it relies on an illustrative small-bit example and the assertion that repeated P=1 entries with negative V cause systematic negative bias, but does not prove the bias for typical BF16 distributions or rule out other error sources.",
+        "The proposed mitigation is tested mainly by a single loss curve; there are no quantitative metrics, no comparison to existing stabilizers (e.g., QK norm, QK-clip, higher-precision δ/O baselines), and no sensitivity analysis beyond β∈[2,8].",
+        "Positioning relative to prior work on flash-attention numerical stability (e.g., Golden et al. 2024) is insufficient; the 'first mechanistic explanation' claim needs more careful support and comparison.",
+        "Scope of the mechanism is limited to one identified condition (multiple identical row maxima in safe softmax); it may not address broader low-precision instabilities, as the limitations acknowledge.",
+        "Some algorithmic details of the stabilized softmax are unclear/possibly inconsistent (e.g., the interaction between modified m and the running online-softmax max), making reproduction and theoretical justification harder."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Addresses an important and practically relevant problem: instabilities in low-precision Flash Attention training, which is a known pain point for large-scale transformer training.",
+        "Provides a detailed empirical debugging narrative with targeted interventions that isolate the failure to specific layers/heads and to the computation of δ = rowsum(dO ∘ O).",
+        "Links numerical rounding bias to training dynamics through a plausible causal chain: biased δ error → biased low-rank weight updates → increased spectral norm/activations → loss explosion.",
+        "Proposes a simple, mathematically motivated mitigation based on the shift-invariance of softmax, and shows that it stabilizes the reproduced GPT-2 failure case.",
+        "The analysis workflow, if made rigorous, could provide a useful template for diagnosing numerical instabilities in other low-precision training settings."
+      ],
+      "weaknesses": [
+        "Novelty and positioning are overstated. The paper claims the “first mechanistic explanation,” but prior work such as Golden et al. (2024) already studies Flash Attention stability, and the manuscript does not adequately differentiate its findings from existing numerical analyses.",
+        "The central technical argument is not sufficiently rigorous. The low-rank/similarity claim is supported mainly by visual heatmaps rather than quantitative rank, similarity, or spectral-norm measurements. The approximation in Eq. (3) lacks formal justification or error bounds.",
+        "The rounding-bias analysis is questionable. The paper argues that BF16 addition during P̄V causes biased rounding when P̄[T,t]=1, but Flash Attention typically accumulates in FP32 and rounds only at specified points; the manuscript is unclear about where exactly BF16 rounding occurs and why the stated overflow/rounding argument applies to the actual kernel.",
+        "Mathematical/algorithmic issues reduce confidence. There appear to be transpose/shape inconsistencies in the gradient derivation, and Algorithm 1 seems to overwrite the adjusted normalization factor m in line 10, potentially negating the proposed modification.",
+        "Evaluation is narrow. The study focuses on a single GPT-2 architecture, one dataset, one failure instance/scale, and one mitigation setting (β=7). There are no multiple seeds, no broader model scales, no FP8/FP16 comparisons, and no downstream evaluation.",
+        "No comparison to existing stabilization techniques such as QK normalization, QK-clipping, gated attention, stochastic rounding, or loss/gradient scaling. It is therefore unclear whether the proposed fix offers practical advantages over known methods.",
+        "Reproducibility is incomplete. The code link is missing, the deterministic data replay procedure is not fully described, and key kernel-level details (accumulation precision, cast points, rounding modes) are omitted.",
+        "The mitigation is highly specific to repeated row maxima and may not generalize. The paper acknowledges that the proposed modification is tailored to one identified rounding pattern, but it does not test robustness across architectures, precisions, or training regimes.",
+        "Claims about attention sinks are speculative and not experimentally validated. The discussion suggests a link between attention sinks and rounding-induced instability but provides no targeted experiments to support it.",
+        "Presentation quality is uneven. Figures are low-resolution, several equations are hard to parse, and important claims are highlighted without sufficient supporting evidence."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Addresses an important and persistent real-world failure in low-precision flash attention training, with strong motivation from community-reported issues.",
+        "Provides a detailed and systematic empirical isolation of the failure source: disabling tiling, layer-wise analysis, delta computation variants, O precision, and attention-head localization.",
+        "Offers a coherent mechanistic causal chain from BF16 numerical error in O to biased delta, low-rank gradient accumulation, spectral-norm growth, and loss explosion.",
+        "The proposed dynamic-max softmax modification is mathematically motivated by softmax shift invariance and is shown to stabilize training in the reported setting.",
+        "Reproducibility is relatively strong: deterministic data ordering, code available, and consistency across multiple hardware platforms is claimed."
+      ],
+      "weaknesses": [
+        "Generalizability is limited to a single GPT-2/BF16/nanoGPT failure case; no evidence on larger models, other architectures, or formats such as FP8.",
+        "The central rounding-bias example appears inconsistent with round-to-nearest ties-to-even: the exact halfway case should round to the even BF16 significand, but the paper rounds it away from zero, undermining Claim 3.",
+        "Algorithm 1 is internally inconsistent: after computing an adjusted m on lines 8-9, line 10 overwrites it with max(m_prev, r_m), so P can still contain exactly 1 and the proposed fix is not correctly specified in pseudocode.",
+        "The condition for repeated maxima omits r_m = 0, even though a zero row maximum also produces P = 1 and could trigger the same failure.",
+        "The low-rank representation claim is supported mainly by qualitative heatmaps for selected tokens/steps; no quantitative rank, cosine similarity, or SVD analysis across training is provided.",
+        "No comparison to existing stabilizers (e.g., QK normalization, QK-clip, FP32 O, standard attention) in terms of stability, final quality, or computational overhead; the mitigation's runtime cost is not benchmarked.",
+        "Evaluation is narrow: only one model scale, one dataset, and no downstream task performance after stabilization beyond loss curves.",
+        "The 'first mechanistic explanation' claim may be overstated, and prior work such as Golden et al. (2024) is not sufficiently contrasted."
+      ]
+    }
+  },
+  "v3": {
+    "exp1_quality": {
+      "oa": 6,
+      "strengths": [
+        "Addresses an important, long-standing practical failure of BF16 Flash Attention training and provides a mechanistic causal chain from low-level rounding to loss explosion.",
+        "Systematic isolation experiments convincingly trace the failure to the low-precision computation of O in delta = rowsum(dO * O), and further to particular layers/heads, ruling out tiling and other components.",
+        "The gradient-error decomposition is insightful: it connects biased delta coefficients to structurally similar low-rank rank-1 updates, explaining spectral-norm growth and loss explosion.",
+        "The BF16 rounding-bias explanation is concrete, with a detailed arithmetic example and a plausible link to multiple maxima, negative V entries, and attention sinks.",
+        "The proposed dynamic-maximum modification is simple, mathematically motivated, and validated across GPT-2S with AdamW and Muon and GPT-2M, with claimed cross-hardware consistency.",
+        "The paper is clearly written, well structured, and includes useful appendices with derivations, pseudocode, and qualitative evidence on Llama-3.1."
+      ],
+      "weaknesses": [
+        "Scope and generality are limited: the main training experiments are on GPT-2-scale models in BF16; larger models, FP8, and architectures beyond GPT-2 are not systematically evaluated, and the Llama appendix only shows qualitative patterns.",
+        "The evaluation lacks comparisons to existing stabilization approaches such as QK normalization, QK-clip, gated attention, stochastic rounding, or simply computing O in FP32; downstream task performance is not reported.",
+        "The proposed mitigation detects repeated maxima only within the current Flash Attention block, but in tiled FA repeated maxima can occur across blocks; the algorithm does not check whether the current block maximum equals the running maximum, so the fix may not cover all cases it claims to target.",
+        "No overhead or efficiency analysis is provided for the modified softmax, despite the paper's motivation being efficient low-precision training; beta/epsilon sensitivity and throughput impacts are not quantified.",
+        "The claim that the rank-1 error matrices share a common low-rank structure R is supported mainly by visualization; a quantitative analysis of rank, similarity, and perturbation effects would strengthen the argument.",
+        "The biased-rounding argument is illustrated with one detailed BF16 addition example and qualitative reasoning about asymmetry; broader statistical validation across tokens, heads, and runs would make the causal claim more robust.",
+        "Reproducibility details are incomplete in places: the code URL is missing/placeholder, the number of independent runs and seeds is unclear, and exact block sizes for stabilized FA training are not specified."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Targets a real, long-standing practical problem: BF16 flash attention training instability and loss explosion.",
+        "The experimental isolation strategy is systematic: ruling out tiling, localizing to a layer/head, and distinguishing O vs delta computations.",
+        "The proposed dynamic-max modification is simple, integrated into flash attention, and validated on GPT-2S/GPT-2M with AdamW and Muon.",
+        "Offers a plausible mechanistic narrative linking repeated maxima, P=1 entries, negative V values, biased rounding, and gradient accumulation.",
+        "Attempts reproducibility by fixing data order and releasing code, which is important for debugging numerical failures."
+      ],
+      "weaknesses": [
+        "The central claims about similar low-rank representations are supported mainly by visual inspection of a few matrices/columns. There is no quantitative similarity metric, no statistical test, and the common matrix R is not formally defined or estimated.",
+        "The rounding-bias explanation is not rigorous. It mixes BF16 accumulation with FP32 accumulation semantics, gives a single example and a small 2-bit table, and does not establish that round-to-nearest-ties-to-even is systematically biased for the actual arithmetic path in flash attention.",
+        "The proposed fix is heuristic and conditionally triggered. It may fail when repeated maxima are close to zero or when exp(S-m) still rounds to 1, and there is no ablation over beta, epsilon, or comparison with standard stabilizers such as QK normalization or clipping.",
+        "Evaluation is narrow and mostly qualitative. It focuses on one GPT-2 failure case and loss curves; there are no downstream evaluations, no multiple random seeds, no compute-overhead analysis, and no broad validation across architectures, scales, or low-precision formats such as FP8.",
+        "The paper overclaims novelty in places ('first mechanistic explanation') despite related prior work on flash attention stability, and several mechanistic links remain correlational rather than causal.",
+        "Some experimental details and claims are internally unclear: e.g., the localization to layer 2 versus specific heads, the selection of six outlier heads despite focusing on head 8, and the exact precision semantics of the O accumulation and rounding."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Provides the first detailed mechanistic explanation for a well-known BF16 Flash Attention training failure, isolating the error to the computation of δ in the backward pass and specific attention heads/layers.",
+        "Systematically narrows down the source through targeted experiments (disabling tiling, layer-wise analysis, alternative δ formulations, selective high-precision substitutions), making the causal chain convincing.",
+        "Identifies an interesting interaction between emergent low-rank/similar representations and biased BF16 rounding errors, supported by quantitative visualizations and a concrete arithmetic example.",
+        "Proposes a minimal and mathematically motivated modification to the safe softmax and validates it on GPT-2S and GPT-2M with both AdamW and Muon optimizers, showing stable training for long runs.",
+        "Reproducibility is strong: code is provided, experimental setup is described in detail, and failure reproduction uses fixed data ordering to isolate numerical effects.",
+        "The paper is well-written and clearly organized, with useful appendices and a practical diagnostic blueprint for other low-precision instabilities."
+      ],
+      "weaknesses": [
+        "Generalization is limited: the analysis focuses almost entirely on a specific GPT-2/BF16 failure case, with only preliminary evidence on Llama-3.1-8B and no large-scale LLM experiments or other formats like FP8.",
+        "The proposed mitigation is applied per Flash Attention block; if multiple global maxima occur across different blocks, each block may still have a single maximum and P=1 can persist, so the fix may not fully prevent the identified biased-rounding condition.",
+        "No analysis of runtime or memory overhead of the dynamic-max modification in a fused Flash Attention kernel, which is important for claiming a practical solution.",
+        "Evaluation of the mitigation lacks comparisons to existing stabilization techniques (e.g., QK normalization, gating, QK-clip) and does not report downstream task performance beyond validation loss.",
+        "Some central claims (e.g., 'first mechanistic explanation', 'low-rank' structure) are stronger than the provided quantitative evidence; the rounding-bias argument is illustrated but not formally proven as a general property.",
+        "Mitigation experiments appear to be limited in the number of random seeds, making it unclear whether stability is robust across different data orders and initializations."
+      ]
+    }
+  }
+}

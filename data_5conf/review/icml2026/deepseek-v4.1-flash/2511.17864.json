@@ -1,0 +1,58 @@
+{
+  "v3": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Extends the foundational implicit-weight-patch theory from vanilla transformers to modern architectures (Gemma, Llama, Falcon, MoE, parallel blocks) via explicit rank-1 MLP updates and an RMSNorm scale patch, with constructive proofs (Theorem 1) and multi-layer induction (Theorem 2) plus Algorithm 1.",
+        "Introduces a unified input/output controllability framework (Definitions 1–2, Theorem 3) that abstracts the update mechanism and includes a useful negative result (Theorem 4) showing exact controllability fails for RMS post-norm without a trainable scale vector.",
+        "Provides empirical validation on Gemma 3 1B/4B and Falcon-7B, including text and image contexts, demonstrating near-perfect logit matching and token agreement in float32 and 100% token match for Gemma in bfloat16 after numerical stabilization.",
+        "Includes an honest limitations section acknowledging token-dependent equivalence, the distinction between mechanistic and algorithmic insights, and the inability to handle unconstrained free generation."
+      ],
+      "weaknesses": [
+        "Theorem 3 is essentially a direct combination of the two controllability definitions; the substantive work lies in the per-architecture lemmas (Appendix A), which are mostly straightforward rank-1 algebra and do not constitute a deep theoretical advance.",
+        "Theorem 1 requires f(...)_i ≠ 0 for all i; when this condition fails, the paper's fallback of dividing by 1 breaks exactness, and numerical instability in bfloat16 is only mitigated, not eliminated, by the stable update.",
+        "The multi-layer Algorithm 1 claims self-correction under numerical errors, but if x_l' ≠ x_l, the target activation x_{l+1,target} was generated from x_l, not x_l'; it is not clear that a single-block patch using Eq. 2–4 can exactly reach that target, so the claimed exactness across layers may not hold in practice.",
+        "Experiments only compare next-token distributions with teacher forcing (forcing the updated model to follow the baseline's chosen token when they diverge), not unconstrained free generation; practical significance is limited because updates are token-dependent and must be recomputed at every step.",
+        "No code or reproducibility artifact is provided, and the stable RMSNorm inversion relies on numerically solving for a Lagrange multiplier μ without fully analyzing the precision and robustness of that root-finding step.",
+        "The abstract claims 'identical token generation' but this only holds for float32/stable bfloat16, not for the naive bfloat16 setting (87.5% agreement), which is a slight overclaim."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The technical content is correct: the rank-1 updates in Theorem 1 (and Lemmas 1–2) are straightforwardly verifiable algebra (e.g., (W_gate + ΔW_gate)z = W_gate z_C), and the induction in Theorem 2 is valid for the single-token setting they analyze.",
+        "The paper provides explicit, ready-to-use formulas for absorbing context into modern (bias-free, gated, RMSNorm, pre/post-norm) architectures, which is a useful concrete extension of Dherin et al. (2025) beyond the vanilla block.",
+        "The controllability framework, while simple, does yield a clean characterization of which architectures admit exact patches, and Appendix D gives a genuine (if practically irrelevant) impossibility result for post-RMSNorm without a trainable scale.",
+        "Experiments are run on real models (Gemma 3 1B/4B and Falcon 7B) with text and image contexts, and the numerical-stability issue in bfloat16 is identified and mitigated via the RMSNorm-inversion update.",
+        "Limitations (token-dependent, per-step recomputation, descriptive-not-prescriptive nature) are stated honestly and are not used to over-claim practical utility."
+      ],
+      "weaknesses": [
+        "Novelty is marginal. The central result is a mechanical algebraic extension of Dherin et al. (2025), and the authors themselves note that concurrent work (Innocenti and Achour, 2025) already generalizes the theory to Pre-LayerNorm and arbitrary block positions; the incremental delta here is bias-free/gated/RMSNorm blocks plus the framework.",
+        "The controllability framework is close to tautological for over-parameterized networks. Definitions 1–2 essentially assert 'a parameter update exists that matches the function's argument/output', and Theorem 3 follows directly from those two definitions with no additional insight; it re-describes the obvious two-step recipe rather than proving something non-obvious.",
+        "The experiments largely validate a construction that is guaranteed by algebra. Since the updates are derived to force exact output equality, the near-zero logit/TVD results in float32 are expected; the only substantive empirical finding is the bfloat16 numerical sensitivity. No falsifiable hypothesis about ICL mechanism is tested.",
+        "Practical value is unclear and explicitly disclaimed: the patches are token-dependent, must be recomputed at every generation step, provide no speedup or compression, and the authors state the result is descriptive rather than an efficient-inference algorithm. This substantially limits significance.",
+        "The evaluation is narrow: essentially one main prompt, argmax generation, and the updated model is forced to follow the baseline's chosen token when it diverges, which masks real divergence and inflates apparent agreement. Metric/seed details and statistical rigor are thin.",
+        "Some claims are overstated relative to the evidence (e.g., 'perfect implicit weight patch' as a general principle, 'a simpler and more powerful lens'), and the Δm update is a full vector that can be enormous (division by near-zero activations), undercutting the framing of the update as a benign minimal 'patch'."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "The core mathematical results are sound. The rank-1 updates in Theorem 1 (Eqs. 2–4) are correct and the substitution proofs verify that (W_gate+ΔW_gate)z = W_gate z_C and that T'(C\\Y,x) = T(C,x); the multi-layer induction (Theorem 2) and unified Theorem 3 are standard but correctly argued.",
+        "The input/output controllability framework is an elegant and genuinely useful conceptual contribution. It cleanly separates the problem into (i) correcting the internal MLP input and (ii) absorbing the residual change, and it recovers prior results as special cases while covering gating, pre/post-norm, MoE, and parallel blocks (Table 1).",
+        "The extension to modern architectures is non-trivial and practically relevant: handling gated MLPs (GeGLU/SwiGLU), RMSNorm, and bias-free residual blocks is exactly the gap left open by Dherin et al. (2025), and the paper fills it constructively.",
+        "The treatment of numerical stability is thorough and honest. The authors diagnose the element-wise division instability in Δm, derive an analytical RMSNorm inversion via Lagrange multipliers (Appendix B.2, with a proper existence/uniqueness argument for μ), and demonstrate a stable variant that recovers 100% token agreement in bfloat16.",
+        "The formal impossibility result (Theorem 4, Appendix D) for fixed-scale post-RMSNorm is a nice piece of rigor that delineates the boundary of the framework rather than overclaiming universality.",
+        "Experimental validation spans Gemma 3 1B/4B (text and image) and Falcon 7B, uses multiple prompts, and reports multiple distributional metrics (L∞ logit diff, TVD, Hellinger, rank distance, top-1 diff) plus update-norm ablations, which adequately supports the theoretical claims."
+      ],
+      "weaknesses": [
+        "The contribution is largely an incremental generalization of Dherin et al. (2025). The central mechanism (rank-1 patches to MLP weights) is inherited; the novelty lies in adapting it to modern components and in the controllability framing. This is meaningful but not a fundamentally new understanding of ICL.",
+        "The empirical evaluation is narrow: a handful of prompts with per-token forced alignment to the baseline's chosen tokens, rather than a broader benchmark. It confirms the algebra but does not demonstrate utility in any practical setting.",
+        "The token-dependent nature of the updates is a fundamental limitation—they must be recomputed at every generation step, so this is explicitly a descriptive lens, not an efficient inference method. The authors acknowledge this, but it substantially caps the significance of the result.",
+        "The headline claim of 'identical token generation' holds only in float32/stable settings; the base bfloat16 Gemma run shows 87.5% token agreement. The abstract's framing ('near-perfect logit matching and identical token generation') slightly overstates what the default configuration achieves.",
+        "The Falcon validation is conducted on a pre-norm architecture without post-normalization scaling, i.e., the easier case that avoids the RMSNorm-inversion difficulty. The hardest architecture-specific case is therefore not fully stress-tested beyond Gemma.",
+        "The reference list contains multiple garbled author attributions (e.g., 'Gu and Dhoo', 'Gu and Heng', 'Innocenti and Albert', 'Magalha et al.'), suggesting sloppiness in bibliography handling that should be corrected."
+      ]
+    }
+  }
+}

@@ -1,0 +1,149 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a timely and relevant problem: test-time scaling for masked diffusion language models (MDLMs), which is less explored than scaling for autoregressive LLMs.",
+        "Proposes a concrete framework, UnMaskFork (UMF), that formulates the unmasking trajectory as a search tree and uses MCTS with deterministic actions such as model switching and inference configurations.",
+        "The deterministic-action design enables node caching, and the paper provides an ablation showing that caching improves fixed-NFE performance on LiveCodeBench (Table 3).",
+        "Reports improvements over Best-of-N, DTS*, and AB-MCTS on three coding benchmarks (LiveCodeBench, HumanEval+, MBPP+) at a fixed NFE budget (Table 1), and shows scaling curves in Figures 2 and 5-8.",
+        "Includes a qualitative case study (Figures 3 and 4) illustrating interleaved contributions from Dream-Coder and LLaDA within a single successful trajectory.",
+        "Discusses broader impacts and safety considerations, including misuse risks for code generation and increased inference compute."
+      ],
+      "weaknesses": [
+        "The central claim that UMF 'consistently outperforms' baselines is not statistically supported. The coding evaluations use only 100 problems per benchmark, with no variance, confidence intervals, or significance tests. For example, LiveCodeBench 28 vs. 21 (AB-MCTS) corresponds to z≈1.15, HumanEval+ 88 vs. 81 to z≈1.37, and MBPP+ 72 vs. 68 to z≈0.62, so the reported gains could plausibly be noise.",
+        "The MATH experiment lacks any baseline comparison; Table 2 only shows UMF scaling from 768 to 12288 NFE. This does not support the abstract's claim that UMF is effective for mathematical reasoning relative to existing test-time scaling methods.",
+        "The theoretical motivation is weak. Equation (1) is a trivial inequality (sum of minima ≤ minimum of sums) that does not prove strict improvement or that tree search will find the optimal switching policy. The variance argument in Section 5.2 assumes deterministic transitions (Var[R]≈0), but the Dream model uses T=0.1 and stochastic sampling may still occur, undermining the exact-caching rationale.",
+        "The MCTS algorithm description contains inconsistencies and typos that hinder reproducibility. Algorithm 1 uses UNMASKTONEXTRATIO(N, a, T) instead of the child node, calls FULLYUNMASKED(N, r) rather than on the rollout node, and stores cache entries with N rather than N_new. Key details such as rollout policy, UCT tie-breaking, action selection, and handling of stochasticity are not fully specified.",
+        "Reproducibility is insufficient: no code release, no random seeds, unclear reward computation for code and MATH, unspecified prompt formats, and incomplete details on tokenizer mapping between Dream-Coder and LLaDA. The claim that decode/re-encode mapping causes 'no structural degradation' is asserted without quantitative validation.",
+        "The novelty is incremental. Diffusion Tree Sampling (DTS) already constructs a tree over unmasking and reuses past computation. UMF's main distinction is using multiple pretrained MDLMs as actions with deterministic caching. The gains over multi-model AB-MCTS are modest and not clearly significant, and the paper does not establish that the specific combination is substantially more than a well-engineered ensemble.",
+        "Baseline tuning and comparability are questionable. DTS* and AB-MCTS may not be optimally adapted to MDLMs, and the paper does not explore stochastic schedules that could close the gap. The claim that temperature scaling is ineffective for MDLMs is based on limited models, a fixed schedule, and specific remasking strategies, and may not generalize.",
+        "The caching benefit is modest. Table 3 shows only a +2 point gain at NFE=12288 (26→28) with a ~55.8% cache hit rate, which is within plausible noise. The paper does not report actual NFE savings, wall-clock/compute reduction, or how cache hits translate into deeper search.",
+        "The evaluation is narrow: only two MDLMs (Dream-Coder/LLaDA for code, Dream/LLaDA for math), primarily code benchmarks, and a 105-problem MATH subset. There is no evaluation on other reasoning domains, no comparison against strong single-model tuned baselines at matched budgets beyond the selected baselines, and no failure-case analysis.",
+        "The paper overstates conclusions relative to evidence, e.g., 'consistently outperforms' and 'significantly outperforms' despite small sample sizes and no significance testing. A limitations section is largely absent, and the impact statement does not discuss the method's failure modes, reward overfitting, or search-cost trade-offs."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "Addresses an underexplored and timely problem: test-time scaling for masked diffusion language models, with a clear motivation that naive high-temperature sampling can degrade iterative unmasking quality.",
+        "Proposes a reasonable and concrete framework: casting the unmasking trajectory as a search tree, treating inference configurations as actions, and using MCTS with cached deterministic rollouts.",
+        "Reports consistent gains on three coding benchmarks at a fixed NFE budget, and shows monotonic improvement with NFE on MATH, suggesting the approach can exploit additional inference compute.",
+        "Includes ablations on caching and action types, which provide some evidence that model diversity and cache reuse contribute to the reported gains.",
+        "The multi-model interleaving idea is interesting and, if validated properly, could be a useful direction for MDLM inference.",
+        "Contains an impact statement that discusses misuse risks, compute cost, and access disparities."
+      ],
+      "weaknesses": [
+        "The evaluation protocol likely leaks test information: the search reward uses public LiveCodeBench tests and standard EvalPlus tests, while final Pass@1 is reported on private LiveCodeBench and extended EvalPlus sets. For EvalPlus, the standard tests are part of the extended evaluation set, so optimizing on them directly optimizes a subset of the reported metric. This inflates absolute scores and weakens the central empirical claims.",
+        "Benchmark subsets are small (100 problems each) and no confidence intervals, error bars, or multiple seeds are reported. Differences such as 28 vs 21 on LiveCodeBench or 88 vs 81 on HumanEval+ may not be statistically significant. MATH uses only 105 problems and no baseline comparison.",
+        "The core 'deterministic action' claim is inconsistent: Dream-Coder/Dream is used at T=0.1, which still samples stochastically. Exact state-action caching is invalid unless argmax decoding is used, and the variance argument (Var[R]≈0) does not hold exactly. No seed control is described, harming reproducibility.",
+        "The theoretical motivation in Section 5.1 is weak and arguably incorrect. Eq. (1) is a pointwise inequality that does not account for the fact that the state distribution z_t depends on the chosen action; it does not justify that interleaving locally best kernels yields lower accumulated error. The connection to MCTS reward is not established.",
+        "Baselines may be under-tuned or unfairly implemented. DTS* and AB-MCTS are described only briefly; AB-MCTS is called AB-MCTS-M in the setup but AB-MCTS in results. There is no detail on how DTS* was adapted to MDLMs, how action spaces were defined, or whether caching was available to baselines.",
+        "The reported gains may stem from multi-model ensembling and reward-based search rather than from deterministic action branching. The Pair and single-model UMF ablations partially address this, but do not isolate MCTS from model switching or caching. A multi-model Best-of-N with identical tokenizer mapping and total NFE is missing.",
+        "Tokenizer switching between Dream and LLaDA is a major potential source of artifacts. The paper only qualitatively claims 'no structural degradation' and provides no quantitative tokenizer round-trip analysis. Figure 3 shows garbled text such as 'mask+TMS', which undermines confidence in the case study.",
+        "Algorithm 1 contains notation and pseudo-code errors (e.g., ISROLLOUTCAHED, UNMASKTONEXTRATIO, missing arguments in SETNODECACHE, inconsistent variables N/N_tau/r), making the method difficult to reproduce.",
+        "NFE is used as the sole compute metric, but tokenizer encode/decode, text mapping, MCTS overhead, cache memory, and wall-clock runtime are not measured. The practical efficiency claim is therefore incomplete.",
+        "No code release or detailed hyperparameters/seeds are provided. Exact prompts, reward normalization, tie-breaking rules, baseline tuning details, and MCTS implementation are insufficient for reproducibility.",
+        "The conclusion that temperature-based stochastic scaling is 'ineffective' for MDLMs is overgeneralized from a limited set of temperatures and remasking strategies. It may be an artifact of the specific schedule, reward setup, and model choices.",
+        "The MATH experiments lack baselines and rely on a PRM reward; the claim of strong scalability on mathematical reasoning is not supported as a comparative result.",
+        "Presentation issues include typos, inconsistent naming, garbled case-study text, and an unclear explanation of the mask-ratio schedule versus the 'one token per NFE' statement. There is no explicit limitations section, and the potential reward leakage is not discussed."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Timely and well-motivated problem: the paper identifies that naive temperature scaling is often ineffective for masked diffusion language models and proposes a structured test-time scaling alternative.",
+        "Novel and coherent framework: UnMaskFork formulates unmasking as a tree search with actions defined by inference configurations (model, temperature, remasking strategy), and uses MCTS plus deterministic-action caching to improve sample efficiency.",
+        "Strong empirical coverage: UMF is compared against Best-of-N, DTS*, AB-MCTS, and Pair baselines across LiveCodeBench, HumanEval+, and MBPP+, with additional MATH results and scaling curves up to NFE=24576.",
+        "Caching ablation is informative: Table 3 shows that caching achieves roughly 50% hit rates at larger budgets and improves Pass@1 under a fixed NFE budget, supporting the efficiency claim.",
+        "Action-type ablation supports the design: Table 4 compares temperature, remasking, and multi-model actions, showing that multi-model actions yield the best overall results.",
+        "Qualitative case study adds insight: Figure 4 illustrates interleaved Dream-Coder and LLaDA unmasking, suggesting that heterogeneous models can complement each other within one trajectory.",
+        "The paper includes an ethics/impact statement that discusses misuse, compute cost, and deployment safeguards, which is appropriate for code-generation and reasoning applications."
+      ],
+      "weaknesses": [
+        "The central \"deterministic\" claim is inconsistent with the implementation: Dream-Coder uses T=0.1, which is stochastic, not deterministic. This undermines the stated Var[R]≈0 assumption, complicates the caching argument, and means cached stochastic rollouts may bias MCTS value estimates.",
+        "Algorithm 1 contains pseudocode errors and ambiguities: e.g., `ISROLLOUTCAHED`, advancing `N` instead of `N_tau` in the rollout loop, unclear `EVALUATE(N,r)` / `FULLYUNMASKED(N,r)` calls, and repeated cache-setting lines. These issues hinder reproducibility and make the method harder to trust as specified.",
+        "The theoretical motivation in Section 5.1 is weak: the sum-of-minimums inequality only concerns expected per-step KL errors and does not guarantee better terminal reward. The claim that switching \"strictly outperform[s] any single static model\" is not formally established.",
+        "The empirical advantage of multi-model actions over temperature-based UMF is marginal on LiveCodeBench (28 vs 27) and MBPP+ (72 vs 71); only HumanEval+ shows a clear gap (88 vs 82). Thus the broad claim that structural diversity is superior to stochastic diversity is not uniformly supported.",
+        "No error bars, confidence intervals, or multiple random seeds are reported. With only 100 coding problems and 105 MATH problems, small differences (e.g., 1 point) may not be statistically reliable.",
+        "The method relies on external reward signals: public test cases for LiveCodeBench, standard tests for EvalPlus, and a process reward model for MATH. This is a strong deployment assumption and is not discussed in a dedicated limitations section.",
+        "Presentation quality is uneven: reference years are frequently wrong (e.g., Austin et al. 2011 vs. 2021; Dang et al. 2021 vs. 2025), contributions are misnumbered, Figure 3 contains garbled text, and baseline definitions such as \"Pair\" are not fully clear.",
+        "Key experimental details are missing: the exact action set for multi-model UMF, number of MCTS simulations/rollouts per iteration, tie-breaking rules, tokenizer-mapping validation, and wall-clock/energy costs are not specified. No code release is mentioned.",
+        "The evaluation is limited to 7B/8B models and specific benchmarks. Comparisons to other MDLM test-time scaling methods (e.g., ReMDM, particle Gibbs, MEDAL, TReASURe) and to training-time scaling are absent, limiting the generality of the conclusions.",
+        "The contribution of MCTS itself is not isolated: there is no ablation against simple action-selection strategies (e.g., greedy or random action choice) using the same multi-model action set, so it is unclear how much UCT search adds beyond model diversity and caching.",
+        "The tokenizer mapping strategy across heterogeneous models is only qualitatively justified. Text-based decode/re-encode at expansion nodes could introduce subtle errors, and no quantitative analysis of its impact on generation quality is provided."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a timely and important problem: test-time scaling for masked diffusion language models (MDLMs), which is relatively underexplored compared to autoregressive models.",
+        "Proposes a practical method, UnMaskFork (UMF), that formulates unmasking as a search tree and uses MCTS with deterministic action branching and caching.",
+        "Empirically evaluates UMF on three coding benchmarks (LiveCodeBench, HumanEval+, MBPP+) and MATH, showing consistent improvements over baselines such as Best-of-N, DTS*, and AB-MCTS.",
+        "Includes useful ablations on caching, action types, and multi-model action sets, as well as scaling curves and a qualitative case study.",
+        "Appendix provides additional experiments on block diffusion, larger action sets, runtime/memory analysis, robustness to public-test mismatch, and comparisons with ReMDM/TReASURE.",
+        "Good impact statement that discusses societal risks, safety practices, and compute/environmental concerns.",
+        "Reproducibility of main models and settings is mostly described (models, temperatures, remasking strategies, NFE schedules, generation length)."
+      ],
+      "weaknesses": [
+        "The central 'deterministic action branching' claim is undermined by the use of Dream-Coder at T=0.1, which is stochastic according to the paper's own Section 3.2; caching a single stochastic rollout is not theoretically justified, and the variance argument (Var[R]≈0) does not hold for this action. This weakens the core methodology and its theoretical motivation.",
+        "The theoretical analysis in Section 5.1 (Eq. 1) is a trivial inequality (sum of minima ≤ minimum of sums) and does not establish that MCTS will find the best local kernels or that the action set contains them; it provides only weak motivation.",
+        "Experimental evaluation lacks statistical rigor: no confidence intervals, multiple seeds, or significance tests are reported; coding benchmarks use only 100 problems and MATH uses 105, so reported gains may be within noise (e.g., LiveCodeBench improves only +2.0 points from NFE=12288 to 24576).",
+        "Baseline comparisons are not fully reproducible or fair: adaptations of DTS* and AB-MCTS to MDLMs/multi-model settings are not detailed, and the TReASURE comparison is likely misconfigured or not comparable (UMF 48.57 vs TReASURE 6.67 at NFE=1536), making the claim of substantial outperformance weak.",
+        "No code release or detailed hyperparameters for baselines are provided; the tokenizer conversion procedure is heuristic and only validated via average relative length change (1.09%), with no semantic or behavioral analysis of possible errors.",
+        "There is no dedicated limitations section; important limitations such as high compute cost (~12 minutes per problem at NFE=12288), reliance on public test cases for reward, small sample sizes, and dependence on two specific models are not adequately discussed.",
+        "Novelty is incremental: MCTS for MDLM inference already exists (DTS, MEDAL, TReASURe), multi-model search is similar to AB-MCTS, and the main new ingredient—caching deterministic rollouts—is straightforward and not rigorously justified.",
+        "The action set is hand-designed and heuristic, with no learned policy or value function, despite the paper mentioning this as future work.",
+        "Runtime is high and not compared to baselines, limiting practical significance for test-time scaling."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "Targets an underexplored and timely problem: test-time scaling for masked diffusion language models, with a concrete MCTS-based framework and a caching mechanism that exploits deterministic transitions.",
+        "The deterministic multi-model action design is intuitive, and the paper provides a broad set of empirical comparisons (Best-of-N, DTS*, AB-MCTS, Pair) across three coding benchmarks and MATH, plus ablations on action types, caching, and model diversity.",
+        "The tokenizer-mapping approach for heterogeneous MDLMs is a practical engineering contribution, with reported length drift (1.09%) and runtime/memory/switch-overhead analysis.",
+        "The caching mechanism is sensible, and Table 3 shows it improves fixed-budget performance; the public-test-drop robustness check is a useful addition.",
+        "The impact statement responsibly discusses misuse, compute cost, and safety considerations."
+      ],
+      "weaknesses": [
+        "Evaluation is small and lacks statistical rigor: 100 problems per coding benchmark, 105 MATH problems, no seeds, no error bars, and no confidence intervals. Reported gains such as 7 points on LiveCodeBench and 11.43 points on MATH may not be statistically reliable.",
+        "Baseline validity is questionable. TReASURe scores only 6.67–10.48% on MATH while UMF reaches 48.57–60.95%, an implausibly large gap that suggests misconfiguration. ReMDM is flat at 18.0 on LiveCodeBench, and the DTS*/AB-MCTS adaptations are not described in enough detail to verify fair tuning.",
+        "A critical ablation is missing: there is no non-MCTS deterministic interleaving, round-robin model switching, or beam-search baseline, so it is unclear whether gains come from MCTS or simply from using multiple strong deterministic MDLMs. The reported ~50% cache hit rate suggests MCTS revisits many deterministic states where a memoized DFS would be simpler and likely more efficient.",
+        "The theoretical justification is weak. Eq. (1) (sum of mins ≤ min of sums) is trivial and ignores compounding errors and state-distribution shifts. The variance argument assumes deterministic rewards and overlooks noisy rewards such as PRMs or sampled tests; with deterministic transitions and exact rewards, MCTS is largely unnecessary.",
+        "Reproducibility is limited: no code release, no seeds, incomplete hyperparameters (UCT constant, reward normalization, tree depth, EoS handling), and Algorithm 1 uses inconsistent notation (a vs α, T vs τ, N vs N_τ). The cache key across heterogeneous tokenizers is not rigorously defined, since the same text can tokenize differently under different models.",
+        "The MATH claims are not supported in the main text: Table 2 reports only UMF results without any baseline, and the only comparison (TReASURe) is relegated to the appendix with suspiciously low numbers.",
+        "The contribution is incremental over existing diffusion tree-search work (DTS, MEDAL, TReASURe, AB-MCTS); the main novelty is combining multiple pretrained MDLMs as deterministic actions, which resembles a structured ensemble with tokenizer surgery.",
+        "Presentation has several errors: a missing contribution ①, corrupted text in Figure 4 (“mask=YES”), incorrect citation years, and unclear algorithm pseudocode. These issues make the paper harder to trust and reproduce.",
+        "The NFE/caching accounting can be misleading: saved NFEs are counted against hypothetical uncached expansions, while the cache was built with prior NFE; comparing at fixed NFE to non-caching baselines may not be fully apples-to-apples.",
+        "Using public test cases as the search reward means the method is reward-guided decoding rather than pure test-time scaling; this limits claims about general reasoning without a reliable verifier."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Addresses a timely and underexplored problem: test-time scaling for masked diffusion language models, where standard AR-style scaling methods are not obviously applicable.",
+        "Proposes a clear and conceptually appealing framework, UnMaskFork, that treats inference configurations (models, temperatures, remasking strategies) as discrete MCTS actions and leverages deterministic/near-deterministic rollouts for caching.",
+        "Reports consistent empirical gains on coding benchmarks at fixed NFE: UMF outperforms Best-of-N, DTS*, and AB-MCTS on LiveCodeBench, HumanEval+, and MBPP+, with continued scaling to 24576 NFE on LiveCodeBench.",
+        "Includes useful ablations: action-type comparison shows multi-model actions are strongest; caching improves performance and has ~50% hit rate; a pair baseline shows that structured interleaving beats independent multi-model budget allocation; a three-model action set further improves average coding score.",
+        "Provides additional practical analyses: compatibility with block diffusion decoding, robustness to dropped public tests, runtime and memory measurements, and a qualitative case study showing interleaved model contributions.",
+        "The impact statement is thoughtful and discusses safety, compute, and deployment risks appropriately."
+      ],
+      "weaknesses": [
+        "The central determinism claim is not fully supported by the experimental setup. The paper states that Dream uses temperature T=0.1, but with T>0 the preliminary section defines sampling as stochastic. If Dream-Coder is sampled at T=0.1, then transitions are not deterministic, cache reuse may return stale/biased rewards, and the Var[R]≈0 argument does not hold. This is a significant soundness issue for the core method and caching analysis. The authors should clarify whether they use argmax, fixed seeds, or exact T=0, and if not, revise the determinism and caching claims.",
+        "The MATH evaluation is weak in the main text: it reports only UMF's own scaling curve and no comparison to standard baselines such as Best-of-N or DTS* under the same PRM reward. The appendix comparison to TReASURE shows an unusually large gap and is explicitly described as not an exact drop-in comparison, so the claim that UMF is effective on mathematical reasoning is not convincingly supported.",
+        "Statistical significance is not established. The coding evaluations use only 100 samples per benchmark and report no confidence intervals, variance, or repeated-seed analysis. Several headline differences (e.g., 72 vs 68 on MBPP+) may not be statistically meaningful, so the claim of consistently outperforming baselines is somewhat overstated.",
+        "Baseline adaptations are under-specified. DTS* and AB-MCTS-M are not clearly defined, the meaning of the star in DTS* is unexplained, and it is unclear how these methods were adapted to masked diffusion, how their NFE budgets were matched, and whether they had access to the same reward signal. This limits reproducibility and fairness assessment.",
+        "Algorithm 1 contains typos and undefined variables (e.g., α, N vs. Nτ), and important MCTS details are missing: how unexplored actions are selected, how many actions are available, how tie-breaking is performed, the exact caching key, how many search iterations are run, and how partial rollouts are handled at budget exhaustion. These omissions hinder implementation and reproduction.",
+        "The multi-model tokenizer mapping is heuristic and potentially brittle for code generation. The paper reports only average relative length drift and an anecdotal claim of no structural degradation, but does not analyze whether re-tokenization introduces semantic or syntactic errors in generated code.",
+        "The theoretical motivation in Eq. (1) is a simple inequality and does not prove that MCTS or a learned switching policy will outperform a single static model, nor does it connect the KL-error decomposition directly to generation quality. It is better viewed as intuition than as a formal justification.",
+        "The evaluation is limited to small model sizes (7–8B) and a relatively narrow set of tasks. No full benchmark results are given, and the 100-sample subsets may not reflect performance on the complete LiveCodeBench, HumanEval+, or MBPP+ benchmarks.",
+        "The caching accounting is confusing: the reported saved NFEs can exceed the executed budget because they are measured against hypothetical uncached expansions. This makes it difficult to interpret the practical NFE savings and the true efficiency gain of caching.",
+        "The paper does not include a dedicated limitations section. While the impact statement discusses societal risks, methodological limitations such as reliance on a verifier/reward model, extra memory/compute for multiple models, and sensitivity to tokenizer mismatch are not fully discussed.",
+        "No code release, seeds, or implementation details are provided, which weakens reproducibility. The reported gains would be more convincing with open-source code and exact configuration files."
+      ]
+    }
+  }
+}

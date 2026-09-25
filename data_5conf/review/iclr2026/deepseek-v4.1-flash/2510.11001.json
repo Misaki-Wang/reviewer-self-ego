@@ -1,0 +1,126 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "The paper proposes a practical post-training method that can be integrated into both dense and MoE LLMs, with negligible parameter increase (about 0.03M) and a reported ~6.27% FLOPs overhead for a 16k-token setting.",
+        "The training strategies (router controlling loss with score dispersion and distribution preservation, plus threshold control with buffer proportional control and EMA synchronization) are reasonably motivated and address a real challenge in token-choice routing: controlling the selection ratio without top-k.",
+        "The empirical evaluation spans two model scales (Qwen3-1.7B dense and Qwen3-30B-A3B MoE), 17 benchmarks, and multiple domains (general knowledge, math/STEM, coding/agent), with ablations over selection ratio, layer range, and training control variants.",
+        "Qualitative and quantitative analyses of token selection (selection ratio curves, layer-wise preferences, examples in math/code) help illustrate the method's behavior and align with the motivation of allocating computation to critical tokens.",
+        "The appendix provides useful details on training hyperparameters, computational overhead estimation, and comparisons against MOR in table form."
+      ],
+      "weaknesses": [
+        "The paper lacks empirical comparisons with the most closely related adaptive-computation methods (e.g., MOR, ITT, MoD, early exit, or even a well-tuned z-loss baseline). The only comparison is against vanilla SFT and an internal z-loss-like variant, which is insufficient to establish competitiveness or novelty at a top-tier venue.",
+        "The reported gains are small on many benchmarks (e.g., +0.13 BBH, +0.15 MATH, +0.37 CMMLU on the 30B MoE) and no statistical significance, variance, or multiple-seed results are provided. It is therefore unclear whether the average +0.87 gain is robust or due to noise.",
+        "Inference-time behavior for auto-regressive generation is not adequately specified. If selected past tokens are reprocessed, how are KV caches and prior representations updated efficiently? If only the current token is reprocessed, the nested pass attends to a compact subsequence of length one and loses context. This is a major technical gap for an LLM post-training method.",
+        "The computational overhead analysis is limited to a 16,384-token sequence where self-attention dominates. For shorter typical SFT/evaluation/generation sequences, the MoE MLP overhead can be proportionally much larger, so the claim of 'minimal computing increase' may be misleading. No wall-clock latency or memory measurements are reported.",
+        "The ablation study does not isolate the individual contributions of the two router losses (L_sd and L_dp), nor does it analyze sensitivity to important hyperparameters such as lambda_sd, lambda_dp, beta, alpha, or gamma. This weakens the support for the proposed training strategy.",
+        "There is no compute-matched baseline to separate the benefit of dynamic token selection from simply adding extra computation (e.g., random token selection, uniform extra depth on all tokens, or static layer repetition). Without such controls, the central claim that dynamic selection of critical tokens drives the improvement is not convincingly established.",
+        "Generalization and robustness are not tested beyond the specific SFT setup: no pre-training/continual pre-training results, no other model families, and no analysis of potential distribution shift in selection ratios during generation. The method is only validated on Qwen3 models with a proprietary/synthetic SFT dataset.",
+        "Clarity and presentation have issues: notation inconsistencies (e.g., L_c vs. L_e, Eq. 3 variable use), reference formatting problems, and some benchmark inconsistency (PIQA is listed in the evaluation suite but absent from the main results table). These are minor but affect reproducibility."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Addresses an important and timely problem: adaptive computation for LLMs, specifically allocating extra depth to critical tokens.",
+        "Proposes a post-training method that can be integrated into existing dense and MoE architectures, which is practical and appealing.",
+        "Introduces training strategies for token selection stability, including buffer proportional control and EMA synchronization, which are reasonable engineering contributions.",
+        "Provides experiments on both a small dense model (Qwen3-1.7B) and a large MoE model (Qwen3-30B-A3B) across many benchmarks.",
+        "Reports some gains, especially on coding and agent tasks (e.g., BFCL v3 +2.05, LiveCodeBench v6 +1.42).",
+        "Includes a computational overhead analysis and qualitative visualizations of token selection."
+      ],
+      "weaknesses": [
+        "Core novelty is limited: dynamic token selection and reprocessing have been explored in closely related work such as MOR and ITT, but the paper provides no empirical comparison to these methods, only a conceptual table.",
+        "The router controlling loss appears technically flawed: as written, L_sd = sum p' log p' (i.e., -H) is minimized, which encourages a uniform normalized routing distribution, directly contradicting the stated goal of score dispersion and token discriminability.",
+        "The evaluation lacks statistical rigor: no variance, multiple seeds, or confidence intervals are reported, and many gains are below 1 point, making it unclear whether improvements are significant.",
+        "No compute-matched or parameter-matched baselines are provided. Since DND adds ~6.27% FLOPs and extra parameters, gains could simply come from additional computation rather than the proposed method.",
+        "The main results are only on Qwen models, and the SFT baseline details (data, epochs, training recipe) are insufficiently specified, raising reproducibility and confound concerns.",
+        "Reproducibility is weak: missing details on positional embeddings for the nested pass, per-layer threshold handling, exact SFT dataset, packing/unpacking implementation, and constraints on the learnable fusion parameter β.",
+        "The claimed 'minimal computing increase' (6.27% FLOPs) may be non-trivial in practice; no wall-clock latency or memory overhead is measured, and the irregular nested computation may be inefficient.",
+        "The paper is poorly written in places: inconsistent notation (L_c vs L_e), grammatical errors, and unclear equation limits (e.g., Eq. 6 sums from L_i to L_i).",
+        "No ablation on the number of nested passes or on the fusion strategy; the term 'nested depth' is misleading if only one extra pass is performed.",
+        "The threshold control scheme lacks theoretical justification and per-layer details, and the potential conflict between L_sd and L_dp (both pushing scores toward 0.5) is not analyzed."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Introduces DND, a post-training token-level dynamic depth method that is compatible with both dense and MoE architectures, with minimal parameter overhead (0.03M) and modest FLOPs overhead (~6.27%).",
+        "Proposes training strategies (router controlling loss and threshold control) to stabilize token selection, and ablation studies show that each component contributes to performance gains.",
+        "Conducts extensive evaluation across 17 benchmarks covering general knowledge, mathematics, coding, and agent tasks, on both Qwen3-1.7B and Qwen3-30B-A3B, with consistent average improvements.",
+        "Provides detailed analyses of selection ratios, threshold dynamics, and qualitative visualizations that reveal layer-wise token selection preferences (e.g., nouns in shallow layers, mathematical expressions in deeper layers).",
+        "Clearly positions the work relative to MOR and other adaptive computation methods, and discusses limitations and future directions."
+      ],
+      "weaknesses": [
+        "Novelty is incremental: token-level dynamic depth and recurrent processing have been explored in MOR, ITT, Mixture-of-Depths, and latent recurrent models. The main new components are training controls, but the Score Dispersion Loss is questionable: maximizing entropy of normalized routing scores p' = p / sum p encourages uniform scores, which reduces discriminability rather than enhancing it. No ablation isolates L_sd versus L_dp.",
+        "Evaluation lacks comparisons to closely related adaptive computation baselines (e.g., MOR, ITT, top-k token selection, random selection, z-loss only, or compute-matched vanilla SFT). Without such controls, it is unclear whether gains come from DND's selection mechanism or simply from extra computation and training.",
+        "Performance gains are small (average +0.87 on 30B, +1.88 on 1.7B), and many individual task improvements are within noise (e.g., +0.13 on BBH, +0.15 on MATH). No statistical significance tests, confidence intervals, or multiple seeds are reported, making the claims fragile.",
+        "Reproducibility is limited: the training data is described vaguely as synthetic material built from a 1-2M instance seed set, no code or model checkpoints are provided, and some hyperparameters are tuned only on the 1.7B model and assumed to transfer to 30B.",
+        "The fusion formula x^i = (β·p^i)·x_v^i + (1 - β·p^i)·x_d^i allows β·p^i > 1, which would yield negative weight for the nested output. β is learnable and unconstrained, risking instability, and no analysis of β dynamics is given.",
+        "The nested pass packs selected tokens into a compact sequence with new positional embeddings, so selected tokens attend only to other selected tokens rather than the full context. This may discard useful information and is not ablated against alternative fusion or attention designs.",
+        "The computational overhead analysis is FLOPs-only; no wall-clock latency, memory, or throughput measurements are provided. Packing/unpacking and dynamic control may introduce practical overhead not captured by FLOPs.",
+        "Some notation and typographical errors reduce clarity: Eq. 6 sums from L_i to L_i (likely L_s to L_e), and the appendix refers to the method as 'Drop-and-Drop' instead of DND."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Introduces DND, a practical post-training method for adding adaptive nested depth to off-the-shelf dense and MoE LLMs with minimal parameter overhead and relatively small throughput loss.",
+        "The combination of token-choice routing, normalized fusion, router-controlling losses, and threshold control with buffer/EMA mechanisms is well-motivated for stabilizing token selection.",
+        "The empirical evaluation covers multiple dense models and a 30B MoE model across general, math, coding, and agent benchmarks, with ablations and token-selection analyses.",
+        "Token uncertainty and layer-wise selection analyses provide useful qualitative evidence about which tokens are selected and how representations change."
+      ],
+      "weaknesses": [
+        "The Score Dispersion Loss appears mis-specified: maximizing entropy over normalized routing scores encourages uniform scores, not discriminability among tokens, contradicting the stated goal of enhancing token selection precision. The Distribution Preservation Loss also pulls scores toward 0.5, further reducing separability; combined with threshold selection, this undermines the central routing control mechanism.",
+        "The fusion equation appears inconsistent with the text: with βp weighting the vanilla output and 1−βp weighting the nested output, higher routing probability gives less weight to the recomputed representation, opposite to the claim that more difficult tokens incorporate more of the nested output.",
+        "Key baselines are missing: the paper does not compare against random token selection, uniform extra-depth computation for all tokens, or other adaptive-depth/post-training methods beyond ITT, making it unclear whether gains come from dynamic selection or simply additional computation.",
+        "Evaluation lacks statistical rigor: single runs are reported without variance, confidence intervals, or significance tests, and the 30B MoE average gain is small (+0.87), so robustness is not established.",
+        "Reproducibility is limited: no code, model checkpoints, or detailed data recipe are provided, and the training data is described only loosely as synthetic/curated from human annotations and open-source materials.",
+        "Novelty is incremental relative to MOR, ITT, and existing token-choice dynamic-computation approaches; the paper does not sufficiently isolate its contribution from prior dynamic-depth or recurrent-depth methods.",
+        "Some claims are stronger than the evidence: for the 30B model, several improvements are very small (e.g., +0.13 BBH, +0.15 MATH), and the inference overhead is non-negligible despite modest FLOPs."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Provides a practical post-training method for integrating adaptive token-level computation into existing dense and MoE LLMs, with a plug-and-play architecture.",
+        "Reports experiments across several models (Qwen3-1.7B, Llama3.2-1B, Gemma3-1B, Qwen3-30B-A3B) and many benchmarks, with consistent improvements over SFT baselines, albeit often small for the 30B model.",
+        "Includes computational overhead and throughput analysis, and offers some token-selection analyses (entropy, layer-wise selection) that help illustrate router behavior.",
+        "Conducts ablations on the proposed training strategies and key hyperparameters (selection ratio, layer range) for one dense model."
+      ],
+      "weaknesses": [
+        "Novelty is limited: DND combines existing ideas such as token-choice routing, recurrent/nested processing of selected tokens, and router/threshold controls. Related prior work (Mixture-of-Depths, MOR, ITT, token pruning) already explores adaptive token computation; the contribution here is incremental.",
+        "There is a likely technical flaw in the Score Dispersion Loss. As written, it maximizes entropy over normalized router scores p' = p / sum(p), which encourages the p_i values to be uniform rather than dispersed. Combined with the Distribution Preservation Loss pulling scores toward 0.5, the training objective appears to reduce, not enhance, token-selection distinguishability. This undermines the central claim that the router control loss improves selection precision.",
+        "The nested pass design is under-specified and potentially problematic. Packing selected tokens into a compact subsequence means that the nested self-attention only operates among selected tokens, so selected tokens lose context from unselected tokens. The paper does not clearly explain causal masking, new positional embeddings E_pos^r, or how this works during autoregressive decoding/KV-cache inference.",
+        "Evaluation is insufficient for a top-tier conference. There is only one adaptive-computation baseline (ITT) and only on Qwen3-1.7B. There are no compute-matched controls such as random token selection at the same ratio, extra layers/compute, threshold-only or router-only variants, or other adaptive-depth/token-selection methods. No multiple seeds, confidence intervals, or significance tests are reported, so small gains (e.g., +0.87 average for Qwen3-30B-A3B) may be within noise.",
+        "Ablations are limited to Qwen3-1.7B and do not isolate the proposed router loss components (L_sd vs. L_dp), nor do they verify that learned selection is better than random selection at the same target ratio. Ablations are not performed on MoE or larger models.",
+        "Reproducibility is weak. The training data is described vaguely as synthetic material built on a high-quality seed set of 1-2 million instances, without dataset names or access details. Hyperparameters are mostly in the appendix, but the exact training/evaluation setup, code, and model checkpoints are not provided.",
+        "The claimed efficiency benefits are overstated. DND adds about 6.27% FLOPs and runs at 91.6-93.1% relative speed, which is not negligible. It also introduces router parameters whose reported total (0.03M) is unclear relative to the number of DND-enabled layers and hidden size, and beta is unconstrained in the fusion equation, allowing beta*p to exceed 1 and destabilize optimization.",
+        "The empirical gains are modest and mostly consistent with additional computation/training rather than a clearly superior selection mechanism. The paper does not convincingly rule out that simply training longer, adding layers, or using extra parameters would yield similar improvements.",
+        "Clarity and notation need improvement. Equation (6) has apparent typos in the summation limits, the fusion normalization is not actually normalized if beta*p is outside [0,1], and several implementation details (per-layer router sharing, inference-time packing, positional embedding reset) are missing."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Introduces DND, a post-training method that integrates dynamic token-level nested depth into existing dense and MoE LLMs with minimal parameter and computational overhead.",
+        "Provides extensive empirical evaluation across three small dense models and one large MoE model, covering general knowledge, math/STEM, and coding/agent benchmarks.",
+        "Includes computational overhead analysis (FLOPs and throughput) showing only ~6% extra FLOPs and ~92% of vanilla throughput.",
+        "Proposes training strategies (router controlling loss and threshold control) with ablations, visualizations, and token selection analysis linking selection to logit entropy.",
+        "Well-written and clear presentation with informative figures and a detailed appendix."
+      ],
+      "weaknesses": [
+        "Limited novelty: dynamic token selection for extra computation is closely related to existing methods like MOR and ITT; the main new contribution is post-training integration and routing control.",
+        "Equation (4) appears inconsistent with the text: higher routing probability p gives more weight to the vanilla output and less to the nested output, contradicting the claim that critical tokens incorporate more recomputed representation.",
+        "The score dispersion loss in Eq. (6) maximizes entropy of normalized routing scores, which pushes scores toward uniformity rather than dispersion/discriminability, potentially undermining the stated router control objective.",
+        "Evaluation lacks variance/statistical significance; gains on the 30B MoE model are small (0.87 average) and some individual improvements (e.g., +0.13 BBH, +0.15 MATH) could be noise.",
+        "Baselines are limited: only SFT and ITT (ITT only on Qwen3-1.7B) are compared; no comparison to MOR or other adaptive computation/post-training methods despite close relation.",
+        "The nested pass applies self-attention only among selected tokens with new positional embeddings, potentially losing original context; this design choice is not ablated or analyzed.",
+        "Some implementation details are unclear or inconsistent, e.g., the claimed +0.03M parameter increase seems lower than expected for per-layer routers, and the exact form of E_pos^r is unspecified."
+      ]
+    }
+  }
+}

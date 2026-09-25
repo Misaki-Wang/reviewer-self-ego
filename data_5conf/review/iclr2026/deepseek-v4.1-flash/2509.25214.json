@@ -1,0 +1,136 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Addresses an important practical problem: efficiently adapting LoRA adapters to heterogeneous quantization configurations for edge deployment without repeated fine-tuning per configuration.",
+        "Introduces a configuration-aware LoRA adjustment that maps a quantization configuration to a compact r×r transformation applied to L2, enabling parallel per-layer adaptation and reducing the output dimensionality compared with predicting full LoRA parameters.",
+        "Combines the configuration-aware model with a Pareto-based configuration search and diversity-preserving filtering, which is a reasonable approach to maintaining both performance and coverage across bit-widths.",
+        "Reports experiments on multiple tasks and model sizes (GLUE with RoBERTa-Large; C4 with Qwen2.5-1.5B/3B and Llama-2-7B) and shows competitive accuracy with lower training time than per-configuration fine-tuning baselines such as Q-LoRA and LQ-LoRA.",
+        "Includes useful ablations and sensitivity analyses, e.g., effect of configuration search, rank sensitivity, number of segments, and generalization to unseen configurations.",
+        "Provides some evidence that a single trained model can generalize across configurations, which is the central practical promise of the method."
+      ],
+      "weaknesses": [
+        "The motivation for adjusting L2 rather than L1 is inconsistent: the main text says most adaptation signal is concentrated in L2, but Appendix C.1 says shared components are mostly captured in L2 while configuration-specific knowledge is primarily encoded in L1. This directly undermines the justification for the proposed design.",
+        "The hypervolume comparison is not apples-to-apples: CoA-LoRA is evaluated over 50 configurations spanning 2.5–6.25 bits, whereas Q-LoRA and LQ-LoRA are evaluated only at four bit-widths (2.5, 3, 3.5, 4). Hypervolume naturally favors methods evaluated over a larger and wider set of points, so the reported HV improvements are not convincing as stated.",
+        "The configuration search is technically unclear. Configurations are discrete, but finite-difference gradients are computed over configuration embeddings, and it is not explained how embedding-space updates map back to valid discrete quantization configurations. The role of the GP and EHVI updates is also underspecified.",
+        "Algorithm 1 appears incomplete: it fits a GP once, but does not re-evaluate f1 or update the GP after generating new configurations, even though the search and filtering are described as cyclic. This makes the search procedure difficult to reproduce and assess.",
+        "The initial configuration generation formulation has notation and modeling problems: κ is said to be the number of quantization parameters (five), yet the constraint sum_j X_ij = 1 forces each layer to select exactly one of them, which conflicts with needing five parameter values per layer. The storage constraint is also not fully defined.",
+        "The training objective is ambiguous: Eq. 3 optimizes only θ, but the LoRA matrices L1 and L2 also appear in the model and likely need to be trained. It is unclear whether they are fixed, shared, or optimized jointly, which affects both the method’s capacity and reproducibility.",
+        "Empirical evidence lacks error bars or multiple seeds. Some reported gains are small or inconsistent, e.g., GPTQ-LoRA has higher HV than CoA-LoRA on Qwen2.5-1.5B in Table C.2, and CoA-LoRA does not consistently outperform LQ-LoRA on all tasks/ranks.",
+        "Reproducibility is limited: no code is provided, key implementation details of the GP, finite-difference search, bit-width computation, and unseen-configuration evaluation are missing, and several writing/notation errors remain (e.g., N = 196,252,224 described as layers rather than weight matrices; malformed quantization equation)."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a practically important problem: serving quantized LLMs across heterogeneous edge-device configurations without retraining a separate LoRA adapter per configuration.",
+        "The high-level idea of a configuration-aware model that generates lightweight low-rank adjustments conditioned on quantization settings is sensible and potentially useful.",
+        "Combines configuration search with Pareto/GP/EHVI ideas and a diversity-preserving filtering step, which is a reasonable direction for selecting training configurations.",
+        "Empirical evaluation spans several GLUE tasks, C4 language modeling, multiple model sizes (RoBERTa-Large, Qwen2.5-1.5B/3B, LLaMA-2-7B), multiple ranks, and some zero-shot downstream tasks.",
+        "Reports training-time savings relative to per-configuration fine-tuning baselines and shows generalization to unseen configurations in some plots.",
+        "Includes several ablations, including configuration search, rank sensitivity, segment count U, and low-rank similarity analysis."
+      ],
+      "weaknesses": [
+        "Major inconsistency between Table 2 and Table 3 for the same rank r=64: accuracy gaps differ dramatically, e.g., Shared-LoRA on QNLI is -15.93% in Table 2 but -0.44% in Table 3, and CoA-LoRA on MNLI is +9.60% in Table 2 but -0.63% in Table 3. This undermines the main empirical claims and suggests the evaluation setup is unreliable or inconsistently described.",
+        "The Pareto/hypervolume objective is defined inconsistently: the main text says f2 is average bit-width, while Appendix B normalizes f2 as accuracy or perplexity. Hypervolume values and reference point (1,1) are therefore ambiguous and possibly meaningless.",
+        "The configuration-search procedure is technically underspecified and likely invalid for the discrete per-layer bit-width space: finite-difference gradients are taken over continuous embeddings, then sign updates are applied, but it is not explained how the resulting embeddings map back to valid discrete quantization configurations.",
+        "The low-rank adjustment motivation is contradictory: Appendix C.1 states that configuration-specific knowledge is primarily encoded in L1, yet the method adjusts L2 via an inserted r×r transform.",
+        "Appendix Eq. 11 appears dimensionally invalid (adding L1 and L2 to a matrix residual instead of multiplying), and several algorithmic details are missing or imprecise, indicating insufficient technical care.",
+        "It is unclear what is actually optimized in Eq. 3: whether L1/L2 are fixed, trainable, or part of θ. This ambiguity affects reproducibility and interpretation of the method.",
+        "Missing implementation details: the architecture and training of θ, how target bit-width selection from the final configuration set works, how per-layer heterogeneous configurations are handled, and how the GP scales to high-dimensional concatenated configuration embeddings with only tens of samples.",
+        "Baseline coverage is incomplete and inconsistent: GPTQ-LoRA is listed as a baseline but omitted from the main comparison table, and relevant methods such as QA-LoRA are cited but not compared.",
+        "Claims about arbitrary quantization configurations are not fully supported; experiments mainly evaluate average bit-width curves rather than truly arbitrary per-layer bit-width distributions.",
+        "The novelty is incremental: conditional/hypernetwork LoRA adapters plus Bayesian/Pareto configuration search, with unclear advantage over simpler alternatives such as per-bit-width adapters or mixture-of-LoRA approaches.",
+        "Reproducibility is weak: no code or detailed hyperparameter/architecture settings, reliance on Gurobi and a single calibration batch, and many unstated design choices."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Addresses a practical and relevant problem: adapting LoRA adapters to heterogeneous quantization configurations for edge deployment without repeated per-configuration fine-tuning.",
+        "The core idea of a configuration-aware model that maps layer-wise quantization configurations to lightweight r×r LoRA adjustments is novel and technically interesting.",
+        "The layer-wise parallel adjustment design reduces the output dimensionality compared with predicting full LoRA parameters, making the mapping more tractable.",
+        "The Pareto-based Gaussian-process configuration search with diversity-preserving filtering is a reasonable approach to constructing a training configuration set, though its practical effectiveness is not fully established.",
+        "Experiments cover four GLUE tasks, multiple model sizes, C4 perplexity, unseen configurations, rank sensitivity, and zero-shot evaluations, providing a reasonably broad empirical study.",
+        "Implementation details such as SVD-based initialization, hyperparameters, and an algorithm sketch are provided in the appendix, which aids reproducibility."
+      ],
+      "weaknesses": [
+        "There is a serious reporting inconsistency: the main Table 2 results appear to match rank 32 in Table 3, while the training settings state that rank 64 is used. This undermines reproducibility and makes the main comparison unclear.",
+        "Hypervolume comparisons may be unfair or not directly comparable: CoA-LoRA is evaluated on 50 configurations spanning 2.5–6.25 bits, whereas Q-LoRA and LQ-LoRA are only evaluated on four bit-widths from 2.5–4 bits. HV values are only meaningful if computed over the same configuration range/reference set.",
+        "The configuration search is technically unclear: finite-difference updates are described over learned continuous embeddings, but it is not explained how these updates map back to valid discrete quantization configurations. This raises concerns about the validity of the search procedure.",
+        "Equation 3 optimizes only the configuration-aware model θ, and it is not clear whether the base LoRA matrices L1 and L2 are also trained. If they are fixed or only initialized by SVD, the adaptation capacity may be limited, and there is no ablation on this design choice.",
+        "The paper claims gains over state-of-the-art methods, but the reported gains are relative to Q-LoRA, not the stronger LQ-LoRA baseline. Against LQ-LoRA, improvements are mixed, and SST-2 is actually worse in the main results.",
+        "The claim of 'no additional time cost' is misleading: CoA-LoRA still incurs a one-time training cost, and Shared-LoRA is much faster, albeit less accurate. The overhead of GP search, calibration, and configuration selection is not fully quantified.",
+        "Related quantization-aware LoRA methods such as QA-LoRA and any-precision/dynamic bit-width quantization approaches are cited but not compared empirically, leaving the positioning relative to the broader literature incomplete.",
+        "There are inconsistencies across tables, e.g., Shared-LoRA HV on QNLI differs substantially between Table 2 and Table 3, and the rank discrepancy suggests possible experimental errors.",
+        "The empirical evaluation is mostly limited to GLUE with RoBERTa-Large and C4 perplexity for larger LLMs, with no downstream generation, instruction-following, or real edge-device latency/memory measurements."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Targets a practical and important problem: serving quantized LLMs under heterogeneous per-layer bit-width configurations without retraining a separate LoRA adapter for every configuration.",
+        "Proposes a lightweight configuration-aware mapper that outputs per-layer r×r adjustment matrices, reducing output dimensionality and enabling parallel adjustment across layers; the mapper adds <0.5% parameters.",
+        "Combines configuration-aware LoRA adjustment with a Pareto-based configuration search using GP/EHVI and diversity-preserving filtering; ablations suggest the search improves over no-search and random extension baselines.",
+        "Reports a broad empirical study across GLUE/C4, multiple models (RoBERTa, Qwen2.5, Llama-2), bit-widths, LoRA ranks, integer mixed-precision, and zero-shot tasks, with hypervolume and training-time comparisons.",
+        "Shows clear efficiency advantages over one-to-one fine-tuning methods (QLoRA/LQ-LoRA) when many configurations are needed, while outperforming Shared-LoRA in most settings.",
+        "Provides algorithm details, hyperparameters, parameter breakdowns, and some reproducibility information in the appendix."
+      ],
+      "weaknesses": [
+        "Novelty and positioning are not fully convincing: the method combines existing components (LoRA, SVD initialization, parameter/adapter generation, Bayesian optimization) and does not compare against recent LoRA-generation methods such as LoRA-Gen, ICM-LoRA, or CONDP-DIFF despite discussing them.",
+        "The 'arbitrary' and 'on-the-fly' claims are overstated: experiments cover finite bit-width ranges/config spaces, mostly NormalFloat quantization, and the deployment-time cost of selecting/generating adjustments is not measured.",
+        "The configuration search is technically under-specified: it is unclear how finite differences over embeddings map back to valid discrete configurations, how the GP/EHVI is refit or maintained during training, and how f1 is evaluated (single calibration batch) reliably for search.",
+        "Hypervolume comparisons may be unfair because CoA-LoRA is evaluated over 50 configurations while QLoRA/LQ-LoRA are evaluated over only 5 configurations; it is not clear that HV is computed on a common grid.",
+        "Empirical gains over the strongest baseline (LQ-LoRA) are often small (e.g., SST-2 +0.20%) and no error bars or statistical significance tests are reported; the abstract/intro claims of 1.74%-8.89% gains over 'state-of-the-art' mix comparisons against QLoRA.",
+        "The role of L1/L2 is unclear: Eq. 2 suggests they may be SVD-initialized and largely frozen, with only θ trained, which restricts capacity and questions the comparison to fine-tuning full LoRA adapters.",
+        "Ablations are incomplete: there is little analysis of trainable vs frozen L1/L2, sensitivity to calibration data, GP kernel/initial design, T1/T2, EHVI approximation quality, and deployment memory/latency overhead.",
+        "Some training-time and efficiency claims are imprecise: CoA-LoRA still requires nontrivial one-time training and is slower than Shared-LoRA, so 'no additional time cost' needs qualification.",
+        "Reproducibility is weakened by an incomplete implementation link ('available a') and missing details on how integer mixed-precision results are obtained with a method designed for NormalFloat configurations."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a practically relevant problem: adapting LoRA adapters to heterogeneous quantization configurations without retraining a separate adapter for every configuration.",
+        "The proposed CoA-LoRA combines a configuration-aware lightweight mapper with a Pareto-based configuration search, which is a reasonable high-level direction.",
+        "The mapper is small (<0.5% of parameters) and generates per-layer r×r adjustments in parallel, suggesting a potentially efficient architecture.",
+        "The paper includes a broad set of experiments (GLUE, C4, multiple model sizes, integer mixed-precision, zero-shot tasks, rank sensitivity) and an appendix with additional analyses.",
+        "Ablations suggest that the Pareto-based configuration search contributes to performance improvements over no configuration search and random extension."
+      ],
+      "weaknesses": [
+        "The configuration search is not technically well-defined. The method claims to optimize discrete quantization configurations, but Eq. (7)-(8) and Algorithm 1 update continuous embeddings via finite differences and sign steps. It is never specified how an updated embedding maps back to a valid discrete per-layer configuration. This is a core technical flaw in the proposed search procedure.",
+        "The Pareto filtering definition in Eq. (9) is incorrect or at least highly ambiguous. The condition f(C') != f(C) does not mean 'not dominated'; for almost any two distinct configurations this vector inequality is true, so the stated Pareto set definition does not correctly identify non-dominated configurations.",
+        "The central 'arbitrary configuration' and 'on-the-fly adaptation' claims are overstated. For a target bit-width, Appendix A.3 actually selects the closest configuration from the final trained set, so the method is not demonstrated to work for truly arbitrary quantization configurations. Generalization to unseen configurations is only tested within the same bit-width range and distribution.",
+        "The main evaluation appears unfair for hypervolume comparisons. CoA-LoRA is evaluated over 50 configurations, while QLoRA and LQ-LoRA are evaluated on only 5-6 bit-widths due to cost. Hypervolume values are then compared across these different evaluation sets/ranges, which can significantly bias the comparison in favor of the denser curve. Baselines should be evaluated on the same configuration set or HV should be computed under identical conditions.",
+        "The adaptation capacity is limited and insufficiently justified. The configuration-aware model only outputs an r×r transform Uθ applied to a fixed L2 matrix, while L1 and L2 themselves are obtained per configuration via SVD of the quantization residual and are not jointly fine-tuned. The paper does not ablate whether training the base LoRA matrices jointly would materially improve results, nor does it provide evidence that the r×r transform is sufficient across diverse configurations.",
+        "Important baselines and comparisons are missing. QA-LoRA is discussed in related work but not compared. GPTQ-LoRA is omitted from the main GLUE comparison. LoRA-generation baselines such as ICM-LoRA or LoRA-Gen are not empirically compared, despite the paper positioning itself in adapter generation.",
+        "Training and inference efficiency claims are not fully supported. The abstract claims 'no additional time cost', but Table 2 shows CoA-LoRA takes 57 minutes on QNLI versus 21 minutes for Shared-LoRA. The cost of SVD per configuration, GP fitting, calibration evaluations, and configuration search is not clearly accounted for. No inference latency or memory measurements are reported for edge deployment.",
+        "Reproducibility and reporting are weak. There is no final code link (the sentence 'Our implementation is available a' is incomplete), no seeds/variance/error bars, insufficient detail on data splits, GP hyperparameters, finite-difference step behavior, and exactly how configurations are mapped back to discrete settings. The notation is also inconsistent, e.g., Eq. (11) writes L1 + L2 instead of the LoRA product L1 L2, and Eq. (12) reuses L for layer count and LoRA matrices.",
+        "The empirical gains are not uniformly convincing. Some table entries show large improvements over QLoRA (e.g., QQP +7.87% in Table 2), but it is unclear whether these are on the same configuration set and evaluation protocol. Zero-shot gains are modest, and no statistical significance or variance is reported.",
+        "The writing and presentation need substantial polishing. There are duplicate figure captions, inconsistent section capitalization, an unclear 'Solution' column in Table 2, and several equations/algorithms that are difficult to reproduce from the main text alone."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Addresses a practical and important problem: adapting LoRA adapters to arbitrary quantization configurations for heterogeneous edge deployment without per-configuration fine-tuning.",
+        "Proposes a novel configuration-aware LoRA adjustment mechanism that generates lightweight layer-wise r×r transformations of the low-rank adapter, keeping the auxiliary model very small (often <0.5% of model parameters).",
+        "Introduces a Pareto-based quantization configuration search with Gaussian-process surrogate modeling, EHVI, finite-difference-guided updates, and diversity-preserving filtering to improve the training configuration set.",
+        "Reports extensive experiments across GLUE and C4, multiple model families and sizes (RoBERTa-Large, Qwen2.5-1.5B/3B, LLaMA-2-7B/13B), several quantization settings, and relevant baselines including QLoRA, LQ-LoRA, GPTQ-LoRA, and Shared-LoRA.",
+        "Empirical results generally show strong accuracy/HV improvements over baselines while substantially reducing training time relative to one-to-one per-configuration fine-tuning, with demonstrated generalization to unseen configurations and robustness under different ranks and integer mixed-precision quantization.",
+        "The paper is generally well motivated and clearly written, with useful algorithm details, parameter breakdowns, and additional experiments in the appendix."
+      ],
+      "weaknesses": [
+        "Evaluation fairness for the hypervolume metric is questionable: CoA-LoRA is evaluated on 50 configurations, while QLoRA and LQ-LoRA are compared using only about five configurations, which can inflate the apparent HV advantage unless the curve is interpolated or all methods are evaluated on the same configuration set.",
+        "Key technical details of the configuration search are underspecified: the finite-difference gradient approximation operates over embeddings/discrete configurations, it is unclear how updates map back to valid per-layer quantization parameters, how often the Gaussian process is refit, and how reliable the single-batch calibration objective is for guiding search.",
+        "The central optimization appears to train only the configuration-aware mapper θ while L1/L2 are SVD-initialized and not jointly fine-tuned. This is a significant limitation relative to standard LoRA fine-tuning and is not ablated or fully justified, even though it may partly explain the efficiency.",
+        "There is a tension in the motivation/justification: Appendix C.1 states that configuration-specific knowledge is primarily encoded in L1, while the method adjusts only L2 via (I + Uθ(Q_i)). The paper should reconcile this observation with the design choice.",
+        "Some claims are stronger than the evidence: e.g., 'no additional time cost' and 'state-of-the-art' gains are not uniformly supported, since CoA-LoRA still requires training time for a single target configuration and some per-task/per-bit comparisons show only modest or inconsistent gains over LQ-LoRA or QLoRA.",
+        "Reproducibility and clarity issues remain: the implementation link appears incomplete, notation for f2 is inconsistent between the main text and appendix, the 'Solution' column in Table 2 is not explained, and the algorithm listing omits or obscures several important steps."
+      ]
+    }
+  }
+}

@@ -1,0 +1,131 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Addresses an important and practical problem: the communication bottleneck in multi-device Transformer inference under low-bandwidth conditions, which is well motivated with measurements showing communication dominates latency for existing methods (Figure 3).",
+        "Proposes a novel and intuitive method, Mixed-Precision Attention, that keeps local tokens in full precision while transmitting vector-quantized non-local tokens, together with two auxiliary techniques (Noise-Augmented Vector Quantization and Distributed Class Tokens) to preserve accuracy.",
+        "Provides extensive experiments across vision (ViT-Base on CIFAR-100/ImageNet-1K) and language (GPT2-S/M on Wikipedia/Wikitext-103), covering bandwidth (10–500 Mbps), device counts (2–8), input lengths (256–4096), and ablations (Tables 1–6), with meaningful speedups over single-device inference and strong gains over TP, SP, and BP baselines in low-bandwidth regimes.",
+        "Open-source intent, detailed hyperparameter settings, and an explicit limitations/societal-impact discussion are included."
+      ],
+      "weaknesses": [
+        "The theoretical justifications are not sound. Theorem 1 assumes the quantization residuals are Gaussian and i.i.d. across dimensions and the proof contains notation errors and typos (e.g., inconsistent use of \\hat{X} and \\tilde{X}). Theorem 2 assumes class-token errors are independent and identically distributed across devices, but quantization errors are shared across devices because each device attends to quantized tokens from the others; the independence assumption is therefore invalid, so the claimed 1/N variance reduction is unsupported.",
+        "For generative models like GPT2, the method only parallelizes the initial encoding (prefill); autoregressive decoding is performed sequentially on a single device. The paper does not measure end-to-end generation latency, so the claimed speedups for GPT2 do not cover the dominant cost in real-time generation. The handling of causal masking during distributed training/inference with allgathered compressed tokens is also unclear, raising soundness concerns for decoder models.",
+        "Accuracy preservation is overstated in the abstract. Zero-shot language modeling degrades severely (e.g., GPT2-M perplexity increases from 43.22 to 62.29 at G=32 and to 96.99 at G=1), and vision accuracy drops by up to 3.58%. Accuracy results lack error bars or statistical significance tests, and hyperparameters (e.g., commit loss β) are tuned to select the best validation accuracy, which can inflate reported gains.",
+        "The latency/communication evaluation is under-specified. Bandwidth emulation, network latency (RTT), codebook synchronization overhead, and the distributed implementation (number of laptops, communication library, message scheduling) are not described in enough detail to reproduce or fully trust the latency measurements. No comparisons against simple uniform quantization or other communication-compression baselines are provided, and no high-bandwidth regime is tested to identify when Astra ceases to be beneficial.",
+        "Presentation and reproducibility issues remain: inconsistent terminology (“mixed-precision” is really full-precision vs. quantized), typographical errors and notation inconsistencies in the appendix, and no accessible code link despite the claim of open-sourcing. The per-layer VQ lookup overhead is not isolated in the latency breakdown, and the method’s storage footprint grows with the number of groups, as acknowledged only in the limitations."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "Targets an important and practical problem: inter-device communication is indeed a bottleneck for multi-device Transformer inference under low bandwidth.",
+        "The high-level idea of combining sequence parallelism with full-precision local attention and compressed non-local token representations is intuitive and plausible.",
+        "The empirical study covers both vision (ViT-Base on CIFAR-100/ImageNet-1K) and language (GPT2-S/M on Wikipedia/Wikitext-103), with ablations on noise magnitude, commitment loss, and distributed class tokens.",
+        "The paper attempts to provide theoretical intuitions for the two accuracy-preservation techniques and includes supplementary latency results and a limitations section.",
+        "If the claimed speedups and accuracy preservation were fully supported, the approach could be useful for bandwidth-constrained edge deployments."
+      ],
+      "weaknesses": [
+        "The headline speedup claims are internally inconsistent and not convincingly supported. Table 4 reports 171.82x speedup over SP and 342.74x over TP at 10 Mbps, while the abstract/conclusion emphasize up to 15.25x over SOTA; Appendix D states the strongest baseline reaches only 0.17x at 10 Mbps, which conflicts with Table 4's 29.37x for BP+SP. This makes the central latency claims unreliable.",
+        "Latency evaluation does not measure end-to-end Transformer inference for most claimed settings: it uses a 12-layer encoder as a proxy for ViT and GPT2 prefill, and autoregressive GPT2 decoding remains single-device. Thus the speedups do not support broad 'GPT2 inference acceleration' claims.",
+        "Accuracy is substantially degraded in important cases. GPT2-S zero-shot PPL rises from 58.91 to 120.7 (G=1) and GPT2-M from 43.22 to 62.29 (G=32); fine-tuned PPL also increases (e.g., 14.8 to 16.84). The claims of preserving task accuracy are therefore overstated and should be scoped more carefully.",
+        "The theoretical results are weak. Theorem 1 has duplicated notation and relies on strong i.i.d. diagonal covariance assumptions; it shows a distributional distance reduction under an assumed residual distribution, not improved generalization or inference accuracy. Theorem 2 assumes zero-mean independent errors and ignores bias from each device seeing different full-precision local tokens, so the 1/N variance reduction does not justify the claimed accuracy improvement.",
+        "The distributed class token analysis is oversimplified: averaging mixed-precision class-token outputs does not generally equal full-precision global attention, because each replica has asymmetric access to full-precision tokens. The proof omits the bias term.",
+        "Novelty is limited and related work is incomplete. Vector quantization for communication reduction is well studied in distributed training/inference; the paper does not engage with existing quantized/compressed communication literature, making the contribution appear incremental.",
+        "Reproducibility is poor: no usable open-source URL is provided, and key training details are missing, including learning rates, batch sizes, number of fine-tuning iterations, K-means initialization details, EMA decay, noise covariance estimation, class-token training procedure, and codebook synchronization.",
+        "Latency emulation details are unclear: how bandwidth caps are enforced, whether communication overlaps computation, whether codebook lookup/encode/decode costs are included, and how synchronization and packetization overheads are modeled. Baseline communication volume estimates at 10 Mbps also appear inconsistent with full-precision sequence parallelism.",
+        "Fairness of accuracy comparisons is unclear: ASTRA is fine-tuned on each dataset, while it is not specified whether baselines/original models use exactly the same fine-tuned base, training budget, or hyperparameter search.",
+        "Missing baselines: no comparison to standard communication-compression approaches (e.g., gradient/token quantization, top-k sparsification, low-bit all-reduce) that are directly relevant to the paper's core claim.",
+        "Presentation is rough: inconsistent ASTRA/Astra naming, duplicated theorem symbols, incomplete sentences ('den'), typos like 'Mpbs', Table 3 header 'Datasize per Token', missing/unclear figure references, and missing URL, all reducing readability."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "The paper identifies a clear and important problem: inter-device communication dominates multi-device Transformer inference latency in bandwidth-constrained environments, which is a practical limitation of existing methods.",
+        "The proposed Astra framework introduces a novel and effective combination of techniques: Mixed-Precision Attention with vector quantization for non-local tokens, Noise-Augmented Vector Quantization (NAVQ) for regularization, and Distributed Class Tokens (DCT) for improved global information aggregation.",
+        "The experimental evaluation is comprehensive, covering both vision (ViT) and NLP (GPT2) models, multiple datasets (CIFAR-100, ImageNet-1K, Wikipedia, Wikitext-103), and various bandwidths, device counts, and token lengths.",
+        "The latency speedup results are impressive: up to 2.64× over single-device inference and up to 15.25× over state-of-the-art multi-device methods under low bandwidth (10-20 Mbps), where baselines perform worse than single-device inference.",
+        "The accuracy preservation is reasonably well demonstrated, with less than 3.58% degradation on ViT-Base under 2457.6× compression, and the ablation studies clearly show the benefits of NAVQ and DCT.",
+        "The paper provides theoretical justifications (Theorems 1 and 2) for NAVQ and DCT, which, while simplified, offer intuitive support for the design choices.",
+        "The writing is clear, the structure is logical, and the limitations are discussed in the appendix, showing good research ethics."
+      ],
+      "weaknesses": [
+        "The evaluation of inference latency is based on simulations using bandwidth caps on laptops, not a real distributed deployment across multiple physical devices. This may not fully capture real-world network variability, synchronization overhead, and hardware heterogeneity, potentially overstating the practical speedups.",
+        "The theoretical analyses in Appendices B and C rely on simplified assumptions (e.g., Gaussian quantization residuals, first-order Taylor expansion) that may not hold in practice. The connection between these proofs and the actual behavior of the quantized model is not rigorously established.",
+        "The paper does not compare against other compression-based multi-device inference methods (e.g., quantization-aware training, low-bit communication). While the baselines focus on parallelism strategies, a comparison with communication compression techniques would strengthen the contribution.",
+        "The zero-shot generalization drop on GPT models is significant (e.g., PPL from 43.22 to 62.29) and not thoroughly analyzed. The paper hypothesizes limited expressiveness of discrete embeddings but does not explore potential remedies.",
+        "The Distributed Class Token mechanism is only applicable to encoder-based models with a class token (e.g., ViT). For decoder-only models like GPT, there is no class token, and the paper does not discuss how the method adapts (it simply states there is no class token). This limits the generality of the approach.",
+        "The storage overhead and codebook maintenance for grouped VQ are acknowledged as limitations but not quantified. In practice, storing multiple codebooks for each group may be prohibitive on edge devices.",
+        "The paper claims open-sourcing but the link is omitted in the provided manuscript; reproducibility depends on code availability, which cannot be verified from the submission alone."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a well-motivated practical problem: inter-device communication dominates multi-device Transformer inference latency under constrained bandwidth (58.6–93.5% of total latency, Fig. 3), and the paper targets the important sub-100 Mbps regime where prior methods fail.",
+        "Proposes a conceptually simple and tunable method: sequence parallelism with vector-quantized non-local token embeddings, plus Noise-Augmented Vector Quantization (NAVQ) and Distributed Class Tokens. Group count G gives a clear communication–accuracy trade-off.",
+        "Broad empirical evaluation: ViT on CIFAR-100/ImageNet-1K, GPT2-S/M on Wikipedia/Wikitext-103, Llama-3-8B, multiple bandwidths (10–500 Mbps), device counts (2–8), token lengths (256–4096), heterogeneous devices, packet loss, and dynamic bandwidth.",
+        "Demonstrates strong latency gains in low-bandwidth settings: up to 2.64x over single-device inference and 15.25x over BP+AG at 10 Mbps; ASTRA remains faster than single-device inference where baselines are slower (Fig. 1, Table 4).",
+        "Ablations support the proposed components: NAVQ improves validation accuracy by 0.86% over lambda=0; distributed class tokens improve accuracy by up to 7.13% over a single class token; codebook size has only mild sensitivity (Tables 12–15).",
+        "Honest limitations section acknowledges zero-shot degradation, VQ codebook storage overhead, fine-tuning requirements, and that generative speedups are limited to prefill rather than full autoregressive decoding.",
+        "Reproducibility is partially addressed: fixed seed 42, ten-run standard deviations for ViT (<0.0012), and training schedules/details in Appendix D."
+      ],
+      "weaknesses": [
+        "The central accuracy claim is not supported across tasks: the abstract/introduction claim 'maintains task accuracy within 3.58%' under extreme compression, but this only matches ViT G=1 on CIFAR-100. For GPT2-S G=1, zero-shot PPL rises from 58.91 to 120.7; for GPT2-M G=1, Wikipedia PPL rises from 12.16 to 17.86; for GPT2-M G=32, zero-shot PPL rises from 43.22 to 62.29 (+44%). Claims should be qualified by model, task, and compression level.",
+        "For decoder-only generative models, ASTRA only accelerates the prefill/time-to-first-token stage; autoregressive decoding remains sequential on one device. The abstract and conclusion frame general Transformer inference speedup, but end-to-end LLM generation benefits are much narrower.",
+        "The theoretical results are flawed/overstated. Theorem 3.1 uses the same symbol for quantized and noise-augmented embeddings in the statement, and the proof relies on i.i.d. Gaussian residuals to show distributional closeness, not improved task generalization. Theorem 3.2 assumes i.i.d. zero-mean per-device errors and ignores bias from differing local token sets, so the 1/N variance reduction is not rigorously justified.",
+        "Evaluation is simulation-based rather than a real distributed deployment; bandwidth capping and packet-loss emulation are not fully described; baseline implementations (Megatron TP, Voltage SP, DeTransformer BP) may not be optimized fairly; no code or artifact release is mentioned.",
+        "Missing comparisons to communication-compression baselines (e.g., quantized sequence parallelism, activation quantization, or KV-cache compression) and no real edge/Wi-Fi testbed. Fine-tuning hyperparameters such as learning rate and batch size, and latency measurement methodology, are not specified.",
+        "Latency reporting is inconsistent: Table 7 claims 1.13–5.13x over 'fastest baseline BP,Nb=4', but 5.13x is only vs BP,Nb=8 at 10 Mbps (8.011s/1.563s); vs BP,Nb=4 it is about 2.97x (4.642s/1.563s), and at 500 Mbps ASTRA G=1 (1.540s) is slower than BP,Nb=4 (1.485s). The abstract says 'up to 15.25x over prior multi-device baselines' while Table 4 shows much larger speedups over TP/SP at 10 Mbps (342.74x/171.82x).",
+        "Accuracy comparisons may be unfair because ASTRA is fine-tuned per dataset, but it is not stated whether the original single-device baseline receives the same fine-tuning schedule; language experiments use a single seed, whereas only ViT is averaged over ten seeds.",
+        "Presentation issues: inconsistent naming ('Astra' vs 'ASTRA'), 'prefetch' vs 'prefill', broken equation (3), an odd reference (Wiisfi), and some claims that are not directly reflected in the reported tables.",
+        "Novelty is moderate: vector-quantizing activations for communication and averaging local class-token copies are straightforward extensions, and the paper lacks deeper analysis of when VQ compression preserves attention semantics or why NAVQ outperforms simpler regularization."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Targets a real and under-examined bottleneck: the paper's own latency breakdown (Fig. 3) shows inter-device communication consumes 58.6–93.5% of total runtime below 100 Mbps, motivating communication reduction rather than more parallelization.",
+        "The core idea — sequence parallelism combined with vector-quantized non-local token embeddings and full-precision local attention (Mixed-Precision Attention) — is sensible and yields a tunable accuracy/bandwidth trade-off via the number of VQ groups.",
+        "Evaluation breadth is reasonable: ViT-Base (CIFAR-100, ImageNet-1K), GPT2-S/M (Wikipedia, Wikitext-103, zero-shot), and Llama-3-8B, plus sweeps over bandwidth (10–500 Mbps), device count (2–8), sequence length (256–4096), packet loss, and dynamic bandwidth traces.",
+        "The component ablations provide useful signal: NAVQ improves validation accuracy by 0.86% over no-noise (Table 12), and distributed class tokens consistently beat the single-token variant (Table 13).",
+        "The limitations section is candid about zero-shot degradation, prefill-only acceleration for decoders, fine-tuning requirements, and codebook storage overhead."
+      ],
+      "weaknesses": [
+        "The theoretical contributions are mis-stated and do not support the claims. In the main text, Theorem 3.1 / Eq. (3) has identical left- and right-hand sides (W2²(PX, PX̂) < W2²(PX, PX̂)), which is vacuous; the Appendix B proof is garbled with inconsistent tilde/hat notation and repeated identical expressions. Critically, the injected “noise” is sampled from the quantization-residual distribution with mean μ and covariance Σ, so it effectively adds back the expected quantization bias — making the “distributional fidelity” result near-trivial and unrelated to the claimed generalization benefit.",
+        "Theorem 3.2 asserts an exact 1/N error reduction by assuming the N distributed class-token errors are i.i.d. with per-coordinate variance equal to a single token's. Since all copies attend to the same global sequence, their errors are correlated, and the iid assumption inflates the claimed variance reduction. This is a standard averaging argument dressed up as a theorem rather than a novel result.",
+        "The headline claims are not supported by the evidence. The abstract states accuracy is “within 3.58%” and that ASTRA “remains robust,” but the most demanding (and realistic) settings degrade badly: GPT2-S zero-shot PPL rises from 58.91 to 120.7 at G=1 and GPT2-M from 43.22 to 62.29 at G=32; Llama-3-8B “robustness” applies only to the prefill/time-to-first-token stage, not generation.",
+        "The large reported speedups (e.g., 171.82× over SP, 342.74× over TP, 15.25× over BP) are largely artifacts of baselines becoming catastrophically slow at ≤10 Mbps rather than of ASTRA’s absolute efficiency; comparing ASTRA’s end-to-end latency to “original attention” latency is a misleading metric. There is no comparison against strong communication-reduction alternatives (e.g., KV-cache quantization/compression), which the discussion dismisses by goal-difference rather than by measurement.",
+        "The latency methodology is underspecified for a systems paper: bandwidth is emulated by capping consumer GPUs (1660Ti), and the communication model (whether compute/communication overlap, per-block sync/all-to-all costs, and latency/bandwidth interplay are modeled) is not detailed, though the conclusions hinge on it. Baselines also appear untuned for the low-bandwidth regime.",
+        "Possible result selection: main accuracy tables (Tables 1, 3) report the best β per configuration, and ablations report best values (Table 14), which may overstate robustness. There is a large swing in ΔAcc (0.37%–7.13%) across settings that is not fully reconciled.",
+        "Novelty is incremental: VQ of keys/values for transmission is close to existing KV-cache quantization/compression work, and mixed-precision local/global attention plus replicated class tokens are natural design choices rather than a fundamentally new mechanism.",
+        "Presentation quality is below the bar: nonsensical equations (main-text Eq. 3), notation inconsistencies throughout the appendices, confusing figure layout, and an unexplained row in Table 7 (Llama-3-8B = 4.578) without units/label, which impedes reproducibility and verification."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Identifies an important and under-addressed bottleneck: inter-device communication in bandwidth-limited multi-device Transformer inference, with motivating measurements showing communication dominates 58.6-93.5% of baseline latency.",
+        "Proposes a coherent framework combining sequence parallelism, mixed-precision attention, vector-quantized non-local tokens, and fine-tuning of codebooks with commitment loss.",
+        "Two accuracy-preserving techniques, Noise-Augmented Vector Quantization (NAVQ) and Distributed Class Tokens, are intuitively motivated and ablated; NAVQ improves validation accuracy by up to 0.86% and distributed class tokens by up to 7.13% in their settings.",
+        "Broad empirical evaluation spans ViT, GPT2-S/M, and Llama-3-8B; vision and language tasks; multiple bandwidths, device counts, token lengths, packet loss, dynamic networks, quantization compatibility, and heterogeneous devices.",
+        "Useful practical results are reported: speedups at low bandwidth (up to 2.64× over single-device inference and 15.25× over prior multi-device baselines) and robustness under packet loss and dynamic bandwidth.",
+        "Limitations are discussed honestly, including zero-shot degradation, prefill-only acceleration for decoder-only models, fine-tuning requirement, and codebook storage overhead."
+      ],
+      "weaknesses": [
+        "Theoretical justifications are not fully sound. Theorem 3.1 is stated with typographical errors (e.g., \\hat{X}=\\hat{X}+\\lambda\\xi; both sides of the inequality appear identical), and its proof assumes Gaussian residuals with diagonal covariance and i.i.d. per-dimension errors, which is restrictive for real VQ residuals.",
+        "Theorem 3.2 assumes independent and identically distributed class-token errors across devices, but quantization errors for shared non-local tokens are common across devices, inducing correlation; the claimed 1/N variance reduction therefore does not generally hold as stated, weakening the theoretical support for Distributed Class Tokens.",
+        "Language-model accuracy is not always convincing. For GPT2-S at G=1, Wikipedia PPL rises from 15.79 to 21.46 and Wikitext-103 from 18.96 to 25.98; zero-shot PPL rises from 58.91 to 120.7. The abstract's 'within 3.58%' accuracy claim is only supported for ViT-Base and does not capture these larger language-task regressions.",
+        "For decoder-only generative models, ASTRA accelerates only the prefill/time-to-first-token stage, not autoregressive decoding; this limits the practical impact of the Llama-3-8B results, as acknowledged but not reflected in the broad claims about inference acceleration.",
+        "Latency experiments often use a generic 12-layer encoder for speedup claims while accuracy experiments use ViT/GPT2/Llama; the correspondence between the latency model and the actual models evaluated is unclear, and GPT2 latency is not measured.",
+        "The paper lacks a released code/artifact or detailed deployment/benchmarking script, and some key details (bandwidth emulation, exact communication timing measurement, hardware setup consistency) are under-specified, limiting reproducibility.",
+        "Presentation needs substantial editing: inconsistent ASTRA/Astra naming, broken or duplicate equations, invalid/weak references (e.g., a commercial Wi-Fi website), and figure/table formatting issues reduce clarity.",
+        "Comparison to KV-cache compression is discussed but not empirically included; while the authors argue it is complementary, a direct comparison under the same bandwidth-limited multi-device setting would strengthen the evaluation.",
+        "Originality is moderate: vector quantization for communication, noise regularization, and replicated class tokens are individually reminiscent of existing techniques, so the contribution largely lies in their combination rather than a fundamentally new mechanism."
+      ]
+    }
+  }
+}

@@ -1,0 +1,120 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "The paper clearly identifies and studies a practically relevant problem: gradient staleness in asynchronous pipeline parallelism and its degradation as pipeline depth increases.",
+        "It offers a plausible mechanistic explanation via basis misalignment and supports it with controlled toy experiments (quadratic and spiral losses) plus a convergence bound linking delay τ and coordinate-wise smoothness C.",
+        "The proposed basis rotation framework is simple to implement, systematically organizes eigenbasis-estimation choices (first vs. second moment, unilateral vs. bilateral), and shows that more accurate Hessian approximation yields better delay robustness.",
+        "The empirical evaluation is extensive for a small-scale setting: multiple baselines, model sizes up to 1B parameters, scaling studies, weight-stashing ablation, basis-update-frequency analysis, and GPU-hour comparisons. The reported reductions in iterations (up to 76.8%) and wall-clock time (54.3%) are large and consistent.",
+        "The appendix provides useful implementation details, including nanoGPT-based model configurations, optimizer hyperparameters, and additional results on validation loss and alternative baselines, improving reproducibility relative to many theory-only papers."
+      ],
+      "weaknesses": [
+        "The core optimization technique—rotating gradients/momenta into an approximate Hessian eigenbasis and applying coordinate-wise Adam—is very close to existing methods such as SOAP, GaLore, and Shampoo. The novelty is primarily in applying such basis rotation to asynchronous pipeline staleness and in the diagnostic framing, which may be considered incremental.",
+        "The theoretical analysis relies on strong assumptions: exact Kronecker-factorized empirical Fisher, β1=0, coordinate-wise bounded noise, and coordinate-wise ℓ∞ smoothness. These are not clearly satisfied in LLM training, and the bound is inherited/adapted from prior work (Xie et al., 2025). The claim that delay effects are “aggravated” by C is only partially supported by the bound: the relative slowdown for the C-dependent terms is sqrt(1+τ) regardless of C, though C can determine whether those terms dominate the noise term.",
+        "The paper does not directly measure Hessian-basis alignment or the proxy C during real Transformer training. Evidence that misalignment is the primary cause of delay sensitivity in practice remains indirect, based mainly on synthetic landscapes and the relative success of more accurate eigenbasis approximations.",
+        "Implementation details are underspecified in a potentially important place: Algorithm 1 accumulates the second moment in the rotated basis, but when the eigenbasis is refreshed every 10 steps, it is unclear how the previous second-moment buffer is transformed or reset. This affects correctness and reproducibility of the method.",
+        "The empirical scale is limited: 1B tokens and up to 1B parameters, with sequence length 512 and batch size 8. This is far from realistic LLM pre-training. There is no comparison against synchronous pipeline parallelism in wall-clock terms, nor against a direct SOAP-style optimizer in the asynchronous setting, and no error bars or multiple random seeds are reported.",
+        "Some central claims, such as delay scaling linearly with pipeline depth, are asserted rather than formally derived in the main text; the appendix analyzes memory-driven stage counts but not the actual delay scaling. The paper also lacks a dedicated limitations section discussing the strong theoretical assumptions and practical constraints."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "Identifies a practically relevant problem: asynchronous pipeline parallelism suffers from gradient staleness that worsens with pipeline depth, with a reported 5.81x slowdown from 1 to 32 stages (Figure 2a).",
+        "Provides a plausible mechanistic explanation (basis misalignment between Hessian eigenbasis and coordinate basis) and supports it with controlled quadratic and spiral loss experiments (Figures 3-4) showing Adam's oscillations and delay sensitivity under misalignment.",
+        "Proposes a concrete and efficient method (basis rotation with Kronecker-factored eigenbasis estimation) and reports large empirical improvements over three asynchronous pipeline baselines (e.g., 76.8% fewer iterations at 1B scale).",
+        "Includes a theoretical convergence analysis for delayed Adam under coordinate-wise smoothness, extending existing results to include a delay parameter.",
+        "Evaluates additional aspects such as eigenbasis approximation quality, robustness without weight stashing, computational efficiency, and validation loss, showing consistent trends."
+      ],
+      "weaknesses": [
+        "The central theoretical claim that delay's negative effect is amplified by basis misalignment is not adequately supported: in Theorem 2.3 the leading-order ratio between delayed and non-delayed convergence is sqrt(1+τ), independent of C. The bound shows absolute degradation with both C and τ, but does not establish that the relative penalty from delay increases with misalignment, as the paper asserts.",
+        "No comparison to existing second-order optimizers (SOAP, Shampoo, EShampoo, GaLore) in the asynchronous pipeline setting. Since the proposed basis rotation is essentially a variant of these methods, the reported gains may stem from second-order preconditioning rather than the specific alignment mechanism, making the novelty and attribution unclear.",
+        "Experimental scale is limited: models of 95M and 1B parameters trained on only 1B tokens from OpenWebText with sequence length 512 and batch size 8. This is far from typical LLM pre-training scale (billions/trillions of tokens), so claims about 'large-scale asynchronous training' and scalability are not well supported.",
+        "No comparison to synchronous pipeline parallelism (e.g., GPipe) in wall-clock time. The motivation is that asynchronous execution eliminates bubbles, but it is unclear whether basis rotation's overhead still makes it faster than synchronous training in practice.",
+        "The paper lacks an explicit limitations section discussing the small-scale evaluation, absence of second-order baselines, theoretical gaps, and the fact that the delay τ is not quantitatively linked to the number of pipeline stages P.",
+        "Some claims are overstated given the evidence (e.g., 'restoring scalable asynchronous training' and 'vital component for enabling high-fidelity, large-scale asynchronous pipeline parallelism')."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Identifies and formalizes basis misalignment between the Hessian eigenbasis and the standard coordinate basis as a key factor that makes Adam-type optimizers sensitive to gradient staleness in asynchronous pipeline parallelism, supported by controlled quadratic and spiral-loss experiments.",
+        "Provides a convergence analysis for asynchronous Adam with delayed gradients showing that the delay penalty scales multiplicatively with coordinate-wise smoothness C, a proxy for basis misalignment, and proves that bilateral rotation minimizes the (1,1)-norm under a Kronecker-factorized empirical Fisher assumption.",
+        "Proposes a practical basis rotation framework with efficient eigenbasis-estimation strategies along two axes (approximation source and rotation geometry), enabling a controllable trade-off between estimation fidelity and memory/compute overhead.",
+        "Demonstrates large and consistent empirical gains: up to 76.8% fewer iterations to reach the same training loss, slowdown reduced from 4.24x to 1.27x at P=32, and restored scaling with model size up to 1B parameters.",
+        "Includes extensive experiments across model sizes (95M–1B), pipeline depths (P=1–32), baselines (PipeDream, PipeDream-LR, Nesterov, Delay Compensation), ablations on estimation fidelity, weight stashing, basis update frequency, and wall-clock efficiency.",
+        "Good reproducibility: algorithms, hyperparameters, and proofs are provided in the appendix; experiments use accessible hardware and standard architectures, making the setup relatively easy to reproduce."
+      ],
+      "weaknesses": [
+        "Algorithmic novelty is limited: basis rotation closely resembles existing second-order/rotation optimizers such as SOAP, GaLore, and Shampoo; the primary novelty is the application and analysis in the asynchronous pipeline setting rather than a fundamentally new optimizer.",
+        "Theory-practice gap: Theorem 2.3 assumes beta1=0 and coordinate-wise l_inf smoothness, while the experiments use beta1=0.9 and a different optimizer configuration; the convergence analysis does not directly cover the actual method used in practice.",
+        "Strong theoretical assumptions: the analysis relies on exact Kronecker-factorized empirical Fisher and l_inf smoothness, which may not hold for real Transformer Hessians; C as a misalignment proxy conflates overall curvature scale with basis misalignment.",
+        "Experimental scale is modest: training uses 1B tokens and models up to 1B parameters with P<=32, so claims about large-scale scalability to hundreds of stages are not empirically validated; no multiple seeds or error bars are reported, limiting statistical reliability.",
+        "Potential confound: basis rotation is a stronger optimizer even without delay, so absolute iteration reduction may partly reflect general optimizer improvement rather than delay mitigation alone, although the slowdown metric partly controls for this.",
+        "Practical overheads are not fully quantified: memory costs of weight stashing and eigenbasis storage for large models are not thoroughly analyzed; Algorithm 1 also does not specify how the second-moment buffer is handled when the basis changes, which may affect correctness and reproducibility.",
+        "Presentation issues: some notation inconsistencies (e.g., x vs. w, T/2 vs. T/T typographical errors in the proof), unclear reset behavior on basis updates, and a few figure/OCR quality issues reduce clarity."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Novel and well-motivated diagnosis: the paper identifies basis misalignment (between the Hessian eigenbasis and the standard coordinate basis) as the root cause of Adam-type optimizers' sensitivity to gradient staleness in asynchronous pipeline parallelism. This is supported by a controlled quadratic/spiral-loss study (Figure 3, Figure 4) and by a direct correlation between basis-aligned regions and negligible slowdown.",
+        "Theoretical support is provided: Theorem 2.3 shows delay τ enters the convergence bound multiplicatively with a curvature/misalignment proxy C (the (1,1)-norm), formalizing the claim that misalignment amplifies the delay penalty; the stage-dependent extension (Theorem E.6) yields a stage-aware effective delay τ' that motivates the stage-aware rotation strategy, and Theorem 3.1 shows bilateral rotation minimizes the (1,1)-norm.",
+        "Comprehensive empirical evaluation: multiple async baselines (PipeDream, PipeDream-LR, Nesterov, Delay Compensation), an ablation over four eigenbasis-estimation strategies, comparison with preconditioned optimizers (SOAP, Muon, Scion), MoE generalization, wall-clock/GPU-hour results, robustness without weight stashing and with weight prediction, and scaling up to a 3B model.",
+        "Mechanistic validation in real LLM training (Figure 11): basis rotation dampens update oscillations along the dominant Hessian eigenvector and reduces the normalized Hessian (1,1)-norm from 0.5436 to 0.1228, directly supporting the central hypothesis.",
+        "Reproducibility is adequate: detailed hyperparameters, optimizer settings, model configs, the virtual-stage configuration rationale, and a memory-overhead analysis (Appendix H) are provided.",
+        "The limitations discussion is honest (weight-stashing memory scaling, virtual-stage caveats, partial 3B training), which is appropriate and not penalized."
+      ],
+      "weaknesses": [
+        "Limited methodological originality: basis rotation is essentially Kronecker-factored (empirical Fisher) rotation of the kind used in SOAP/GaLore, and Table 3 shows SOAP already attains a slowdown of 1.34× vs. basis rotation's 1.27×. This suggests the specific proposed method is largely a repackaging of existing rotated optimizers, and the paper's true contribution is the diagnosis rather than the algorithm.",
+        "The (1,1)-norm is only a proxy for basis misalignment; the link between minimizing this proxy and delay robustness is argued heuristically rather than proven. Theorem 3.1 further relies on an exact Kronecker-factorized empirical Fisher assumption that need not hold in practice, so the claim that basis rotation 'minimizes basis misalignment' is only guaranteed under idealized conditions.",
+        "The convergence analysis is built directly on existing Adam analysis (Xie et al., 2025) with β1=0 in the main theorem, and the multiplicative (1+dτ) factor is a fairly expected consequence of standard delayed-gradient arguments (Stich & Karimireddy, 2020; Koloskova et al., 2022). The unusual assumption v0+ε > (…)/poly(T) also limits the direct applicability of the bound.",
+        "Experimental scale is modest relative to the paper's framing about 'large-scale' training: models are trained on only 1B tokens of OpenWebText, and the flagship 3B result is a partial run (82K of 250K steps) shown only in the appendix. The headline 81.7% figure rests on this partial 3B curve.",
+        "The virtual-stage setup (32 stages mapped onto 8 GPUs) preserves the delay pattern but not true distributed communication/synchronization behavior; the paper does not analyze whether the periodic basis estimation and rotation introduce additional communication or synchronization overhead that could erode the wall-clock gains at real multi-node scale.",
+        "Minor presentation issues: the abstract reports 81.7% while Figure 2b reports 81.6%; Figure 5's caption references panels '(c-e)' that do not match the panel labels; and the equality of the effective-delay definition with the claimed multiplicative interaction is asserted rather than shown in the main text."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "Addresses an important and practical problem: gradient staleness in asynchronous pipeline parallelism, with a clear motivation and intuitive framing around basis alignment.",
+        "Provides a coherent intuition and empirical demonstrations that basis alignment affects delay sensitivity (e.g., Figures 3, 4, and 11), including reduced oscillations along dominant Hessian eigenvectors.",
+        "Conducts a relatively broad set of experiments across model sizes (95M to 3B), multiple baselines, and additional settings such as MoE, weight stashing, and preconditioned optimizers.",
+        "The basis rotation framework is clearly described and connects to established second-order optimization ideas, with a well-organized presentation.",
+        "The paper attempts a formal convergence analysis and extends it to stage-dependent delays, which is a useful direction if the analysis were corrected."
+      ],
+      "weaknesses": [
+        "The central theoretical claim that basis misalignment amplifies the delay penalty is not supported by Theorem 2.3. The bound contains a factor (1 + dτ) multiplying C in both the delay and non-delay terms; the relative delay penalty is therefore independent of C. Thus the theorem does not show that larger misalignment (larger C) exacerbates the relative effect of delay, contradicting the paper's stated theoretical verification.",
+        "The proposed method is essentially a re-implementation of existing optimizers (SOAP, GaLore, Shampoo) with minor modifications. The paper's own Table 3 shows SOAP achieves a 1.34× slowdown versus basis rotation's 1.27×, indicating that the specific contribution beyond known basis-alignment methods is marginal.",
+        "Experimental scale is insufficient for the claims: the 3B model is trained on only ~1B tokens (≈0.33 tokens per parameter) and results are partial (82K of 250K steps). There is no comparison to synchronous pipeline training in wall-clock time, and no error bars or multiple seeds are reported.",
+        "The claim that baselines violate scaling laws when increasing model size is confounded by the fixed token budget. Larger models are undertrained, so increased loss is not necessarily due to delay; the observed 'critical failure' may be an artifact of insufficient training data.",
+        "Missing wall-clock and memory overhead comparisons for the 1B and 3B models. The main 2nd/bilateral strategy may incur large memory overhead (by the paper's own per-matrix estimates, roughly 78 GB extra for a 3B model), which is not reported or discussed.",
+        "The virtual-stage setup (multiple pipeline stages per GPU) may not faithfully emulate true asynchronous distributed pipeline parallelism, affecting wall-clock and hardware utilization claims.",
+        "The paper lacks a limitations section and overstates novelty: delay scaling with pipeline depth is well known, and basis misalignment has been studied previously.",
+        "Reproducibility concerns: no code is provided, hyperparameters for the 3B model are incomplete (e.g., batch size, total tokens), and single-run results without seeds make it difficult to assess variance."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "The paper identifies and formalizes a practically important failure mode in asynchronous pipeline parallelism: gradient delay grows with pipeline depth, and basis misalignment between the Hessian eigenbasis and the coordinate basis makes Adam-type optimizers especially vulnerable to stale gradients. This is a novel and useful framing.",
+        "It provides a convergence analysis for asynchronous Adam under delay that explicitly couples the delay tau with the Hessian (1,1)-norm C, showing that the delay penalty is amplified under basis misalignment; the extension to stage-dependent delay is a natural and useful refinement.",
+        "The proposed basis rotation framework is practical: it introduces a unified design space of eigenbasis-estimation strategies (1st/2nd order, unilateral/bilateral) and analyzes memory overhead, with theoretical support that bilateral rotation minimizes the Hessian (1,1)-norm under a Kronecker-factorized empirical Fisher.",
+        "The empirical evaluation is extensive and convincing: models up to 3B parameters, multiple async baselines (PipeDream, PipeDream-LR, Nesterov) and preconditioned optimizers (SOAP, Muon, Scion), ablations on basis update frequency, weight stashing, stage-aware scheduling, MoE, validation loss, and wall-clock GPU hours. Results show large improvements over standard async baselines (e.g., 1.27x slowdown vs 4.24x at P=32, 81.7% fewer iterations at 3B).",
+        "The paper empirically validates the proposed mechanism by tracking oscillations along the dominant Hessian eigenvector and measuring a reduction in normalized Hessian (1,1)-norm from 0.5436 to 0.1228, directly supporting the basis-misalignment explanation.",
+        "Reproducibility is reasonably addressed through detailed architecture, hyperparameter, optimizer, hardware, and scheduling descriptions; limitations such as weight-stashing memory, virtual pipeline stages, and basis-update overhead are discussed honestly."
+      ],
+      "weaknesses": [
+        "The proposed method is conceptually close to existing preconditioned optimizers, especially SOAP (which corresponds to the 2nd-order/bilateral strategy) and GaLore (1st-order/unilateral). The paper acknowledges this, but the direct comparison with SOAP shows only a modest advantage (1.27x vs 1.34x slowdown), so the improvement over the closest prior work is relatively small. The headline 81.7% iteration reduction is against async baselines that do not perform basis alignment, not against SOAP.",
+        "Theoretical guarantees for basis rotation assume an exact Kronecker-factorized empirical Fisher; in practice this is an approximation, and the paper does not bound the effect of approximation error on convergence or delay robustness. The convergence bound also uses the Hessian (1,1)-norm as a proxy for misalignment, which conflates curvature scale with misalignment and may not fully isolate the claimed mechanism.",
+        "The main convergence theorem assumes beta1=0 (with beta1>0 relegated to an appendix extension) and yields a delay term (1+d*tau) that includes a large dimension factor d; the practical tightness and implications of this bound are not fully explored. The theorem also relies on somewhat restrictive assumptions such as v0+epsilon > ... / poly(T).",
+        "Experiments are limited to models up to 3B parameters and 1B training tokens (OpenWebText), which is modest relative to the large-scale LLM training that motivates the work. The use of virtual pipeline stages sharing physical GPUs when P exceeds available devices may not faithfully capture real multi-node asynchronous pipeline communication and scheduling overhead, though the authors argue that comparisons remain fair.",
+        "No code or artifact release is mentioned, and some implementation details (e.g., exact eigenbasis update procedure, power iteration and QR details) are only partially specified, limiting full reproducibility.",
+        "Presentation has some issues: typos (e.g., 81.6% vs 81.7%, min over T/T < t <= T in Theorem 2.3), dense notation, and inconsistent symbols between main text and appendix (x vs w, g vs g-bar, tilde-v vs hat-v) make the theoretical sections harder to follow."
+      ]
+    }
+  }
+}

@@ -1,0 +1,129 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 2,
+      "strengths": [
+        "The paper identifies a real and important mismatch between existing MoE offloading systems and UMA-based edge platforms, supported by motivating measurements on server vs. Jetson AGX Orin (Figure 1).",
+        "The core idea of exploiting low-entropy BF16 exponent bits via lossless compression and compression-aware hierarchical caching is promising and avoids the security/behavioral risks of lossy quantization.",
+        "The system combines compression, cache management, and scheduling in a co-design, with a prototype implemented in C++/CUDA and Python and evaluated on multiple MoE models and two Jetson platforms.",
+        "The paper provides a theoretical approximation bound for the proposed scheduler and a maximum-entropy justification for the cache-hit modeling, showing ambition beyond pure empirical systems work."
+      ],
+      "weaknesses": [
+        "The evaluation lacks critical component-wise ablations. The main claimed contributions are compression and cache-affinity scheduling, but the ablation only replaces cache eviction policies and removes cache planning. There is no isolation of the scheduling algorithm or lossless compression; therefore the reported gains cannot be attributed to the central technical contributions.",
+        "The baselines are weak or misconfigured. DeepSpeed ZeRO-3 is a training-oriented offloading mechanism, not an inference-optimized MoE serving system; Accelerate is a general offloading library. The paper does not compare against highly related lossless LLM compression methods such as DF11, ZipNN, or Huff-LLM, nor against recent MoE serving systems such as MoE-Lightning, Klotski, ProMoE, Fiddler, KTransformers, SwapMoE, or D2MoE. This undermines the claimed state-of-the-art superiority.",
+        "The central theoretical guarantee (Theorem 3.1) is not convincingly established. The proof in Appendix B contains inconsistencies and questionable steps, including undefined event X_b, confusing notation (N vs. M), and a case analysis in Lemma B.5 that does not rigorously justify the bound for the actual system. The bound may not hold under the real implementation's cross-layer pipelining and multiple CUDA streams.",
+        "There is no correctness verification that ZipMoE produces bit-exact or token-identical outputs to the full-precision model. The paper repeatedly claims 'semantically lossless' and 'preserving model behavior,' but no token-level equivalence or end-to-end accuracy check is reported.",
+        "The abstract claims 'up to 72.77% inference latency reduction' and 'up to 6.76x higher throughput,' but the evaluation reports much larger numbers (e.g., up to 97.97% TPOT reduction and up to 42.49x throughput improvement). This inconsistency suggests stale or overstated claims and hurts credibility.",
+        "Reproducibility is insufficient. The paper does not provide code or an artifact, and omits key implementation details such as the compression backend/level, number of shards K, number of worker threads L, cache pool sizes, baseline configurations, random seeds, and exact prompt sampling procedure.",
+        "The paper lacks a limitations section. It does not discuss energy/power costs, which are critical for edge deployment, nor does it evaluate on actual mobile phones or Raspberry Pi despite claiming broad mobile/edge applicability. Only Jetson platforms are tested.",
+        "The cache planning algorithm may be computationally expensive: Algorithm 4 performs grid search over memory ratios and nested loops over cache-hit counts, with complexity scaling with the product of pool capacities. No planning overhead or scalability analysis is provided.",
+        "The claim that SM-cached experts achieve 'same zero latency as full-tensor cache hits' is not generally supported. For top-1 routing models such as SwitchTransformers, there is no other expert I/O in the same sparse layer to hide decompression latency, so the overlap argument fails in that important case.",
+        "The lossless compression only targets exponent bits and reduces model size to about 68%, which is modest and still requires substantial offloading. The claim of shifting MoE inference from I/O-bound to compute-centric is therefore likely overstated without detailed latency breakdowns or I/O measurements for ZipMoE itself."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Timely and well-motivated problem: the paper targets on-device MoE serving on UMA-based mobile SoCs and correctly identifies two concrete mismatches in existing offloading systems (batch-size-1 interactive latency, and the false assumption that CPU DRAM is a distinct external store from GPU memory). The motivation in §2.1 with the server-vs-edge breakdown (Fig. 1) is concrete and grounded in measurements.",
+        "The lossless framing is genuinely valuable and well argued: unlike quantization/pruning, bit-exact recovery preserves model behavior, and the paper connects this to the security risks of adversarially quantized models (§1, citing Shu et al./Egashira et al.). This is a defensible and non-trivial motivation for the compression direction.",
+        "The compression + compression-aware caching + scheduling co-design is a reasonable systems contribution, and the implementation (2.6K Python + 8K C++/CUDA) is evaluated on real edge hardware (Jetson AGX Orin 32/64GB) with three real open-source MoE models and real workloads (ShareGPT).",
+        "The paper attempts both a scheduling approximation guarantee (Thm 3.1) and a probabilistic cache-planning model with a maximum-entropy property (Thm 3.2), which is more than many serving papers provide.",
+        "Reported empirical gains over MoE-Infinity, DeepSpeed ZeRO-3, and Accelerate are substantial across TPOT, TTFT, throughput, and end-to-end latency, and the ablation over cache-management strategies (Fig. 10) is a useful sanity check."
+      ],
+      "weaknesses": [
+        "The core novelty — lossless compression of low-entropy exponent bits — is never compared against the prior lossless LLM-compression systems the paper itself cites (DFloat11/Zhang et al. 2025, ZipNN/Hershcovitch et al. 2025, Huff-LLM/Yubeaton et al. 2025). All baselines (MoE-Infinity, DeepSpeed ZeRO-3, Accelerate) are serving systems without lossless compression, so the reported speedups cannot be attributed to the compression contribution versus the caching/scheduling contribution. This is a decisive omission for a paper whose headline claim is compression-enabled I/O reduction.",
+        "Despite the repeated 'lossless'/'semantically lossless' claim, there is no verification that ZipMoE outputs are bit-identical (or at least behaviorally identical) to the uncompressed full-precision model: no perplexity, accuracy, or token-parity results, and no test of the memory-coalesced tensor-recovery kernel's numerical correctness. A 'lossless' claim requires this evidence.",
+        "Headline numbers are internally inconsistent. The abstract claims 'up to 72.77% inference latency reduction and up to 6.76× higher throughput,' while §5 reports 62.65%–97.97% TPOT reduction and 1.79×–42.49× throughput (and 3.03×–42.49× end-to-end). The abstract's maxima are lower than the body's, suggesting the reported gains are not consistently defined or that the abstract reflects a different version.",
+        "Fairness of the fixed-memory comparison is questionable. The paper states it exploits the OS page cache ('effective utilization of the page cache during fixed-memory experiments, which improves both memory and I/O efficiency'), which can hold offloaded/compressed tensors outside the enforced DRAM budget, effectively bypassing the memory constraint that the paper's whole thesis is built on. This can inflate the gains relative to baselines and is not controlled or ablated.",
+        "The theoretical analysis is of questionable novelty and rigor. The scheduler proof (Appendix B) is garbled and hard to verify: inconsistent notation (B_m vs B_M), an undefined threshold k in Definition A.1, undefined free variables in the charge arguments, and a loose (3-1/L) bound derived under an idealized two-resource model. The maximum-entropy result (Thm D.1) largely restates known weighted finite-population-sampling theory (Chen et al. 1994), with the DP merely computing a Poisson-binomial distribution; it does not obviously justify the modeling choices used at runtime.",
+        "The cache-planning model assumes independent Bernoulli expert selection with rank-based marginals, ignoring the strong correlations in real MoE routing. The 'Bayes robust' argument does not validate independence, and no empirical check (e.g., predicted vs. observed hit rates/makespan) is provided to show the planner's model tracks reality.",
+        "Baseline configuration is uneven: DeepSpeed is given a different (coarser, 18GB vs 20GB/10GB) memory budget and is described as memory-budget-agnostic, so the comparison does not cleanly isolate ZipMoE's contribution; no sensitivity sweep of the memory budget is given for the main baselines.",
+        "For an on-device/mobile serving paper, there is no energy or power evaluation, which is a primary constraint on edge devices and a natural axis where lossless compression (less I/O) should win; its absence weakens the practical significance claims.",
+        "Reproducibility is under-specified: no artifact/code release is mentioned, and key tuning parameters (number of E-chunk shards K, worker thread count L, tolerance margin δ, grid step) are not reported for the experiments, making it hard to reproduce or assess robustness."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "The paper introduces a novel approach to on-device MoE serving by combining lossless compression of exponent bits with a compression-aware caching and scheduling system. This addresses a critical bottleneck in edge deployment: I/O stalls due to limited memory and slow storage.",
+        "The technical contributions are solid: the cache-affinity scheduler with a provable constant-factor approximation (Theorem 3.1) and the hierarchical cache planning based on maximum entropy modeling (Theorem 3.2) are theoretically grounded and practically relevant.",
+        "The evaluation is thorough, using three popular MoE models on two real edge platforms, comparing against strong baselines (MoE-Infinity, DeepSpeed, Accelerate). The results show substantial improvements in latency and throughput, supporting the central claims.",
+        "The paper is well-written and clearly structured, with helpful figures and a detailed appendix covering the scheduling algorithm, theoretical proofs, and cache planning. The implementation details are sufficient for reproducibility.",
+        "The shift from I/O-bound to compute-centric inference via parallel decompression is a promising direction that leverages underutilized CPU cores on mobile SoCs, and the lossless nature preserves model behavior, avoiding security risks of quantization."
+      ],
+      "weaknesses": [
+        "The paper lacks a dedicated limitations section. While the authors mention some constraints in the appendix, a discussion of scenarios where the approach may not apply (e.g., highly skewed expert activation, systems with very few CPU cores) would improve the paper's completeness.",
+        "The theoretical analysis assumes ideal conditions (e.g., deterministic decompression and I/O delays). Real-world variability could affect the approximation guarantee, and the paper does not empirically validate the bound or discuss its practical tightness.",
+        "The rank-based workload modeling assumes stationarity of expert popularity ranks, which may not hold for all workloads. The paper does not evaluate robustness to distribution shifts or provide guidance on handling non-stationary expert activation patterns.",
+        "The implementation details are somewhat sparse: the exact grid search procedure for cache partitioning and the tuning of the tolerance margin δ are not fully specified, which could hinder reproducibility.",
+        "The impact statement is generic and does not address potential negative societal consequences of more efficient on-device MoE inference (e.g., enabling harmful applications), though this is not a major flaw."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Proposes a novel system design that integrates lossless compression of exponent bits with compression-aware caching and cache-affinity scheduling specifically for MoE inference on UMA-based edge devices.",
+        "Achieves substantial empirical improvements across multiple models and hardware: up to 97.97% TPOT reduction, 53.25-87.90% TTFT reduction, and 1.79x-42.49x throughput improvement over strong baselines.",
+        "Introduces a principled cache planning algorithm based on rank-based workload modeling and maximum entropy DP, with sensitivity analysis showing robustness to distribution shifts.",
+        "Provides a theoretical analysis of the scheduler with a constant-factor approximation guarantee, which, while flawed, adds a layer of rigor to the system design.",
+        "Conducts extensive evaluations including ablations that isolate the contribution of the core system (~76% of gain) versus cache management (~24%), and isolates the effect of the OS page cache.",
+        "Includes a detailed appendix with algorithms, proofs, and additional results, demonstrating thoroughness in system description.",
+        "Discusses limitations such as hardware generalizability and alternative compressors, showing awareness of the system's scope."
+      ],
+      "weaknesses": [
+        "The central claim of 'semantically lossless' and 'identical model behavior' is not empirically verified: the paper provides no accuracy, perplexity, or task-level results to confirm that the reconstructed model produces bit-identical outputs to the original.",
+        "The theoretical guarantee (Theorem 3.1) has potential flaws: the condition for no decompression bubbles (c < ρu) appears inconsistent with the per-chunk decompression cost model, and the charging argument may not hold when the I/O thread is busy with other tasks. The bound is also not validated empirically.",
+        "Missing comparison with quantization-based methods (e.g., 4-bit GPTQ/AWQ), which are the primary alternative for memory-constrained on-device inference. The paper motivates lossless compression via security concerns but does not quantify the performance trade-off against quantized models.",
+        "Inconsistent performance numbers: the abstract claims up to 72.77% latency reduction and 6.76x throughput, while Section 5.1 reports up to 97.97% TPOT reduction and 42.49x throughput improvement. This discrepancy needs clarification.",
+        "Evaluation is limited to NVIDIA Jetson AGX Orin (64GB and 32GB), which is a high-end edge device, not representative of mobile phones or Raspberry Pi. Behavior on slower UFS storage and heterogeneous CPU cores (e.g., big.LITTLE) is not tested.",
+        "Baselines (DeepSpeed, Accelerate) are general offloading systems not optimized for MoE, and may not be fairly tuned for UMA edge hardware. The FineMoE comparison in the appendix shows anomalous ~20s latency, suggesting potential misconfiguration or unfair setup.",
+        "Reproducibility is hindered by missing code link (abstract says 'Our code is available at:' but no URL), unspecified hyperparameters (e.g., K, L, δ, default compressor), and lack of analysis on the computational cost of the cache planning algorithm.",
+        "The cache planning model assumes independent expert selections and a stationary rank-based distribution. While sensitivity to distribution shift is tested, the goodness-of-fit of the maximum entropy model to real expert activation traces is not evaluated.",
+        "No energy efficiency measurements are provided, which are critical for edge and mobile deployments.",
+        "The paper is primarily a systems contribution and may be better suited for a systems venue; its machine learning novelty is limited, though it addresses an important application area."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Targets a genuinely relevant and practical problem: on-device MoE serving under tight memory budgets. The decision to pursue a lossless approach is well-motivated by the documented safety/behavioral risks of quantization (Sec. 1), and the resulting method preserves model behavior by construction.",
+        "The system is a substantial engineering effort: bit-field decomposition, a compression/decompression pipeline, a zero-copy UMA-aware data path, a memory-coalesced GPU reconstruction kernel, hierarchical caching, and a scheduler, all implemented in C++/CUDA and evaluated on real edge hardware (Jetson AGX Orin 64GB/32GB).",
+        "The compression-aware caching insight is reasonable and somewhat novel: because sign/mantissa bits are incompressible and are ~50% of the tensor, caching them yields ~2x tensor coverage under a fixed budget while exponent-bit decompression is hidden behind I/O of other experts (Sec. 2.3, Sec. 3.2).",
+        "The paper makes an attempt at formal guarantees (Theorem 3.1, constant-factor approximation) and a maximum-entropy justification for the cache-planning model (Theorem 3.2), and includes an ablation isolating the OS page-cache effect (Table 2) plus a sensitivity analysis to workload shift (Table 4)."
+      ],
+      "weaknesses": [
+        "The most directly relevant prior systems are never compared experimentally. DFloat11, Huff-LLM, NeuZip, and ZipNN are lossless LLM compression/inference methods; the paper discusses DFloat11 only to dismiss it qualitatively (\"overhead becomes prohibitive... rarely encountered in on-device inference\") without any measurement. Without these comparisons, the incremental contribution over existing lossless approaches is not substantiated.",
+        "Baseline choice is weak and inflates headline claims. DeepSpeed ZeRO-3 and Accelerate are generic offloading frameworks, not MoE-serving specialists, so the reported 42.49x throughput and 72.77% latency gains are largely against weak baselines. Against MoE-Infinity (the only real MoE baseline), gains are far more modest (~2-3x), and FineMoE is relegated to the appendix (Tables 5-6).",
+        "The OS page-cache confound is not fully controlled in the headline comparisons. ZipMoE opportunistically uses the page cache (Sec. 4, Sec. 5.1), which is not part of the proposed contribution and is not equally granted to baselines; the headline numbers therefore conflate the proposed techniques with an OS-level effect. Table 2 mitigates but does not eliminate this concern.",
+        "The theoretically-motivated algorithmic contributions contribute little in practice. Table 1 shows the cache-pool planning (+P) adds only ~0.12/3.70 (about 3%) of the throughput gain and hierarchical pools (+C) ~20%, while ~76% comes from \"the core system.\" This undercuts the significance of the caching/scheduling contributions that carry the paper's formal claims.",
+        "The proof of Theorem 3.1 (Appendix B) is sloppy and the guarantee is loose. Eq. (15) misuses an indicator (1_{X_b}) where a charge term is intended, Lemma B.5's case analysis is hard to verify, and the constant (up to 3-1/L ~ 2.67) is very weak. Modeling assumptions (independent Bernoulli expert selection) are strong and unvalidated. Describing this as a \"provable performance guarantee\" overstates the rigor.",
+        "Claims and reported ranges are inconsistent and hard to map to evidence. Abstract claims (72.77% latency reduction, 6.76x throughput) do not clearly correspond to the tables (which report e.g. 1.79x-42.49x), and the enormous ranges reflect baseline weakness rather than consistent, well-characterized gains.",
+        "The \"semantically lossless\" claim is technically sound but underexplored empirically: no output-equivalence or quality comparison against a strong quantization baseline is provided, so the practical cost/benefit versus lossy on-device serving is argued qualitatively rather than measured.",
+        "Presentation quality is below the bar: figures are low-resolution screenshots, references contain duplicated entries and wrong years (e.g., Maiti et al. 2020/2023, Yang & Wang 2025 cited as 2024), and there are numerous typographical/formatting errors."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Addresses an important and timely problem: on-device MoE serving under tight memory and I/O constraints, where lossless behavior preservation is desirable.",
+        "Proposes a complete system with compression-aware hierarchical caching, DAG-based scheduling, and CPU-parallel decompression, exploiting BF16 exponent-bit redundancy.",
+        "Provides theoretical analysis: a constant-factor approximation for the cache-affinity scheduler and a maximum-entropy cache-planning formulation.",
+        "Empirical evaluation is broad: multiple MoE models, two Jetson edge platforms, TTFT/TPOT/throughput/end-to-end metrics, ablations, page-cache isolation, distribution-shift sensitivity, and an additional FineMoE baseline.",
+        "Reports substantial speedups over MoE-Infinity, DeepSpeed, and Accelerate, and discusses hardware generalizability and compressor extensibility.",
+        "Lossless compression avoids the behavioral drift and security risks of quantization, which is a meaningful advantage for on-device deployments."
+      ],
+      "weaknesses": [
+        "Abstract's headline numbers (72.77% latency reduction, 6.76x throughput) are inconsistent with the main results (up to 97.97% TPOT reduction, up to 42.49x throughput), reducing trust in the summary.",
+        "Code URL is missing in the abstract, and key reproducibility details (exact hyperparameters, baseline configurations, versions, scheduler parameters, cache pool settings) are insufficiently specified.",
+        "The theoretical guarantee is not fully convincing: the proof of Lemma B.5/Theorem B.7 has notation inconsistencies (σ_I vs σ_1, compute-bound vs compute-dominant) and relies on a charging argument whose case analysis is hard to verify; the constant-factor bound is also for a simplified per-layer model.",
+        "Hardware evaluation is limited to Jetson AGX Orin despite claims about mobile phones, Raspberry Pi, and general edge platforms; no results on other UMA or heterogeneous-memory devices.",
+        "Baseline comparison is incomplete: no comparison to lossless-compression-based LLM serving systems (e.g., DFloat11, Huff-LLM, ZipNN) or to quantization-based on-device MoE systems; ablation 'baseline' in Table 1 is not clearly defined.",
+        "No empirical verification of exact bitwise lossless reconstruction or output equivalence is reported; 'semantically lossless' is assumed rather than demonstrated.",
+        "The maximum-entropy cache-planning theorem is mathematically interesting but its connection to 'Bayes robustness' is overclaimed and not empirically validated.",
+        "Presentation is dense and has several inconsistencies: low-resolution figures, mismatched reference years/names, unclear definitions of task types, and missing details in the main text that are relegated to appendices."
+      ]
+    }
+  }
+}

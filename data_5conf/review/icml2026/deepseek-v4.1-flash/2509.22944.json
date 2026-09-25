@@ -1,0 +1,122 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Simple, calibration-free dual-scale parameterization that adds a second-axis scale factor and can be folded into activations with minimal overhead, making it architecture-agnostic and layer-independent.",
+        "Novel proxy metric 'matrix imbalance' and a modified Sinkhorn-Knopp-style algorithm for balancing row/column standard deviations; empirically shown to reduce kurtosis and improve quantization in Fig. 2.",
+        "Extensive experiments across Qwen3 family, Llama, DeepSeek, and MoE models at 3/4-bit, including uniform/non-uniform, calibrated/uncalibrated, memory-perplexity Pareto plots, flip rates, QA, reasoning, timing, and ablations.",
+        "Demonstrates compatibility with AWQ calibration (A-SINQ) and non-uniform NF4 quantization, and shows fast quantization time (~1.1x RTN) with no inter-layer dependencies.",
+        "Reproducibility is supported by a code release and detailed algorithmic description (log-domain accumulation, clipping, early stopping), though the link is truncated in the extracted PDF."
+      ],
+      "weaknesses": [
+        "The core algorithmic contribution (Sinkhorn normalization) is not ablated against simpler dual-scale heuristics (e.g., direct row/column std normalization, random scales, or a single balancing step), so it is unclear whether the Sinkhorn iteration is necessary or the gains come merely from adding a second scale.",
+        "The 'matrix imbalance' proxy is heuristic and lacks theoretical justification; there is no proof that minimizing it minimizes quantization error or end-to-end loss. The connection is only empirically shown on one model (Qwen3-1.7B) and not rigorously analyzed.",
+        "The modified Sinkhorn algorithm has no convergence guarantees and relies on unspecified implementation details (clipping thresholds, early-stopping criteria, log-domain accumulation), which may hinder exact reproducibility.",
+        "Presentation issues: Table 5 mislabels a 3-bit block as '1-bit'; Eq. 5 is malformed with an extra x term; Algorithm 1 has duplicate s̅ and a confusing return statement; the text contains typos such as 'Formulacally'; the code link is missing in the extracted PDF.",
+        "Baseline fairness is questionable: HQQ on Llama 3-70B 3-bit reports 85.64 Wiki2 (vs RTN 5.26), and Hadamard+RTN is sometimes worse than RTN, suggesting mistuned baselines or implementation issues that cast doubt on comparisons.",
+        "Gains at 4-bit are marginal (e.g., Qwen3-235B 4-bit Wiki2 5.58 vs RTN 5.65; DeepSeek-V2.5 5.48 vs 5.49), contradicting the abstract's 'bit-widths ≤ 4' framing; the main benefits appear at 3-bit only.",
+        "No explicit limitations section; the paper does not discuss failure cases, the extra activation-scaling overhead of the second scale, or scenarios where calibration remains preferable.",
+        "Missing comparisons to other calibration-free methods such as QuIP# and no experiments combining SINQ with activation quantization, despite activation quantization being a key motivation in the introduction."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The core idea is simple, intuitive, and practically motivated: adding a second scale vector along the column dimension (W ≈ s ⊙ Q ⊙ t) lets the quantizer trade off outlier-induced error between rows and columns, and the Sinkhorn–Knopp-style iteration is a fast, calibration-free way to find these scales. The method is architecture-agnostic with no inter-layer dependencies, which is a genuine deployment advantage.",
+        "The empirical evaluation is broad and well-scoped: Qwen3 (0.6B–235B), DeepSeek-V2.5-236B and V3-685B, Llama 2/3, and MoE models; 3-bit and 4-bit; uniform (RTN/HQQ) and non-uniform (NF4/FP4/HIGGS); calibration-free and calibrated (GPTQ/AWQ); perplexity, flip rates, reasoning benchmarks, and quantization timing. Reporting actual memory and Pareto fronts is good practice, and code is released.",
+        "Quantization is fast (≈1.1× RTN, faster than HQQ and far faster than AWQ/GPTQ), and the method composes cleanly with non-uniform levels (NF4) and with AWQ calibration (A-SINQ), demonstrating orthogonality to existing techniques.",
+        "Gains are substantial in the 3-bit calibration-free regime (e.g., Qwen3-1.7B Wiki2 22.39 vs 32.10 for HQQ; Qwen3-235B-A22B 3-bit 6.27 vs 10.11 RTN), which supports the paper's main value proposition for the low-bit, no-calibration setting."
+      ],
+      "weaknesses": [
+        "Limited novelty. Two-sided/diagonal scaling and Sinkhorn-type normalization for quantization overlap with existing weight-space transformations (DuQuant's dual transformation, AWQ/SmoothQuant channel scaling, Hadamard/rotation methods). The paper cites these but does not clearly delineate the methodological delta, and the 'dual-scale' framing is presented as new when the underlying mechanism is essentially diagonal reparameterization plus a normalization heuristic.",
+        "Weak theoretical grounding. The 'matrix imbalance' proxy (Eq. 4) is a heuristic ratio of max-to-min row/column standard deviations; there is no analysis or error bound connecting it to quantization error, and no convergence guarantee for the modified Sinkhorn iteration (the paper relies on log-domain accumulation, clipping, and early stopping, implicitly acknowledging it may not converge). The claim that imbalance is a better proxy than kurtosis rests on a single model (Qwen3-1.7B) and one gradient-based kurtosis optimizer (Fig. 2), which is not a systematic study.",
+        "Marginal gains in the most practically relevant setting (4-bit). For DeepSeek-V2.5-236B 4-bit, SINQ 5.48 vs RTN 5.49; Qwen3-235B 4-bit 5.58 vs 5.60; several Qwen3 4-bit numbers are within noise, and the authors themselves note in the Fig. 3 caption that the distance from the 4-bit Pareto front is '<0.01 ppl.' The abstract's claim of 'significantly' improving perplexity is overstated.",
+        "Anomalous/suspicious numbers that inflate the apparent advantage and undermine confidence. Qwen3-32B 3-bit RTN Wiki2 = 30.78 is far worse than Qwen3-14B RTN (10.50) with no explanation, which artificially inflates the 3-bit improvement; Table 5 reports A-SINQ 4-bit Qwen3-1.7B Wiki2 = 16.67, exactly equal to the BF16 value (16.67), which is implausible and suggests a data/typo problem.",
+        "Presentation and correctness errors. Table 5 labels the 3-bit section '1-bit'; Algorithm 1 notation is broken (line 2 'W ← W', line 9 'Q, s̅, s̅ ← Quantize(W)' with a duplicated symbol, ambiguous return statement), and Eq. 4 is muddled. Bolding appears misapplied in Table 1 (RTN values are bolded even where SINQ is clearly better).",
+        "Baseline fairness. Several key baselines (RTN, Hadamard+RTN, GPTQ) are self-implemented (marked †) and RTN looks unusually weak in places, so it is unclear whether comparisons reflect method differences or implementation differences; improvements over HQQ are often within noise. Memory accounting that includes activations (identical across weight-only methods) may further obscure real differences and shift Pareto fronts.",
+        "The abstract/introduction's framing ('closing the gap' to calibrated and non-uniform quantization) is not fully supported: in 4-bit the gap to calibrated methods remains, and the comparisons to HIGGS conflate memory/format differences, with the fairer Table 11 comparison relegated to the appendix."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "The core idea is simple, clean, and clearly motivated: adding a second scale vector along the column dimension (Eq. 2) lets the quantizer trade off outlier-induced error between rows and columns, which single-scale formats cannot do (Fig. 1). This is a natural and effective extension of standard per-channel scaling.",
+        "The proposed Sinkhorn-Knopp-style algorithm (Alg. 1) that alternately normalizes row and column standard deviations is elegant, fast, and calibration-free. The reported quantization cost of ~1.1x RTN (Table 7) is a genuine practical advantage over HQQ (>2x), AWQ (>30x), and GPTQ (>60x).",
+        "The empirical evaluation is extensive and convincing across scales and architectures: Qwen3 0.6B-235B-A22B, DeepSeek-V2.5-236B, DeepSeek-V3-685B, Llama 2/3, and MoE models (Tables 1-5, 8-12). The gains are especially large at 3-bit (e.g., Qwen3-32B: RTN 30.78 vs SINQ 8.79 Wiki2).",
+        "The comparison is fair with respect to memory overhead: the paper accounts for auxiliary parameter count (1D vs 2D tiling, Sec. 2.1.2) and reports actual memory use in Pareto plots (Fig. 3), rather than comparing at nominal bit-width only.",
+        "The method is shown to be orthogonal and composable: it combines with AWQ calibration (A-SINQ, Sec. 2.2.2, Table 5) and with non-uniform NF4 levels (Table 4), and the ordering of operations for AWQ compatibility is thoughtfully addressed.",
+        "Architecture-agnostic, layer-independent design (no inter-layer dependencies unlike rotation-based methods) is a real practical advantage for deploying to new architectures, and this claim is substantiated by out-of-the-box results on MLA/MoE models.",
+        "Reproducibility is well-supported: code is released, timing distributions are reported (Fig. 5), and ablation studies on tiling, shift usage, and auxiliary precision are provided (Fig. 4).",
+        "The related-work discussion is thorough and positions SINQ clearly relative to HQQ, Hadamard/QuaRot/SpinQuant, GPTQ, AWQ, HIGGS, and Kurtail."
+      ],
+      "weaknesses": [
+        "The 'matrix imbalance' proxy (Eq. 4) is heuristic and lacks theoretical grounding. There is no analysis establishing that minimizing the max/min std-dev ratio provably reduces quantization error, nor a convergence guarantee for the std-dev Sinkhorn iteration (standard Sinkhorn theory applies to nonnegative row/column sums, not standard deviations). The connection is intuitive but asserted rather than proven.",
+        "The claim that imbalance is a better proxy than kurtosis rests on limited evidence: Fig. 2 is on a single model (Qwen3-1.7B). A broader study across model scales would strengthen this central design choice, which the method depends on.",
+        "At 4-bit the improvements are often marginal and within noise: e.g., Qwen3-14B (RTN 8.95/12.50 vs SINQ 8.76/12.21), DeepSeek-V2.5-236B (5.49/8.27 vs 5.48/8.25), and Qwen3-235B-A22B (5.65/9.49 vs 5.58/9.43). The strong contribution is concentrated at 3-bit, which the abstract acknowledges but the significance framing ('significantly improves') slightly overstates for the 4-bit regime.",
+        "Several hyperparameters of Alg. 1 are described only qualitatively ('clip update values to avoid large jumps', 'early-stopping measure'), without concrete values or sensitivity analysis in the main text. This limits exact reproducibility of the iteration behavior.",
+        "The comparison to Hadamard + RTN (a strong calibration-free baseline) shows SINQ winning on perplexity, but the paper does not analyze whether the two are complementary (e.g., combining a Hadamard transform with dual-scaling) or characterize when each is preferable beyond the memory Pareto plot.",
+        "The paper does not report variance/error bars on the perplexity and flip metrics for the main tables, making it hard to judge whether small deltas (particularly at 4-bit) are meaningful.",
+        "The reasoning results (Table 6) are explicitly labeled 'preliminary pass@1 results' with a small evaluation set, so the claim that SINQ 'sustains robust reasoning capabilities' is under-supported relative to the strength of the phrasing."
+      ]
+    }
+  },
+  "v4": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "The paper provides extensive experiments on multiple model families (Qwen3, Llama, Phi, DeepSeek, MoE, MLA) and quantization settings, consistently showing that SINQ outperforms calibration-free baselines (RTN, Hadamard+RTN, HQQ) on perplexity and flip rates at 3/4-bit, often reducing the gap to BF16 by over 50%.",
+        "The proposed method is simple, architecture-agnostic, layer-independent, and compatible with calibration (AWQ) and non-uniform quantization (NF4), making it practical for diverse deployment scenarios.",
+        "Efficiency is well documented: quantization time is only ~1.09x RTN (faster than HQQ), inference overhead is small (1.8% at batch 1, negligible in no-overhead/GGUF variants), and memory overhead is minimal.",
+        "The observation that column-wise weight standard deviations correlate with input activation magnitudes is interesting and provides a novel, calibration-free route to pseudo-activation-aware scaling.",
+        "Reproducibility is supported by released code, permissive licensing, open-weight models, and use of standard evaluation settings."
+      ],
+      "weaknesses": [
+        "Algorithm 1 is internally inconsistent: line 6 applies scales by division (W ⊘ exp(u) ⊘ exp(v)), while line 17 applies them by multiplication (W ⊙ exp(u*) ⊙ exp(v*)). Given the parameterization in Eq. 3, this either double-scales the weights or undoes the normalization, making the core method unreproducible as written and casting doubt on the central claims.",
+        "The theoretical justification for the weight-std/activation-magnitude relation (Eq. 4) is heuristic, based on a single-layer Adam simulation, and the paper does not directly show that SINQ's learned t scales achieve higher R^2 with μ_x than baselines in the main text.",
+        "Ablations are limited: there is no sensitivity analysis for key hyperparameters (number of iterations K, target variance τ, step-size clamps s_min/s_max, damping) and no direct comparison of Sinkhorn normalization against simpler column-wise scaling strategies.",
+        "Some claims are overstated: 'zero to negligible compute overhead' and 'identical inference time' are not fully supported by the measured 1.8% overhead at batch 1 and slightly lower end-to-end speedups than AWQ.",
+        "The paper lacks an explicit limitations section and does not discuss failure modes (e.g., when weight std devs are not predictive of activations, or for extremely sparse/outlier-heavy weights).",
+        "Presentation issues (missing code URL, typos like 'Formulically', unclear table labels such as 'SINQ'/'ART' for bit-width groups, and pseudocode ambiguity) hinder clarity."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Delivers a simple, practical, calibration-free weight-only quantization method that consistently improves perplexity across a wide range of model families (Qwen3, Llama, Phi, DeepSeek, MoE), scales (0.6B–235B), and bit-widths (3/4-bit), with the core claim (large gap reduction vs. uncalibrated uniform baselines) supported by Tables 1–3 and 11–19.",
+        "Useful and somewhat novel insight: column-wise weight standard deviations carry information about typical input magnitudes, enabling a 'pseudo-activation-aware' column scaling without calibration data; the Sinkhorn-Knopp-style normalization to balance row/column std is a clean way to operationalize this.",
+        "Demonstrates practical value beyond accuracy: negligible inference overhead (Table 5, ~1.8% worst case), fast quantization time (~1.1x RTN, faster than HQQ), a no-overhead variant, and a working GGUF/llama.cpp integration (Table 9).",
+        "Shows composability: SINQ combines with NF4 (non-uniform) and with AWQ calibration (A-SINQ), and is architecture-agnostic/per-layer, which is a genuine deployment advantage over rotation-based methods.",
+        "Reproducibility is reasonably strong: code in supplementary, open-weight models, and reuse of an open evaluation harness (Zheng et al., 2025) for perplexity settings."
+      ],
+      "weaknesses": [
+        "Modest originality: dual-scale (row+column) quantization and Sinkhorn-style normalization are both established ideas; the contribution is largely the specific combination plus the balancing heuristic, which is incremental rather than a fundamentally new method.",
+        "Weak theoretical grounding for the central 'pseudo-activation-awareness' claim. The supporting evidence is a toy single-layer Adam analysis (Eq. 4, Fig. 2b) whose fitted relation (s_W ∝ 1/sqrt(s_x)) is only loosely connected to the quantity actually used as predictor (1/s_W), and Fig. 2a is a histogram of R^2 values with many low correlations rather than a rigorous validation. The leap from this toy setting to real LLMs is asserted, not demonstrated.",
+        "No direct end-to-end ablation isolating the contribution of the Sinkhorn algorithm versus naive dual-scale column scaling. The necessity of the balancing procedure is argued via row-wise kurtosis (Fig. 2c, Fig. 7) rather than by showing perplexity differences, so it is unclear how much of the gain comes from the extra parameterization versus the normalization algorithm.",
+        "Baseline strength is questionable in places: HQQ is reported worse than RTN on Qwen3-14B (10.73 vs 10.50 Wiki2), and RTN on Qwen3-32B is anomalously bad (30.78), which can inflate relative gains. The headline '>50% gap reduction' holds against RTN but drops to roughly 20% (Wiki2) and 41% (C4) against HQQ on Qwen3-32B, so the abstract's claim is somewhat overstated relative to the strongest baseline.",
+        "Overclaiming in framing: 'largely closes the gap' between calibrated and uncalibrated methods is not fully supported—calibrated AWQ/GPTQ still win in several settings (e.g., 4-bit Qwen3-1.7B Wiki2 AWQ 16.90 vs SINQ 17.14; calibrated flips in Table 2 are often close or favor AWQ), and A-SINQ vs AWQ differences are frequently marginal.",
+        "No limitations discussion. The impact statement is generic, and constraints of the method (layer-scale sharing needed for the no-overhead variant, sensitivity to group size, auxiliary-variable precision, failure modes) are mentioned only in passing and never systematically analyzed.",
+        "Presentation issues: several figures (Fig. 2a histogram, Fig. 3) are dense and hard to interpret; the derivation linking Eq. 4 to the predictor used is not made clear, and the parameter-count argument in Sec. 2.1.2 is easy to misread."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Novel and effective method: dual-scale parameterization with a Sinkhorn-Knopp-style normalization for calibration-free low-precision quantization of LLM weights.",
+        "Interesting empirical observation that column-wise weight standard deviations are predictive of input activation magnitudes, enabling pseudo-activation-aware quantization without calibration data.",
+        "Extensive and convincing experiments across multiple model families (Qwen3, Llama, DeepSeek, Phi, MoE), bit-widths (3-bit and 4-bit), and quantization types (uniform, non-uniform, calibrated). Consistent improvements in perplexity and flip rates over strong baselines.",
+        "Significant practical benefits: negligible compute overhead (e.g., 1.8% at batch size 1), fast quantization time (1.09x RTN, faster than HQQ), architecture agnostic with no inter-layer dependencies, and compatibility with AWQ calibration and NF4 non-uniform quantization.",
+        "Strong reproducibility: code is available, evaluation settings follow prior work, permissively licensed models and code are used, and detailed implementation is provided.",
+        "Clear presentation with informative figures (e.g., Fig. 1, 2, 3) and comprehensive tables that support the claims."
+      ],
+      "weaknesses": [
+        "Theoretical grounding is limited: the link between weight column standard deviations and input magnitudes is supported by a simplified single-layer Adam simulation and empirical R^2 values that are moderate for many layers (Fig. 2a). The Sinkhorn algorithm is heuristic with no convergence guarantees, and its objective (matrix imbalance) is not directly derived from quantization error.",
+        "Hyperparameter sensitivity of the Sinkhorn algorithm (number of iterations K, step-size bounds s_min/s_max, target variance τ) is not ablated in the paper, leaving questions about robustness and optimal settings.",
+        "Several baselines (RTN, Hadamard+RTN, Hadamard+GPTQ) are implemented by the authors, which may introduce implementation differences and affect fairness, although this is disclosed.",
+        "The no-overhead variant requires sharing the second scale across some layers (e.g., Q, K, V), which may not be possible for all architectures and yields slightly worse perplexity than standard SINQ (Appendix A.6).",
+        "Memory comparisons are not always apples-to-apples (e.g., auxiliary variables are quantized to 8 bits in calibrated experiments but not in all uncalibrated ones), though actual memory usage is reported.",
+        "Minor presentation issues: inconsistent naming (ASINQ vs A-SINQ), a typo ('Formulically'), and some references missing years. No dedicated limitations section in the main text, though trade-offs are discussed in the method and appendix."
+      ]
+    }
+  }
+}

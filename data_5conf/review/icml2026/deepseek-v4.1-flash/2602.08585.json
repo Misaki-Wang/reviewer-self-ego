@@ -1,0 +1,135 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Clear and well-motivated problem framing: the paper correctly identifies cross-head budget allocation as underdeveloped relative to intra-head scoring, and reframes allocation as a marginal-utility (cost-benefit) optimization rather than a magnitude-based heuristic. This is a useful conceptual shift.",
+        "The eviction-loss decomposition in Eq. (7) into an irreducible oracle loss plus an 'Optimality Gap' is clean, and Figure 1 provides an intuitive visual validation of the decomposition.",
+        "The optimization pipeline is principled: isotonic regression via PAVA yields a convex, non-increasing surrogate, making the separable allocation problem amenable to a greedy solver whose optimality for diminishing-returns objectives is correctly argued (Appendix A.2). Figure 2a shows the relaxation matches a DP/knapsack solver on the calibration data.",
+        "Strong and consistent empirical gains. On LongBench at 80% compression (Table 1), LU-KV-π2 recovers ~84% of the Full-KV gap on Mistral-7B (46.21 vs. 40.54 AdaKV), and on RULER-16K (Table 2) it lifts average accuracy from ~37.5% (AdaKV) to ~70% under the same budget. Gains hold across three model scales (Mistral-7B, Llama-3.1-8B, Qwen2.5-32B) and multiple metrics (SnapKV, KeyDiff, EA).",
+        "The offline profiling design is a practically important contribution: a pre-computed lookup table gives true cross-layer/cross-head allocation at zero online overhead, which sidesteps the memory cost that the paper argues limits AdaKV. Figure 5 supports the negligible-overhead claim.",
+        "The ablation in Table 3 (with vs. without optimality-gap correction, avg. +3.53) directly supports the central hypothesis that allocation should follow metric correctness, not perceived importance.",
+        "The evaluation protocol is appropriately rigorous: question-agnostic (query-free) compression is harder than query-aware setups, and the paper evaluates at both 50% and 80% compression with a detailed appendix of per-dataset results."
+      ],
+      "weaknesses": [
+        "Conceptual circularity in the oracle definition. Oracle importance (Eq. 4) is computed under full attention over a future decoding window, but during eviction the future attention patterns themselves depend on which tokens are retained. The profile is therefore derived from statistics of an unattainable regime, and the paper does not analyze how well full-attention oracle rankings transfer to the compressed regime. This is the weakest link in the causal chain from theory to practice.",
+        "The offline calibration is under-specified and potentially fragile. It relies on a single synthetic ~4,000-token AI-generated novel plus 30 generated questions (Appendix E), and the 'structural stability across tasks' claim rests almost entirely on Figure 2b. There is no sensitivity analysis over calibration corpus, domain, length, or number of questions, and no evidence that profiles transfer to domains unlike the calibration data. Given that the entire online method is a lookup table, this assumption deserves much stronger validation.",
+        "Reproducibility gaps. Calibration prompts, the exact oracle computation, and how the aggregated profile Φ is discretized into integer budgets are described only loosely; no code or calibration artifacts are mentioned. Reproducing the headline numbers would be difficult.",
+        "Limited baseline set. Only Uniform, PyramidKV, and AdaKV are used as allocation strategies, despite the paper's claim of metric-universality and its own citations of CAKE, HeadKV, CriticalKV, KVzip, and Expected Attention. Since the contribution is specifically about allocation, stronger or more recent allocation baselines (or at least an oracle-allocation upper bound in the main tables) would substantially strengthen the case.",
+        "No variance or significance reporting. All results appear to be single runs with no error bars, yet some deltas are extreme (e.g., RULER multikey-3 improving from 1.00 to 67.40). Such magnitudes warrant verification that baselines are tuned comparably in the question-agnostic regime rather than reflecting an unfair configuration.",
+        "Overstated optimality claims. The relaxation is only shown to match the DP solution on the synthetic calibration data (Fig. 2a); the 'near-optimal precision' and 'global optimum' language in Section 4.2/Appendix A.2 applies to the relaxed surrogate, not to the original non-convex problem (Eq. 8), and this distinction is blurred in the main text.",
+        "The theoretical results (non-convexity of the loss, greedy optimality) are relatively standard and somewhat incremental; the non-convexity proof (Appendix A.1) essentially reduces to the observation that a heuristic metric's ordering need not be monotone in oracle importance.",
+        "The 'without Optimality Gap' ablation is ambiguously described (Section 5.4 / Table 3), making it hard to tell exactly what alternative allocation rule is being compared against; clarifying this would make the ablation more convincing."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "Identifies a relevant and under-explored problem: head-level budget allocation for KV cache eviction, showing that heuristic score magnitudes are not equally reliable across heads.",
+        "Proposes a practical offline profiling protocol that avoids online combinatorial optimization, making static data-driven allocation feasible in deployment.",
+        "Reports substantial empirical gains over Uniform, PyramidKV, and AdaKV on RULER and LongBench under 80% compression, especially on multi-key retrieval tasks (e.g., Mistral-7B RULER-16K average 69.98% vs. 37.48% for AdaKV-SnapKV).",
+        "Includes an ablation (Table 3) attempting to isolate the effect of the optimality gap, showing that incorporating it improves average scores by roughly 3.5 points.",
+        "Provides detailed appendices with per-dataset scores, hyperparameters, and additional visualizations, which aids transparency.",
+        "Efficiency measurements (Figure 5) suggest that the online lookup and budgeting introduce negligible overhead relative to SnapKV at the same compression ratio."
+      ],
+      "weaknesses": [
+        "The central theoretical claim is technically flawed: PAVA is an isotonic regression algorithm that enforces monotonicity, not convexity. It does not generally produce a convex non-increasing surrogate loss as claimed in Section 4.2 and Appendix A.2. A convex relaxation requires the greatest convex minorant (or similar), so the greedy solver's optimality guarantee does not hold as stated.",
+        "The Oracle Importance definition (Eq. 4) is not a valid measure of output perturbation. It ignores attention renormalization after eviction, cross-head interactions, and the fact that future queries are unknown at inference time. The global objective in Eq. 8 is a sum of per-head proxies with no justified bound on actual model output degradation.",
+        "There are mathematical presentation errors that undermine confidence: Eq. 5 defines Misses as M^π(b) \\ M^π(b), which is empty; Eq. 7 uses an undefined L_{ℓ,h,j}; and the Optimality Gap notation switches between Δ(π, π*) and Δ(π, I).",
+        "The offline profiling is based on a single AI-generated ~4,000-word novel and 30 generated questions. No evidence is provided that the averaged profile generalizes to 128k contexts or diverse tasks. Figure 2b actually shows visibly divergent local-compression curves across LongBench tasks, contradicting the claim of 'remarkably stable' head profiles.",
+        "The experiments lack strong KV-eviction baselines such as H2O, full SnapKV, CriticalKV, CAKE, HeadKV, KVzip, and Expected Attention. The paper mainly compares allocation strategies under a fixed metric, so the claimed contribution over the broader literature is not established.",
+        "Baseline treatment is questionable and internally inconsistent. AdaKV is first described as a global greedy method, then claimed to be practically constrained to layer-wise uniform budgets. The very low RULER scores for Uniform/Pyramid/AdaKV (e.g., 29–37% average) raise concerns about baseline implementation or fairness.",
+        "No statistical significance, variance, or multiple-seed results are reported. LongBench and RULER evaluations are noisy, and the reported gains may not be robust.",
+        "Key hyperparameters are not ablated: attention sink size, recent-token window (1 for KeyDiff vs. 32 for SnapKV), maximum compression threshold of 99%, calibration context, and number of calibration queries. This limits reproducibility and makes it unclear which design choices drive the gains.",
+        "The efficiency claim is overstated. At the same compression ratio, memory usage and TTFT are comparable to SnapKV (Figure 5), not better; decoding latency and throughput are not measured. The '80% reduction with minimal performance degradation' claim is contradicted by RULER results (e.g., Mistral-7B 69.98 vs. 86.63 Full-KV; Qwen2.5-32B 80.47 vs. 95.02).",
+        "Reproducibility is weak: the calibration data, generated queries, offline profile, and code are not released, and the AI-generated novel's generation procedure is unspecified.",
+        "Originality is limited. The decomposition in Eq. 7 is largely set algebra, and the insight that allocation should follow marginal utility is standard. The main novelty is the offline profiling plus PAVA-based solver, but the latter is flawed."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a timely and important problem: memory-efficient long-context LLM inference via KV cache eviction and head-level budget allocation.",
+        "Introduces a novel perspective by framing cross-head budget allocation as long-horizon utility optimization and defining an optimality gap between heuristic metrics and future-aware importance.",
+        "Formulates a global combinatorial optimization objective and proposes a practical offline profiling protocol that enables zero-overhead online execution through a precomputed lookup table.",
+        "Provides an extensive empirical evaluation across three model scales, two benchmarks, multiple heuristic metrics, and aggressive 80% compression ratios, with generally strong gains over Uniform, PyramidKV, and AdaKV baselines.",
+        "The ablation study attempts to isolate the effect of the optimality-gap correction, showing that ignoring it degrades average performance.",
+        "The efficiency analysis suggests that the method introduces negligible latency overhead and reduces peak memory relative to uncompressed inference.",
+        "The metric-universality claim is partially supported by experiments with SnapKV, KeyDiff, and Expected Attention metrics in the appendix."
+      ],
+      "weaknesses": [
+        "The central optimization claim is not soundly supported: applying PAVA isotonic regression to the loss sequence enforces monotonicity, not convexity, so the resulting surrogate need not have non-increasing marginal gains. The greedy solver's optimality guarantee for Eq. 10 therefore does not follow from the stated method. The paper needs a correct convex minorant/greatest convex envelope or isotonic regression on marginal gains.",
+        "The Oracle Importance is not a true oracle. It is defined as a maximum over future decoding steps of attention weight times projected value norm, which ignores cumulative contribution and the distribution of future queries. Calling this the ground-truth importance and using it to define the optimality gap is misleading and weakens the theoretical framing.",
+        "The decomposition contains mathematical errors and typos: the Misses definition is written as M_pi(b) setminus M_pi(b), which is empty; Eq. 7 uses an undefined L_{ell,h,j}; and the set relation in Eq. 5 is not correct as written. These issues make the theoretical section difficult to verify.",
+        "The key offline profiling assumption is insufficiently validated. Calibration uses a single AI-generated 4k-token context and 30 generated questions, with no cross-model or cross-domain transfer experiments, no sensitivity analysis, and no specification of K_max. The stability claim across tasks is supported mainly by qualitative curves rather than quantitative validation.",
+        "Baseline comparisons are concerning. AdaKV is described as practically constrained to layer-wise allocation because global sorting supposedly requires buffering all KV states, but the original AdaKV method may not require such buffering. This may artificially weaken a strong baseline. The paper also omits comparisons to H2O, CriticalKV, CAKE, HeadKV, KVzip, and other relevant KV eviction methods.",
+        "Reproducibility is limited. There is no mention of released code or calibration data, no random seeds or error bars, and several important implementation details are missing, including how calibration is performed per model and how the DP/greedy solver is implemented.",
+        "Some claims are overstated. The phrase '80% reduction with minimal performance degradation' does not hold uniformly: on RULER, Mistral-7B with SnapKV drops from 86.63 to 69.98 average, and Qwen2.5-32B with SnapKV drops from 95.02 to 80.47. The 'metric-universality' also requires re-running calibration for every metric and model.",
+        "Presentation quality has issues beyond OCR artifacts: notation is inconsistent, the NP-hardness statement is imprecise because an exact DP solution is used, and there is no explicit limitations or broader-impact discussion."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Addresses the underdeveloped problem of cross-head budget allocation in KV cache eviction, where most prior work focuses on intra-head token scoring.",
+        "Provides a principled global optimization formulation for head-level budget allocation, with a convex-hull/PAVA relaxation and greedy solver that is practical and metric-agnostic.",
+        "Extensive empirical evaluation on LongBench and RULER across multiple models and proxy metrics; LU-KV substantially outperforms Uniform, PyramidKV, and AdaKV at 80% compression, e.g., Mistral-7B LongBench average 45.79/46.21 vs 41.89/40.54, and RULER average 69.98 vs 37.48.",
+        "Includes useful ablation on the optimality gap term and efficiency analysis showing negligible memory/latency overhead compared with SnapKV.",
+        "Impact statement appropriately acknowledges risks of aggressive cache compression and domain shift."
+      ],
+      "weaknesses": [
+        "The central 'Oracle Importance' is computed offline using future decoding queries, but inference is query-agnostic; it is therefore not a true oracle for unknown future queries. Transferability is only shown for two short calibration sets (Chinese novel ~4k and English SAT ~150) while benchmarks extend to 128k, and the calibration prompts/data are not released, limiting reproducibility.",
+        "Theoretical claims of near-optimality are not rigorously supported: the non-convexity proof is straightforward algebra, the PAVA-based convex relaxation lacks approximation guarantees, and the claimed match to DP is shown only on synthetic calibration data (Fig. 2a) without downstream validation or error bounds.",
+        "Main tables omit Llama-3.1-8B despite the paper claiming evaluation on three base models, and main comparisons omit recent strong KV eviction methods (CriticalKV, DefensiveKV, HeadKV, KVZip, CAKE), which appear only in the appendix. This makes the state-of-the-art comparison incomplete.",
+        "The 'minimal performance degradation' claim is overstated for RULER: e.g., Mistral-7B single3 drops from 99.60 with Full-KV to 18.20, and average RULER drops from 86.63 to 69.98, even though LU-KV still beats the baselines.",
+        "Offline profile construction (30 generated questions, one AI-generated Chinese novel) lacks sensitivity analysis for the number, distribution, domain, and length of calibration data; averaging per-query optimal ratios may obscure variance across queries.",
+        "The 'w/o Delta' ablation is not fully specified; since Delta is algebraically derived from the same oracle importances, the comparison risks being circular or implementation-dependent.",
+        "Originality is moderate: the static per-head calibration approach resembles HeadKV, and convex-hull/greedy allocation is standard; the main novelty is the framing and offline utility profile rather than a fundamentally new mechanism.",
+        "Some baseline comparisons need clearer justification, especially AdaKV being constrained to layer-wise or locally dynamic allocation due to memory concerns; the fairness of this comparison is not fully established."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "Addresses an important and practical problem: cross-head KV cache budget allocation under long-context inference.",
+        "Provides a formal decomposition of eviction loss into oracle metric loss and optimality gap loss, and formulates budget allocation as a combinatorial optimization problem.",
+        "Proposes an efficient greedy solver via isotonic/PAVA relaxation and shows exact agreement with DP on calibration data in Figure 2(a).",
+        "Reports large empirical improvements over Uniform, PyramidKV, and AdaKV on LongBench and RULER, with extensive appendix experiments and an impact statement acknowledging compression risks."
+      ],
+      "weaknesses": [
+        "The central 'Oracle Importance' is not validated as true long-term utility; it is defined as max future attention times projected value norm, but no evidence links it to output perturbation, task loss, or human evaluation.",
+        "The offline profiling protocol is fragile and under-validated: it uses a ~4k AI-generated Chinese novel and 30 generated questions; transferability is tested only with one 150-token English SAT excerpt, so the claim that profiles are stable across tasks/models/domains is not convincingly supported.",
+        "LU-KV does not actually predict future utility online; it uses a static lookup table learned from calibration data, so the 'task-agnostic' claim is not justified and performance may degrade under distribution shift.",
+        "The convex-hull/PAVA relaxation has no theoretical approximation guarantee relative to the original non-convex problem; the exact match to DP in Figure 2(a) is only on calibration data, not on downstream tasks.",
+        "The additive per-head loss objective ignores cross-head and cross-layer interactions and nonlinear effects of evicting multiple tokens, yet the method optimizes this surrogate as if it were the true model loss.",
+        "Experimental evidence lacks statistical rigor: no seeds, error bars, or significance tests; the very large gains over baselines could be sensitive to implementation details, and baseline tuning/fairness is not fully documented.",
+        "The ablation on optimality gap loss (Table 3) is under-specified: it is unclear what 'w/o Δ' means operationally or how the gap is removed, making the claimed contribution hard to verify.",
+        "Reproducibility is limited: the abstract contains only a 'Project Code' placeholder, calibration data/questions are not released, and profiling/hyperparameter details are incomplete.",
+        "Presentation has serious flaws: table labels are garbled (e.g., 'Mistra B-v0.3', '5-32B', nonsensical appendix headers), symbols are inconsistent, and several claims are overstated (e.g., TTFT is comparable, not decreased; RULER degradation is not 'minimal').",
+        "Novelty is limited: offline head-wise allocation resembles HeadKV, and the optimization reduces to a standard separable greedy allocation after PAVA; the main comparison to HeadKV appears only in the appendix."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Introduces a novel and well-motivated perspective on KV cache eviction: rather than trusting instantaneous heuristic scores, it allocates head-level budgets based on long-horizon oracle utility, with a clear loss decomposition into oracle metric loss and optimality gap.",
+        "Formulates head-wise budget allocation as a global combinatorial optimization problem and proposes an efficient convex-hull relaxation via PAVA plus a greedy marginal-gain solver, making the approach practical and metric-agnostic.",
+        "Extensive empirical evaluation on LongBench and RULER across three model families (Mistral-7B, Llama-3.1-8B, Qwen2.5-32B), multiple underlying metrics (SnapKV, KeyDiff, EA, and integrations with KVZip/CAKE), and compression ratios (50%, 80%, 90%). LU-KV consistently improves over Uniform, PyramidKV, and AdaKV, often recovering most of the Full-KV performance.",
+        "Practical deployment is well addressed: the offline profiling protocol yields a static lookup table with negligible online overhead, and efficiency analysis shows memory reduction with comparable TTFT latency.",
+        "Good ablation and analysis suite: validates the optimality-gap component, studies transferability of profiling data, compares with HeadKV, visualizes layer/head loss distributions, and provides detailed per-task scores in the appendix.",
+        "Reproducibility is reasonably supported with a code link, hyperparameter details, profiling protocol description, and impact/limitation discussion."
+      ],
+      "weaknesses": [
+        "The convex-hull relaxation only guarantees optimality for the relaxed surrogate objective; no approximation bound is given for the original non-convex combinatorial problem. The claimed exact match with DP in Figure 2(a) needs clarification because DP on the original non-convex Eq. 8 need not generally coincide with greedy allocation on the PAVA-relaxed problem.",
+        "The offline profiling relies on a single synthetic Chinese novel excerpt (~4k tokens) and 30 generated questions. Transferability is tested only against one short English SAT passage and a limited set of downstream tasks, so robustness to profiling corpus, language, domain, context length, and query distribution remains insufficiently established.",
+        "Several implementation details are missing or vague: the future decoding window K_max for Oracle Importance, the exact PAVA and aggregation procedure, the computational cost of offline profiling, and how the profile behaves for different model scales and metrics.",
+        "Some claims are overstated. At 80% compression, RULER performance still leaves a substantial gap to Full-KV in several settings, so 'minimal performance degradation' is not uniformly supported. The 'task-agnostic' claim rests on empirical transfer rather than formal guarantees.",
+        "Main experiments compare against only Uniform, PyramidKV, and AdaKV; HeadKV and other recent allocation methods are largely relegated to the appendix, and no oracle-allocation upper bound is reported.",
+        "The Oracle Importance metric is a heuristic proxy based on max future attention times projected value norm; it is not validated as a true causal contribution measure beyond the allocation results.",
+        "Presentation could be improved: notation is dense, several appendix tables are hard to read, and there are formatting/typographical issues (e.g., 'Mistra B-v0.3', ambiguous Figure 2(a) caption)."
+      ]
+    }
+  }
+}

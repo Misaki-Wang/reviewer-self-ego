@@ -1,0 +1,133 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 2,
+      "strengths": [
+        "Introduces a novel and practical idea: exploiting permutation invariance of attention to reorder tokens within segments and improve block-level sparsity for long-context LLM prefilling.",
+        "Formalizes key permutation properties with Lemmas 3.1-3.2 and Theorem 3.3, providing a clean theoretical basis for the non-causal setting.",
+        "Conducts experiments on two strong long-context models (Llama-3.1-8B, Qwen-2.5-7B-1M) and two challenging benchmarks (LongBench, LongBenchv2), with multiple sparse-attention baselines.",
+        "Reports end-to-end TTFT speedups up to 2.75x and includes ablations on permutation target and segment size, plus permutation-overhead analysis.",
+        "Addresses an important and timely problem (efficient long-context prefilling) and includes a reproducibility statement with public models/datasets and positive ethical discussion."
+      ],
+      "weaknesses": [
+        "Fundamental causality violation: the segmented permutation permits intra-segment bidirectional attention. Algorithm 1 computes full on-diagonal blocks without a token-level causal mask, so tokens can attend to future tokens within the same segment. This breaks the autoregressive semantics of LLMs, contradicts the 'plug-and-play' claim, and is not justified theoretically or empirically. Theorem 3.3 only applies to unmasked attention and does not justify the causal approximation.",
+        "Missing critical control: there is no 'permuted full attention' baseline (same permutation, no block sparsity) to isolate the effect of intra-segment bidirectionality from sparsity. The LongBenchv2 result where PBS-Attn exceeds full attention for Llama (29.82 vs 28.83) raises suspicion that non-causal local attention may inflate performance, but this is not analyzed.",
+        "Empirical claims are overstated: 'consistently outperforms existing block-sparse attention' is not supported per category; PBS-Attn is worse than MeanPooling/XAttention on several LongBench categories (e.g., Few-shot Learning, Code). LongBenchv2 gains over the strongest baselines are small (e.g., Qwen 34.39 vs 34.19) and no variance or significance tests are reported. The claimed 31% relative improvement is against a weak MeanPooling baseline, not the strongest baseline.",
+        "Efficiency comparison may be unfair: speedup is measured against FlashAttention and baseline implementations that may not be equally optimized; the custom permuted-FlashAttention kernel lacks implementation detail; tensor parallelism at 256K/512K may confound comparisons; absolute latencies, memory usage, and kernel-level breakdowns are absent. Permutation overhead is only analyzed in the appendix and not clearly integrated into the main speedup claims.",
+        "The permutation is heuristic: key importance is estimated using only the last query block, with no ablation on the choice of query block and no theoretical justification. Sensitivity to layer/head and hyperparameters (segment size S, block size B, selection threshold) is not systematically studied.",
+        "Missing baselines: no comparison to SpargeAttention (cited as related, training-free) or other recent block-sparse methods, and no comparison to a causal variant that preserves intra-segment causality, which would clarify the cost of the approximation.",
+        "No limitations section: the paper does not discuss the causality approximation, failure cases, sensitivity to hyperparameters, decoding implications, or when the method may fail. This is especially problematic given the method changes the model's attention semantics.",
+        "Reproducibility is limited: code is only promised after review, kernel details are insufficient for independent reproduction, and no seeds, variance, or hyperparameter sensitivity are reported.",
+        "Presentation issues: typos and inconsistencies (e.g., 'prefetch' for prefilling, 'PBS-Attn' vs 'PBS-Attn', algorithm variable M vs \\overline{M}, missing code URL), and the description of Figure 1/segmented permutation is ambiguous about what is actually skipped versus computed."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The core observation is clean and correct: attention is invariant to key permutation (given KV pairing) and equivariant to query permutation, formally proven in Appendices A.1–A.3. This is a valid foundation for the proposed method.",
+        "The segmented permutation strategy is a sensible, non-trivial adaptation of permutation-based reordering to autoregressive LLMs: restricting permutation to intra-segment while keeping inter-segment causality intact (Figure 1) is a reasonable way to avoid destroying the causal structure.",
+        "The query-aware key permutation (sorting keys within each segment by importance estimated from the last query block, Eq. 10–11) is simple, cheap, and directly targets the 'vertical line' phenomenon that harms block sparsity.",
+        "The method is genuinely plug-and-play and orthogonal to block-selection algorithms; Appendix B.2 shows it also improves XAttention's density–quality trade-off, supporting the claim that the benefit is not tied to one selection heuristic.",
+        "A custom Triton permuted-FlashAttention kernel is implemented, and end-to-end TTFT measurements (Figure 3) demonstrate real speedups (up to 2.75×) rather than only theoretical FLOP savings.",
+        "Consistent, if modest, improvements across two models (Llama-3.1-8B, Qwen-2.5-7B-1M) and two benchmarks (LongBench, LongBenchv2), plus useful ablations on permutation target and segment size, and a reproducibility statement."
+      ],
+      "weaknesses": [
+        "The empirical gains are marginal and likely within noise. On LongBench, PBS-Attn beats the second-best sparse method by <0.5 points (Llama: 37.37 vs. MInference 37.06; Qwen: 36.37 vs. XAttention 36.26), and on LongBenchv2 the margins over MInference/XAttention are ~0.2 points. No error bars, seeds, or significance tests are reported, so 'consistently outperforms' is not well supported.",
+        "The headline improvements appear to rest on an anomalously weak baseline. Unpermuted MeanPooling scores 36.67 on Llama but only 31.83 on Qwen for LongBench, and the '31% relative improvement' for Qwen on LongBenchv2 is measured against this weak MeanPooling (26.24 → 34.39). Since PBS-Attn uses the *same* selection algorithm as MeanPooling, this large model-dependent asymmetry is unexplained and raises fairness/config-tuning concerns rather than demonstrating the value of permutation.",
+        "The efficiency claim is not clearly established. Figure 3 shows PBS-Attn and FlexPrefill with nearly overlapping speedup curves (both ≈2.75× at 256K), and XAttention is close; the statement that PBS-Attn 'achieves the highest speedup across all context lengths' is not convincingly supported by the figure.",
+        "Novelty is limited and overlaps with concurrent work. The authors themselves cite SVG2 and PAROAttention, which use token permutation to improve block sparsity for diffusion transformers; the contribution here is essentially the causal (segmented) adaptation, which is a modest increment. The theoretical results (Lemmas 3.1–3.2) are elementary and well-known properties of softmax attention, not a substantive theoretical advance.",
+        "Important recent sparse-attention baselines named in the related work (NSA, MoBA, SpargeAttention, SeerAttention) are not compared against, so the claim of superiority over 'existing block-sparse attention methods' is only tested against a subset (MInference, FlexPrefill, XAttention) plus a self-constructed MeanPooling baseline.",
+        "The absolute sparsity improvements are small (Figure 4: e.g., density ~0.63 → ~0.58 at 8K, ~0.25 → ~0.21 at 128K), and the reported 7–15% 'relative' improvements translate to modest absolute block reductions that do not obviously explain the claimed speedups.",
+        "Hyperparameters (segment size S=256, block size B=128, threshold 0.9) are fixed for the main results, and the segment-size and permutation-target ablations are shown only at a single 32K context length, limiting confidence that the choices generalize across context lengths.",
+        "Presentation issues: Algorithm 1 uses P_i^T for the inverse permutation instead of P_σ^T, and initializes 'M = 0' inconsistently with the mask notation; these and similar notational slips reduce clarity of the core algorithm."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Formalizes attention permutation invariance/equivariance (Lemmas 3.1–3.2, Theorem 3.3) and leverages it to design a segmented permutation that preserves inter-segment causality for autoregressive LLMs.",
+        "Proposes a simple query-aware key permutation that clusters 'vertical line' keys within segments, significantly reducing block-level density (e.g., Figure 2: density 82.5%→32.3% while attention coverage 91.7%→96.4%) and improving sparsity across context lengths (Figure 4).",
+        "Demonstrates practical end-to-end speedup up to 2.75× at 256K on LongBenchv2 with a custom Triton permuted-FlashAttention kernel, and shows permutation overhead is negligible (Appendix C).",
+        "Shows the permutation is orthogonal to block selection: it also improves XAttention's performance-density trade-off (Appendix B.2), making it a plug-and-play enhancement.",
+        "Evaluates on two challenging long-context benchmarks (LongBench, LongBenchv2) and two long-context LLMs (Llama-3.1-8B, Qwen-2.5-7B-1M), with PBS-Attn generally outperforming MInference, FlexPrefill, XAttention, and unpermuted MeanPooling."
+      ],
+      "weaknesses": [
+        "Causality preservation is not fully specified. The method applies intra-segment permutation while claiming only inter-segment causality. If on-diagonal segment blocks are computed fully without a token-level causal mask that respects original positions, future tokens within the same segment can be attended to, violating autoregressive causality. The custom kernel is not detailed enough to assess how this is handled, raising soundness and reproducibility concerns.",
+        "Performance improvements over strong baselines are marginal and lack statistical significance. For example, on Qwen-2.5-7B-1M LongBench, PBS-Attn avg 36.37 vs MInference 36.21 (+0.16) and XAttention 36.26 (+0.11); on LongBenchv2 Qwen, 34.39 vs 34.19 (+0.20). No error bars, multiple runs, or variance estimates are reported.",
+        "Missing comparisons to recent training-free sparse attention methods such as SpargeAttention and SeerAttention, which are discussed in related work but not evaluated, weakening the empirical claim of state-of-the-art performance.",
+        "The block selection algorithm (MeanPooling) is simple and uses a fixed threshold τ=0.9 with no sensitivity analysis. The permutation strategy relies on a heuristic (sorting by mean attention of the last query block) without ablation on alternative importance estimators.",
+        "Speedup claims are not fully consistent: the text says PBS-Attn achieves the highest speedup across all context lengths, but Figure 3 appears to show FlexPrefill outperforming PBS-Attn at 512K. Clarification is needed.",
+        "The custom permuted-FlashAttention kernel is central to the efficiency results, but implementation details are omitted beyond mentioning Triton. Code is promised only after review, which currently hinders reproducibility.",
+        "Limitations are not explicitly discussed in a dedicated section; potential downsides (e.g., permutation overhead at short sequences, interaction with GQA, segment-size sensitivity) are only partially addressed.",
+        "Minor inconsistencies: the text states a '7% absolute sparsity improvement at 8K' while Figure 4 shows Δ around 11%; the proof in Appendix A.1 has a typo (P_σ instead of P_π)."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 2,
+      "strengths": [
+        "Clear motivation and analysis of information fragmentation in block-sparse attention, with intuitive visualizations and a coverage-density trade-off study.",
+        "Formalizes the permutation invariance/equivariance properties of attention (Lemmas 3.1, 3.2, Theorem 3.3) correctly and provides proofs in the appendix.",
+        "Introduces segmented permutation to preserve inter-segment causality, a practical idea for applying token reordering to causal LLMs.",
+        "Extensive experiments on LongBench, LongBenchv2, and RULER with multiple models (Llama-3.1-8B, Qwen-2.5-7B/14B, Qwen3-8B) and comparisons to strong baselines.",
+        "Custom permuted-FlashAttention kernel in Triton achieves up to 2.75x end-to-end speedup for long-context prefilling, with detailed timing breakdowns.",
+        "Thorough ablations on segment size, block size, permutation target, GQA handling, and layer/head-wise sparsity analysis.",
+        "Well-written and organized, with clear figures and an honest impact statement."
+      ],
+      "weaknesses": [
+        "Causality violation via future information: the global importance score is computed using the last query block (future tokens relative to earlier segments) and used to permute keys for all segments. This means the block selection for earlier tokens depends on future queries, breaking the causal property of the model and potentially inflating accuracy. The method is not a plug-and-play causal attention replacement as claimed.",
+        "Intra-segment causality is not preserved: segment size S=256 is larger than the attention block size B=128, so permutation mixes keys across blocks within a segment. By allowing full attention within on-diagonal segments, earlier tokens can attend to future keys within the same segment. This is a significant approximation that is not analyzed or ablated.",
+        "No analysis of the impact of the above causality violations. The comparison to full attention is unfair because full attention is strictly causal, while PBS-Attn leaks future information. The reported performance close to or even better than full attention on LongBenchv2 may be partly due to this leakage.",
+        "The code link is missing (the manuscript says 'Code available at' without a URL), limiting reproducibility despite detailed implementation settings.",
+        "The block selection threshold (0.9) is fixed without sensitivity analysis, and the choice of last-block queries as proxy is not fully justified; Table 4 shows it can be worse than other proxies on tasks like HotpotQA.",
+        "Performance gains over baselines are sometimes marginal (e.g., LongBench average scores), and the method only provides speedup for contexts longer than 16K, with significant overhead at shorter contexts.",
+        "Novelty is moderate: token permutation for attention sparsity has been explored in Reformer, MMInference, SVG2, and PAROAttention. The contribution is mainly an adaptation with segmented permutation and empirical tuning.",
+        "The paper lacks a limitations section discussing the causality trade-offs, the applicability to decoding, or the robustness of the proxy scoring across diverse tasks."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Addresses an important and timely problem: reducing the quadratic cost of long-context LLM prefilling via block-sparse attention.",
+        "Proposes a simple, intuitive idea: permuting keys to cluster globally important 'heavy hitter' tokens into contiguous blocks, thereby improving block-level sparsity.",
+        "Introduces a segmented permutation strategy that preserves inter-segment causality while applying intra-segment permutations, a novel adaptation for causal LLMs.",
+        "Provides formal lemmas and proofs for attention permutation invariance/equivariance (though these are standard results).",
+        "Conducts a reasonably comprehensive empirical evaluation across LongBench, LongBenchv2, and RULER, using multiple models (Llama-3.1-8B, Qwen-2.5-7B-1M, Qwen3-8B, Qwen-2.5-14B-1M).",
+        "Shows that permutation can be combined with existing block-selection algorithms (e.g., XAttention), supporting the claim of being plug-and-play.",
+        "Includes layer-wise and head-wise analyses, as well as a failure-mode analysis for 'slash-line' attention patterns.",
+        "Reports a custom Triton kernel and provides a timing breakdown, demonstrating practical speedups at very long contexts (e.g., 2.75x at 256K in the main figure)."
+      ],
+      "weaknesses": [
+        "Significant soundness concern: the method computes full attention within on-diagonal segments of size S=256, which allows tokens to attend to future tokens within the same segment, violating token-level causal attention. The paper only claims to preserve inter-segment causality and does not discuss or evaluate the impact of this intra-segment causality violation. This undermines the 'plug-and-play' claim for causal LLMs and could contaminate the KV cache used for subsequent decoding; no generation/decoding experiments are provided.",
+        "Incomplete theoretical foundation: permutation invariance/equivariance holds for full attention, but under causal masking the permutation changes the set of keys each query may attend to. The paper does not provide a theorem or analysis showing that the segmented permutation yields an output equivalent (or a controlled approximation) to causal attention.",
+        "Inconsistent speedup reporting: the abstract and Figure 4 claim up to 2.75x at 256K, while Table 7 reports 3.12x at 256K and 3.41x at 512K. The measurement conditions (e.g., tensor parallelism) differ between these results, making it difficult to verify the central efficiency claim.",
+        "Reproducibility issues: the abstract states 'Code available at' but no URL is provided. The custom permuted-FlashAttention Triton kernel is not released. Algorithm 2 omits the forced selection of first and most recent key blocks mentioned in the text.",
+        "No error bars or variance are reported for any benchmark results. Some results show sparse attention outperforming full attention (e.g., LongBenchv2 on Llama-3.1-8B: PBS-Attn 29.82 vs Full 28.83), which is suspicious without statistical significance testing.",
+        "Gains are modest: block-level density improvement is about 7% at 8K, and selected-block reduction is 10.7-14.4%. Speedups only appear at long contexts (>16K), with significant slowdown at short contexts (0.26x at 4K). The method adds permutation and block-selection overhead that may limit practical adoption.",
+        "Missing limitations section: failure modes (e.g., 'slash-line' heads) are relegated to an appendix without discussing their implications. Memory overhead, GQA handling trade-offs, and the short-context slowdown are not framed as limitations.",
+        "Originality is incremental: the paper combines existing ideas (token permutation, heavy-hitter identification, block-sparse attention). It is closely related to Reformer, MMInference, and prior heavy-hitter work; the main novelty is the segmented permutation for text-only causal LLMs.",
+        "Presentation issues: title mismatch between 'Sparse Attention via Token Permutation' and 'Sparser Block-Sparse Attention via Token Permutation'; citation errors (e.g., 'Grattafori' misspelling, inconsistent years); a reference dated 2026 (Prism); and formatting issues in equations and proofs."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "The core idea of actively restructuring the attention matrix via token permutation, rather than only passively selecting blocks, is novel and practically motivated. The proposed segmented permutation is a sensible way to preserve inter-segment causality while allowing intra-segment reordering.",
+        "The theoretical lemmas and theorem are correct, even if standard, and provide a clear formal basis for the permutation operations. The presentation of the method is generally clear and the plug-and-play, training-free nature is attractive.",
+        "The empirical evaluation is broad: LongBench, LongBenchv2, RULER, and multiple models including Llama-3.1-8B, Qwen-2.5-7B/14B, and Qwen3-8B. Ablations on segment size, block size, permutation target, GQA handling, and overhead are thorough.",
+        "The efficiency results are substantial: custom Triton kernels achieve up to 2.75x end-to-end TTFT speedup at 256K context, with detailed timing breakdowns showing permutation and selection overhead becoming negligible at long contexts.",
+        "Reproducibility is mostly well-supported: algorithms, hyperparameters, baselines, and model/dataset choices are specified, with code referenced (though the URL is missing in the manuscript) and extensive appendices."
+      ],
+      "weaknesses": [
+        "The central claim that PBS-Attn 'consistently outperforms' existing block-sparse methods is overstated. On LongBench with Llama-3.1-8B, PBS-Attn is worse than XAttention on Few-shot (28.36 vs. 31.35) and Code (24.25 vs. 26.19); on Qwen-2.5-7B it is worse than MeanPooling on Few-shot (47.36 vs. 49.07) and worse than XAttention on Single-Doc and Multi-Doc QA; on RULER, default PBS-Attn is worse than XAttention at 8K, 16K, 32K, and 128K. Average gains are modest and not uniform.",
+        "The causality treatment is not adequately justified. Segmented permutation permutes keys within each segment while keeping query order; to avoid breaking computation, the method effectively computes all on-diagonal blocks, which allows each query to attend to all keys in its segment, including future tokens after permutation. This violates exact causal attention within a segment and is not covered by Theorem 3.3, which assumes no causal mask. The paper should explicitly frame this as an approximation, quantify its effect on causal language modeling, and avoid claiming exact permutation invariance for causal attention.",
+        "The theoretical contribution is limited. Lemmas 3.1 and 3.2 are standard properties of attention, and Theorem 3.3 is a direct combination of them. The novelty is mainly empirical and engineering-oriented, which is acceptable but should not be oversold as a new theoretical foundation.",
+        "The evaluation lacks statistical rigor. No error bars or multiple seeds are reported, and in LongBenchv2 the sparse method sometimes exceeds full attention (e.g., 29.82 vs. 28.83 for Llama-3.1-8B), which is suspicious and undiscussed. Comparisons are not matched on block density or coverage across methods, and the MeanPooling baseline is a self-implemented selection strategy that is surprisingly weak on some settings (e.g., Qwen LongBenchv2 at 26.24), which may inflate the apparent benefit of permutation.",
+        "The memory overhead analysis is optimistic. The proxy scoring requires O(B*N) memory, and the explicit torch.gather() permutation allocates a temporary buffer proportional to sequence length. For 128K context this is roughly 32 MiB per head (about 1 GiB for 32 heads), and for 512K it can reach several GiB, which may not be negligible. End-to-end memory measurements are not provided.",
+        "At shorter context lengths the method is slower than FlashAttention: Table 7 reports speedups of 0.26x at 4K and 0.60x at 8K, with overhead above 50% at 8K. The paper correctly scopes this to long-context prefilling, but the practical operating range should be stated more prominently.",
+        "The code URL is missing or truncated in the manuscript, and kernel-level details of the permuted-FlashAttention implementation are not fully specified, which limits reproducibility of the reported speedups."
+      ]
+    }
+  }
+}

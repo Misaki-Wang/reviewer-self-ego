@@ -38,6 +38,94 @@
         "Clarity and positioning problems: tables are confusing and sometimes inconsistent (e.g., Table 3 vs. Table 4 vs. Table 5 contexts), related work omits important quantization-aware training and pruning works, and some claims are not well supported by the numbers presented.",
         "The biological/spiking inspiration is speculative; no spiking neural network experiments are provided beyond binarized Transformer variants, and the claimed connection to biological plausibility remains hand-wavy."
       ]
+    },
+    "exp3_positive": {
+      "oa": 3,
+      "strengths": [
+        "Simple and intuitive idea: casting quantization/sparsification as perturbations and using ridge-regression reconstruction with a regularization parameter lambda is easy to implement and understand.",
+        "Demonstrates stable training at very low precision (down to 1-bit weights/activations) on ResNet-50/ImageNet and Transformer/WMT, which is a challenging regime where many methods diverge.",
+        "Provides reference code snippets for the denoising affine transform and quantized matrix multiplication, which helps reproducibility.",
+        "Extends the formulation to sparsification and structured sparsity, yielding sub-1-bit models with competitive BLEU in one setting.",
+        "The reported results on some benchmarks are competitive with prior low-precision methods and occasionally exceed full-precision baselines, which is interesting if it holds under fair comparisons."
+      ],
+      "weaknesses": [
+        "Novelty is limited: the core method is essentially a closed-form ridge-regression dequantization with shrinkage, similar in spirit to existing learned-scale quantization methods, but not positioned or compared against them under the same training framework.",
+        "Theoretical claims are not rigorously supported. Propositions 1 and 2 only show trivial limiting behavior; there is no convergence or generalization analysis. The 'denoising' interpretation is heuristic, and shrinking the scale factor mainly introduces bias toward the mean rather than provably suppressing quantization noise.",
+        "Evaluation is not apples-to-apples. Tables compare against numbers from different papers with different architectures, training recipes, datasets, and budgets. FP32 baselines differ substantially (e.g., 27.5 vs 29.49 BLEU), making state-of-the-art claims unreliable. Baselines are not reimplemented under the proposed setting.",
+        "Claims are overstated. 'Arbitrary precision and sparsity' is not demonstrated; experiments go down to 1-bit and limited sparsity. The claim that low-precision training 'consistently surpasses' full precision is contradicted by reported results (e.g., Table 3 DE-EN 100k A4W4 33.64 < 33.9). No LLM experiments despite generative-AI motivation.",
+        "Missing ablations and analysis. There is no analysis of gradient flow through the reconstruction statistics (e.g., stop_gradient), no wall-clock or memory measurements despite efficiency motivation, no comparison to a simple stable STE dequantization, and lambda/block-size ablations are limited to one setting.",
+        "The sparsification extension is simplistic: moving near-mean values to the mean is only compared to threshold-to-zero pruning, not to modern sparse training or pruning methods.",
+        "Reproducibility is incomplete: only code snippets are provided, not full code. Key implementation details (inference-time computation of statistics for activations, actual integer matrix multiplication, block-wise application to convolutions) are insufficiently specified. No error bars or multiple runs.",
+        "The biological/spiking motivation is speculative and not experimentally validated beyond a binary transformer. Clarity also suffers from some equation typos and unclear notation."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "The paper proposes a principled ridge-regression-based dequantization transform that creates a data-dependent gradient path for quantization error, offering a simple drop-in alternative to STE.",
+        "It unifies quantization and sparsification under the same error-injection/dequantization view.",
+        "The affine quantized matrix multiplication shortcut reduces the naive four-term expansion to one integer matmul plus two low-rank corrections, with a complexity analysis and code snippet.",
+        "The empirical study covers multiple architectures and scales, including nanoGPT, GPT-2, Gemma 1B/4B, ResNet-50, and WMT translation, and reports stable training at A1W1 where STE fails.",
+        "The method provides Pareto frontier analyses for storage and approximate energy, yielding practical insights such as asymmetric precision and structured sparsity trade-offs.",
+        "Reference code snippets for the main operations are included."
+      ],
+      "weaknesses": [
+        "The dequantization transform g(q) explicitly uses statistics of the original full-precision x (mean_x, Cov_xq) to reconstruct x. It is unclear how this is computed efficiently and robustly at inference when x is the activation being quantized, and the paper does not measure the resulting overhead.",
+        "The paper claims theoretical grounding but provides no formal convergence, error bound, or stability analysis for the proposed training dynamics.",
+        "LLM experiments lack comparisons to strong recent QAT baselines such as BitNet, ParetoQ, and QuEST in the main tables; comparisons are mostly against STE or much older methods.",
+        "The main Gemma evaluation uses short 25k-step runs, reports an unusual 'C4 accuracy' metric, and lacks standard LM evaluation (e.g., perplexity or zero-shot benchmarks), making SOTA claims unconvincing.",
+        "Reported A1W1/A1.5W1.5 accuracies are often far below BF16 baselines, and improvements over STE are sometimes modest; stability alone does not establish state-of-the-art performance.",
+        "Code snippets are inconsistent (e.g., affine_quantize returns only q, while the shortcut assumes it returns q, s, and o) and some operations are described as integer but implemented in float, hurting reproducibility.",
+        "Computational efficiency claims rest on a coarse arithmetic energy proxy and do not include wall-clock, latency, memory, or actual hardware measurements.",
+        "The proposed transform is closely related to learnable quantization scales/normalization and data-dependent STE variants; the conceptual novelty over existing STE corrections is not fully isolated.",
+        "Experimental details such as compute resources, seeds, variance, baseline tuning, and hyperparameter search are insufficiently reported.",
+        "The paper contains several overstatements ('for the first time', 'state-of-the-art', 'rendering empirical hacks obsolete') that are not supported by the evidence presented."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper proposes a simple, architecture-agnostic dequantization/normalization transform that can be inserted into standard autograd pipelines without custom gradient estimators.",
+        "It unifies quantization and sparsification through an additive perturbation view, which is intuitive and appealing for practical QAT workflows.",
+        "The affine quantized matrix multiplication shortcut reduces the naive expansion to a single integer matmul plus low-rank corrections, which could be computationally useful if validated.",
+        "The empirical results on small-scale nanoGPT/GPT-2 and Gemma pre-training provide some evidence that the proposed transform can stabilize training in certain ultra-low-precision regimes where STE fails.",
+        "The paper attempts to map storage/energy Pareto frontiers for low-bit and sparse LLMs, which is a relevant direction for efficient model deployment."
+      ],
+      "weaknesses": [
+        "The central theoretical claims are not adequately supported. The paper claims a principled solution and even mentions guaranteed convergence, but no convergence proof or formal analysis of the proposed transform is provided. The ridge-regression objective minimizes reconstruction error, not task loss or training stability.",
+        "The 'error-aware gradient' argument is informal and incomplete. Since the quantization error is detached, the method does not actually backpropagate through the rounding error; it only backpropagates through a data-dependent affine transform whose statistics are computed from the quantized values. The paper does not rigorously show that this creates a meaningful corrective path or improves optimization.",
+        "Novelty and positioning are overstated. Claims such as 'for the first time' stable A1W1 and sparse sub-1-bit training ignore or understate prior work such as QuEST, BitNet, ParetoQ, and STBLLM on 1-bit, ternary, and sub-1-bit sparse training. The affine shortcut is mostly straightforward algebra rather than a fundamental theorem.",
+        "Evaluation is insufficient for a top-tier AI conference. There are no standard LLM benchmarks (e.g., zero-shot evaluation on MMLU, HellaSwag, ARC, etc.), the 'C4 accuracy' metric is undefined, and the runs are very small-scale. The paper claims SOTA but does not compare against a broad set of strong quantization baselines on the Gemma experiments.",
+        "Baselines are weak or incomplete. Most comparisons are against standard STE, with only partial comparisons to BitNet and ParetoQ. Important recent QAT methods are not empirically compared, and no controlled ablations isolate the claimed denoising effect from other factors.",
+        "The deployment/inference story is unclear. For weights, the dequantization transform uses the original high-precision tensor to compute scale/offset; it is not explained how this is handled after training or why it does not require storing full-precision information. For activations, if the original high-precision activations are available to compute the transform, the claimed compression advantage may be questionable.",
+        "The energy-efficiency analysis relies on a toy proxy that omits data movement, quantization overhead, and hardware realities. The paper acknowledges this but still uses it to make strong claims about Pareto frontiers and hardware implications.",
+        "The λ regularization is not robustly validated. Table 13 shows that λ=1.0 performs very poorly, so the claim of a wide satisfactory range is overstated, and only one precision/task is tested.",
+        "Writing, formatting, and references contain multiple errors and inconsistencies (e.g., 'quantization-awre', inconsistent citation years, incomplete definitions, and code snippets that appear inconsistent with the equations). This limits reproducibility and clarity.",
+        "The biological-intelligence framing and some frontier claims are speculative and not directly supported by the presented experiments."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3,
+      "strengths": [
+        "Addresses an important and timely problem: instability of quantization-aware training, especially in ultra-low-bit and sparse regimes, and proposes a unified treatment of quantization and sparsification.",
+        "The denoising dequantization transform derived from a ridge-regression objective is simple, closed-form, and compatible with standard autograd systems; reference code snippets are provided.",
+        "The affine quantized matrix multiplication shortcut is mathematically justified and reduces affine dequantization overhead to one low-precision matrix multiplication plus inexpensive rank-1 corrections.",
+        "Broad empirical scope: experiments span nanoGPT, GPT-2, Gemma 1B/4B, ResNet-50 on ImageNet, and WMT translation, with ablation studies on precision, sparsity, affine quantization, FP4, and block size.",
+        "Reports stable training in some settings where standard STE fails, notably A1W1 and sparse sub-1-bit configurations, and provides useful storage/energy Pareto analyses.",
+        "The paper is generally well motivated and attempts to ground the method in a principled optimization objective rather than purely heuristic fixes."
+      ],
+      "weaknesses": [
+        "Critical inference-time issue: the dequantization transform in Eq. 3 and Code Snippet 2 depends on the original full-precision tensor x (through Cov_xq and mean_x). For activations, this means the method needs pre-quantization high-precision activations at test time, which defeats the purpose of activation quantization and makes the reported accuracy/efficiency results questionable for deployment.",
+        "The comparison with STE is not apples-to-apples: STE’s forward pass does not use the original x to dequantize, while the proposed method does. This can inflate accuracy and stability relative to standard QAT and undermines the central empirical claims.",
+        "Missing head-to-head comparisons to recent state-of-the-art low-bit LLM training methods such as ParetoQ, QuEST, BitNet, and STBLLM on the main LLM/Gemma experiments. The Pareto frontier figures mostly show the authors’ own configurations rather than competitive baselines, so claims of state-of-the-art performance are not adequately supported.",
+        "The theoretical claim that the transform creates an “explicit corrective gradient path” for quantization error is not fully rigorous. The scale and offset are data-dependent functions of x and q, so the gradient is more complex than the paper suggests, and no convergence or error-correction guarantee is provided.",
+        "Some claims are stronger than the evidence: “for the first time stable A1W1” is questionable given prior binary neural network literature, and the biological-intelligence framing is speculative rather than substantiated.",
+        "Reproducibility is limited for the large-scale experiments: training Gemma models on up to 64 TPUs is not readily reproducible, and full hyperparameters, code, and evaluation details are incomplete.",
+        "The energy efficiency metric is a crude arithmetic proxy that ignores data movement, dequantization overhead, and the cost of retaining or recomputing full-precision x, so the energy Pareto conclusions may be optimistic.",
+        "Minor presentation and notation issues remain (e.g., inconsistent use of q/Q, reference formatting errors, awkward phrasing such as “dequantization dequantization”), which make some derivations harder to follow."
+      ]
     }
   }
 }

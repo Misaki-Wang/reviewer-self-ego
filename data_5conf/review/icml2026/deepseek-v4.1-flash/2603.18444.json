@@ -1,0 +1,137 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 2,
+      "strengths": [
+        "Provides a clear statistical reformulation of RLVR reward estimation, framing advantage computation as distribution estimation and introducing a simple Bayesian shrinkage estimator (DBB).",
+        "The proposed DBB estimator is computationally cheap and easy to implement, requiring only per-prompt reward statistics and no extra forward passes or trajectory storage.",
+        "The paper includes experiments on two model scales (Qwen3-1.7B and 8B) across six in-distribution and three out-of-distribution benchmarks, showing consistent improvements over naive GRPO and RePO.",
+        "The ablation study on the discount factor λ and the extension to Dr.GRPO demonstrate generality and provide useful insights into the bias-variance trade-off.",
+        "Training dynamics analysis (reward, response length, entropy) offers some intuition about how DBB affects optimization.",
+        "The motivation—addressing variance collapse and poor utilization of generated rollouts in group-based RLVR—is well-posed and practically relevant."
+      ],
+      "weaknesses": [
+        "Major confound: the method uses a different clipping range ((0.98, 0.98)) than all baselines ((0.2, 0.28)). This is a critical hyperparameter that affects exploration and policy update magnitude; without a control with the same clipping range, the reported gains cannot be attributed to DBB.",
+        "The exact advantage computation with DBB is never explicitly stated. It is unclear whether A_i = (X_i - p_dbb)/sqrt(Var_dbb), how the posterior variance is used, and how advantages are normalized. This severely limits reproducibility.",
+        "The theoretical claim that DBB 'theoretically avoids estimated variance collapse' is overclaimed. With all-correct outcomes, β_t = λ^t β_0 → 0 and Var = αβ/(α+β)^2 → 0 as t grows; similarly for all-incorrect. DBB only delays collapse, it does not prevent it in the limit.",
+        "No multiple seeds or error bars are reported. RLVR experiments on small benchmarks (e.g., AIME with 30 problems) are high-variance; single-run gains of 1-4 points may not be statistically significant.",
+        "Missing strong baselines: DAPO dynamic sampling, GRESO, and entropy-guided advantage shaping directly address variance collapse and zero-variance prompts. Without comparisons, the claimed sample-efficiency advantage over existing methods is unclear.",
+        "The 'sample efficiency' claim is not directly tested. DBB does not reduce the number of rollouts; it reuses reward statistics across epochs. A fair compute-matched comparison against GRPO with a larger N (e.g., N=16) is absent.",
+        "The MSE analysis is empirical and limited: it only shows DBB lower MSE for λ<0.95 and N up to 16. The abstract's claim of 'achieves lower mean squared error than standard point estimation' is not universally true and lacks theoretical conditions.",
+        "The paper lacks a limitations section. It does not discuss when DBB may hurt (e.g., rapidly changing policies, stale historical rewards), the bias introduced, or failure cases.",
+        "The evaluation protocol for OOD benchmarks is unclear: they are evaluated only on the 'best checkpoint' selected by in-distribution validation, and it is not stated how this checkpoint is chosen or whether the same protocol is used for all methods.",
+        "The DBB variance is incorrectly described as 'posterior variance'; it is the Bernoulli variance evaluated at the posterior mean. The actual posterior variance of the Beta distribution is αβ/((α+β)^2(α+β+1)).",
+        "Presentation issues: inconsistent naming (GRPO-DBB vs RLVR-DBB vs HBB), wrong figure references, citation years are systematically incorrect, and Algorithm 1's epoch/iteration indexing is ambiguous.",
+        "The paper does not release code or provide enough details (seeds, exact posterior update schedule, handling of prompts not in the current batch) for reliable reproduction.",
+        "The RePO baseline underperforms even naive GRPO on several OOD benchmarks (e.g., BBH 42.96 vs 59.18 for 8B), suggesting either an implementation issue or an unfair comparison, which weakens the empirical claim."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "Simple and practically cheap: DBB stores only two scalars (α, β) per prompt and requires no extra rollouts, memory, or forward passes, which is a genuine practical advantage over replay-based methods like RePO.",
+        "The statistical analysis is mostly correct and clearly presented. I verified Eqs. (14) and (15): with α_τ = λα_{τ-1}+S_τ and H = λ(α_{τ-1}+β_{τ-1})+N, E[p̂^dbb] = wμ_{τ-1}+(1-w)p_τ and Var = (1-w)²p_τ(1-p_τ)/N, and the MSE decomposition in Eqs. (17)-(19) and Appendix B is sound.",
+        "The paper tackles a real and well-motivated problem (sample inefficiency and zero-variance groups in group-based RLVR) and offers an intuitive reformulation of advantage estimation as reward-distribution estimation.",
+        "The estimator does have a genuine qualitative property: since α, β > 0 always, the posterior variance p̂(1-p̂) cannot collapse to zero, unlike the sample-variance estimator.",
+        "The evaluation is broad: two model scales, six in-distribution and three out-of-distribution benchmarks, GRPO and RePO baselines, plus a demonstration that DBB transfers to Dr.GRPO's advantage.",
+        "The authors honestly acknowledge that the estimator is biased and frame it as a bias–variance trade-off rather than claiming unbiasedness."
+      ],
+      "weaknesses": [
+        "Decisive confound: GRPO/RePO use clip range (clip_low, clip_high) = (0.2, 0.28), but DBB uses (0.98, 0.98) — essentially [0.02, 1.98], i.e. almost no clipping (Appendix C). The authors admit DBB's importance ratios are larger and justify the change on those grounds, but no GRPO control with the same clip range is run. The reported gains therefore cannot be attributed to DBB rather than to the relaxed clipping.",
+        "Hyperparameter selection on the test set: λ is chosen per model 'based on performance trends' on the very benchmarks (MATH500, Minerva, AIME24/25, AMC24, Olympiad) that are then reported in Table 1. With gains of only ~2–3 points, this selection bias plausibly explains much of the improvement.",
+        "No statistical rigor: a single run per configuration, no seeds, error bars, or confidence intervals. On AIME24 (30 problems, 8 samples, granularity ≈3.33%), the +4.17/+5.42 'improvements' correspond to roughly one problem and are almost certainly noise. The central claim 'consistently outperforms' is not statistically supported.",
+        "Out-of-distribution results are suspicious and uncontextualized: MMLU-Pro improves by +13.10 (8B) and BBH by +21.26 (1.7B), which is implausibly large for math-only RLVR and is evaluated only on the 'best checkpoint' (Appendix C). Without base-model reference numbers, this likely reflects reduced degradation of general ability (or checkpoint cherry-picking) rather than improved reasoning; it is a missing baseline.",
+        "A large uncontrolled response-length divergence (≈1250 → ≈2300 tokens for DBB on 1.7B, Fig. 2) is not disentangled. The accuracy gains may stem from longer responses/entropy dynamics rather than better reward estimation; the paper labels this 'depth-wise exploration' without evidence. The 'without additional computational cost' claim also ignores the substantially longer inference sequences.",
+        "Overstated claims: the abstract/intro assert DBB 'achieves lower MSE than standard point estimation,' but Fig. 3 shows MSE is higher for λ ≥ 0.95, so the result is conditional. Similarly, 'theoretically prevents variance collapse' is trivially true of any smoothed estimator, and the practical benefit is unproven — assigning non-zero (uniform) advantage to all-same groups is arguably counterproductive relative to dynamic sampling that discards them.",
+        "Limited novelty: discounted Beta–Bernoulli / exponential-forgetting posteriors (discounted Thompson sampling) are standard tools, and the theoretical contribution is a textbook bias–variance/MSE analysis. The work is an application rather than a new method or new understanding.",
+        "Reproducibility gap: the advantage computation with DBB (how Â_i is formed from α_τ, β_τ, X_i) is never specified, which is essential to reproduce and to understand why 'importance ratios tend to be larger.' No code is mentioned.",
+        "Presentation defects: 'HBB estimation' typo (Sec. 4), an incomplete sentence in Sec. 3.3 ('To make the estimator's dependence on the underlying reward probabilities {p1,...,pτ}, we re-express...'), inconsistent naming (RLVR-DBB vs. GRPO-DBB), and several incorrect reference years (e.g., Guo et al. 1998, He et al. 1995).",
+        "The MSE analysis (Sec. 5.3) is conducted only on Qwen3-1.7B-Base and uses a 128-sample empirical mean as a noisy surrogate for the true p_τ (std ≈ 0.04 at p = 0.5), so the estimator-vs-reference comparison is itself noisy; the claimed MSE advantage is conditional on λ and does not hold generally.",
+        "The 'sample efficiency' framing is misleading: the method still draws N = 8 rollouts per prompt per epoch; it reuses historical rewards rather than reducing rollout cost, and the abstract's headline 'sample-efficient' claim is therefore not directly demonstrated (e.g., no reduced-rollout experiments)."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3,
+      "strengths": [
+        "Novel and insightful reframing of group-based RLVR advantage computation as a reward-distribution estimation problem, connecting it to Bayesian inference over a policy-induced Bernoulli reward. This is a clean conceptual lens that reveals why point estimation is fragile in the low-rollout regime.",
+        "The theoretical analysis is correct and clearly derived: the DBB posterior mean/variance (Eqs. 14–15) and the unconditional mean/variance/MSE under non-stationary rewards (Eqs. 17–19, Appendix B) are derived correctly. The shrinkage interpretation (biased toward the historical mean, variance scaled by (1-w)^2) is intuitive and the claim that the posterior variance αβ/(α+β)^2 is strictly positive is valid.",
+        "The method is essentially free: it uses only per-prompt historical reward statistics and requires no extra rollouts, replay buffers, or forward passes, in contrast to replay-based methods such as RePO.",
+        "Broad empirical coverage: two model scales (1.7B/8B), six in-distribution math benchmarks and three out-of-distribution benchmarks, with comparisons to GRPO and RePO, plus a generalization study applying DBB to Dr.GRPO's advantage (Table 3).",
+        "The λ ablation (Table 2) and the empirical MSE study (Figure 3) together provide mechanistic support that ties estimation accuracy to downstream performance, which is independent of the main comparison and lends plausibility to the proposed estimator."
+      ],
+      "weaknesses": [
+        "Confounded comparison that directly threatens the central empirical claim. Appendix C states that all baselines use the DAPO clip-higher range (0.2, 0.28) while GRPO-DBB uses a different, 'wider' range reported as (0.98, 0.98). Since the clip range strongly affects RLVR dynamics, the observed gains cannot be attributed to the DBB estimator alone. The value (0.98, 0.98) is also internally inconsistent with the described 'wider' range and likely a typo, further undermining reproducibility. The authors should run all methods under identical clipping (and ideally sweep the clip range for the baselines).",
+        "No statistical rigor: results appear to be single-seed with no error bars or confidence intervals. Given the well-known training variance of RLVR and the small evaluation sets (e.g., AIME24/25 and AMC have tens of problems), several reported deltas (e.g., +4.17 on AIME24, +2.42 avg on 8B) are within plausible seed noise. The very large OOD gains (+13.10 MMLU-Pro and +4.14 BBH on 8B; +21.26 BBH on 1.7B) are surprising for a reward-estimator change and require multi-seed validation before they can be trusted.",
+        "Missing the most relevant baseline. Variance collapse is a central motivation, yet the paper does not compare against the primary variance-collapse mitigations (DAPO dynamic sampling, GRESO) that are discussed in Related Work. Without this, the claimed advantage over existing variance-collapse remedies is unsupported.",
+        "The MSE analysis is weaker than presented. The reference p̃_τ is a finite 128-sample empirical mean whose noise (≈0.044 for p=0.5) is comparable to the point-estimator MSE being measured (p(1-p)/N ≈ 0.031 for N=8), and the study is run only on a 10% prompt subset. While the comparison between the two estimators shares the same reference, the absolute MSE values and the strong 'estimation accuracy ↔ performance' conclusion are not as solid as claimed.",
+        "Overclaiming relative to what is proven. The abstract/introduction state that DBB 'achieves lower mean squared error than standard point estimation,' but the MSE reduction is only demonstrated empirically (Figure 3) and in fact reverses for λ near 1.0; there is no theorem guaranteeing MSE superiority. Similarly, 'theoretically avoids variance collapse' is argued informally rather than proven, and the trade-off of injecting non-zero (bias-driven) advantages into all-correct/all-wrong groups is not analyzed for its potential to produce spurious updates.",
+        "The 'sample-efficient' framing is only indirectly demonstrated. Training is always run with the same rollout budget N=8, so there is no training-level sample-efficiency curve (performance vs. rollouts) to substantiate the efficiency claim; it is inferred from the MSE-vs-N analysis.",
+        "Presentation and consistency issues: a typo ('HBB estimation' in Section 4), inconsistent naming (RLVR-DBB vs GRPO-DBB), mismatched figure references in Section 5.3 (text refers to Figure 3(a) and 'Figure 2(b)' interchangeably), and an unclear/ambiguous clip-range specification all reduce clarity and reproducibility."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Clear statistical framing of RLVR reward estimation as inference over a policy-induced Bernoulli reward distribution, explicitly connecting GRPO-style advantage estimation to bias-variance trade-offs.",
+        "The proposed DBB estimator is simple and practical: it stores only per-prompt Beta posterior statistics, requires no trajectory replay or extra forward passes, and can be integrated into GRPO and Dr.GRPO with negligible memory/compute overhead.",
+        "Appendix B provides useful derivations of the DBB estimator's mean, variance, and MSE, and the posterior variance remains strictly positive for λ>0 with positive prior parameters, giving a principled mechanism to avoid variance collapse.",
+        "The empirical study is broad: two model scales, six in-distribution math benchmarks, three out-of-distribution benchmarks, and comparisons against GRPO, RePO, GRESO, and DAPO, plus ablations on λ, prior parameters, clipping, alternative advantage forms, and training dynamics.",
+        "The paper analyzes training dynamics (validation accuracy, reward, response length, entropy) and reports MSE versus λ and rollout budget N, which helps explain why DBB can improve optimization stability and exploration depth.",
+        "The presentation is generally clear and well organized, with detailed appendices covering derivations, hyperparameters, and additional comparisons."
+      ],
+      "weaknesses": [
+        "The main empirical claims of outperforming baselines are not cleanly supported because GRPO-DBB uses a much wider clipping range, (0.98,0.98), while all baselines use (0.2,0.28). Appendix D isolates the clipping effect only for GRPO, not for RePO, GRESO, or DAPO, so the headline comparisons to strong recent baselines remain confounded.",
+        "Statistical significance is assessed over four independent evaluation seeds, not independent training runs. There is no evidence that the reported gains are stable across training seeds, and p-values over per-prompt accuracies may overstate method-level significance. This is a serious limitation for the central claim that GRPO-DBB consistently outperforms baselines.",
+        "The theoretical claim that DBB achieves lower MSE than point estimation under mild non-stationarity is not formally established. The paper derives MSE expressions but does not characterize conditions guaranteeing MSE_DBB < MSE_pt; the comparison is primarily empirical in Section 5.3, based on one model, one training run, and a 128-sample surrogate for the true reward probability.",
+        "The sample-efficiency framing is overstated. DBB does not reduce the number of rollouts per prompt or demonstrate improved performance per rollout budget; it reuses historical reward statistics at the same rollout budget. No wall-clock, total-rollout, or performance-versus-budget curves are provided to substantiate sample-efficiency claims.",
+        "The exact advantage computation with DBB is not specified in the main text or Algorithm 1. Line 11 says only “Compute advantage A_i with (ατ,βτ) and Xi,” leaving unclear whether posterior mean, posterior variance, or both are used for normalization and how zero-variance groups are handled. This harms reproducibility and makes the method difficult to implement exactly.",
+        "The novelty is modest: DBB is a discounted conjugate Bayesian shrinkage estimator closely related to per-prompt EMA and Laplace smoothing. Appendix H shows only a small MSE advantage over EMA (e.g., 0.0083 vs. 0.0086), so the contribution is more an application of known shrinkage ideas than a fundamentally new method.",
+        "The discount factor λ must be tuned per model scale (0.25, 0.5, and 0.75 for 0.6B, 1.7B, and 8B models), and no adaptive or robust default is proposed. The suggested rule of thumb is speculative and based on a small number of scales, limiting practical applicability.",
+        "The very large out-of-distribution gains, especially on BBH (e.g., +16.97 for Qwen3-1.7B over GRPO), are surprising for a method trained only on math data and are not mechanistically explained beyond entropy and response-length arguments. Baseline-specific implementation issues or evaluation artifacts are not fully ruled out.",
+        "There are notation and presentation issues that reduce clarity, including “abb” instead of “dbb” in Equations (18)–(19), an apparent typo in Algorithm 1 line 7 (“∧d:”), and inconsistent use of τ as both epoch and training step.",
+        "No code release or training-seed variance is reported. Despite detailed hyperparameter tables, exact reproduction of the claimed gains is difficult, particularly given the nonstandard clipping configuration used for DBB."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The method is genuinely lightweight: DBB only maintains two scalars (α, β) per prompt and requires no extra forward passes, memory, or replay buffers, which is a real practical advantage over replay-based approaches like RePO.",
+        "The reformulation of group-relative advantage estimation as reward-distribution estimation is a clean and useful framing that connects RLVR to classical Bayesian shrinkage, and it plausibly explains variance collapse in a principled way.",
+        "The empirical study is broad: two model scales (1.7B, 8B), six in-distribution and three out-of-distribution benchmarks, plus an additional 0.6B backbone, an extension to Dr.GRPO, and comparisons against EMA, Laplace smoothing, and empirical Bayes.",
+        "The reported gains are consistent in direction across most benchmarks and model scales, and the paper does report per-cell standard deviations and p-values rather than point estimates only."
+      ],
+      "weaknesses": [
+        "The main results appear to come from a single training run per method. The 'four independent runs' are evaluation-seed repetitions of the same best checkpoint (Appendix C), so the reported variance and paired t-tests measure evaluation noise, not training reliability. RLVR training is notoriously high-variance, and significance claims ('statistically significant across nearly all benchmarks over four independent runs') are therefore not supported for the method itself.",
+        "There is a serious confound: GRPO-DBB and Dr.GRPO-DBB use clip range (0.98, 0.98) while all baselines use (0.2, 0.28). A range of 0.98 effectively disables PPO clipping, fundamentally changing the optimization. The isolation argument in Appendix D rests on single-run comparisons and does not convincingly rule out that the wider clipping range (rather than the DBB estimator) drives the gains. This directly threatens the central claim.",
+        "The theoretical contribution is thin relative to the abstract's claims. The paper states it 'characterizes analytically' a lower-MSE regime, but Section 3.3 explicitly concedes that whether DBB beats point estimation 'depends on the relative magnitudes of bias and variance, which we empirically evaluate.' The MSE expressions are a standard bias-variance decomposition of an exponentially weighted average, and 'theoretically avoids variance collapse' is trivial since αβ/(α+β)² > 0 for positive α, β.",
+        "The per-prompt EMA baseline attains MSE 0.0086 vs DBB's 0.0083 (only 2.67% higher) at essentially the same memory cost, and outperforms the point estimator over a reasonable λ range. Yet EMA's downstream performance is never reported in the main experiments. This undercuts the specific novelty of the Beta–Bernoulli conjugate machinery—if a scalar EMA is nearly as good, the added value of the Bayesian formulation is unclear.",
+        "The advantage computation is underspecified. Section 3.2 defines the DBB estimate p̃ but never gives the explicit advantage formula (Algorithm 1 line 11 only says 'Compute advantage A_i with (α, β) and X_i'). The claim that the estimator 'removes GRPO's zero-sum normalization' and produces larger dynamic-range advantages is central to both the method and the clipping-range justification, yet the exact form of A_i is not stated, hindering reproducibility.",
+        "The out-of-distribution gains are implausibly large for a reward-estimator change on math data (e.g., +17 BBH and +7 MMLU-Pro at 1.7B; +13 MMLU-Pro at 8B), which is surprising given that RLVR on math typically does not improve knowledge/general-reasoning benchmarks this much. Combined with the single-training-run issue, this raises the possibility of a lucky run or evaluation artifacts rather than a robust effect.",
+        "The method requires per-model λ tuning (0.25/0.5/0.75 for 0.6B/1.7B/8B), and λ=1.0 (the naive non-discounted Beta–Bernoulli) underperforms GRPO on 1.7B. The 'rule of thumb' for larger models is post-hoc extrapolation, so the practical benefit is confined to a tuned range and the generalization claims are speculative.",
+        "Baseline fairness is questionable: several baselines (e.g., DAPO on 8B) underperform naive GRPO on in-distribution benchmarks despite being tuned to their 'best configurations,' which suggests possible mis-tuning or incomparable budgets. The margin over GRESO on 8B OOD is only 1.05 points and is driven almost entirely by a 0.3-point MMLU-Pro difference, so the strong comparative claims are overstated.",
+        "The mechanism explanation in Section 5.1 (depth-wise vs breadth-wise exploration, longer responses, lower entropy) is a post-hoc narrative without causal evidence; the entropy/response-length interpretation is speculative."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Introduces a novel statistical estimation perspective for RLVR, modeling rewards as Bernoulli draws and framing advantage computation as reward distribution inference; the proposed Discounted Beta-Bernoulli (DBB) estimator is simple, lightweight, and leverages historical reward statistics without replay or extra forward passes.",
+        "Provides theoretical analysis of the DBB estimator, including bias-variance decomposition and MSE expressions, showing that the posterior variance remains positive and avoids exact variance collapse; the analysis is clear and connects to the empirical MSE study.",
+        "Comprehensive empirical evaluation across two model scales (Qwen3-1.7B and 8B), six in-distribution math benchmarks, and three out-of-distribution reasoning benchmarks, with four independent runs and paired significance tests; GRPO-DBB consistently outperforms GRPO and strong recent baselines (RePO, GRESO, DAPO).",
+        "Includes useful ablation and analysis: λ sensitivity, training dynamics (entropy, response length), MSE vs. λ and N, extension to Dr.GRPO, and comparisons to alternative shrinkage estimators (EMA, Laplace, EB) and prior sensitivity.",
+        "Well-organized and generally clear presentation; implementation details, hyperparameters, and compute setup are documented in the appendix, supporting reproducibility."
+      ],
+      "weaknesses": [
+        "The exact advantage computation for GRPO-DBB is not explicitly stated in the main text; Algorithm 1 says 'Compute advantage A_i with (α,β) and X_i' but omits the formula (e.g., whether it normalizes by posterior variance), which hinders reproducibility and understanding of the claimed variance-collapse avoidance.",
+        "GRPO-DBB uses a much wider clipping range (0.98, 0.98) than the baselines (0.2, 0.28); although Appendix D isolates this for GRPO, the main comparison still risks confounding the estimator effect with clipping, and the paper does not show test performance of all baselines under the wider range.",
+        "The paper does not compare downstream RLVR performance of DBB against simple shrinkage alternatives (EMA, Laplace, EB), even though EMA achieves nearly the same minimum MSE (0.0086 vs. 0.0083); thus the necessity of the Beta-Bernoulli formulation over simpler estimators is not fully established.",
+        "The theoretical claim that DBB achieves lower MSE under mild non-stationarity is not formally proven with explicit conditions; the paper provides MSE expressions and empirical verification, but the abstract's 'characterize analytically' overstates the theoretical result.",
+        "No explicit limitations section; the bias, λ tuning burden, and scale-dependent optimal λ are discussed but not consolidated as limitations.",
+        "Some minor presentation issues: notation/typos in equations (e.g., Eq. 3 importance weight parentheses, Algorithm 1 line 7 '∧d:'), and the claim of 'no additional memory usage' is slightly inaccurate since per-prompt α,β must be stored (though the overhead is small).",
+        "Statistical significance is assessed via per-prompt paired t-tests without multiple-comparison correction; some borderline p-values (e.g., 0.0419, 0.0387) may not survive correction."
+      ]
+    }
+  }
+}

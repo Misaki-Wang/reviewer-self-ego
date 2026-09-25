@@ -1,0 +1,133 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 2,
+      "strengths": [
+        "Targets an important and practical problem: reducing prefill/decode cost of long-context LLMs for resource-constrained and on-device settings.",
+        "Introduces a plug-in dynamic sparse attention framework with learned boundary detection, hierarchical chunk-level scoring, and length-normalized chunk aggregation; using attention-derived soft labels with focal loss for boundary prediction is technically reasonable.",
+        "Evaluates on Needle-in-a-Haystack and LongBench and reports latency/memory comparisons against dense and block-sparse attention, with additional appendix ablations such as boundary sharing and sliding-window/block-sparse variants.",
+        "The boundary predictor is lightweight (20 MB), shared across layers/datasets, and the appendices provide substantial implementation detail (soft labeling, focal loss, NMS, pseudocode).",
+        "Limitations are explicitly discussed, including hyperparameter sensitivity and context-length extension; no major ethical concerns are apparent."
+      ],
+      "weaknesses": [
+        "Core efficiency claim is contradicted by Algorithm 1: it initializes a dense token-level similarity matrix S_t in R^{L x L} and fills chunk submatrices, requiring O(L^2) memory/time. This is not subquadratic and conflicts with the on-device/long-context motivation; memory results show DHSA can use more peak memory than dense torch.sdpa (6.99 vs 6.33 GB at 8k, 9.69 vs 8.38 GB at 16k, 16.99 vs 15.18 GB at 32k), contradicting the abstract's 35% memory reduction claim.",
+        "Despite 'token-level selection' claims, chunk-level scores are upsampled to block-constant scores; all tokens within a chunk receive identical similarity. TopK with budget N_b cannot distinguish important tokens inside a selected chunk and may break ties arbitrarily, so the method is effectively dynamic block-sparse attention, not fine-grained token-level sparsity.",
+        "Dynamic boundary detection is not quantitatively evaluated: no precision/recall/F1 or end-to-end ablation on boundary quality in the main paper, only visualizations. The predictor uses only 8-token local windows, and labels are heuristic attention-ratio labels; the claim that local context is sufficient is not established.",
+        "Length normalization q_c = sqrt(|C|) * avg(q), k_c = sqrt(|C|) * avg(k) yields q_c dot k_c = sqrt(|C_q||C_k|) times average token-pair similarity, which systematically favors longer chunks rather than removing length bias. No analysis or ablation supports the stated rationale.",
+        "Causality and tie-breaking are underspecified: the prefill algorithm fills S_t for all chunk pairs including future positions, and does not explicitly enforce a causal mask before TopK; within-chunk ties are unresolved. This threatens correctness and reproducibility.",
+        "Missing accuracy baselines: recent dynamic sparse/KV methods cited in the introduction (MInference, H2O, StreamingLLM, PyramidKV) are not compared on LongBench or Needle-in-a-Haystack, so claims of consistently outperforming dynamic sparsity baselines are unsupported.",
+        "Experimental support is inconsistent and limited: LongBench uses only Gemma2-2b-it and 100 samples per dataset, with no variance or significance tests; DHSA is often below dense (e.g., Qasper 30.20 vs 35.32, NarrativeQA 20.69 vs 22.37), and latency/memory numbers conflict across abstract, introduction, and tables (torch.sdpa DHSA memory is worse than dense).",
+        "Presentation and reproducibility issues: typos such as 'prefetch', duplicate/incorrect Gemma citations, year mismatch for Bai et al., no code release, no training compute/time/seeds, and unclear generation of attention-derived labels for long sequences. Limitations omit the O(L^2) matrix and missing-baseline issues."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "The core idea of learning content-dependent chunk boundaries (rather than fixed-size blocks) via a small boundary-prediction network, and deriving its labels automatically from attention-mass ratios, is a reasonable and somewhat novel angle for sparse attention. It avoids manual annotation and is cheap (a 20 MB predictor shared across layers).",
+        "The paper distinguishes prefill-stage vs decode-stage sparsity and provides a cost analysis (O(L^2) dense vs O(L*N_b) block sparse vs an extra O(L) boundary pass), which is a useful framing that many sparse-attention papers omit.",
+        "DHSA does consistently beat the block-sparse baseline on most LongBench tasks (e.g., NarrativeQA 20.69 vs 16.74, Qasper 30.20 vs 26.15) and shows clear latency reductions relative to dense attention in Tables 2-3.",
+        "The appendix provides non-trivial implementation detail (focal loss, soft labeling, NMS with window sizes, hyperparameters such as w=4, hidden size 256, alpha/beta), and the Limitations section honestly flags dependence on the chunk budget/size.",
+        "The chunk-representation analysis (padding dilution and length sensitivity, addressed with sum/actual-length and sqrt(|C|) scaling) is a small but sensible observation."
+      ],
+      "weaknesses": [
+        "The headline accuracy claim is not supported by the paper's own data. Table 1 shows DHSA below dense attention on nearly every task: Qasper 30.20 vs 35.32, NarrativeQA 20.69 vs 22.37, MultifieldQA-en 34.98 vs 37.32, HotpotQA 38.78 vs 41.63, Musique 15.90 vs 19.05. These are 5-15% relative drops on single-document QA, directly contradicting the abstract's assertion that DHSA 'matches dense attention in accuracy.'",
+        "The memory-reduction claim (35%) is contradicted by the paper's own tables. In Table 3, DHSA uses MORE peak memory than dense torch.sdpa (16k: 9.69 vs 8.38 GB; 32k: 16.99 vs 15.18 GB), and in Table 2 DHSA (6.99 GB) exceeds dense sdpa (6.33 GB). The abstract and intro both advertise large memory savings that the experiments do not show. Additionally, block sparse reporting 9.88 GB vs dense 6.33 GB is implausible and unexplained.",
+        "Internal inconsistencies in the reported gains: the abstract claims '20-60%' prefill latency and '35%' memory reduction while the introduction claims '25-45%' latency and '30-35%' memory; the word 'prefetch' is used instead of 'prefill.' The reported numbers are not stable across the paper.",
+        "The most relevant dynamic-sparse baselines are cited (MInference, H2O, LM-Infinite, Scissorhands) but never compared in accuracy; only dense and a single block-sparse baseline appear in the accuracy tables. The stated advantage over 'dynamic approaches' is therefore unsupported, and the block-sparse baseline is a weak straw man given the paper's own criticism of static/block methods.",
+        "Evaluation is thin: only two very small models (Gemma2-2b-it, Gemma3-1b-it), 100 samples per LongBench dataset, a single seed, and no variance/error bars. Needle-in-a-haystack is a retrieval task that does not exercise the general long-context reasoning the paper claims to preserve.",
+        "Novelty is limited. Chunk-level similarity upsampled to token-level masks is essentially block-sparse attention with content-dependent boundaries; the 'length-normalized aggregation' (multiplying the mean by sqrt(|C|)) is a minor heuristic with no theoretical justification. Because the boundary predictor is trained on heuristic attention-derived soft labels, the 'fully data-driven' framing is overstated.",
+        "Presentation and referencing problems: Figure 5's sub-captions are out of order and the (a)/(b)/(c)/(d) labels do not match the text; 'Team et al. [2025]' is listed twice for Gemma 2 and Gemma 3; Bai et al. is cited as both 2023 and 2024. These make the results harder to verify.",
+        "No code or artifact is released for what is fundamentally a systems/efficiency contribution, limiting reproducibility of the latency and memory measurements (which are sensitive to implementation choices such as torch.sdpa vs eager)."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3,
+      "strengths": [
+        "Addresses an important practical problem: reducing long-context prefill cost and memory for resource-constrained LLM inference.",
+        "DHSA is a plug-in module that does not require retraining the base LLM, and its boundary predictor is lightweight (20 MB) and shared across layers/datasets, which is practically appealing.",
+        "The method combines hierarchical chunk-level routing, dynamic boundary prediction, and length-normalized aggregation; the boundary predictor pipeline using local windows, auto-derived attention labels, soft labels, focal loss, and NMS is technically reasonable.",
+        "The paper evaluates on Needle-in-a-Haystack and LongBench with Gemma2/Gemma3 models, and includes latency/memory comparisons against dense and block-sparse attention plus several KV-compression methods.",
+        "Some results are promising: DHSA is close to dense attention on several LongBench tasks, outperforms block-sparse attention on most reported tasks, and shows meaningful prefill latency reductions at longer context lengths.",
+        "The limitations section honestly acknowledges context-length extension and hyperparameter dependence as open issues."
+      ],
+      "weaknesses": [
+        "The central claim that DHSA 'matches dense attention in accuracy' is not supported by the LongBench results: averaged over the 11 reported tasks, dense is 35.42 vs DHSA 33.99, with notable gaps on Qasper (35.32 vs 30.20), HotpotQA (41.63 vs 38.78), Mf-en (37.32 vs 34.98), and Musique (19.05 vs 15.90).",
+        "The peak-memory reduction claim is contradicted by the paper's own tables under torch.sdpa: at 16k context, dense uses 8.38 GB vs DHSA 9.69 GB; at 32k, dense uses 15.18 GB vs DHSA 16.99 GB; Table 2 also shows dense 6.33 GB vs DHSA 6.99 GB. Thus the claimed 35% memory reduction is only observed in the eager setting and is overclaimed in the abstract.",
+        "The paper claims superiority over dynamic sparsity baselines, but provides no accuracy comparison to MInference, H2O, Scissorhands, StreamingLLM, PyramidKV, or similar dynamic/KV-compression methods; those methods appear only in latency/memory plots. This leaves a central comparative claim unsupported.",
+        "There is a likely data-contamination issue: the boundary predictor is trained on TriviaQA, and TriviaQA is also a LongBench evaluation task. The reported TriviaQA result (DHSA 87.03 vs dense 87.00) may therefore be inflated, and the paper does not discuss this overlap.",
+        "The main paper lacks systematic ablations isolating the contribution of dynamic chunking, length-normalized aggregation, and the learned boundary predictor versus fixed/static chunking. Only a boundary-sharing variant is reported, so it is unclear which components drive the gains.",
+        "The length-normalized aggregation in Eq. 4 is under-justified: multiplying averaged chunk queries/keys by sqrt(|C|) scales chunk-pair similarity by sqrt(|C_l||C_k|), which is not obviously a length-bias correction and may instead favor larger chunks. No ablation or theoretical analysis supports this design choice.",
+        "Reproducibility is weak: no code or artifact is released, training details such as optimizer, learning rate, epochs, batch size, and data splits are incomplete, and boundary-predictor training/validation protocols are not fully specified. Results appear to be single runs without error bars or significance tests.",
+        "The efficiency evaluation is inconsistent and confusing: eager vs. sdpa results differ substantially, block-sparse memory sometimes exceeds dense memory, and memory measurement methodology is not clearly described. Abstract/introduction numbers also vary (20-60% vs. 25-45% latency reduction; 35% vs. 30-35% memory reduction).",
+        "The 'on-device' framing is not well supported by the experiments, which use a single NVIDIA RTX 3090 24 GB desktop GPU, batch size 1, and 1B-2B models. No mobile/edge deployment or realistic on-device constraints are evaluated.",
+        "The boundary predictor is trained offline using labels derived from dense attention, so 'without retraining' applies only to the base model; transfer across models, layers, and datasets is not fully established, and the training cost of the predictor/label generation is not analyzed.",
+        "Presentation issues remain: S_l is referenced but undefined in Section 2.2, Algorithm 1 has a dimension typo for S_c, Eq. 8 uses ambiguous notation for beta/base, 'prefetch' is used where 'prefill' is intended, and several claims are overbroad relative to the reported evidence."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a well-motivated and practically important problem: input-adaptive sparse attention for memory-constrained long-context prefill, where static/heuristic patterns fail to generalize.",
+        "The hierarchical routing formulation (chunk-level similarity → token-level selection) is sensible and avoids materializing dense L×L token similarity, keeping cost near-linear in L for fixed budgets.",
+        "Reasonable technical details: length-normalized chunk representation (Eq. 4) that avoids padding-dilution and length sensitivity, and an automatic soft-labeling scheme derived from attention ratios that avoids manual annotation.",
+        "Broad and reasonably thorough evaluation across three model families (Llama-3.1-8B, Qwen2.5-3B, Gemma-2-2B) and three benchmark families (NIAH, LongBench, RULER), plus CPU and GPU backends, ablations, hyperparameter sensitivity, and larger/higher-precision backbone results.",
+        "Concrete memory-constrained demonstration (100K context on a single 24GB GPU) and a component-level overhead breakdown (Tables 9–10) that honestly shows routing overhead is only amortized at longer contexts.",
+        "Limitations are acknowledged (prefill focus, decoding left to future work; batch inference handled by a sequential for-loop)."
+      ],
+      "weaknesses": [
+        "The central headline claim of '12–20% relative accuracy gains over Block Sparse Attention' is measured against a relatively weak baseline. Against stronger baselines in the authors' own Table 1 (SeerAttention 30.8, Quest 30.9 vs DHSA 31.8 on Llama; SeerAttention 30.8 vs DHSA 31.8; on Gemma DHSA 30.3 vs dense 30.9), the margins are small or nonexistent, and on several individual tasks (e.g., Llama Single-Doc QA: Quest 22.4 > DHSA 18.3) DHSA does not lead. The framing overstates the empirical advantage.",
+        "The text claims DHSA 'matches the performance of the original dense attention baseline' at 12.5% density, but in Table 1 DHSA is consistently below dense (31.8 vs 32.7 on Llama; 25.3 vs 26.0 on Qwen; 30.3 vs 30.9 on Gemma). This is a meaningful misstatement of the results.",
+        "Potential train/test overlap / leakage: the boundary predictor is trained on TriviaQA, which is also part of LongBench's few-shot learning category. DHSA slightly exceeds dense attention on the few-shot learning column (68.8 vs 68.3 on Llama; 67.2 vs 66.9 on Qwen), which is anomalous for a sparse method and suggests the gains may be partially attributable to in-distribution supervision rather than genuinely input-adaptive routing. This is not controlled for or discussed.",
+        "The theoretical analysis (Appendix B) relies on strong, idealized assumptions (equal-length segments, all-or-nothing segment relevance, bounded boundary error δ) and compares DHSA's near-oracle bound against a worst-case block-sparse alignment that is contrived. The resulting inequality (1−2δ/m ≫ m/2B) is not a rigorous characterization of realistic performance and does not substantially support the empirical claims.",
+        "The 'drop-in / frozen backbone' framing is somewhat undercut by the requirement to train a separate boundary predictor per backbone family (reported ~8.9 hours on a single RTX 3090) using the base model's attention maps, which requires access to attention patterns and a calibration pass for each new model. This practical cost is downplayed.",
+        "Some efficiency claims are weaker than presented: end-to-end TTFT gains are modest (Table 10: 1,550 vs 2,170 ms at 8K; 5,830 vs 11,680 ms at 32K), and the batch claim (sequential for-loop 'faster than batched FA2') is asserted with limited evidence and may not generalize beyond the specific memory-constrained setting.",
+        "Several comparisons mix prefill-oriented methods (MInference, Block-Sparse, SeerAttention, DHSA) with decoding-oriented methods (DuoAttention, Quest) evaluated under dense prefill, which makes the downstream accuracy comparisons apples-to-oranges despite the caveat noted in the text."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "Addresses an important and timely problem: long-context LLM inference under memory constraints, with a drop-in sparse attention module that keeps the backbone frozen.",
+        "The hierarchical chunk-level routing idea is intuitive and reasonably novel; dynamic boundary detection and length-normalized chunk representations are well motivated and ablated.",
+        "The paper provides extensive empirical evaluation on LongBench, RULER, and Needle-in-a-Haystack, and reports both accuracy and latency/TTFT results.",
+        "The implementation details, algorithms for SDPA and tiled online-softmax backends, and complexity analysis are useful for practitioners.",
+        "The boundary predictor is lightweight (~20MB), shared across layers, and requires only one-time calibration, which is practically appealing.",
+        "Demonstrates compatibility with multiple model families and both GPU and CPU backends, broadening potential applicability."
+      ],
+      "weaknesses": [
+        "The theoretical analysis is not sound. Proposition B.6 claims an upper bound on block-sparse recall of m/(2B), but its proof assumes a specific worst-case segment/block alignment and a budget accounting where selected blocks consume B tokens each. This is not a general upper bound; it ignores block-sparse methods that select partial blocks or token-level budgets, and the bound is inconsistent with empirical block-sparse recall. The comparison with DHSA's near-oracle recall is therefore not rigorously established.",
+        "There is a serious data contamination issue: the boundary predictor is trained on TriviaQA, and LongBench's few-shot learning category includes TriviaQA. This undermines the fairness of the few-shot learning results and the claim of generalization. Other training datasets (ChatQA2, Long Data Collections) may also overlap with evaluation distributions.",
+        "The claimed 100K Needle-in-a-Haystack evaluation is inconsistent with the appendix, which states that the setup uses context lengths from 1K to 64K tokens. Figure 1a includes 100K for DHSA, but baselines are not evaluated under the same setting, making the comparison incomplete and the claim unsupported.",
+        "The RULER results do not support the abstract's claim of 'near-dense accuracy.' DHSA underperforms dense attention by roughly 4-5 absolute points at every context length (e.g., 76.2 vs 81.5 at 32K; 71.5 vs 75.2 at 48K) and is sometimes worse than DuoAttention/Quest at shorter lengths. The abstract and conclusion overstate the accuracy preservation.",
+        "The 'model-agnostic' claim in Table 2 is misleading: DHSA requires training a separate boundary predictor for each backbone family, so deploying to a new model is not drop-in without calibration. The table also marks DHSA as model-agnostic while omitting important baselines for Qwen and Gemma, limiting the comparison.",
+        "Baseline comparisons are not consistently fair. DuoAttention and SeerAttention require training/gating, and it is unclear whether they were retrained or tuned for each backbone under matched budgets. Omitting these baselines for Qwen/Gemma weakens the multi-model claim.",
+        "At 25% density on LongBench, DHSA (34.4) outperforms dense attention (32.7). A sparse method exceeding dense accuracy by 1.7 points is suspicious and likely indicates evaluation noise, quantization artifacts, or inconsistent dense baseline measurement. The paper does not explain this anomaly.",
+        "The complexity analysis ignores the potential O(N_c^2) chunk-similarity cost when dynamic chunking produces many chunks. N_c is not bounded by an explicit user budget in the method description, and if chunking is fine-grained, N_c can approach O(L), making the routing cost quadratic. The overhead breakdown in Table 10 already shows routing is a significant fraction of TTFT.",
+        "The method targets only the prefill stage; decoding is left to future work. While this scope is acknowledged, it limits the practical impact for long-context generation, which is often decode-heavy.",
+        "The paper lacks a limitations section and only provides a minimal impact statement. It does not discuss failure cases of boundary prediction, sensitivity to domain shift, or risks of incorrect sparsification.",
+        "Reproducibility is limited: the code URL is missing/placeholder in the manuscript, boundary-predictor training data generation details are incomplete, and hyperparameter selection appears to use validation-set performance without full disclosure. The dependence on dense attention labels for training also conflicts with the memory-constrained motivation, since generating labels at long context lengths may itself be infeasible."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Well-motivated hierarchical formulation: chunk-level routing is used to produce compact token-level index sets, avoiding explicit O(L^2) token-pair scoring while preserving causal semantics (Algorithm 1, Section 3.1). This is a clean and sensible way to make dynamic sparsity tractable at long context.",
+        "Content-aware dynamic chunking with a lightweight boundary predictor trained via automatic soft labels derived from dense attention mass, combined with length-normalized 'robust chunk representation' (Eq. 4, Section 3.2-3.3). The ablation (Table 4) shows both components contribute meaningfully (31.8 vs 30.7 vs 28.0), giving concrete evidence for the design choices.",
+        "Broad, multi-axis empirical evaluation: three model families (LLaMA-3.1-8B 4-bit, Qwen2.5-3B/14B, Gemma-2-2B), three benchmark suites (NIAH up to 100K, LongBench, RULER up to 48K), plus GPU and CPU backends. Ablations, hyperparameter sensitivity (Table 7), and component-level overhead breakdowns (Table 10) are included, which strengthens the evidential base.",
+        "Practical relevance to the stated memory-constrained setting: DHSA scales to ~100K context on a single 24GB RTX 3090 where dense attention OOMs, and reports kernel-level prefetch speedups (up to 10.66x at 128K, 6.25% density, Figure 6) and end-to-end TTFT reductions (Table 9).",
+        "The appendix theoretical analysis (Propositions B.5/B.6) formalizes an intuition—semantics-aligned chunking can retain more oracle-important tokens than fixed block grids under equal budget—and is paired with a matching empirical recall study (Figures 2b, 12).",
+        "Honest scoping of the contribution: the paper explicitly restricts itself to prefetch acceleration and leaves decoding/KV-cache optimization to future work, and it clearly flags that decoding-oriented baselines (DuoAttention, Quest) are reference comparisons rather than apples-to-apples."
+      ],
+      "weaknesses": [
+        "The claim of 'near-dense accuracy in highly sparse regimes' is overstated. At 6.25% density DHSA averages 27.7 vs 32.7 dense on LongBench (Table 3), roughly a 15% relative drop, and it is clearly below dense on Single Doc QA (18.3 vs 22.0), where Quest (22.4) is actually higher. The abstract's 'best overall performance' phrasing also glosses over the fact that dense attention remains the top row in Table 1.",
+        "Novelty is moderate. SeerAttention, Quest, and MInference already learn or predict input-adaptive sparsity with a frozen backbone; the genuinely new element here is content-aware dynamic chunking, but the surrounding routing/prediction pipeline is largely incremental over existing dynamic sparse attention.",
+        "The theoretical results rest on strong, unverified assumptions—exact semantic segments, intra-segment homogeneity (ε_intra ≪ Δ_inter), bounded boundary shift δ, and worst-case segment/block alignment—so Propositions B.5/B.6 read as illustrative intuition rather than guarantees about real attention distributions. The stated bound 1 - 2δ/m is not connected to any measured quantity (e.g., boundary accuracy) in the experiments.",
+        "Reproducibility of the 'drop-in' claim is weakened by per-backbone training: the boundary predictor must be retrained for each model family (~8.9 hours on an RTX 3090, Section A.4), and the 'Code is available at:' link is absent/truncated in the abstract. Training data is QA-oriented, and the authors themselves note that generalization to other distributions is only empirical.",
+        "Batch inference collapses to a per-example for-loop (Figure 9), which is a real throughput limitation for serving; the comparison is only against batched FA2 under memory pressure, not against batched sparse alternatives.",
+        "Speedup reporting is dominated by attention-kernel-level numbers, while end-to-end TTFT gains are more modest (3.28s→1.88s average, Table 9). At matched density DHSA is slower than Block Sparse (Figure 5), so the 'comparable prefetch cost' framing needs more careful qualification."
+      ]
+    }
+  }
+}

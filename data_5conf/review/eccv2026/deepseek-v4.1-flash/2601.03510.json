@@ -22,6 +22,24 @@
         "Comparison to BFA-Net on hidden ScanNet200 is not fully explained, and the paper would benefit from clarifying whether all baselines are compared under identical backbone, training schedule, and pretraining assumptions."
       ]
     },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "Addresses a relevant problem in 3D point cloud segmentation: geometric ambiguity among objects with similar shapes but different visual appearance, and proposes using 3D Gaussian Splatting attributes directly in native 3D space rather than via 2D-3D fusion.",
+        "The Gaussian-to-point alignment idea is intuitive, and the use of Mahalanobis distance to account for anisotropic Gaussian ellipsoids is a reasonable technical choice compared with plain Euclidean matching.",
+        "The paper evaluates on several standard indoor segmentation benchmarks (ScanNet v2, ScanNet200, ScanNet++, Matterport3D) and includes ablations for the distance metric and neighborhood size.",
+        "Qualitative examples show some improvement on difficult classes such as refrigerator and shower curtain, and the method reports gains over PT v3 and BFANet baselines under the reported settings."
+      ],
+      "weaknesses": [
+        "The central claim that Gaussian opacity encodes appearance/material information is technically unsupported. In 3DGS, opacity is a per-Gaussian blending/visibility parameter, not color, texture, or material. The actual appearance-carrying Gaussian attribute is spherical harmonics, which the method explicitly avoids using. The point cloud already contains RGB color, and the baselines also use it, so the paper does not isolate what appearance information opacity adds beyond color. This undermines the main 'appearance-aware' motivation.",
+        "The scale-based boundary pseudo-label extraction is heuristic and insufficiently validated. Small Gaussian scales do not necessarily correspond to semantic object boundaries, especially across different scene scales and reconstruction quality. Setting η=0.7 prunes the largest 70% of scales, leaving 30% of object points as 'boundary' points, which is implausibly large for true boundaries. The method also aggregates 3D scale vectors from rotated Gaussians by simple weighted averaging, which ignores rotation and is not physically well-defined. No boundary pseudo-label accuracy is reported, and there is no ablation on η or the semantic-boundary radius r.",
+        "The empirical gains are marginal and sometimes negative. On ScanNet v2 the improvement is +1.4 mIoU over PT v3 and +1.1 over BFANet; on ScanNet200 hidden test G2P underperforms BFANet (35.5 vs. 36.0 mIoU); on ScanNet++ and Matterport3D the gains are only +0.8 and +0.4 mIoU. No error bars or statistical significance tests are provided, and some classes regress (e.g., picture -2.4 vs. PT v3).",
+        "The efficiency analysis is unfavorable and not adequately justified. Training latency increases by 67%, training memory by 30%, inference latency by 21%, and inference memory by 74% for very small mIoU gains. The cost of reconstructing or obtaining the required 3D Gaussians is not included in the efficiency discussion, making practical deployment unclear.",
+        "Novelty and attribution are overstated. The method combines existing components: PT v3 backbone, BFANet B-S block, Sonata-style self-supervised pretraining, Gaussian-to-point matching, feature distillation, and boundary pseudo-labeling. The claim of being the 'first' to leverage aligned 3DGS attributes for point cloud segmentation is questionable given prior work such as UniPre3D and other GS-based segmentation/pretraining methods. The 'without any 2D or language supervision' claim is misleading because the 3D Gaussians themselves are reconstructed from multi-view images using 2D rendering losses, and the GS source may involve external pretraining.",
+        "The experimental design does not cleanly isolate the contribution of the proposed components. G2P uses the BFANet B-S block, so comparisons against BFANet and the module ablation may conflate boundary-module gains with scale-based pseudo-label gains. There is no control using spherical harmonics or other Gaussian attributes, no control replacing opacity with geometry/color, and no boundary-only vs appearance-only study with the same BFANet backbone.",
+        "The method relies on precomputed per-scene Gaussians and dataset-specific Gaussian reconstructions. It is unclear how the approach would be applied to a new scene without first running 3DGS optimization, and the paper does not analyze robustness to Gaussian reconstruction quality, missing views, or outdoor domains where GS data are unavailable. This limits the claimed generality."
+      ]
+    },
     "exp3_positive": {
       "oa": 4,
       "strengths": [
@@ -62,6 +80,45 @@
         "The method effectively uses multi-view image supervision during training through the 3D GS reconstruction, even though no pretrained 2D features are used. This makes comparisons to purely point-based baselines somewhat difficult to interpret: it is unclear how much of the gain comes from better Gaussian attribute alignment versus simply having access to image-derived multi-view information. A stronger controlled baseline using the same images (e.g., an explicit 2D-3D fusion baseline trained from scratch with the same image inputs) would strengthen the claim.",
         "Several components rely on hyperparameters and training-time labels, such as the boundary pruning ratio, object-focused subset filtering, and semantic boundary candidate radius. The sensitivity analyses are useful but relatively shallow, and the overall pipeline is complex, making reproduction nontrivial without released code or precomputed assets.",
         "The analysis of Gaussian attributes is interesting but somewhat hand-wavy in places (e.g., opacity as a visibility-confidence cue). More rigorous investigation of why opacity and scale transfer well, and when they fail, would improve the scientific contribution."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "The core idea—aligning Gaussian attributes to original point clouds to preserve geometry while transferring opacity and scale cues—is reasonable and well motivated for geometric ambiguity in indoor segmentation.",
+        "The Mahalanobis-distance-based Gaussian-to-point correspondence is technically sensible, and the ablation against Euclidean matching supports its benefit.",
+        "The paper provides multi-benchmark evaluations, class-wise analysis, ablations, efficiency measurements, and a limitations discussion, which are useful for understanding the method.",
+        "G2P shows some gains on geometrically challenging classes such as refrigerator and shower curtain, supporting the claim that Gaussian-derived visibility/scale cues can help appearance-sensitive segmentation."
+      ],
+      "weaknesses": [
+        "The overall gains are marginal and do not establish clear superiority: ScanNet v2 improves only +0.9 mIoU over PT v3 and +0.4 over BFANet, ScanNet200 hidden test underperforms BFANet (35.7 vs. 36.0), and instance-level mAP is nearly unchanged (23.2 vs. 23.1). No statistical significance or multi-seed variance is reported.",
+        "The method relies on expensive offline preparation, including per-scene 3D Gaussian optimization (~22 min/scene) and per-dataset teacher training (~27.9 h), making practical deployment costly and limiting applicability when Gaussian reconstructions are unavailable.",
+        "Boundary pseudo-label generation uses ground-truth semantic labels to remove background classes and define semantic boundaries, so the supervision is not purely pseudo-label based; this should be clarified and ablated without ground-truth semantic filtering.",
+        "Reproducibility is a concern: details of GS reconstruction and coordinate alignment for each benchmark, the Sonata-based appearance-encoder pretraining, and data filtering are insufficiently specified, and no code release is mentioned.",
+        "Component contributions are small and possibly within noise: boundary-only and distillation-only both reach 77.8 mIoU, while the full model reaches 78.4; several hyperparameters appear tuned with limited sensitivity analysis.",
+        "Novelty over existing GS-augmented point cloud methods is incremental, combining nearest-Gaussian matching, distillation, and heuristic scale-based boundary extraction rather than introducing a fundamentally new formulation.",
+        "Efficiency trade-offs are unfavorable: inference memory increases by 74% and latency by 21% for roughly +1.4 mIoU over PT v3, which is difficult to justify for many applications.",
+        "Clarity is weakened by table inconsistencies and typos (e.g., UniProtID, BFANet*, Bookcheff, ShwrCurt), and the paper does not convincingly compare against Gaussian-based segmentation methods despite using Gaussian attributes."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Presents a well-motivated and clear solution to geometric ambiguity in point cloud segmentation by transferring GS attributes (opacity, scale) to points while preserving original point geometry.",
+        "The Gaussian-to-Point correspondence with Mahalanobis distance and inverse-distance aggregation is technically sound and ablated against Euclidean distance and varying neighborhood sizes.",
+        "The three components (G2P feature augmentation, GS-primitive-guided distillation, scale-based boundary extraction) are individually validated and shown to be complementary in ablation studies.",
+        "Extensive experiments on ScanNet v2, ScanNet200, ScanNet++, Matterport3D, and instance segmentation, with multiple metrics and ablations, demonstrate consistent improvements over geometric baselines and competitive performance without 2D/language supervision in the segmentation pipeline.",
+        "The method improves challenging classes such as refrigerator and shower curtain, supporting the central claim that Gaussian-derived cues mitigate geometric bias.",
+        "The paper is well written with clear figures, and it usefully discusses limitations including outdoor-scene generalization and offline preparation cost.",
+        "Distillation enables Gaussian-free inference, and the design preserves the original point cloud for accurate geometry."
+      ],
+      "weaknesses": [
+        "Performance gains are modest and not always state-of-the-art (e.g., ScanNet v2 +0.4 over BFANet; ScanNet200 hidden test 35.7 vs BFANet 36.0), which may be within run-to-run variance and weakens the practical significance.",
+        "The method depends on offline per-scene 3D Gaussian reconstruction (22 min/scene, plus 27.9h teacher training per dataset) and on the SceneSplat-7K dataset, limiting scalability and applicability to point-cloud-only settings; the 'without 2D features' claim may be somewhat misleading because GS is reconstructed from multi-view images.",
+        "Several design choices are heuristic and tuned per dataset (e.g., scale pruning ratio η=0.7, semantic radius r^s, loss weights λ_d/λ_b), with unclear generalization to new domains such as outdoor scenes.",
+        "The core technical novelty is moderate, relying on existing components (PT v3 backbone, BFANet B-S block, Sonata encoder, Mahalanobis distance) with the main contribution being attribute transfer and distillation.",
+        "The appearance encoder is pretrained from scratch per dataset, adding substantial training cost and limiting cross-dataset transfer; no code, pretrained models, or detailed reproducibility artifacts are mentioned.",
+        "Boundary pseudo-labels from scale can be noisy due to texture-induced small scales, and although semantic filtering helps, the robustness of the combined boundary cue across diverse scenes is not sufficiently analyzed."
       ]
     }
   }

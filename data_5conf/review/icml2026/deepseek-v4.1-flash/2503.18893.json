@@ -1,0 +1,119 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "The motivation is clearly presented and empirically grounded: token-wise cosine similarity across layers is low, but CKA and eigenvalue analyses (Fig. 2) indicate that dominant singular subspaces are aligned; horizontally concatenating grouped layers' KV caches lowers the rank needed for 95% variance.",
+        "The proposed xKV is simple, post-training, and architecture-agnostic: it performs a cross-layer SVD over groups of adjacent layers, stores a shared token basis A and layer-specific reconstruction matrices B, and can trade off compression vs. accuracy by group size (xKV-2 vs. xKV-4).",
+        "The RULER results are strong and directly support the main claim: on Llama-3.1-8B at 64K, xKV-4 at ~8.0x compression reaches 87.8 average accuracy vs. 92.0 uncompressed, while Single SVD collapses to 35.3 and MiniCache at 1.3x collapses to 43.8. This is convincing evidence that sharing subspaces across layers provides benefits beyond per-layer SVD.",
+        "The method shows compatibility beyond GQA models: on DeepSeek-Coder-V2-Lite with MLA, xKV achieves ~3x-3.5x compression on RepoBench-P/LCC without noticeable accuracy loss, whereas MiniCache and Single SVD degrade. This broadens the practical relevance.",
+        "The paper includes an honest limitations section acknowledging fixed rank allocation, lack of end-to-end system measurement, and reconstruction overhead, which is appropriate and helpful.",
+        "No obvious ethical concerns arise from the work; the method uses public models and benchmarks."
+      ],
+      "weaknesses": [
+        "Reproducibility is materially incomplete. The code link is missing, and the manuscript omits critical implementation details: how ranks are selected to achieve each reported compression ratio, the SVD algorithm/solver used, whether A and B storage are fully accounted in the compression-rate calculation, and hyperparameters for grouping and key/value rank ratios. MiniCache is reimplemented rather than using official code, which creates uncertainty in the key baseline comparison.",
+        "The empirical comparison is narrow. The paper compares against only MiniCache and Single SVD, omitting strong KV-cache compression baselines from quantization, token eviction, and other low-rank projection families (e.g., KIVI, SnapKV, H2O, ASVD, Palu, ShadowKV, EigenAttention). Claims of addressing the memory bottleneck would be much stronger with broader baselines.",
+        "There is no end-to-end evaluation of memory footprint, decoding throughput, latency, or peak GPU memory. The central motivation is deployment memory/throughput, but the paper only reports accuracy and a nominal compression rate. Since reconstruction X_l = A B_l can add large per-layer compute during decoding, the practical benefit on throughput is not established. The '<10% prefill overhead' claim is also unsupported by details.",
+        "The compression-rate accounting is not fully transparent. Because A is L x r and still scales with context length, the actual memory saving depends on r and must be reported together with B storage. The tables give 'Comp.' values without enough detail to verify how each ratio was computed or whether all metadata is included.",
+        "The theoretical link is suggestive but incomplete. The CKA analysis in Appendix A relates CKA to alignment of left singular vectors, but the main text mainly argues from one CKA heatmap (shown for value caches) and a 95%-eigenvalue heuristic. There is no error bound connecting CKA alignment to reconstruction error or final attention-output error, and key-cache CKA/alignment is less directly visualized.",
+        "Presentation issues reduce polish: inconsistent capitalization/terms (e.g., 'key-Value', 'Minicache' vs. 'MiniCache'), occasional grammatical errors ('xKV have yielded', 'by and constructing'), and dense/unwieldy tables. These do not invalidate the results but make the paper harder to parse."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Novel and well-supported motivating analysis. Using CKA, the paper convincingly demonstrates that the dominant singular vectors of KV-caches are aligned across layers even when per-token cosine similarity is low (Fig. 2a–b). This reframes why prior cross-layer merging (MiniCache/SLERP) is fragile, and the appendix correctly derives that high CKA implies alignment of the dominant left singular vectors. The eigenvalue analysis in Fig. 2c directly motivates grouping layers.",
+        "The method is simple, clean, and plug-and-play: horizontally concatenate grouped layers' KV-caches, run one SVD, and factor it as a shared basis A plus layer-specific reconstruction matrices B. It requires no retraining or architectural change, which is genuinely useful for deployment on existing models.",
+        "Reasonably broad evaluation: three GQA models (Llama-3.1-8B, Qwen2.5-7B/14B-1M) on RULER plus a DeepSeek MLA model on LongBench code tasks, with a consistent ordering (xKV-4 > xKV-2 > Single SVD) that supports the central hypothesis about cross-layer basis sharing.",
+        "The internal comparison against Single SVD (group size 1) is a fair, informative ablation that isolates the benefit of cross-layer sharing from per-layer low-rank compression, and the near-lossless xKV-4 results on Qwen2.5-14B (~2.4x at 93.5 vs 93.6 baseline) are a legitimate and stronger story than the headline baseline comparison.",
+        "The limitations section is honest about the absence of end-to-end system measurements and fixed rank allocation."
+      ],
+      "weaknesses": [
+        "The headline claim (up to 6.8x higher compression than the state-of-the-art inter-layer method with +2.7% accuracy) rests entirely on a self-reimplementation of MiniCache, whose code the authors state was unavailable. The reported MiniCache numbers are far worse than the original paper's published results (e.g., Llama-3.1-8B at 1.3x collapses to 43.8% average vs 92.0% baseline). Such a large discrepancy may reflect a non-faithful reproduction; without the original code or independent verification, the central comparative claim is not reliably established. The comparison is also framed across different operating points (xKV at 8.0x vs MiniCache at 1.2x), which is apples-to-oranges.",
+        "No end-to-end system evaluation. For a paper whose entire motivation is the KV-cache memory bottleneck, there is no throughput, latency, or actual memory-in-practice measurement, and the reconstruction FLOPs are acknowledged but not quantified. This is a significant evidential gap, not merely a nice-to-have.",
+        "The interaction between decompression and attention is critically unclear. The decode description ('reconstruct ... by multiplying A with B') suggests materializing the full L x d cache per layer per step, which would eliminate the memory savings at compute time. The paper never clarifies whether attention is instead computed in the low-rank space (e.g., via (Q B^T) A^T and (attn A) B), which is essential to the memory claim. As written, the practical benefit is unsubstantiated and possibly undermined.",
+        "Key methodological details are missing/underspecified, hurting reproducibility: how the rank r is selected to hit a given compression rate is not described; the code URL in the abstract is blank; and the on-the-fly decomposition cost is only loosely characterized ('<10% of prefilling time').",
+        "Overclaiming and internal inconsistency. The conclusion states '8.5x compression while maintaining strong accuracy,' yet no configuration reaches 8.5x and at ~8x xKV-2 degrades to ~71% (Llama) and ~80% (Qwen-14B) against ~92–93% baselines. The abstract's '+2.7% accuracy' gain omits that xKV at the headline 8x operating point remains ~4% below uncompressed accuracy.",
+        "Grouping is fixed to contiguous strides, but the CKA matrix (Fig. 2b) exhibits block structure not fully aligned with adjacency (some adjacent pairs show low alignment). The paper does not justify or ablate the stride grouping against data-driven grouping, despite this directly affecting compression quality.",
+        "The design choices (fixed key:value rank ratio 1:1.5, fixed group boundaries, no per-task or per-head allocation) are acknowledged as limitations, but together they suggest the reported operating points are somewhat hand-tuned, and no sensitivity analysis is provided to show robustness of the headline numbers."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Introduces a simple yet effective cross-layer SVD method that shares left singular vectors across grouped KV-cache layers, exploiting CKA-observed subspace alignment without pretraining or architectural modification.",
+        "Provides clear motivation and analysis: low token-wise cosine similarity but high CKA and reduced required rank under concatenation across layers.",
+        "Comprehensive empirical evaluation on RULER long-context benchmark with Llama-3.1-8B, Qwen2.5-7B/14B, and DeepSeek-Coder-V2-Lite, comparing against MiniCache and single-layer SVD, and demonstrating MLA compatibility.",
+        "Strong results: up to 8x compression with modest accuracy loss, much better than single-layer SVD at high compression, and up to 6.8x higher compression than MiniCache with accuracy improvement on Llama-3.1-8B.",
+        "Ablation studies on key/value compression and rank sensitivity, plus an honest limitations section acknowledging fixed rank allocation and missing end-to-end system measurement."
+      ],
+      "weaknesses": [
+        "Lacks comparison to other post-training low-rank KV-cache compression methods such as Palu, LoRC, ShadowKV, or EigenAttention; single-layer SVD is a useful ablation but not a comprehensive state-of-the-art baseline.",
+        "The MiniCache baseline was reimplemented because official code was unavailable, which may affect the reported 6.8x compression advantage; no direct validation of reimplementation fidelity is provided.",
+        "No end-to-end system evaluation of memory, latency, or throughput; reconstruction FLOPs and on-the-fly SVD overhead are not measured, despite efficiency being the central motivation.",
+        "Only group sizes 2 and 4 are experimentally tested, despite analysis suggesting larger groups; the fixed key/value rank ratio is used, and actual rank values for each compression rate are not fully tabulated, limiting reproducibility.",
+        "The code availability link is missing or blank in the manuscript, and exact rank schedules, SVD implementation details, and MiniCache adaptation details are insufficient for easy reproduction.",
+        "CKA analysis is shown mainly for value-cache on one model; key-cache alignment and generalization across models and datasets are not as thoroughly analyzed.",
+        "Evaluation is limited to 64K context for RULER and coding benchmarks; claims about longer contexts such as 128K or 1M are not empirically validated, and no variance or seed information is reported.",
+        "Minor presentation issues include typos such as 'Mixter-of-Experts' and 'by and constructing', and the promised broader impacts discussion is largely absent despite the section title."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Original observation: CKA analysis reveals that dominant singular vectors of KV caches are aligned across layers, providing a new motivation for cross-layer compression beyond token-wise cosine similarity, with a theoretical link in Appendix A.",
+        "Method is training-free and plug-and-play: cross-layer factorization shares a token basis A across W layers and stores per-layer B, enabling compression of more than 2 layers; compatible with GQA, MLA, and hybrid attention models.",
+        "Empirical results are promising: substantial gains over MiniCache and single-layer SVD, 8x memory compression with about 3% loss on RULER/LongBench, robust multi-turn NIAH performance, and xKV-SR achieves strong accuracy at 5.35x while enabling up to 4.23x throughput.",
+        "Selective Reconstruction and a custom SVD kernel are useful practical contributions; appendices provide FLOPs/memory accounting and an honest limitations discussion."
+      ],
+      "weaknesses": [
+        "Several central claims are overstated or imprecise: the conclusion says xKV 'outperforms accuracy on all other compression methods,' but on RULER Llama-3.1 xKV (88.50) is below SnapKV (89.68) and PyramidKV (89.94) at comparable 8x compression; on Qwen it is also below SnapKV/PyramidKV. The abstract/intro claim of '<=3%' loss is not met in Table 1 (Llama loss 3.39%, Qwen loss 3.17%).",
+        "Evaluation details are inconsistent: the main text lists Qwen2.5-7B-Instruct-1M and Qwen3-4B-Instruct-2507, but Table 1 evaluates Qwen2.5-14B-Instruct-1M; no main RULER/LongBench results for Qwen3 are shown. This makes the empirical coverage unclear.",
+        "The CKA evidence in Figure 2b is for value-cache only, while xKV compresses both keys and values. The paper does not explicitly show key-cache CKA alignment, despite relying on key alignment for the method's core motivation.",
+        "Reproducibility is weakened by the missing code URL in the abstract and incomplete specification of the custom SVD kernel and some rank/setting details; the per-configuration rank choices and pre/post-RoPE handling need clearer description.",
+        "Baseline comparisons may be fragile: MiniCache collapses even at 1.3x compression on Llama (45.04 avg), which is far worse than its original paper suggests; this could be due to setup choices rather than a general limitation, so the comparison deserves more scrutiny.",
+        "Efficiency claims require nuance: dense xKV is compute-bound and is slower than Full Attention (FlashAttention-2) (<1x normalized kernel speedup, about 0.4x at 122k), so the speedups come from SR variants at lower compression (5.35x or 1.63x), not from the 8x dense configuration."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Novel and well-motivated empirical observation: the paper uses CKA to show that while token-wise cosine similarity across layers is low, the dominant left singular vectors of KV-caches are strongly aligned. The link from CKA to left-singular-vector alignment is argued in Appendix A and is internally coherent with the proposed method (which shares the token basis A_k). This is a genuinely useful refinement over the token-similarity assumption underlying MiniCache.",
+        "Simple, training-free, plug-and-play method. Cross-Layer Factorization (concatenating W layers' caches and taking one rank-r SVD to yield a shared basis A_k plus per-layer B_l) requires no architecture change or fine-tuning, which is a practical advantage over CLA/YOCO/MLA that need retraining.",
+        "The window-size ablation (Table 8) is a well-controlled experiment: since window=1 is essentially single-layer SVD, the monotone improvement 45.71 -> 75.15 -> 88.50 -> 88.91 at fixed compression rate is direct evidence that cross-layer sharing (not merely the size of the window) drives the gains.",
+        "Broad empirical coverage: RULER, LongBench, and multi-turn NIAH across Llama-3.1-8B, Qwen2.5, Qwen3-4B, plus DeepSeek-Coder-V2-Lite (MLA/MoE) in Appendix E. The multi-turn result (Figure 4) is a meaningful differentiator, since token-eviction methods collapse after the first turn while xKV remains stable.",
+        "Detailed supporting analysis: FLOPs/memory accounting (Appendix D.6), on-the-fly SVD overhead measurements (Appendix C.1, ~1-6% of prefill), and quantization integration (Appendix D.5) increase confidence in the practical feasibility.",
+        "The Limitations section is honest about the long-prefill-only scope and the authors correctly cite ShadowKV for the selective-reconstruction paradigm."
+      ],
+      "weaknesses": [
+        "The headline efficiency claim is framed as if xKV reduces latency, but the paper's own text shows this is not true for the core method: dense-reconstruction xKV is compute-bound and falls to ~0.4x kernel speedup at 122k. The advertised 4.23x speedup only materializes through Selective Reconstruction, which the authors explicitly state is adapted from ShadowKV (landmark-guided chunk selection, Algorithms 1-2). Thus xKV-SR is essentially 'xKV compression substrate + ShadowKV's SR' and the latency contribution is largely inherited, not novel.",
+        "If SR is the only route to latency gains, the comparison against ShadowKV needs stronger isolation. The reported small throughput deficit of xK-SR vs ShadowKV (attributed to larger rank r from cross-layer sharing) means the net latency benefit of the cross-layer substrate at matched memory is close to nil; the real win is accuracy headroom that lets values stay on GPU. This is a fair point but is under-emphasized relative to the abstract's framing.",
+        "Fairness of the MiniCache baseline is questionable. MiniCache is run by merging half the layers (middle-to-end) from a single official setting, and it collapses to ~45% (Llama) and ~14% (Qwen) at only 1.3x. MiniCache's own paper reports far smaller degradation; the comparison is not clearly apples-to-apples, and it substantially inflates xKV's apparent margin over the only prior inter-layer baseline.",
+        "The 'win' over Single SVD may be somewhat mechanical. At a fixed compression rate, increasing the window W raises the allowed rank roughly proportionally (r' ~ W*r), so window-4 xKV can use ~4x the rank of window-1 at the same memory. This is arguably the intended benefit of basis amortization, but the paper presents Figure 2c and Table 8 as if sharing alone is the cause without disentangling 'shared basis' from 'more rank allowed per group.' A cleaner analysis would hold effective per-layer rank fixed.",
+        "Statistical rigor is limited: no error bars or multiple seeds, results often from single runs (e.g., Full-Attn N-MV differs 97.66 vs 98.18 across tables). The rank ratio (1:1.5) and several settings appear tuned rather than justified.",
+        "Presentation inconsistencies: Table 1's second block is labeled 'Qwen2.5-14B-Instruct-1M' while the text discusses Qwen2.5-7B-Instruct-1M; Qwen3-4B is listed among evaluated models but its RULER results do not appear in the main tables. These reduce confidence in the reported model set.",
+        "The improvements of xKV over the best token-eviction baselines (SnapKV/PyramidKV) on RULER are within noise (88.50 vs 89.68/89.94), so the practical advantage of the low-rank approach over simple eviction is mainly on multi-turn robustness, which is only shown on one model (Llama-3.1-8B)."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Proposes a novel and practically useful cross-layer KV-cache compression method: xKV exploits aligned dominant singular vectors across layers via CKA analysis and cross-layer factorization, enabling training-free, plug-and-play compression without architecture changes or pretraining.",
+        "Strong empirical validation on long-context tasks: RULER (64K), LongBench, multi-turn NIAH, and MLA/DeepSeek-Coder-V2-Lite show up to 8x compression with limited accuracy degradation, often outperforming intra-layer and inter-layer baselines such as Single-SVD, MiniCache, ShadowKV*, and token eviction/quantization methods.",
+        "Efficiency claims are supported by system-level benchmarks: xKV-SR achieves up to 4.23x end-to-end throughput improvement and approximately 30% higher throughput than ShadowKV under similar or better accuracy, by keeping compressed KV states on GPU and avoiding PCIe offloading.",
+        "Solid technical analysis: Appendix A formally links high CKA to alignment of dominant left singular vectors, and Section 2.4/Figure 2c connects the observation to lower required rank when jointly factorizing multiple layers.",
+        "Good reproducibility: the method is described in sufficient detail, code is promised publicly, and extensive appendices cover implementation details, SVD overhead, window-size ablations, quantization integration, and broader CKA analysis."
+      ],
+      "weaknesses": [
+        "The method focuses on long-prefill/short-generation settings; the authors acknowledge in Section 7 that extended generation is not handled, so the cumulative decode KV cache can still become a bottleneck in test-time scaling scenarios.",
+        "Dense reconstruction (xKV without SR) can be slower than full attention at long sequence lengths (Figure 5a shows normalized kernel speedup below 1.0x and ~0.4x at 122k), making the practical latency benefit dependent on Selective Reconstruction; this is a meaningful limitation for the memory-only use case.",
+        "Selective Reconstruction relies on a landmark-guided token-selection mechanism adapted from ShadowKV; while the integration is effective, the selection component itself is not a new contribution, and accuracy depends on token-selection quality.",
+        "The paper does not fully clarify peak memory during prefill: since cross-layer SVD requires concatenating W layers' caches, memory savings may be partly realized only after the group is compressed, and the claimed storage complexity reduction may not hold uniformly during the prefetch phase.",
+        "Some presentation issues and inconsistencies: e.g., the text mentions Qwen2.5-7B-Instruct-1M but Table 1 refers to Qwen2.5-14B-Instruct-1M; the method is called xKV in some places but xKV-4 in the table; 'prefetch' and 'prefill' are used interchangeably; Figure 2b's CKA matrix is specifically for value-cache, while the method also compresses keys.",
+        "Evaluation is convincing but bounded: the main accuracy benchmarks are RULER, LongBench, and multi-turn NIAH, with fixed rank settings and a 64K-context compression rate calculation; the authors note task-dependent compression sweet spots, so broader adversarial or domain-specific long-context robustness is not fully established."
+      ]
+    }
+  }
+}

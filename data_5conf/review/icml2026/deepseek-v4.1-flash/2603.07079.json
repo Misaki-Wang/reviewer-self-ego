@@ -1,0 +1,129 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "The paper addresses a relevant limitation of on-policy distillation: reverse KL is mode-seeking and may under-represent teacher uncertainty, especially at high-entropy reasoning tokens where multiple continuations are plausible.",
+        "The proposed EOPD method is conceptually simple and easy to integrate into PPO-style on-policy distillation: it selectively adds a forward KL term only when teacher token entropy exceeds a threshold, and uses top-k teacher tokens to control cost.",
+        "The empirical study is broad: three Qwen3 student scales, six math benchmarks, out-of-domain tasks, a Llama model, Pass@k curves, and ablations over the entropy threshold, top-k, and alternative forward-KL placements.",
+        "The paper includes useful diagnostic analyses, including token-level entropy histograms, a toy experiment, high-entropy forward-KL curves, entropy dynamics, and comparisons to entropy bonus / advantage shaping.",
+        "Reproducibility is partially supported by use of open-source frameworks (verl, DistillKit), named base/teacher models, hyperparameter tables, prompt templates, and an impact statement noting no new ethical concerns."
+      ],
+      "weaknesses": [
+        "The main empirical claims are not supported by statistical evidence. The paper reports no error bars, confidence intervals, or seed variance for the main benchmark results, despite many gains being small and several comparisons being negative for EOPD (e.g., Qwen3-1.7B AIME25 Avg@8: EOPD 5.83 vs OPD 6.25; Qwen3-0.6B AMC23 Pass@8: EOPD 55.0 vs OPD 57.5; Qwen3-0.6B OlympiadBench Avg@8: EOPD 19.52 vs OPD 20.15; Qwen3-4B Minerva Avg@8: EOPD 39.71 vs OPD 40.08). This weakens the claim of 'consistent improvements'.",
+        "The necessity of entropy-aware selection is not convincingly demonstrated. In Table 6, full forward KL is competitive with or better than EOPD on several metrics (e.g., AIME25 Pass@8: Full 20.0 vs EOPD 16.67; AIME24 Pass@8 tied at 23.33; AMC23 Pass@8 tied at 75.0). Since full forward KL is simpler, the paper needs stronger evidence that selective FKL provides a significant advantage beyond full FKL, or a measured compute/efficiency tradeoff. No wall-clock, FLOPs, or memory comparison against full FKL is provided.",
+        "The instability argument for reverse KL relies heavily on a simplified toy experiment with a categorical distribution, top-10 student truncation, and a single-logit policy-gradient update. This may not reflect LLM on-policy distillation. The toy experiment does not compare against forward KL or analyze gradient variance, so the observed instability could be due to high-variance policy-gradient optimization rather than reverse KL itself.",
+        "The forward KL term is not the true forward KL: it is computed over the teacher's top-k tokens with teacher probabilities renormalized over that top-k set. This truncation changes the objective and ignores the teacher tail. The paper does not analyze approximation error or whether the renormalized objective still preserves the intended mode-covering behavior.",
+        "The entropy threshold τ is tuned using the same evaluation benchmarks used to report final performance (MATH500 and AMC23 in Table 5), with no separate validation split. This risks benchmark-specific tuning. The analysis also inconsistently uses different high-entropy thresholds (τ=0.8 in some experiments versus entropy ≥1.0 in others) without clear justification.",
+        "Reproducibility is incomplete: there is no code release, no random seeds for the main experiments, no variance estimates, and no detailed training compute (iterations, GPU hours). The exact implementation of the forward-KL term, its weighting, and the entropy bonus / advantage shaping baselines is not fully specified. Notation also has inconsistencies (e.g., recursive \\tilde{A}_t definition, π_{ts} vs π_{te}, and a malformed π_{\\succeq\\kappa}), making exact reproduction harder.",
+        "The comparison to GRPO is not compute-matched: GRPO uses 8 rollouts per prompt while OPD/EOPD use 1 rollout per prompt, yet GRPO is often competitive or better (e.g., Qwen3-4B MATH500 Avg@8: GRPO 80.47 vs EOPD 80.20; Qwen3-1.7B MATH500 Avg@8: GRPO 68.83 vs EOPD 68.73). The paper should either match compute or clearly scope claims to OPD rather than implying broad superiority.",
+        "The paper lacks a dedicated limitations section. The impact statement only says no new ethical concerns, but it does not discuss risks of transferring teacher uncertainty, potential benchmark overfitting, or the fact that higher entropy may sometimes reflect teacher error rather than useful diversity."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The core idea is intuitive and clearly motivated: reverse KL is mode-seeking and forward KL is mode-covering, so gating forward KL on teacher entropy is a sensible way to preserve diversity without full mode-covering overhead. The paper articulates this connection well.",
+        "The empirical evaluation is broad: three student scales (0.6B/1.7B/4B), six math benchmarks, out-of-domain benchmarks (GPQA-Diamond, MMLU-Pro, AlpacaEval 2.0), and an additional Llama-family experiment. This breadth is a genuine strength.",
+        "Several relevant ablations are included: sensitivity to the entropy threshold tau (Table 5), forward KL placement (full/random/EOPD, Table 6), and comparison with entropy-driven baselines (entropy bonus, advantage shaping, Table 4), plus a top-k probability-mass/memory tradeoff analysis in Appendix F.",
+        "The token-level entropy histogram (Fig. 3) and the forward-KL-at-high-entropy diagnostic (Fig. 5, Fig. 11) provide a plausible mechanism-level view consistent with the method's design.",
+        "The writing is generally clear and the paper is easy to follow, with implementation details (Appendix A) and evaluation details (Appendix C) provided."
+      ],
+      "weaknesses": [
+        "The central empirical claims are not statistically supported. No seed variance or confidence intervals are reported for the main results, yet the reported gains are ~1-2% (e.g., +1.16 Avg@8, +1.37 Pass@8 for 0.6B). On benchmarks with only 30 problems (AIME24/25) and 8 samples, such differences are well within run-to-run noise. The claim of 'consistent improvements' is therefore not established.",
+        "The motivating instability analysis is not convincing. The toy experiment (Sec. 3.2) uses a single-sample, REINFORCE-like update (s_x <- s_x + eta*r(x)), whose variance is inherently higher when the teacher is high-entropy. The observed non-convergence is plausibly an artifact of the high-variance single-sample estimator rather than an intrinsic property of reverse KL. This undermines the paper's stated diagnosis.",
+        "No balancing or scaling coefficient is introduced between the single-sample reverse-KL surrogate and the full-expectation forward-KL term in Eq. (9). These terms have different scales/units, and the paper provides no analysis of how their relative magnitudes affect optimization, which is a methodological gap for both soundness and reproducibility.",
+        "Equations (7)-(8) are not well-defined: \\tilde{A}_t is defined in terms of itself (\\tilde{A}_t = max(-r_t \\tilde{A}_t, -clip(...) \\tilde{A}_t)), which is circular. The clipped PPO surrogate is therefore mis-stated, indicating a lack of care in the core objective definition.",
+        "The diversity-degradation evidence in Sec. 3.1 confounds model capacity: comparing an 8B teacher's token entropy to a 1.7B student's (6.8% vs 18.5% high-entropy tokens) conflates capacity-driven entropy reduction with a reverse-KL effect. A capacity-controlled baseline (e.g., an off-policy/FKL-trained student of the same size) is needed to support the claim.",
+        "The novelty is incremental. Mixing forward and reverse KL is a well-known idea; token-adaptive gating by teacher entropy is a modest extension. The paper does not compare against simpler alternatives such as JSD-like/generalized divergences or a fixed divergence mixture, leaving the incremental value unclear.",
+        "Some results contradict the 'consistent improvements' narrative: for 0.6B, OlympiadBench Avg@8 OPD 20.15 vs EOPD 19.52; for 4B, Minerva Avg@8 OPD 40.08 vs EOPD 39.71; AlpacaEval WR OPD 29.92 vs EOPD 29.54. EOPD also barely differs from the 'Full' forward-KL baseline on several benchmarks (Table 6), undercutting the claim that selective placement is decisive.",
+        "Mechanism claims in Secs. 5.4-5.5 remain correlational. The paper itself notes that entropy bonus matches EOPD's entropy yet underperforms, so the causal link from preserved high-entropy tokens to downstream accuracy is asserted rather than demonstrated.",
+        "Reproducibility is incomplete: no code release is mentioned, no compute budget/GPU-hours are given, and it is unclear how the forward-KL term is realized within the PPO mini-batch/clipping pipeline. The interaction between the clipped surrogate and the added forward-KL loss is not described."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Addresses a clear and important limitation of reverse-KL on-policy distillation: mode-seeking behavior collapses diversity and gives unstable signals on high-entropy teacher tokens.",
+        "The proposed EOPD method is simple, well motivated, and easy to integrate into existing PPO/verl-style on-policy distillation pipelines by entropy-gating a top-k forward-KL term.",
+        "Evaluation spans three Qwen3 student scales (0.6B, 1.7B, 4B), six mathematical reasoning benchmarks, and out-of-domain GPQA-Diamond/MMLU-Pro/AlpacaEval, with mostly improved Avg@8 and Pass@8 over OPD, KD, and GRPO.",
+        "Includes useful token-level entropy analysis and forward-KL-at-high-entropy analysis, showing that EOPD better preserves teacher-like uncertainty and aligns with the teacher in high-entropy regions.",
+        "Ablations cover the entropy threshold tau, forward-KL placement, top-k truncation, entropy-bonus/advantage-shaping baselines, and a Llama-3.2-3B experiment, supporting the design choices.",
+        "Reproducibility is reasonably supported through public models, datasets, frameworks, and detailed hyperparameters in the appendix."
+      ],
+      "weaknesses": [
+        "Novelty is incremental: entropy-gated switching between reverse KL and forward KL is straightforward, and full forward KL is already competitive in Table 6, so the specific entropy-aware selection yields only modest gains over simpler alternatives.",
+        "Main benchmark results lack statistical rigor: there is no evidence of multiple training seeds or confidence intervals, and many reported gains are small enough to be within noise, especially on AIME24/25 where the benchmark has only 30 problems.",
+        "The claim of consistent improvements is overstated: several per-benchmark results are worse than OPD, e.g., Qwen3-0.6B OlympiadBench Avg@8 and AMC23 Pass@8, Qwen3-1.7B AIME25 Avg@8 and OlympiadBench Pass@8, and Qwen3-4B Minerva/AIME24 Avg@8.",
+        "Efficiency claims are not fully substantiated: the top-k forward KL adds memory and compute, but there is no training-time, throughput, or memory comparison against OPD or full forward KL in the main text.",
+        "The method has technical presentation issues: Eq. (8) overloads tilde-A_t for both advantage and clipped loss, and the top-k forward KL renormalizes the teacher but not the student, so it is not a proper KL divergence.",
+        "The toy experiment is illustrative but not a formal analysis; its high variance estimator may explain instability as much as reverse KL itself, and it does not directly establish the LLM training behavior.",
+        "High-entropy tokens are treated as meaningful reasoning branches without qualitative examples or validation; some high-entropy positions could be formatting, punctuation, or other low-value uncertainty.",
+        "There is no explicit limitations section discussing failure modes, teacher-quality dependence, sensitivity to top-k, potential negative transfer, or computational overhead."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "The paper identifies and clearly motivates a real limitation of reverse-KL on-policy distillation: mode-seeking behavior reduces diversity and produces unstable signals when the teacher distribution has high entropy. The token-level entropy analysis and toy experiment provide useful intuition.",
+        "The proposed method is simple and practical: selectively adding forward KL only on teacher high-entropy tokens with top-k truncation, while retaining the efficient clipped reverse-KL on-policy objective. The reported overhead is modest (~4.5% step time, ~219 MB extra memory).",
+        "The empirical evaluation is broad: three Qwen3 student scales, six math reasoning benchmarks, out-of-domain benchmarks, Pass@k curves, entropy histograms, and comparisons to KD, GRPO, OPD, GKD, entropy bonuses, advantage shaping, adaptive KL methods, and a Llama model.",
+        "The paper provides useful auxiliary analyses, including lower forward KL on high-entropy tokens, preservation of high-entropy probability mass, hyperparameter ablations for tau, alpha, and k, and an efficiency analysis.",
+        "Reproducibility details are mostly adequate: frameworks (verl, DistillKit), optimizer, learning rates, batch sizes, top-k, and compute setup are specified, and code is claimed to be available.",
+        "The impact statement appropriately notes broader societal considerations and does not raise new ethical concerns."
+      ],
+      "weaknesses": [
+        "The main benchmark gains are often small and inconsistent across benchmarks and model scales. Several reported improvements (e.g., AIME25 for Qwen3-1.7B, Minerva/OlympiadBench for Qwen3-4B) are negative or within likely noise. No standard errors, confidence intervals, or multiple seeds are reported for the main results, so claims of 'consistent improvements' are not fully supported.",
+        "The toy experiment does not implement the actual reverse-KL policy gradient: it updates only the sampled logit by a reward-like term rather than computing the full softmax policy gradient. This weakens the claim that reverse KL provides unstable gradient signals, and the toy experiment does not demonstrate that EOPD's forward-KL fix stabilizes the same setting.",
+        "Novelty is limited. Selective or adaptive combinations of forward/reverse KL based on discrepancy or entropy have been explored in prior work (GKD, BD-KD, AKL, ToDi), and EOPD is essentially a threshold rule on teacher entropy. The conceptual distinction from these methods is not deeply developed.",
+        "There is a notational error in the forward KL definition in Eq. (2): the expectation is written over pi_theta while the text says it is over the teacher distribution. Additionally, Eq. (10) renormalizes the teacher over top-k but does not renormalize the student, so it is not a proper KL divergence, though it remains a valid cross-entropy-style loss.",
+        "A conceptual concern is unaddressed: high teacher entropy on student-generated prefixes may indicate that the student has already gone off-track, not that the teacher has meaningful uncertainty. Applying forward KL there could reinforce teacher uncertainty or even teacher mistakes rather than correcting the student.",
+        "The paper lacks an explicit limitations section. It does not discuss when the entropy threshold may fail, dependence on tokenizer/model family, sensitivity to the choice of top-k, or potential failure modes in domains beyond math reasoning.",
+        "Reproducibility is somewhat weakened by the missing code URL in the manuscript and by the absence of seed variance for the main results. The units/base of the entropy threshold (tau = 0.8, entropy >= 1.0) are also not specified."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "Addresses a relevant and timely problem in on-policy distillation: the mode-seeking behavior of reverse KL and its interaction with high-entropy teacher tokens.",
+        "The proposed EOPD method is simple, easy to implement on top of existing OPD/PPO pipelines, and requires no additional teacher forward passes compared to standard OPD.",
+        "The paper reports a broad empirical suite: three Qwen3 student scales, six math reasoning benchmarks, out-of-domain benchmarks, Pass@k curves, entropy histograms, and comparisons with KD, GRPO, OPD, GKD, entropy bonuses, advantage shaping, and adaptive KL baselines.",
+        "The ablations over entropy threshold tau, forward KL coefficient alpha, and top-k size provide some practical guidance, and the memory/time overhead analysis is useful.",
+        "The high-entropy token analysis and training-time forward KL plots provide an initial mechanistic look at how selective forward KL affects teacher-student alignment."
+      ],
+      "weaknesses": [
+        "The central empirical claims are not statistically supported. There are no error bars, confidence intervals, or multiple training seeds, despite many comparisons on small benchmarks such as AIME24/AIME25 (30 problems each). Reported Avg@8/Pass@8 differences of 1-3% can easily be one or two problems and are not reliable evidence of improvement.",
+        "The gains over OPD are small and inconsistent. For example, Qwen3-0.6B AMC23 Pass@8 drops from 57.50 (OPD) to 55.00 (EOPD), OlympiadBench Avg@8 drops from 20.15 to 19.52; Qwen3-1.7B AIME25 Avg@8 drops from 6.25 to 5.83 and OlympiadBench Pass@8 drops from 51.56 to 51.11; Qwen3-4B Minerva Avg@8 drops from 40.08 to 39.71 and AIME24 Avg@8 drops from 18.33 to 17.92. The reported average gains are therefore driven by a few benchmarks rather than a consistently better method.",
+        "The key claim that entropy-aware placement of forward KL is necessary is not convincingly established. Table 7 shows full forward KL is competitive with EOPD (e.g., AIME25 Pass@8: Full 20.00 vs EOPD 16.67; MATH500 Pass@8: Full 86.20 vs EOPD 87.60), and random forward KL is sometimes close. This undermines the main contribution: the selective mechanism may not outperform much simpler alternatives.",
+        "The motivating toy experiment is weak. It removes autoregressive context, uses a hand-designed 80-way categorical distribution with top-10 student capacity, and measures top-10 set change/top-1 change count. A high top-10 change rate under a high-entropy teacher does not by itself demonstrate unstable gradient signals or failure to converge. No final reverse KL/forward KL or comparison to forward KL/EOPD is reported, so the experiment is only illustrative, not decisive.",
+        "The paper claims reverse KL produces unstable learning signals and diversity collapse, but does not rigorously measure instability in the LLM training setting. The training-time forward KL at high-entropy positions is partly optimized by construction in EOPD, so lower forward KL there is not independent evidence that the method improves learning. The causal link between preserved high entropy and downstream accuracy remains unproven.",
+        "There is an inconsistency in what counts as high entropy: Section 5.4 defines high-entropy tokens as entropy >= 1.0, while the method uses tau = 0.8 for gating and Section 5.5 uses tau = 0.8. This makes the mechanism and analysis harder to interpret.",
+        "The paper lacks a limitations section. The Impact Statement does not discuss failure cases, such as miscalibrated teacher entropy, noisy teacher uncertainty, teacher errors being imitated, tokenizer mismatch, or when selective forward KL might hurt. This is a notable omission for a method that relies on teacher uncertainty.",
+        "Reproducibility is incomplete: the code URL is missing/incomplete ('Our code is publicly available at' with no link), and important implementation details are vague, including how teacher top-k/entropy are obtained in practice, exact loss scaling, interaction of the top-k forward KL with PPO clipping, and how many seeds/runs were used. No variance is reported.",
+        "The contribution is incremental relative to prior adaptive KL distillation work such as GKD, BD-KD, AKL, and ToDi. The main novelty is a teacher-entropy threshold for applying top-k forward KL. Empirical advantages over these baselines are modest (e.g., Table 11: AIME25 Pass@8 tied at 16.67; MATH500 Pass@8 87.60 vs 86.80/86.80).",
+        "Presentation quality has several issues: typos and broken notation (e.g., 'A_t = log pi_ts' should be pi_te), Algorithm 1 line 9 formatting is garbled, the code URL is incomplete, and some equations and figure references are not fully explained. These issues reduce clarity and reproducibility."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Clearly identifies a real limitation of reverse-KL on-policy distillation: mode-seeking behavior reduces diversity and produces unstable signals on high-entropy teacher tokens. The token entropy analysis (teacher 18.5% vs OPD 6.8% high-entropy tokens) and toy experiment provide useful motivation.",
+        "EOPD is simple and practical: it gates forward KL on teacher entropy above tau and approximates forward KL over teacher top-k tokens, integrating with PPO-style OPD. The efficiency analysis reports only ~4.5% extra step time and 219 MB extra memory versus 1617 MB for full forward KL.",
+        "Empirical evaluation is broad: three Qwen3 student scales, six math reasoning benchmarks, Pass@k curves, out-of-domain GPQA/MMLU-Pro/AlpacaEval, comparisons to KD, GRPO, OPD, GKD, entropy bonus, advantage shaping, adaptive KL baselines, and a Llama experiment.",
+        "Ablations over tau, alpha, top-k, KL objective, and forward-KL placement provide useful sensitivity analysis. EOPD generally improves over OPD on average and on Pass@8, with entropy/FKL diagnostics supporting the intended mechanism.",
+        "Reproducibility is reasonably supported: implementation frameworks, hyperparameters, evaluation protocols, and training details are given in the appendix, and code is stated to be available.",
+        "No major ethical concerns are apparent; the impact statement is appropriate and does not overclaim."
+      ],
+      "weaknesses": [
+        "The main gains are modest and mixed across benchmarks. EOPD sometimes underperforms OPD or GRPO (e.g., 4B AIME24 Avg@8 17.92 vs OPD 18.33; 4B Minerva 39.71 vs OPD 40.08; 0.6B AMC23 Pass@8 55.00 vs OPD 57.50; AlpacaEval WR 29.54 vs OPD 29.92). No variance, seeds, or statistical tests are reported for the main results, so small average improvements could be noise, especially on small AIME/AMC sets.",
+        "The central claim that reverse KL is unstable at high-entropy teacher tokens is supported mainly by a simplified toy categorical experiment and indirect diagnostics. The toy setup removes context and uses a top-10 student, so it does not directly demonstrate the same instability in LLM on-policy distillation.",
+        "The entropy-gated forward KL is a heuristic: high teacher entropy is assumed to indicate meaningful multiple reasoning paths, but it may also reflect noise or undesirable uncertainty. The paper does not distinguish useful diversity from harmful ambiguity, and no dedicated limitations discussion addresses failure cases or domain dependence.",
+        "The advantage of entropy-based selection over applying forward KL everywhere is not fully established: the full forward KL baseline is competitive with EOPD (e.g., AIME25 Pass@8 20.00 vs 16.67), so the main clear benefit of the entropy gate over full forward KL is computational efficiency rather than large accuracy gains.",
+        "Some experimental comparisons are potentially confounded: GRPO uses the default Qwen3-Base chat template while KD/OPD use the teacher chat template; training data differs across student scales (MATH vs DAPO); and out-of-domain evaluation is only on the 1.7B model.",
+        "The manuscript lacks a dedicated limitations section, and the code URL is incomplete in the provided version ('publicly available at'), though this may be an anonymization artifact."
+      ]
+    }
+  }
+}

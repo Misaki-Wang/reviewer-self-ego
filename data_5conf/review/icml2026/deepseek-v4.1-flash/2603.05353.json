@@ -1,0 +1,138 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "The paper addresses a practically important problem: selective KV recomputation for chunk-wise prefilling in RAG and long-context inference, where cross-chunk interactions are lost under independent KV caching.",
+        "The proposed prompt-to-context attention-norm selection is simple and lightweight, and under inference-consistent global RoPE it shows clear gains over prior recomputation methods on several LongBench tasks (e.g., Qwen passage-split 2WikiMQA: 0.5019 vs CacheBlend 0.4330 and EPIC 0.3697; LLaMA passage-split NarrativeQA: 0.3141 vs CacheBlend 0.3095).",
+        "The RoPE geometry ablation (Table 1) provides useful evidence that token selection should be performed under a positional layout matching inference-time decoding; GLOBAL consistently performs best across four benchmarks.",
+        "The method is plug-and-play and does not require modifying the pretrained model, and it is evaluated on both LLM and VLM backbones, extending the empirical scope to multimodal settings.",
+        "The efficiency analysis with multi-GPU sequence parallelism suggests potential long-context acceleration (e.g., Table 5 reports 3.49x speedup over single-GPU prefill at 32K), which is relevant for practical deployment."
+      ],
+      "weaknesses": [
+        "Methodological details are insufficient: it is unclear how prompt-to-context attention norms are computed when context KV caches are chunk-local (e.g., whether cached keys are re-rotated to global RoPE positions, how much recomputation is needed for selection), how selection overhead is accounted for, how chunk-level importance scores for reordering are derived, and why layers 22–25 are chosen for all models.",
+        "Empirical evaluation lacks statistical rigor: no error bars, multiple seeds, or significance tests are reported, so many observed differences may not be reliable.",
+        "The reordering strategy is not consistently beneficial. In Table 3, Our+Reorder underperforms Our in many settings (e.g., Qwen fixed chunk: 2WikiMQA 0.4773 vs 0.5089, MuSiQue 0.2872 vs 0.3384, HotpotQA 0.5053 vs 0.5967), contradicting the claim of consistent gains.",
+        "VLM results are mixed rather than consistently better: for Qwen3-VL-8B k=2, OCRBench is 842 for Our vs 845 for CacheBlend, and several gains are marginal, yet the text claims consistent outperformance.",
+        "The paper reports Our exceeding the full-context Baseline on several metrics (e.g., Qwen NarrativeQA 0.2110 vs 0.1654; LLaMA NarrativeQA 0.2891 vs 0.1623; Qwen HotpotQA 0.5967 vs 0.5922). Since Our is an approximation of full attention, this is theoretically surprising and is not adequately explained, raising concerns about evaluation setup or confounding factors.",
+        "Table 6 reports that Our improves F1 over exact ring attention (e.g., +2.55 on 2WikiMQA) under sequence parallelism. An approximation should not systematically outperform exact full attention; the numerical-rounding explanation in Appendix B is implausible for such large gains and suggests possible baseline misconfiguration or evaluation issue.",
+        "Reproducibility is limited: no code is provided, exact recomputation ratios for Our and CacheBlend are not specified in the main LLM tables, and evaluation protocols, prompt formatting, and selection-layer implementation are not described in enough detail to reproduce the results.",
+        "Novelty is modest: prompt-to-context attention norms are a known heuristic (similar to H2O-style attention-based eviction), the 'information flow' framing is not formalized, and the RoPE similarity analysis is post-hoc and somewhat circular because selection already depends on RoPE geometry.",
+        "Presentation has issues: the ablation section appears before the main experiments, model naming is inconsistent (ChatGLM vs GLM-4-9B), reference details contain errors (e.g., Grattafori et al. year mismatch), and table captions such as the k=0/k=2/k=4 notation in the VLM table are ambiguous."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "The RoPE geometry ablation (Table 1) is a genuine, systematic empirical finding: GLOBAL positioning is best across all four benchmarks, and the gap to HL-HP/TL-TP is large (e.g., NarrativeQA 0.2288 vs 0.1481). This supports the paper's claim that selection must be evaluated under inference-consistent positional geometry.",
+        "The evaluation is broad in coverage: three LLM backbones (Qwen3-14B, Llama-3.1-8B, GLM-4-9B), a VLM (Qwen3-VL-8B), four LongBench QA datasets, five VLM benchmarks, plus a Needle-in-the-Haystack analysis.",
+        "The method is plug-and-play and training-free, and the paper honestly flags a real limitation (irregular attention masks are poorly served by optimized kernels, causing up to 2x recomputation overhead).",
+        "The extension to VLMs and the sequence-parallel efficiency framing are reasonable directions of practical interest."
+      ],
+      "weaknesses": [
+        "The central \"information flow\" framing is never formalized. The method reduces to s_j = sum of prompt-to-context attention weights followed by top-k selection, which is essentially the same attention-mass importance used by prior work (e.g., H2O, SnapKV-style selection). The conceptual contribution over CacheBlend/EPIC is therefore thinner than the paper claims.",
+        "Chunk reordering, one of four advertised contributions, frequently degrades results rather than improving them. In Table 3, Our + Reorder is worse than Our on Qwen 2WikiMQA (0.4773 vs 0.5089), Qwen MuSiQue (0.2872 vs 0.3384), Qwen HotpotQA (0.5053 vs 0.5967), and LLaMA HotpotQA (0.5053 vs 0.5150). The text's claim that it \"maintains comparable performance and yields additional gains\" is contradicted by the tables.",
+        "The method does not beat the full-context baseline on most metrics (Qwen 2WikiMQA 0.5089 vs 0.5161; MuSiQue 0.3384 vs 0.3718; HotpotQA 0.5967 vs 0.5922), and gains over CacheBlend/EPIC are small and inconsistent (e.g., Qwen NarrativeQA 0.2288 vs CacheBlend 0.2197). The abstract's claim of \"consistent gains over prior methods under comparable efficiency budgets\" is not convincingly supported.",
+        "The recomputation budget/ratio for \"Our\" is not specified in Table 3, even though the comparison is claimed to be at \"comparable efficiency budgets\" with CacheBlend and EPIC (15%). Without matching budgets, the headline comparison is unverifiable and potentially unfair.",
+        "Table 6 claims the approximate method outperforms ring attention on F1 (57.83 vs 56.53 on HotpotQA, etc.), but ring attention should reproduce exact full-prefill behavior. The offered explanation (floating-point non-associativity of reduction order) does not justify an accuracy advantage for an approximation; the ~1-2 point gaps are plausibly noise and the claim is over-interpreted.",
+        "The RoPE similarity analysis (Table 2) rests on very small differences (MoM 0.5324 vs 0.5243 vs 0.5049) that are plausibly within noise, and the assertion that higher RoPE similarity is \"better\" is not independently justified. The Max metric (0.98 vs 0.66) is driven by a single token and is not evidence of a meaningful structural advantage.",
+        "The efficiency story is internally qualified: the paper admits single-device attention scaling limits the benefit of chunk-wise prefetching, then pivots to multi-GPU sequence parallelism and compares TTFT against ring attention. This mixes execution regimes and does not establish an end-to-end efficiency advantage in the setting the abstract emphasizes.",
+        "Presentation problems: Figure 4's caption describes a Needle-in-a-Haystack heatmap but the figure is a \"Score vs Layer Range\" line plot; reference errors (Grattafori et al. listed as 2020 while cited as 2024; the xAI citation is mislabeled); and the \"Ablation Result\" section precedes the main \"Experiment\" section without justification.",
+        "The paper does not acknowledge the most consequential limitation: the method generally fails to match full-context prefilling and its one novel add-on (reordering) is unreliable, which undercuts the practical value of the proposed selection criterion."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3,
+      "strengths": [
+        "Addresses an important and timely problem: efficient long-context inference for retrieval-augmented generation via selective KV recomputation.",
+        "Proposes a simple, model-agnostic token selection criterion based on prompt-conditioned attention norms, which is easy to implement and requires no model modification.",
+        "Provides a useful ablation of RoPE geometry for token selection (Table 1), showing that globally consistent positional assignments substantially outperform chunk-local or mismatched configurations.",
+        "Evaluates on multiple LLM backbones (Qwen, LLaMA, ChatGLM) and a VLM, across several LongBench and vision-language QA benchmarks, comparing against CacheBlend and EPIC.",
+        "Includes a RoPE similarity analysis (Table 2) and Needle-in-a-Haystack visualization (Fig. 3) that offer some geometric intuition for why the selection strategy may work.",
+        "Demonstrates promising efficiency potential under sequence parallelism, with TTFT improvements over ring attention at longer sequence lengths (Table 5).",
+        "The impact statement is reasonable and the paper notes the irregular-attention-mask limitation as a kernel-level challenge."
+      ],
+      "weaknesses": [
+        "The central claim that prompt-to-context attention norms capture 'information flow' and 'structural position' is not rigorously justified. The signal is essentially attention-based relevance; the link to downstream generation is asserted rather than proven. The stated rationale that prompt-to-context attention directly determines decoding attention is flawed because during autoregressive decoding the queries are generated tokens, not prompt tokens.",
+        "Critical implementation details are missing, severely limiting reproducibility: the recomputation budget k for LLM experiments is never specified; head aggregation of attention scores is not described; prompt formatting and which prompt tokens are used are unclear; the chunk-level importance formula for reordering is not given; and the exact procedure for reconstructing global RoPE positions from locally cached KV states is omitted.",
+        "The selection step uses KV states computed under chunk-local attention. Even if RoPE positions are re-rotated to global positions, the hidden states and key contents remain local-context representations. Thus the claimed 'inference-consistent' geometry is only positional, not representational, and the paper does not address this fundamental mismatch.",
+        "Layer selection uses layers 22–25 for all models, but these indices correspond to different relative depths in Qwen3-14B, LLaMA-3.1-8B, and GLM-4-9B. No per-model layer ablation is provided, and the choice is justified only on Qwen, making the cross-model generality questionable.",
+        "Results for 'Our + Reorder' are inconsistent and often degrade substantially (e.g., Qwen fixed-chunk: 2WikiMQA 0.4773 vs 0.5089; MuSiQue 0.2872 vs 0.3384; HotpotQA 0.5053 vs 0.5967). The paper claims reordering 'maintains comparable performance' but does not discuss these regressions. It is also worse than CacheBlend on HotpotQA fixed-chunk.",
+        "The efficiency comparison with ring attention is questionable: ring attention is an exact full-context method, while the proposed method is approximate. Table 6 shows ring attention F1 below the full-context baseline, attributed to numerical differences, but the 1–3 point F1 gap is large and undermines fairness. TTFT speedups may not be at accuracy parity.",
+        "No error bars, significance tests, or variance estimates are reported. Many gains over baselines are small (e.g., VLM k=2 OCRBench: Our 842 vs CacheBlend 845; ChartQA 73.48 vs 71.72), so the claim of 'consistent gains' is not statistically supported.",
+        "The VLM experimental setup is underspecified: it is unclear how visual tokens or images are chunked, how chunk count k relates to recomputation budget, and whether the same selection procedure is applied to visual tokens.",
+        "The paper is poorly organized: the ablation (Section 5) precedes the main experiment section (Section 6), Table 4's caption conflates k with chunk numbers versus recomputation budget, and there are writing issues ('we proposed', 'Ablation Result').",
+        "No code or reproducibility statement is provided, and many standard hyperparameters (chunk size, max sequence length, decoding settings, random seeds) are absent."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a timely and important problem: efficient long-context RAG via selective KV recomputation in multi-chunk KV reuse settings.",
+        "Proposes a simple, training-free token-selection criterion based on prompt-to-context attention norms, which is easy to implement and conceptually intuitive.",
+        "The RoPE-geometry ablation in Table 1 provides useful evidence that selection under inference-consistent global positional assignments (GLOBAL) outperforms mismatched local/tail configurations.",
+        "Evaluation spans multiple LLMs (Qwen3-14B, Llama-3.1-8B, ChatGLM) and a VLM (Qwen3-VL-8B) on several benchmarks, and includes efficiency analysis with TTFT and sequence parallelism.",
+        "The paper includes some honest limitations discussion, including the operational rather than formal use of 'information flow' and the kernel-level overhead of irregular attention masks.",
+        "The chunk-reordering idea is interesting, and the ablation in Table 13 shows that chunk placement matters under causal decoding."
+      ],
+      "weaknesses": [
+        "Novelty is limited: attention-based token selection is well known, and the 'information-flow' framing is mostly rhetorical rather than formal. The method reduces to top-k prompt-attention selection with a RoPE-consistency adjustment.",
+        "Empirical evidence is not robust: no error bars, seeds, or significance tests are reported, and many gains over CacheBlend/EPIC are small or inconsistent. For example, in Table 4 at k=2, Our OCRBench is 842 vs CacheBlend 845; RealWorldQA is 0.6810 vs 0.6758.",
+        "The claimed consistent benefit of chunk reordering is not supported: Our+Reorder often degrades performance relative to Our without reordering (e.g., Qwen fixed-chunk 2WikiMQA 0.4773 vs 0.5089, MuSiQue 0.2872 vs 0.3384, HotpotQA 0.5053 vs 0.5967; LLaMA fixed-chunk 2WikiMQA 0.4455 vs 0.4635).",
+        "The full-context Baseline behaves anomalously in Table 3: on NarrativeQA it is much lower than No Recompute and Our (e.g., Qwen 0.1654 vs 0.2078 vs 0.2288; LLaMA 0.1862 vs 0.2639 vs 0.2891). This undermines the claim that Baseline serves as a full-computation accuracy reference and raises concerns about the evaluation setup.",
+        "Important baselines are missing: there is no comparison to recency/last-k selection, random recomputation, token-to-prompt attention, max/entropy aggregation, or simple attention-norm selection without global RoPE as a standalone method. Without these, it is unclear whether gains come from information-flow selection or from positional/recency bias.",
+        "Reproducibility is limited: no code is provided, and key implementation details are missing, including how global RoPE positions are reconstructed for cached KV, how selected tokens' hidden states are recomputed without a full forward pass, and how attention over non-recomputed tokens is handled.",
+        "Efficiency comparisons are not apples-to-apples: the paper admits recomputation can incur up to 2x overhead relative to ideal compute cost and uses FlashInfer-style kernels for irregular attention while baselines use optimized dense kernels. TTFT comparisons to ring attention also do not compare against CacheBlend/EPIC under the same sequence-parallel setting.",
+        "Hyperparameter transfer is not validated: layers 22-25 are chosen from a Qwen3-14B analysis but applied to all models, despite differing depths and architectures.",
+        "The RoPE-similarity analysis in Table 2 is post-hoc and potentially circular: selection is performed under global RoPE, so selected tokens naturally have higher RoPE similarity to the prompt. It does not independently establish that these tokens are better information carriers.",
+        "Presentation issues and citation inconsistencies exist, e.g., HotpotQA is cited as Yang et al. 2018 in text but listed as Yang et al. 2026; Lewis et al. 2020 vs 2024; Qwen3-VL Bai et al. 2024 vs 2025."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a real and practically relevant bottleneck: the prefilling cost of RAG over large retrieved contexts in the multi-chunk KV-reuse regime, and targets a genuine open problem (how to choose recomputation targets when KV caches are computed independently).",
+        "The controlled RoPE-geometry ablation (Table 1) is a useful, if intuitive, finding: token importance must be scored under positional geometry consistent with decoding (GLOBAL > HL-HP/TL-TP), and this is a defensible design principle.",
+        "Broad empirical coverage: three LLM backbones (Qwen3-14B, Llama-3.1-8B, ChatGLM-4-9B), four LongBench QA datasets, plus a VLM (Qwen3-VL-8B) on five multimodal benchmarks, with several appendix baselines (TurboRAG, PCW, KVLink5, BM25, PyramidKV/SnapKV/StreamingLLM) and a Needle-in-a-Haystack analysis.",
+        "The method is training-free and plug-and-play, which is a practical advantage over training-based alternatives such as KVLink5.",
+        "The limitations discussion in Section 8 is honest about the kernel-level overhead (up to 2x vs ideal) and the irregular-mask issue, and the impact statement is appropriately scoped."
+      ],
+      "weaknesses": [
+        "The central selection signal (prompt-to-context attention norm, Eq. 7-8) is a well-known attention-importance heuristic already used in the cited SnapKV/H2O line of work; the novelty reduces largely to the RoPE-consistency framing. The claim that this single scalar 'jointly captures semantic relevance and effective information flow' is asserted rather than demonstrated, and 'information flow' is never formally defined (the authors concede it is only operational).",
+        "Serious, unexplained evaluation anomaly: the method exceeds the full-context 'Baseline' on multiple cells (Qwen HotpotQA 0.5967 vs 0.5922; LLaMA 2WikiMQA 0.4635 vs 0.4588; LLaMA NarrativeQA 0.2891 vs 0.1862; Qwen NarrativeQA 0.2110 vs 0.1654), and even 'No Recompute' beats the Baseline on NarrativeQA (e.g., LLaMA 0.2639 vs 0.1862). A selective approximation that beats full-context prefilling is implausible and, at minimum, means the stated 'full-computation accuracy reference' is unreliable. The paper does not investigate or even acknowledge this, which undermines confidence in the whole results table and in the framing of the method.",
+        "No variance estimates, error bars, or significance testing anywhere, despite margins that are frequently 1-2 points and inconsistent. 'Consistent gains' is overstated: Our+Reorder is clearly worse on Qwen fixed-chunk 2WikiMQA (0.4773 vs 0.5089) and OCRBench at k=2 (842 vs CacheBlend 845), and reordering flips sign across settings (Table 13, Appendix E). Without variance, these differences cannot be claimed as robust.",
+        "Efficiency claims are mixed and not apples-to-apples. Table 5 reports headline 2.57x/3.49x speedups versus ring attention, but Section 8 concedes recomputation can incur ~2x overhead over ideal compute and that our method uses FlashInfer sparse/irregular kernels while baselines use dense optimized kernels. Reporting large speedups while acknowledging non-comparable kernels is internally inconsistent and weakens the efficiency contribution.",
+        "Reproducibility gaps: it is unclear how prompt-to-context attention norms can be computed under GLOBAL RoPE when the cached keys were produced under chunk-local RoPE (is RoPE re-applied to cached K? is attention recomputed?), how scores are aggregated over heads/layers (layers 22-25 only appear in Appendix F), and how the two-stage reorder-then-reselect procedure interacts with the fixed 15% budget. These details are needed for others to build on the work.",
+        "The RoPE-similarity analysis (Table 2) reports tiny effect sizes (MoM differences of ~0.003-0.04) with Max values near 1.0 that look like a selection artifact, and the interpretation ('alignment between attention salience and RoPE-induced positional structure') is speculative and plausibly confounded.",
+        "Presentation/citation sloppiness (e.g., Llama cited as 'Grattafori et al. 2024'; several year mismatches between in-text and reference entries; Table 3 caption mentions only passage-split though both settings are shown)."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Addresses a practical and important problem: efficient long-context RAG via selective KV recomputation, especially useful in multi-chunk/multi-query serving where document KV caches can be reused.",
+        "Proposes a simple, training-free attention-norm selection criterion and convincingly shows through an ablation (Table 1) that inference-consistent global RoPE ordering substantially outperforms mismatched positional configurations.",
+        "Provides extensive experiments across three LLM backbones, one VLM, multiple LongBench QA datasets, several VLM benchmarks, Needle-in-a-Haystack, LongBench v2, and additional baselines in the appendix.",
+        "Reports consistent gains over CacheBlend and EPIC under the same 15% recomputation budget in most settings, sometimes approaching or even exceeding the full-context baseline.",
+        "Includes an efficiency analysis with Pareto curves and sequence-parallel TTFT comparisons, showing favorable speed-accuracy trade-offs relative to ring attention and single-GPU full prefilling.",
+        "The chunk reordering ablation (ascending vs. descending) provides additional evidence for the positional information-flow intuition, even though reordering is optional.",
+        "Honestly discusses irregular attention-mask kernel overhead and the fact that recomputation can incur up to 2x overhead relative to ideal compute.",
+        "No new ethical risks are introduced, and the impact statement is appropriate."
+      ],
+      "weaknesses": [
+        "Novelty is moderate: attention-based token selection is well studied, and the main new element is applying query-conditioned attention norms under global RoPE for KV recomputation. The 'information flow' framing is not formally measured and largely reduces to direct prompt-to-context attention mass.",
+        "A critical implementation detail is missing: how cached chunk-local RoPE keys are reconciled with global RoPE during scoring and decoding. If non-selected keys remain chunk-local, decoding is positionally inconsistent; if they are re-rotated, this should be explicitly stated and analyzed. This hampers reproducibility.",
+        "Our+Reorder is not consistently better: on Qwen fixed-chunk, reordering causes large drops on 2WikiMQA (0.5089 to 0.4773), MuSiQue (0.3384 to 0.2872), and HotpotQA (0.5967 to 0.5053). The paper underplays these regressions and overstates 'consistent gains' for reordering.",
+        "No error bars or significance tests are reported; many differences are small (e.g., VLM OCRBench 842 vs. 845), so claims of consistent superiority need statistical support.",
+        "Efficiency measurements have unexplained inconsistencies: the Table 14 breakdown sums to roughly 1478 ms, while Table 5 reports Our at 16K = 427.6 ms and 32K = 914.0 ms. The sequence length and hardware setting for Table 14 are unclear, and the 16K-to-32K scaling (~2.14x) is not what would be expected for quadratic attention.",
+        "Layer selection (22-25) is fixed across all models based only on Qwen; generalization to other architectures is not justified, and layer choice likely affects performance.",
+        "The RoPE similarity analysis is not independent evidence: it measures the same geometric property used by the selection criterion, so higher similarity is expected. Max similarities are near ceiling and differences are small.",
+        "Missing details for the VLM setup: how visual tokens are partitioned into k chunks, how multimodal prompt/context positions are assigned, and whether reordering applies to visual chunks.",
+        "Some reference and evaluation inconsistencies: duplicate Yang et al. (2026) entries for KVLink and HotpotQA, date errors, and NarrativeQA 'No Recompute' exceeding the full-context baseline in several settings, which warrants explanation.",
+        "Scoring overhead is reported but not fully analyzed; prompt-to-context attention scoring cost grows with prompt length and context length, and the fixed layer range may not be optimal across tasks."
+      ]
+    }
+  }
+}

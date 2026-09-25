@@ -1,0 +1,120 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "The paper proposes a simple and well-motivated idea: ensembling SAEs via naive bagging and boosting to leverage known feature variability from different initializations.",
+        "It provides a clean equivalence (Proposition 1) showing that ensembling SAE outputs corresponds to concatenating decoder features and coefficients, which is a useful conceptual connection.",
+        "The empirical study is broad for an SAE paper: three language models (GELU-1L, Pythia-160M, Gemma 2-2B), three SAE architectures (ReLU, TopK, JumpReLU), six intrinsic metrics, and two downstream tasks.",
+        "The paper is clearly written, the experimental setup is mostly described in detail (hyperparameters, training times, model layers, datasets), and limitations are honestly acknowledged.",
+        "Some downstream results are promising: boosting improves spurious correlation removal over a single SAE, and top-5 concept detection tends to be better with boosting, suggesting practical utility of the approach."
+      ],
+      "weaknesses": [
+        "The central empirical comparison is confounded by capacity: ensembles always contain J times more features than the single-SAE baseline, but there is no capacity-matched baseline such as a single SAE trained with an expansion factor J times larger. Improvements in reconstruction, diversity, connectivity, and stability may simply reflect the larger dictionary rather than ensembling per se.",
+        "The diversity metric counts the absolute number of dissimilar features and is not normalized by the total number of features; larger ensembles will naturally have higher diversity counts. Similarly, connectivity and stability are measured with different dictionary sizes, so apparent gains may be artifacts of increased capacity.",
+        "The theoretical justifications are weak. Proposition 1 is straightforward; Proposition 2 relies on an unverified uniform-integrability/boundedness argument for the SLLN variance limit; and Proposition 3 is essentially trivial under Assumptions 1 and 2, which assume the desired bias bound and overfitting behavior rather than proving them.",
+        "Downstream results are mixed and often not statistically distinguishable: naive bagging underperforms a single SAE on spurious correlation removal, boosting underperforms on some concept-detection tasks, and confidence intervals overlap in several cases. The claim that ensembling generally improves downstream utility is therefore not strongly supported.",
+        "The downstream evaluation is limited: concept detection and spurious correlation removal are run on only one language model (Pythia-70M) and a small set of tasks, and the Pythia-70M SAE expansion factor is not reported, making that part less reproducible.",
+        "There is no comparison to plausible alternative baselines, e.g. a larger single SAE, SAE stitching, Matryoshka SAEs, or simply averaging SAEs trained with different data subsets, so it is unclear whether the proposed ensemble methods are the best way to exploit the variability.",
+        "Reproducibility is only partially addressed: the paper mentions adapting SAELens and provides hyperparameters, but no code release or artifact is indicated, and the theoretical assumptions are not empirically validated in detail."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "The paper is clearly written and well motivated: the seed-to-seed variability of SAEs is a real and well-acknowledged phenomenon, and turning it from a nuisance into a resource via ensembling is a naturally appealing research question.",
+        "Proposition 1 provides a correct and conceptually useful equivalence (summing SAE reconstructions == concatenating decoder matrices and coefficients), and the authors handle a nice practical detail by folding ensemble weights into the coefficients so that decoder columns retain unit norm for feature interpretation.",
+        "The empirical study is broad in scope: three language models (GELU-1L, Pythia-160M, Gemma 2-2B) crossed with three SAE architectures (ReLU, TopK, JumpReLU), six intrinsic metrics, two downstream use cases, five seeds with 95% confidence intervals, plus hyperparameter sweeps and explicit training-time reporting, which makes the setup relatively reproducible.",
+        "Boosting delivers large, consistent gains on reconstruction (e.g., explained variance 0.920 -> 0.995 and MSE 716.7 -> 46.5 on Gemma 2-2B), and the residual-fitting formulation is simple, intuitive, and easy to combine with existing SAE training code.",
+        "The limitations section is honest (Jx training cost, sequential nature of boosting, redundancy in bagging vs. over-specific features in boosting) and the paper is careful to frame ensembling as a meta-algorithm compatible with any SAE architecture."
+      ],
+      "weaknesses": [
+        "No capacity- or compute-matched baseline: an ensemble of J SAEs has J x k features (8 x 16128 etc.) and uses 8-10x the training compute (Table 3 of the appendix: 11h7m for one Gemma SAE vs 5d5h for boosting), yet the paper never compares against a single SAE trained with a comparable dictionary size (large expansion factor) or equal wall-clock. Because SAEs with k >> d and a weak sparsity penalty can reconstruct activations almost perfectly, the headline reconstruction results (e.g., MSE 716 -> 46, EV 0.92 -> 0.995) are expected from the increased dictionary size alone and do not by themselves support the claim that 'ensembling' improves reconstruction. This missing control is decisive for the central claims.",
+        "Several of the reported metrics are confounded by the number of features m, so the 'diversity' and 'stability' improvements are largely artifacts. Diversity counts the absolute number of features whose max pairwise cosine similarity is below tau; in Table 1 boosting's diversity (130,913) is almost exactly 8x the single-SAE value (16,013), tracking the 8x feature-count increase rather than demonstrating a better decomposition. Stability takes a max over all features j in [m] across other runs, so runs containing J x more features are mechanically favored. Connectivity is defined as 1 - (1/m^2)||C^T C||_0 and depends jointly on m, the L0 of the code, and N, again without normalization or a matched control.",
+        "The downstream evidence does not support 'improved practical utility'. In Table 2 all ensembles' 95% CIs overlap the single SAE (e.g., Amazon Category 0.632 +/- 0.033 vs. 0.665 +/- 0.014; European Parliament 0.938 +/- 0.016 vs. 0.943 +/- 0.016), and no significance test is performed. Worse, Supplementary Table 1 (top-5 features) shows naive bagging is worse than a single SAE on all five concept-detection tasks (e.g., GitHub Code 0.805 -> 0.728), contradicting the abstract's claim. SHIFT scores are tiny in absolute terms (best 0.066), and naive bagging (0.021) actually underperforms the single SAE (0.039) on the very task used to argue utility.",
+        "The theory is thin and partly vacuous. Proposition 2 is the textbook iid-averaging variance-reduction result and only bounds the variance term; the bias term, which is what actually matters for reconstruction fidelity, is not shown to improve. Proposition 3 rests on Assumption 2 ('boosting should be able to overfit almost perfectly to the training set'), which essentially assumes the conclusion, and the authors themselves state that Prop. 3 is 'not surprising'. Proofs also contain errors: Eq. (30) drops the squared norm present in Eq. (29), Eqs. (32)-(33) write '=' where limits are intended, and Eq. (4) reads sum_{j=i}^{J}.",
+        "Boosting is effectively a stack of residual autoencoders (a deep, additively decomposed SAE); since each stage keeps the same sparsity hyperparameters, the total number of active features grows with J, so the reported 'lower relative sparsity' (e.g., 0.059 -> 0.021 on Gemma) is mechanical rather than evidence of a better decomposition. No comparison is made between the greedy sequential code and a jointly optimized code over the concatenated dictionary.",
+        "The abstract/conclusion overclaim 'improved stability': only naive bagging raises the stability metric (0.581 -> 0.633 on Gemma), while boosting is at or slightly below the single-SAE level (0.583 vs. 0.581; 0.707 vs. 0.705 on GELU-1L; 0.680 vs. 0.677 on Pythia-160M). Given the metric's dependence on m noted above, even the bagging gain is questionable.",
+        "Experimental design issues: the downstream study silently switches to Pythia-70M with 100M tokens (a fourth, much smaller model), so those results do not directly assess the intrinsicevaluation ensembles; base-SAE hyperparameters are chosen to hit ~90% explained variance, which by construction makes any later capacity increase look like an improvement; and there is no autointerp/feature-quality evaluation, no test-time cost discussion (Jx inference), and no comparison to related capacity-scaling alternatives such as Matryoshka or stitched SAEs, which are cited but not evaluated. Code release is also not clearly stated.",
+        "As a result of the above, the paper never answers the obvious question it raises for the reader: if the ensemble is equivalent to concatenating dictionaries, why is this preferable to simply training a single SAE with kJ features (standard practice), either in accuracy, interpretability, or cost? Without that comparison the contribution remains an engineering observation rather than a validated method."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "The paper addresses a timely and well-motivated problem: SAE features vary across initializations, so a single SAE captures only a subset of extractable features. It proposes a simple, general meta-algorithm that can be applied to any SAE architecture.",
+        "The core equivalence in Proposition 1, showing that ensembling SAE reconstructions corresponds to concatenating feature directions and coefficients, is conceptually clean and useful for interpreting ensemble behavior.",
+        "The empirical evaluation is broad in several respects: three language models, three SAE activation functions (ReLU, TopK, JumpReLU), six intrinsic metrics, and repeated runs with confidence intervals.",
+        "Boosting performs strongly on intrinsic metrics, with substantial improvements in explained variance, MSE, diversity, and connectivity across the three settings, while naive bagging reliably improves reconstruction and stability.",
+        "The downstream use cases, concept detection and spurious correlation removal, provide practical evidence that ensembles can outperform single SAEs, and the paper discusses when each ensemble type helps or hurts rather than claiming universal superiority.",
+        "Reproducibility details are mostly satisfactory: datasets, model layers, hyperparameter sweeps, training times, and implementation details are provided in the appendix.",
+        "The limitations are discussed honestly, including the computational overhead of training multiple SAEs and the mixed downstream results."
+      ],
+      "weaknesses": [
+        "The central empirical comparison does not control for SAE dictionary size. An ensemble of J SAEs has kJ features, while it is compared to a single SAE with k features. A single, larger SAE trained with a comparable feature budget (e.g., larger expansion factor or comparable parameter count) is missing, so observed gains in reconstruction, diversity, connectivity, and downstream feature selection may partly reflect increased capacity rather than ensembling per se.",
+        "The theoretical support is limited. Proposition 1 is essentially an algebraic rewriting; the bias-variance motivation is standard; and the boosting result relies on Assumptions 1 and 2, which are strong, essentially amount to a generalization bound and near-perfect training-set fit, and are not empirically or theoretically verified.",
+        "The intrinsic metrics may be biased toward ensembles. Diversity and connectivity are absolute-count metrics that can increase simply because the ensemble concatenates more features. Stability is also defined by taking a maximum over more features, which may advantage a concatenated ensemble even if individual features are not more stable.",
+        "Downstream results are mixed and sometimes weak. Boosting underperforms a single SAE on three of five top-1 concept detection tasks, while naive bagging underperforms a single SAE on all spurious correlation removal pairs. The top-5 concept detection results partly mitigate this, but they also suggest that conclusions depend heavily on the number of selected features.",
+        "The SHIFT scores in the spurious correlation removal experiments are low in absolute terms, and the differences between methods are small relative to confidence intervals in some settings, so the practical significance of the downstream gains is not fully established.",
+        "The computational cost is substantial: naive bagging and boosting require 8x or sequential training, with one Gemma 2-2B boosting run taking over five days in the appendix. The paper discusses this but does not compare against the simpler alternative of training one larger SAE under the same compute budget.",
+        "The scope is limited to ensembling SAEs with the same architecture and hyperparameters on residual-stream activations. The paper acknowledges this, but it leaves open whether the approach remains beneficial when compared with better-controlled single-SAE baselines or when ensembling across layers, architectures, or dictionary sizes.",
+        "There are minor presentation issues, such as the index typo in Equation (4) and the need for clearer definitions of stability/diversity when the number of features differs across methods."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Formalizes SAE ensembles and proves that ensembling in reconstruction space is equivalent to concatenating decoder features and feature coefficients, linking ensemble predictions to interpretable feature space.",
+        "Proposes two simple, architecture-agnostic ensemble strategies: naive bagging and boosting, both compatible with common SAE variants such as ReLU, TopK, and JumpReLU SAEs.",
+        "Provides a broad empirical study across three language models and SAE architectures, including intrinsic metrics, AutoInterp, two downstream tasks, and additional SAEBench metrics with confidence intervals over five runs.",
+        "Boosting often improves reconstruction, connectivity, and stability relative to base and expanded SAEs, and shows practical gains on spurious correlation removal.",
+        "Discusses limitations and computational costs honestly, and reports hyperparameters, training times, inference times, and implementation details."
+      ],
+      "weaknesses": [
+        "The theoretical justification is weak: the boosting bias result relies on Assumption A.4 and Assumption A.6, which essentially assume a generalization bound and near-perfect training reconstruction, so it does not genuinely prove bias reduction or explain when boosting will succeed.",
+        "Empirical claims are overstated: naive bagging is worse than the expanded SAE on reconstruction and connectivity for GELU-1L and Pythia-160M, and downstream improvements are often small with overlapping confidence intervals; the abstract's broad claim that ensembling improves reconstruction and stability is not supported for both methods.",
+        "The expanded-SAE baseline is not fully compute- or sparsity-matched in a transparent way: its sparsity is matched to boosting rather than naive bagging, and the ensemble incurs much higher training and inference costs without a compute-normalized comparison.",
+        "Downstream evidence is mixed: the main concept-detection and spurious-correlation-removal experiments use Pythia-70M, several gains are not statistically or practically significant, and the appendix's Gemma 2-2B SCR results are noisy and sometimes negative.",
+        "Interpretability evidence is limited: AutoInterp scores have wide intervals in some settings, qualitative feature examples are illustrative rather than systematic, and the stability metric may be confounded by the larger number of trained feature sets in the ensemble."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper formalizes SAE ensembles and gives a clean equivalence between ensembling SAE reconstructions and concatenating their decoder features/coefficients (Proposition 3.1). This is a useful conceptual link for reasoning about SAE ensembles.",
+        "It proposes two simple, implementable ensemble strategies, naive bagging and boosting, and evaluates them across three language models and three SAE architectures with 5 runs, including intrinsic metrics, AutoInterp, and SAEBench downstream tasks.",
+        "Boosting shows notable intrinsic gains over the expanded SAE baseline on several settings, e.g. Gemma-2-2B explained variance 0.995 vs 0.948 and MSE 46.5 vs 472.3, and Pythia-160M MSE 0.845 vs 4.387, suggesting sequential residual SAE training is a promising direction.",
+        "The paper includes an honest limitations section, compute/inference-time tables, pseudocode, and hyperparameter details, which aid reproducibility.",
+        "The problem is well motivated: SAEs are known to learn variable subsets of features, and improving stability/reconstruction is practically relevant."
+      ],
+      "weaknesses": [
+        "The theoretical results are weak or largely definitional. Proposition 3.1 is essentially the definition of concatenating linear features, and the bagging proposition only shows variance reduction under i.i.d. assumptions while ignoring correlations between SAEs; it does not imply better reconstruction. The boosting proposition relies on Assumptions A.4 and A.6, which essentially assume training error and generalization, making the conclusion close to vacuous and not a real justification of boosting.",
+        "The expanded-SAE baseline is not clearly fair and is confounded with depth/sequential training. Boosting uses J sequentially trained SAEs, i.e. a deep additive model, while the expanded SAE is a single shallow SAE with kJ features; matching feature count and sparsity does not match optimization, capacity, or effective depth. For naive bagging, the authors state it is impractical to L0-match the expanded SAE, so those comparisons are not apples-to-apples.",
+        "Downstream utility claims are overstated. Concept-detection gains over expanded/base SAEs are mostly small and often within overlapping 95% CIs; top-5 feature results often show the base SAE better; SHIFT/SCR scores are tiny and sometimes negative (e.g. Gemma-2-2B). The abstract's blanket claim that SAE ensembles achieve better practical utility is not supported consistently.",
+        "Interpretability evidence is thin. AutoInterp differences are marginal (e.g. Gemma NB 0.799 vs expanded 0.805; Pythia boosting 0.852 equal to expanded), and the qualitative first/last SAE comparison in Table 2 is anecdotal rather than a systematic evaluation. The aggregate-L0 concern is acknowledged but not fully resolved.",
+        "Novelty is limited. Prior work includes SAE Boost, MP-SAEs, and Switch SAEs; bagging SAEs is natural, and the formalization reduces to a simple concatenation identity. The main new empirical finding is that boosting improves reconstruction/stability, which is partly due to sequential residual training rather than a new ensemble principle.",
+        "The paper does not provide a code link, and independent reproduction is extremely expensive: training an 8-SAE boosting ensemble takes up to ~5 days on an H100 and is reported across 5 runs, making verification costly.",
+        "Practical guidance is unclear. Naive bagging improves stability but can hurt reconstruction relative to the expanded SAE; boosting improves reconstruction but sometimes reduces stability and can underperform on tasks like SCR with many redundant features. The paper does not offer a principled way to choose between the two for downstream use."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Formalizes SAE ensembles and shows a clean equivalence between ensembling SAE reconstructions and concatenating their features/coefficients, providing a useful conceptual framework.",
+        "Proposes two concrete ensemble methods, naive bagging and boosting, with clear algorithmic descriptions and bias-variance-inspired theoretical motivations.",
+        "Empirically evaluates across three language models and SAE architectures on intrinsic metrics (explained variance, MSE, connectivity, stability), automated interpretability, concept detection, spurious correlation removal, and additional SAEBench metrics.",
+        "Boosting consistently improves reconstruction and stability relative to the expanded SAE, and often improves downstream task performance; naive bagging improves stability over expanded and base SAEs.",
+        "Reproducibility details are strong: datasets, language models, SAE architectures, hyperparameters, training/inference times, and implementation notes are provided, and limitations and impact are discussed honestly."
+      ],
+      "weaknesses": [
+        "The central claims are somewhat overstated. Naive bagging does not improve reconstruction relative to the expanded SAE on GELU-1L and Pythia-160M, and downstream gains are mixed: naive bagging underperforms on spurious correlation removal and TPP, and some AutoInterp comparisons are not uniformly better than the expanded SAE.",
+        "The theoretical justifications are weak. The naive bagging variance-reduction result is asymptotic and conditions on the training set, while the boosting bias bound relies on strong assumptions (A.4 and A.6) that essentially assume the desired generalization/overfitting behavior rather than proving it.",
+        "The main baseline is an expanded SAE matched in feature count, but other relevant approaches such as SAE Boost, MP-SAE, or dictionary-learning ensemble methods are not empirically compared, leaving open whether the gains are specific to this ensembling formulation.",
+        "Downstream improvements are often small and confidence intervals overlap, especially in concept detection and the main Pythia-70M spurious correlation removal setting, where absolute S_SHIFT scores are low. This limits the practical significance of some claimed downstream benefits.",
+        "Computational cost is substantial: training an 8-SAE ensemble can take days on large models, and boosting is inherently sequential. Although inference is cheap, the training overhead may limit practical adoption and should be weighed more explicitly against the benefits."
+      ]
+    }
+  }
+}

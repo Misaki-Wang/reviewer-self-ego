@@ -1,0 +1,124 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Addresses an important and timely problem: accelerating compute-bound VLA inference, where the LLM backbone dominates latency (>70%).",
+        "Proposes a training-free, multi-component token-pruning method that combines temporal/global attention from previous actions with local early-layer speculation and action-granularity control.",
+        "Reports consistent end-to-end speedups on two GPUs (1.46x on A800, 1.57x on RTX 3090) while keeping average LIBERO success rate close to OpenVLA-OFT.",
+        "Includes ablations, a pruning-ratio design-space exploration, and retained-token visualizations that give some insight into model behavior.",
+        "Honestly acknowledges the main limitation that experiments are simulation-only and does not raise material ethical concerns."
+      ],
+      "weaknesses": [
+        "Reproducibility is weak: many critical hyperparameters are omitted or underspecified, including K_G, K_D, τ, k in the rank-based weight, ε, L_update/L_prune sets, velocity thresholds, and the constants in the frame-sampling formula. The text and Algorithm 1 also disagree on the formula for T.",
+        "There are serious internal inconsistencies: the main text says α=1.0 for LIBERO-Spatial, 0.8 for Goal, and 0.6 for Object/Long, while the appendix says α=1.0 for Long, 0.8 for Goal, 0.6 for Object, and 0.6 for Spatial. FLOPs accounting also conflicts: Table 1 lists 43% FLOPs, while the appendix derives ~0.63 FLOPs.",
+        "The action-aware controller is technically unclear and potentially circular: pruning decisions are made during the LLM forward pass, but the controller appears to need current action velocity/granularity before actions are generated. If it instead uses the previous action, this delay is not discussed or validated, especially at fine/coarse transitions.",
+        "The central insight that previous global attention is reliable for current pruning lacks quantitative validation. Figure 4 is qualitative, and there is no systematic hit-rate/overlap analysis between prior-step global attention and current-step important tokens across LIBERO tasks.",
+        "Evaluation is narrow and statistically weak: only one VLA model (OpenVLA-OFT) and one simulation benchmark (LIBERO) are tested, with no real-robot results, no confidence intervals, and no statistical significance tests. Claims such as 'better than baseline' in the ablation are likely within noise given the reported trial counts.",
+        "Baseline comparisons are not fully convincing: EfficientVLA is reimplemented from the paper without official code and was designed for a diffusion action expert, which may disadvantage it; SP-VLA and other temporal/pruning methods are discussed but not compared.",
+        "Ablations do not isolate the static-pruning subcomponents (global vs. dynamic vs. local) or test sensitivity to controller thresholds, velocity-based sampling, and layer-level pruning choices. The method also requires benchmark-specific α tuning, limiting generality.",
+        "Presentation has many distracting errors and ambiguities: 'OpenVLA-OPT' vs. 'OpenVLA-OFT', m/M notation confusion in Equation 1, ambiguous set operation V_prune = U - V_global ∪ ..., undefined Low-K_D and Q in Algorithm 1, and unclear definitions of attention used for layer confidence."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "Addresses a relevant and practically important problem (VLA inference latency) with a clear hardware-motivation profile (latency breakdown and roofline analysis in Figure 1).",
+        "The core intuition—combining global cross-step information (previous action's attention) with local current-step information for token selection—is reasonable and grounded in the observation that consecutive frames are highly redundant.",
+        "The method is training-free, which lowers the deployment barrier, and it is evaluated on two GPU platforms (A800 and RTX 3090) across four LIBERO task suites.",
+        "Includes an ablation study, a design-space exploration over the pruning ratio, and a limitations section that honestly acknowledges the absence of real-world evaluation."
+      ],
+      "weaknesses": [
+        "Limited novelty: the 'global information from previous actions' is essentially cross-step token caching already explored by VLA-Cache, the 'self-speculative' framing is misleading (the method performs no actual speculative verification, only early-layer prediction of token importance), and the 'action-aware controller' is an ad-hoc threshold heuristic. The contribution reads as an engineering combination of existing ideas with modest gains.",
+        "Contradictory experimental settings that undermine reproducibility: Section 7.1 states α=1.0 for LIBERO-Spatial and 0.6 for Object/Long, while Appendix 10.2 states α=1.0 for LIBERO-Long and 0.6 for Spatial/Object. The reported results cannot be reliably reproduced when the pruning ratios are inconsistent between the main text and appendix.",
+        "Unreliable baseline comparison: EfficientVLA was re-implemented by the authors (not open-sourced) and exhibits an implausibly large success-rate collapse (72.1% on LIBERO-Long). The claimed superiority over this baseline is therefore not credible, and the speculation that it is 'more tolerant' due to a diffusion action expert is unsupported.",
+        "Insufficient statistical rigor: despite 40–50 repetitions per task, no confidence intervals or error bars are reported, and the claimed success-rate 'improvement' over the baseline (98.2% vs 97.6%) is almost certainly within noise and is left unexplained (pruning improving accuracy is unusual and warrants analysis).",
+        "The velocity-based frame-selection formula is stated inconsistently (T = ⌈−16/3·v/6 + 22/3⌉ + 4 in the text vs. T = ⌊−16/3·v_t + 22/3⌋ + 4 in Algorithm 1, differing in both the velocity term and rounding), and its arbitrary fitted coefficients are given with no justification, suggesting overfitting to the specific setup.",
+        "The ablation undermines the central 'action-aware controller' claim: adding Tech 3 increases latency (70.8 ms → 72.4 ms) while only changing SR within noise, so its benefit is not demonstrated.",
+        "The speedup is modest (1.46×/1.57×), and the method requires per-dataset tuning of the pruning ratio α (different values per suite), which weakens the generalization claim; several key hyperparameters (similarity threshold τ, velocity thresholds v_t^th, v_r^th, the rank-decay constant k) are never specified.",
+        "Presentation problems: typos ('OpenVLA-OPT'), inconsistent figure references (Figure 6(a) is cited but Figure 6 is never shown; Figure 3 subfigures are discussed before the figure is introduced), variable mismatches in Equation 1 (m vs. M), and an unclear relationship between the 'global' score and the layer-specific score definition.",
+        "Evaluation is confined to LIBERO simulation with no real-robot validation; while acknowledged in the limitations, this is a material gap for a robotics acceleration paper that claims practical speedups.",
+        "The compute-bound argument (Figure 1c) is established only for the A800; on the RTX 3090 the arithmetic-intensity/ridge-point regime differs, so the FLOPs-reduction-to-latency reasoning does not necessarily transfer, and the paper does not reconcile the reported ~37% FLOPs reduction with the latency speedups."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3,
+      "strengths": [
+        "The core insight is well-motivated and plausible: consecutive action generations in VLA inference share highly similar visual scenes, so global attention from the previous step is a reasonable signal for token selection. The paper supports this with targeted preliminary experiments (Figure 3 on pruning important vs. unimportant vs. random tokens, and Figure 4 comparing local vs. global attention against practical importance).",
+        "The method is training-free and decomposed into three interpretable components (static action-level pruning, dynamic layer-level pruning, and a lightweight velocity-based action-aware controller), each of which is isolated in the ablation study (Table 2) showing the controller recovers success rate at negligible latency cost.",
+        "The design choices are partially backed by measurement: the hit-rate analysis in Figure 5 justifies using the first two decoder layers as the local predictor, and the roofline/latency breakdown (Figure 1) motivates targeting the compute-bound LLM backbone.",
+        "Evaluation spans four LIBERO suites with 40-50 repetitions per task and two GPU platforms (A800 and RTX 3090), and the retained-token visualizations (Figures 10-11) provide qualitative evidence that task-relevant regions are preserved.",
+        "The limitations section is honest about simulation-only evaluation, and the method is compared against three relevant acceleration baselines (SparseVLM, VLA-Cache, EfficientVLA)."
+      ],
+      "weaknesses": [
+        "Reproducibility is undermined by contradictory hyperparameter reporting. Section 7.1 states alpha = 1.0 for LIBERO-Spatial, 0.8 for LIBERO-Goal, 0.6 for LIBERO-Object and LIBERO-Long, whereas Appendix 10.2 states the opposite assignment for Spatial (0.6) and Long (1.0). Since alpha directly controls the reported success-rate/latency trade-off, it is unclear which configuration actually produced the main results in Table 1.",
+        "Several key hyperparameters are left unspecified or unjustified, including the similarity threshold tau for dynamic-token selection, the translational/rotational velocity thresholds v_t^th and v_r^th, the rank-weighting constant k, and how velocity is normalized. The velocity-based frame-sampling formula is also inconsistent across the text: Section 4.2.1 gives T = [-16/3 * v/6 + 22/3] + 4 while Algorithm 1 gives T = floor(-16/3 * v_t + 22/3) + 4, and neither is derived.",
+        "Evaluation is narrow: only one backbone (OpenVLA-OFT) and one simulator (LIBERO) are used, with no real-robot validation and no demonstration that the method transfers to other VLA architectures (e.g., diffusion-expert models such as CogACT). This limits the generality claim that the method 'generalizes well to different hardware architectures' to hardware, not models or domains.",
+        "The comparison to EfficientVLA is of questionable fairness: the authors acknowledge it targets a different architecture (diffusion action expert), is not open-sourced, and was re-implemented from the paper. Its large LIBERO-Long success-rate drop may reflect a mismatched re-implementation rather than a genuine weakness of that method.",
+        "The framing overstates novelty: the 'self-speculative' terminology is applied to what is essentially early-layer attention reuse as a predictor, which is closer to early-exit/layer-skip and temporal-caching ideas (e.g., VLA-Cache) than to speculative decoding. The components are largely incremental combinations of known techniques (attention-based token pruning, layer-wise importance, velocity heuristics).",
+        "The abstract's claim that existing methods suffer 'more than 20%' success-rate loss is used to motivate the work, yet SpecPrune-VLA's own average speedup (1.46x) is lower than the EfficientVLA baseline (1.55x); the claimed advantage rests entirely on preserving success rate, and several reported gains (e.g., 98.2% vs. 97.6% on Spatial) are within run-to-run noise.",
+        "The appendix FLOPs analysis is coarse and partially inconsistent with the reported speedups (it derives ~0.63x FLOPs while the measured ~1.46x speedup implies ~0.68x), and the per-layer attention term 2L^2D is included without clarifying its negligible contribution at these sequence lengths."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Addresses a practically important problem (LLM backbone dominating VLA inference latency) with a clear, profiling-motivated framing (Figure 1: latency breakdown and roofline analysis showing compute-bound inference).",
+        "The core insight of spatial-temporal consistency across consecutive action steps is quantified with a reasonable recall metric (75-88% overlap of important-token sets across steps and viewpoints), which is a clean, verifiable motivation rather than a hand-wavy claim.",
+        "The method is training-free and plug-and-play, and is demonstrated on two architecturally distinct VLA models (OpenVLA-OFT with an MLP action head and pi_0 with a flow-matching action expert), which strengthens the generality claim.",
+        "Evaluation is reasonably broad: four LIBERO suites, real-world Flexiv Rizon4 experiments, cross-GPU validation (A800 and RTX 3090), and robustness on LIBERO-plus with viewpoint/lighting/background perturbations.",
+        "Ablations directly test the two key components (global attention reuse, entropy-based layer weighting), showing measurable gains in both recall and success rate (Tables 2, 3), and the design-space study on prune ratio alpha supports the chosen operating point.",
+        "Overhead is analyzed explicitly (Table 9), and the observation that attention entropy is stable across steps (Figure 5I) is a sensible way to amortize the entropy computation."
+      ],
+      "weaknesses": [
+        "The 'self-speculative' framing is misleading: there is no draft-and-verify speculative decoding. The method reuses prior-step attention statistics and early-layer attention, which is closer to cross-step attention caching/pruning. This overstates the conceptual novelty.",
+        "Novelty is largely incremental: cross-step attention reuse (VLA-Cache), early-layer attention pruning (FastV), and layer-wise entropy/attention pruning (SparseVLM) already exist; the contribution is a combination plus a velocity heuristic. The method does not clearly dominate the strongest baseline (VLA-Cache at 1.07x with 96.9% SR vs Ours at 1.46x with 96.1% SR), so the benefit is a trade-off rather than a decisive advance.",
+        "Statistical rigor for the real-world results is weak: only four tasks with ~50-100 demos, no error bars, and some degradation (TransferTube 82.0% vs 85.0%). Simulation results in the main table (Table 1) are inconsistent with the appendix (Table 12: Ours 96.1 vs 96.4; OpenVLA-OFT 96.6 vs 96.8), and the abstract's '1.57x' refers to the 3090 result while Table 1 shows 1.46x on A800, which is confusing.",
+        "Several key hyperparameters are heuristically set and appear to require per-setting tuning: the velocity-based temporal window T = floor(b + k*v) + 4 with k=-1, b=7, the threshold tau (0.95 sim vs 0.8 real), and the velocity thresholds (v_t=0.5, v_r=0.2). Generality across robots is claimed but only qualitatively supported (the UniVLA/SimplerEnv experiment reports no quantitative success rate).",
+        "The layer confidence score is computed only in the first inference step and reused, relying on the empirical assumption that entropy patterns are stable within a task; this is an approximation with no failure analysis for long-horizon or distribution-shifted tasks.",
+        "Reproducibility is incomplete: no code/artifact link, EfficientVLA is re-implemented (not open-sourced) and its reported 88.9% SR may not reflect the original method, and several design choices (e.g., which layers count as 'middle/deep' — the 15th and 32nd) are not justified beyond a single ablation.",
+        "Presentation quality is below standard: multiple typos and errors ('overcall algorithm' for 'overall algorithm', 'OpenVLA-OFFT', 'Llama2-7B!'), duplicated ablation content between Section 7.5 and Appendix A.1, and equation/figure references that are hard to follow."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a timely and practically important problem: accelerating compute-bound VLA inference, which the authors correctly profile as LLM-dominated (>70% latency).",
+        "The two motivating observations are interesting and reasonably supported: hierarchical image-to-text attention (shallow/middle/deep layers emphasize different content) and temporal consistency of important tokens (75-88% recall of top-30 sets across consecutive steps, Fig. 3).",
+        "The proposed two-level scheme (action-level static pruning from global prior-step attention + dynamic tokens + local early-layer tokens; layer-level dynamic pruning) is a sensible design that fuses global and local cues, and it is training-free and plug-and-play.",
+        "Evaluation is broad in coverage: two architectures (OpenVLA-OFT and π0), four LIBERO suites, LIBERO-plus, a second GPU (3090), and a real Flexiv arm with three cameras; a working 1.46-1.70x speedup with small success-rate change is a useful practical result.",
+        "Several ablations (global attention reuse, entropy-based layer weighting, prune-ratio, thresholds) attempt to isolate the contribution of each component."
+      ],
+      "weaknesses": [
+        "The motivating claim in the Introduction that prior methods cause a “>20% success rate drop” is contradicted by the paper’s own results: FastV drops to 93.3% (3.3 points) and EfficientVLA to 88.9% (~8 points) relative to 96.6%. This overstatement weakens the framing of the contribution.",
+        "Reporting is inconsistent and overclaims. The abstract advertises “up to 1.57x” while Table 1 reports 1.46x; the conclusion mixes 1.46x (A800) and 1.57x (3090). The “negligible” success-rate degradation (<0.7%) is within the paper’s own run-to-run fluctuation (±0.5-0.7%, Table 12), so the no-degradation claim is not statistically supported. On π0, LIBERO-Long falls 85.2%→84.2%, and the real-world TransferTube drops 85%→82% — a 3-point loss that is not “negligible.”",
+        "Comparison fairness is questionable. EfficientVLA is re-implemented from paper details because it is not open-sourced, yet it is used as the main high-speedup point of comparison. FastV/DivPrune are described as “retaining similar token counts…for fairness,” but the reported FLOPs differ substantially (57%/54% vs 43% for Ours), so the controlled comparison is not actually controlled.",
+        "Heavy reliance on hand-tuned, benchmark-specific heuristics with weak justification: guiding layers “15 and 32” are chosen arbitrarily; the pruning interval T=5, pruning window [10,25], retention factor γ=0.9, thresholds v_t^th=0.5/v_r^th=0.2, τ (0.95 sim / 0.8 real), β=0.2, and the K values are all selected by searching on the same LIBERO suites being evaluated, raising overfitting concerns.",
+        "The “self-speculative” framing is misleading. There is no draft-then-verify mechanism; the method simply reuses prior-step attention and early-layer attention. The term “speculative” is borrowed terminology that does not match the mechanism, and the core ideas (attention-based token pruning, reusing prior-step information as in VLA-Cache, EMA importance scores with entropy-based confidence) are largely known techniques combined rather than a fundamentally new method.",
+        "The dynamic-token mechanism compares raw pixel patches (before encoding) via cosine similarity, an ad-hoc proxy for change; no ablation is provided against feature-space similarity or against simply reusing attention-based dynamic detection.",
+        "Real-world evaluation lacks rigor: the number of trials/rollouts is not reported, no confidence intervals are given, and the four tasks show differences well within noise, so the 1.70x speedup claim is not accompanied by evidence that accuracy is preserved.",
+        "Presentation is messy and reduces confidence in the results: inconsistent figure references (e.g., Figure 4(a) cited for frame sampling; Figure 13(a)/(b) cited for different things than in-text), duplicated ablation tables (Tables 2/3 are identical to Tables 5/6), conflicting layer counts (32 layers vs layer 32 vs Fig. 5II showing up to 31), and the symbol T reused for both the pruning interval and the velocity-based frame gap. Some referenced figures (e.g., the LIBERO-plus results in Fig. 10) are not substantiated in text."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "The paper is motivated by two concrete, well-supported empirical insights: (1) hierarchical attention patterns where shallow layers attend broadly, middle layers capture task-relevant objects, and deep layers capture action-centric tokens (Fig. 3), and (2) spatial-temporal consistency, quantified via a 'Recall of Important Tokens' of 75-88% across viewpoints (Fig. 3, Insight 2). This grounding makes the design choices non-arbitrary.",
+        "The method is training-free and plug-and-play, and it is demonstrated on two architecturally distinct VLA models (OpenVLA-OFT with an MLP action head and pi_0 with a flow-matching action expert), which strengthens generality claims.",
+        "The lightweight action-aware controller is a genuinely novel and practically sensible contribution. It classifies coarse- vs. fine-grained actions via end-effector velocity and adapts pruning aggressiveness, and the authors demonstrate threshold transferability across three robots (Franka Panda, Flexiv Rizon4, WidowX-250) and a different VLA model (UniVLA) in SimplerEnv (Appendix A.1.4), which is strong evidence for generalization.",
+        "The evaluation is thorough: four LIBERO suites, LIBERO-plus robustness under viewpoint/lighting/background/noise perturbations, multiple GPUs (A800 and RTX 3090), a detailed per-module latency/overhead breakdown (Table 9, ~4.5% overhead), and component-wise ablations (Tables 2, 3, 11) that isolate the value of global attention reuse and entropy-based layer weighting.",
+        "The accuracy cost is small (avg SR 96.1% vs. 96.6% baseline; real-world 1.70x speedup with near-identical success rates), and the paper reports stability across random seeds (Table 12), which supports reproducibility of the central efficiency claim."
+      ],
+      "weaknesses": [
+        "There is a large gap between the reported FLOPs reduction (57%) and the achieved wall-clock speedup (1.46x on A800, i.e., ~31% latency reduction). The paper attributes only ~4.5% overhead to its own modules, so the discrepancy is not fully explained; a more careful accounting of memory-bound phases, tokenization, and action-head cost would strengthen the speedup claim.",
+        "Novelty is somewhat incremental. Global-attention reuse across steps and frame-similarity-based dynamic token selection overlap conceptually with VLA-Cache, and early-layer attention pruning overlaps with FastV. The genuinely new element is the action-aware controller; the paper would benefit from a sharper articulation of what is fundamentally new versus recombined.",
+        "The 'self-speculative' framing is loosely connected to speculative decoding: there is no draft-and-verify loop. The method uses the first two layers to predict important tokens (Fig. 5II), which is closer to early-exit/early-layer heuristics than to speculation. The terminology risks overstating the conceptual contribution.",
+        "The temporal-consistency motivation assumes short intervals between consecutive inferences, but OpenVLA-OFT generates action chunks (25 steps, open-loop execution, Table 13). It is unclear whether the reported 75-88% recall is measured between consecutive chunk generations (temporally distant) or between finer-grained steps; clarifying this is important because it underpins the global-reuse design.",
+        "Some headline claims are selectively framed. The abstract's 'up to 1.57x in LIBERO' comes from the RTX 3090 result, while the main A800 table shows 1.46x; the '>20% success rate drop' attributed to prior work matches the worst baseline (EfficientVLA on LIBERO-Long) rather than the field, since VLA-Cache retains 96.9% SR. The advantage over strong baselines is therefore a tradeoff (VLA-Cache: higher SR, lower speedup) rather than strict Pareto dominance, and this should be stated more candidly.",
+        "The EfficientVLA comparison is based on a re-implementation (the method is not open-sourced, Appendix A.5.1), and the paper itself notes this method uses a different diffusion action-expert design; fairness of that specific comparison is uncertain."
+      ]
+    }
+  }
+}

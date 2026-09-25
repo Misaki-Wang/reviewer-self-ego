@@ -1,0 +1,132 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Identifies a timely and practically important vulnerability: routing imbalance in expert-parallel MoE inference can be exploited as an algorithmic DoS vector, turning EP efficiency into a latency bottleneck.",
+        "Proposes a simple, black-box attack, RepetitionCurse, that requires no gradients or search and is model-agnostic, making it easy to deploy against API services.",
+        "Conducts a systematic survey of 139 HuggingFace MoE models and tests 14 representative models spanning different sparsity levels, attention mechanisms, and base/instruct variants.",
+        "Provides local vLLM measurements showing concrete MoE-kernel latency amplification (e.g., R_moe up to 2.856x at EP=8 for Mixtral variants) and demonstrates that larger EP generally exacerbates the vulnerability.",
+        "Reports API-level TTFT amplification up to 4.728x and introduces an interesting side-channel angle for inferring whether a backend service uses MoE.",
+        "Gives a simple theoretical upper-bound analysis (TMI) relating k, experts per device, and EP size, which is useful for reasoning about worst-case routing concentration.",
+        "Proposes defenses, including PPL filtering and vulnerability-aware expert placement, and simulates the latter, showing coverage reduction (e.g., 36.7% for DeepSeek-V2-Lite at EP=16).",
+        "Includes an ethical statement acknowledging limited API requests and latency-based rather than disruption-based assessment."
+      ],
+      "weaknesses": [
+        "The central DoS claim is not convincingly demonstrated: experiments compare attack prompts and normal prompts in separate batches rather than under a mixed concurrent workload, so there is no evidence that legitimate users' queuing time or TTFT is actually inflated.",
+        "The coverage metric is internally inconsistent: L_{l,d} averages over experts on a device, while the paper states EP load is GPU-level and fused-kernel time depends on the total number of assigned tokens. This should be a sum, not an average; the current definition confounds cross-model coverage comparisons and weakens the link to the TMI analysis.",
+        "The API side-channel evidence is weak: dense Llama-3-8B shows Rapi=1.160>1, Qwen3-14B shows 0.635, and the promised 95% lower bound is not reported in Table 4. The inference that ChatGPT is backed by MoE lacks ground truth and does not control for tokenizer, length, content filtering, caching, or network variability.",
+        "No baselines or ablations isolate the effect of repetition: there is no comparison to random tokens, non-repetitive long prompts, GCG-style adversarial prompts, or adaptive variants. The PPL-filtering defense is proposed but never evaluated.",
+        "The TMI regime claim is overstated: for DeepSeek-V3, a perfect bottleneck is achievable only while E_d >= k; as EP grows and E_d < k, TMI saturates at E/k. Coverage approaching 1 at EP=E does not imply severity of 1, since actual amplification can be E/k.",
+        "Reproducibility is insufficient: no code, hardware/GPU details, vLLM version, exact prompts, random seeds, API endpoints, or statistical methodology are provided. Algorithm 1 lacks hyperparameters and implementation details.",
+        "Ethical handling is inadequate: the paper probes commercial APIs, including ChatGPT and DeepSeek, with 100 adversarial 20k-token prompts and infers hidden backend architectures, but does not mention responsible disclosure to the affected providers.",
+        "There is no limitations section and little discussion of adaptive attacks, provider-side rate limiting, detection, PPL-filter bypass, or impact on decoding/throughput rather than prefill TTFT.",
+        "Presentation quality is uneven: typos such as 'prefetch' for 'prefill', reference-year errors (e.g., Amdahl, Du, Fedus), unclear figures/tables, missing units/confidence intervals, and inconsistent notation reduce clarity.",
+        "The black-box attack assumes repetitive text yields repeated token IDs, but tokenizer instability for repeated strings and API constraints on sending token IDs are not addressed; coverage iterates vocabulary tokens in a way that may not translate directly to black-box API prompts."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Timely and practically relevant problem: DoS via router imbalance in EP-based MoE serving is an under-examined systems/security surface with real deployment consequences.",
+        "The attack (RepetitionCurse) is simple, black-box, gradient-free, and model-agnostic, which makes the finding easy to reproduce in principle and easy to understand.",
+        "Broad empirical scope: a 139-model HuggingFace survey, controlled evaluation of 14 models across EP=2/4/8, a coverage metric, a vulnerable-expert analysis, and proposed defenses give the paper useful breadth.",
+        "The controlled local profiling (R_moe, Table 3) provides genuine mechanism-level evidence that routing concentration inflates MoE kernel time, and the effect scales with EP size, consistent with the stated theory.",
+        "The secondary analyses (length scalability, normalized entropy across system prompts, vulnerable-expert heatmaps) are interesting and go beyond a single headline number."
+      ],
+      "weaknesses": [
+        "Limited novelty: the core observation that repetitive/OOD tokens concentrate MoE routing is largely anticipated by existing work on MoE load balancing and adversarial routing (e.g., Hayes et al. 2024, cited), and the 'attack' reduces to feeding repeated tokens. The paper does not convincingly differentiate its contribution from what was already known.",
+        "The side-channel claim (inferring that ChatGPT-3.5/4/4o-mini are MoE-backed) is speculative and weakly supported. The proposed discriminator is contradicted by the authors' own dense baseline: Llama-3-8B-Instruct shows Rapi = 1.160 (> 1), which undermines the rule that dense models stay <= 1. API latency is confounded by batching, queuing, caching, network jitter, and output length, and no controlled experiment, repeated-trial statistics, or alternative explanations are provided.",
+        "API-level measurements lack rigor: single point estimates, unspecified API providers/endpoints, no reported variance despite a claimed '95% confidence lower bound,' and no control for caching or concurrent load. The headline 3.063x on Mixtral rests on this noisy, under-controlled measurement.",
+        "Reproducibility gaps: no hardware/GPU specifications, vLLM version, EP implementation details, seeds, or expert-to-GPU mapping specifics. R_moe results (200 prompts each) are reported without error bars or confidence intervals, so the reliability of the reported ratios is unknown.",
+        "The coverage metric (Eq. 4) is a heuristic proxy (averaged percentage loads, max over devices), and its link to actual measured latency is asserted rather than validated. Much of the model-comparison and EP-scaling analysis rests on this unvalidated proxy.",
+        "Defense evaluation is superficial: PPL filtering is not quantitatively tested (only noted that current APIs do not reject the prompts), and the vulnerability-aware load-balance defense is only simulated, with meaningful gains confined to narrow regimes (moderate E, large k; e.g., 36.7% coverage reduction for DeepSeek-V2-Lite).",
+        "Overstated claims and presentation sloppiness: 'the observed LAR exceeds 100%, ranging from 1.514x to 4.728x' conflates ratio and percentage; 'prefetch' is used for 'prefill'; Table 1's formatting is unclear; and the 'low-cost' framing sits awkwardly with 20,000-token adversarial prompts, which are themselves expensive and often subject to context/rate limits.",
+        "Ethics/responsible disclosure: the paper launches working DoS probes against production commercial APIs (OpenAI, DeepSeek, Moonshot, etc.) but reports no prior disclosure to the affected vendors. This is a material omission for a security paper, and the ethical statement's 'limited number of requests' is not sufficient to address the potential ToS/availability impact."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3,
+      "strengths": [
+        "Identifies a practical and important vulnerability in MoE expert-parallel serving: repetitive token patterns can concentrate routing and create straggler GPUs.",
+        "Proposes a simple, black-box, model-agnostic attack (RepetitionCurse) that requires no gradients or knowledge of the backend architecture.",
+        "Provides broad empirical coverage: surveys 139 MoE configurations and tests 14 models spanning different architectures, sparsity levels, and training stages.",
+        "Reports direct latency measurements on local vLLM deployments and commercial APIs, showing MoE kernel latency increases up to 2.856x locally and API TTFT increases up to 4.728x.",
+        "Raises awareness of a systemic serving vulnerability and sketches defense directions (perplexity filtering, vulnerability-aware expert placement) and a possible side-channel."
+      ],
+      "weaknesses": [
+        "The coverage metric L_{l,d} uses an average expert load per device, which contradicts the paper's own statement that GPU-level load is determined by the total number of assigned tokens; this underestimates device bottlenecks when multiple experts are hosted on one GPU and undermines the prevalence and defense analyses.",
+        "The theoretical TMI is not reconciled with measured latency: for Mixtral-8x7B at EP=8, TMI=4 but R_moe=2.651, leaving a gap between the theoretical model and the experiments.",
+        "The DoS claim is not fully supported: experiments measure single-request TTFT/latency, not concurrent load, queuing delay, throughput, or service-level impact on legitimate users.",
+        "The abstract overclaims that 139 MoE configurations reveal nearly all models are susceptible, but only 14 models are actually attacked; the 139 figure comes from configuration scraping.",
+        "The side-channel inference is weak: only two dense baselines are used, and comparisons between API R_api and local R_moe curves are confounded by network, batching, hardware, and deployment differences.",
+        "Defense proposals are not evaluated in terms of real latency or service impact; PPL filtering is untested, and the vulnerability-aware load-balancing defense is simulated only with the flawed coverage metric.",
+        "Reproducibility is poor: no code or artifact is provided, and key details such as vLLM version, GPU type, batch size, normal-prompt construction, expert-to-GPU mapping, and API providers are missing.",
+        "Ethical concerns: the paper probes commercial APIs (including ChatGPT models) with large 20,000-token adversarial prompts to induce latency, without mentioning responsible disclosure or approval, which may violate terms of service and raises research-ethics questions.",
+        "Presentation has inconsistencies and errors: 'prefetch' vs. 'prefill', citation year mismatches (e.g., Amdahl, Bai, Du, Fedus, Gong), and some unclear equations/figures."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Addresses an important and timely system-level vulnerability in MoE LLM serving: routing imbalance under expert parallelism can be exploited to inflate TTFT and degrade SLA compliance.",
+        "Provides a comprehensive empirical measurement across 139 HuggingFace MoE configurations and 13 representative models, covering base/instruction variants, standard and linear attention, and EP sizes from 2 to 32.",
+        "The black-box attack is simple, practical, and model-agnostic: repetitive token prompts require no parameter access or routing knowledge, making the vulnerability easy to test and potentially deploy.",
+        "Includes a useful theoretical upper-bound analysis (TMI) and discusses practical constraints such as unknown expert-to-GPU mapping and inability to control target experts.",
+        "Reports local vLLM profiling experiments with latency amplification metrics for both MoE kernel time and end-to-end TTFT, plus a real-world API evaluation and defense analyses (vulnerability-aware mapping, EPLB, PPL filtering).",
+        "The paper is generally well-written, clearly organized, and the defense section honestly notes that vulnerability-aware mapping is only a partial mitigation."
+      ],
+      "weaknesses": [
+        "Novelty and prior-work treatment are problematic. Hayes et al. (2024), 'Buffer overflow in mixture of experts,' is cited only in passing and omitted from related work, yet it appears to be the closest prior attack on MoE routing collapse. The claim of being 'the first to demonstrate that routing imbalance can be weaponized to launch DoS attacks' is therefore unsupported and likely overstated.",
+        "The coverage metric in Equation 6 is inconsistent with the reported results. Device load is defined as an average over experts on the device, so B(P_t) cannot exceed 1/E_d. For Mixtral with EP=2, E_d=4, the maximum possible value is 0.25, but Figure 4 reports average bottleneck near 0.35. The intended device load should likely be a sum over experts on the device, not an average. As written, the RQ1 quantitative claims are not reproducible from the formula.",
+        "The evaluation lacks controlled baselines. The paper compares attack prompts against natural or benign prompts but does not compare against other OOD prompts of the same token length, random token repetitions, rare-token repetitions, or the prior Hayes et al. attack. Without such controls, it is unclear whether repetition is uniquely effective or whether any long OOD prompt would produce similar TTFT inflation.",
+        "The SLA violation analysis is speculative. It models TTFT as log-normal using request token-length distributions from BurstGPT and ShareGPT rather than measured TTFT distributions, and assumes the shape parameter is invariant under scaling. The resulting P99 degradation claims depend on unverified assumptions about queueing, attention cost, and MoE latency dominance.",
+        "The commercial API experiments have weak causal attribution and raise ethical concerns. Since the APIs are black boxes, TTFT differences may stem from prefix caching, tokenization, provider-specific optimizations, or other content effects rather than routing imbalance; the paper does not verify routing concentration or EP configuration. The paper also does not document provider permission, disclosure timeline, or terms-of-service compliance, despite sending many long requests to commercial services.",
+        "Reproducibility is limited. No code, data, or exact attack prompts are provided. Key details are missing, including vLLM version, tensor-parallel configuration, exact trigger tokens, tokenization method, batch scheduling, seeds, and hardware/network conditions for API tests. The attack prompt construction is underspecified, especially how trigger tokens are chosen and how instruction templates are excluded.",
+        "The theoretical TMI analysis and the 'nearly any token' coverage claim are less informative than presented. When EP size equals the number of experts, every token trivially achieves coverage 1 because each GPU hosts one expert. The practically relevant regime is lower EP sizes, where coverage and observed latency amplification are much lower and are not fully explained.",
+        "The defense analysis is incomplete. Vulnerability-aware mapping is simulated with full knowledge of trigger-token counts and static mappings, without evaluating online rebalancing overhead, partial knowledge, or realistic serving constraints. The PPL-filter discussion is qualitative and does not measure false positives on legitimate code or structured traffic.",
+        "Presentation issues remain. Some notation is unclear, such as N_eff = exp(H_l) without defining H_l in place, and several important analyses are relegated to the appendix. The paper also lacks a dedicated limitations section, and the impact statement does not fully address the ethical safeguards for attacking live commercial APIs."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper identifies a real and practically relevant systems-level vulnerability: routing imbalance under expert parallelism can be weaponized to inflate TTFT, which is a legitimate DoS surface that existing LLM-DoS work (long-output/resource-exhaustion attacks) does not cover. The framing of 'turning parallelism against itself' is a useful reframing of the efficiency/robustness trade-off.",
+        "The empirical scope is broad: 139 HuggingFace MoE configuration files surveyed, 13 models spanning Mixtral/Qwen3/GPT-OSS/Kimi-Linear/DeepSeek-V2/Llama-4, EP sizes 2–32, and both local vLLM profiling and commercial API measurements. The inclusion of base, instruction-tuned, and linear-attention variants supports the claim that the vulnerability is architectural rather than a post-training artifact.",
+        "The paper is honest about limitations: it explicitly discusses that the attack cannot control which experts are targeted, that the Expert-GPU mapping is unknown in black-box settings, and that vulnerability-aware mapping only partially mitigates the issue (Section 4.4, RQ3, Appendix D/E). The responsible-disclosure stance and low-rate API testing are appropriate.",
+        "Several secondary analyses add value beyond the headline result: the length/context robustness study (Section 6.1), the perplexity-based filter discussion showing that low-PPL filtering would collide with legitimate code traffic (Appendix D), and the EPLB R1/R2 comparison (Appendix E) are useful for practitioners."
+      ],
+      "weaknesses": [
+        "The core mechanism is close to trivial and the theory is post-hoc. Routing concentration from repeating one token follows directly from the fact that identical token embeddings produce identical router inputs (Eqs. 1–2); the variance-minimization objective (Eq. 4) is not solved or analyzed but merely used to motivate 'repeat a token.' The paper calls this 'practically optimal' and 'context-independent' without proving optimality or comparing to any alternative (random tokens, mixed repetition, white-box optimization). The 'theoretical maximum imbalance' in Eq. 5 is a counting bound that is never empirically validated against measured LARs, and no experiment confirms the attack reaches or approaches it.",
+        "The practical threat is fundamentally gated by the static, order-based Expert-GPU mapping assumption, which the paper admits is contradicted by EPLB. Since RepetitionCurse cannot choose which experts are targeted, the actual latency penalty is a probabilistic function of how the attacked experts happen to land across devices. This is not a minor caveat: it means the headline '20%–148% TTFT increase' is conditional on a deployment configuration that sophisticated providers (e.g., DeepSeek's EP=32 setup, which the paper itself cites) may not use. The black-box framing is therefore in tension with the attack's actual requirements.",
+        "The end-to-end API results (Table 3) do not isolate the routing mechanism. The 20,000-token attack prompts are repetitive while 'normal' prompts are presumably natural text; the reported 1.5×–4.7× LARs could partly reflect tokenizer/embedding/length effects rather than routing imbalance. No control experiment (e.g., random natural text of the same length and token distribution) is provided to attribute the latency to routing concentration specifically. Additionally, only 100 requests per condition with 95% CI lower bounds reported — no variance, no per-model batching details — makes the commercial-API numbers weak evidence for a DoS claim.",
+        "Evaluation and reproducibility gaps: (a) the attack-prompt construction procedure (how the repeated token is selected per model) is not specified in the main text; (b) no code or artifact release is indicated; (c) the vulnerability-aware defense in RQ3 is simulation-only and never deployed to verify that the simulated bottleneck reduction translates to real latency reduction; (d) results are reported as point estimates without confidence intervals for the local vLLM experiments, despite the attack's stochastic dependence on mapping alignment.",
+        "Presentation issues reduce confidence: the related work on adversarial routing in MoE (e.g., Hayes et al. 2024) is cited but not contrasted in detail, so the novelty delta versus prior 'buffer overflow in MoE' work is unclear; several references appear malformed (e.g., 'Fu et al. [2021]' for a 2024 paper, 'Patke et al. [2017]' for a 2024 paper, 'Skean et al. [2017]'), and Figure 3 is cited as evidence in Section 4.4 but its caption/description does not clearly support the claim about Layer 1 vs. Layer 2 behavior."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "The paper identifies a timely and practical vulnerability in MoE serving systems: routing imbalance under expert parallelism can be weaponized for DoS, shifting the attack surface from token-generation exhaustion to per-token compute inefficiency.",
+        "The proposed RepetitionCurse attack is simple, black-box, and model-agnostic, requiring no access to router weights or backend mapping, which makes the threat realistic and easy to understand.",
+        "The empirical evaluation is broad: 139 HuggingFace MoE configurations are surveyed, 13 representative models are tested, multiple EP sizes are covered, and experiments are run on real 8-GPU A800 clusters with vLLM plus a commercial-API study.",
+        "The paper provides useful system-level metrics (LAR_moe, LAR_ttft, bottleneck coverage, TMI) and connects router concentration to actual TTFT degradation, showing up to 2.48x TTFT increase on Mixtral-8x7B at EP=8 and up to 2.15x on Qwen3-30B-A3B at EP=32.",
+        "The analysis of EP size as an amplifier of the vulnerability is valuable and counterintuitive: scaling parallelism for efficiency simultaneously enlarges the attack surface.",
+        "The authors consider defenses and limitations, including vulnerability-aware expert placement, dynamic EPLB, and perplexity filtering, and include an impact statement and low-rate API testing."
+      ],
+      "weaknesses": [
+        "The novelty relative to prior work is not sufficiently clarified. Hayes et al. (2024), 'Buffer overflow in mixture of experts,' is cited only in passing; if repetitive prompts were already known to collapse MoE routing, RepetitionCurse's attack primitive is incremental and the paper must explicitly delineate its new contribution.",
+        "The bottleneck coverage metric in Eq. (6) divides by the number of experts per device, so it is not normalized across EP sizes and does not directly measure per-device token load. The observed monotonic increase with EP size in Figure 4 may partly be an artifact of this scaling rather than a pure vulnerability increase; normalizing by the theoretical maximum or using actual summed per-device load would be more convincing.",
+        "The SLA degradation results in Table 5 are projections from an assumed lognormal TTFT distribution and observed LARs, not measured end-to-end SLA violations. The abstract's claim that the attack 'breaks the P99 SLA guarantee' risks overstating what was directly measured.",
+        "The paper conflates attack-only request latency with benign-user TTFT. For alpha=1, LAR_ttft measures the attacker's own request latency, not subsequent benign users' TTFT; the headline 148% increase comes from this setting, while mixed-batch benign impact is lower (e.g., 1.61x for Mixtral at EP=8). A direct measurement of benign users' TTFT under attack-only periods is needed.",
+        "The black-box token-selection procedure is under-specified. At realistic EP sizes, bottleneck coverage is often far below 1, so an arbitrary repeated token may not be optimal; the paper does not explain how an attacker identifies effective trigger tokens without backend mapping, nor does it report the distribution of attack effectiveness over tokens.",
+        "Reproducibility is incomplete. There is no mention of released code/artifacts, exact attack prompts, selected tokens, system prompts, server configuration, batching/scheduling details, API providers, or run-to-run variance. Latency results generally lack error bars or confidence intervals.",
+        "The defense analysis is somewhat artificial: RQ3 assumes a defender can perform a white-box vocabulary scan to identify attractor experts and then re-map them. This may not reflect practical deployment constraints, and the comparison against dynamic EPLB is only in the appendix.",
+        "Ethical treatment of the commercial-API experiments is thin. Although the paper states responsible disclosure and uses a low request rate, it does not name providers, describe authorization/IRB review, or detail the disclosure process, which is important for an attack paper against production services.",
+        "There are minor presentation issues: 'prefetch' is used where 'prefill' is meant throughout, and some table/figure notation and formatting are rough. These do not undermine the core claims but reduce clarity."
+      ]
+    }
+  }
+}

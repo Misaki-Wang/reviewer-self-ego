@@ -1,0 +1,135 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Targets an important and timely problem: efficient inference for long-generation reasoning models where sparse attention accuracy degrades.",
+        "Identifies spatial locality across attention heads and recency locality across decoding steps, and uses these observations to motivate a simple training-free method.",
+        "LessIsMore is simple and compatible with existing selection-based sparse attention backbones such as TidalDecode and with GQA models, requiring no retraining.",
+        "Reports extensive accuracy evaluations on Qwen3-8B/4B across AIME-24/25, MATH500, and GPQA-Diamond at multiple token budgets, consistently outperforming Quest, TidalDecode, and SeerAttention-r, often matching full attention.",
+        "Includes useful ablations on the recent-window ratio, aggregation schemes, and generation length; the generation-length analysis shows LessIsMore avoids the length inflation seen in other sparse methods.",
+        "Provides an honest limitations/future-work section discussing the fixed ratio, PyTorch-based union, retained full KV cache, and GQA-only scope."
+      ],
+      "weaknesses": [
+        "The central accuracy comparisons are not controlled: LessIsMore/TidalDecode use the authors' sampling configuration, while Full Attention, Quest, and SeerAttention-r use reported configurations from Gao et al. (2025). Without re-evaluating all baselines under identical prompts, sampling parameters, and generation settings, the claimed accuracy gains are not reliable.",
+        "No statistical significance or variance is reported for AIME results despite small sample counts; differences such as 76.67 vs. 74.48 at K=6000 could be within noise, so claims of 'lossless' or 'improved' accuracy are overclaimed.",
+        "Efficiency evidence is mismatched: decoding latency is measured on Llama-3.1-8B, while accuracy is reported on Qwen3-8B/4B. Figure 7 appears to combine Qwen3-8B accuracy numbers with Llama latency, so the efficiency-accuracy tradeoff is not directly demonstrated on the evaluated reasoning models.",
+        "The reported speedups are modest (about 1.1x vs. full attention and 1.13x end-to-end vs. TidalDecode), and the method still keeps the full KV cache, so memory savings are not achieved; the 'efficient reasoning' claim is narrower than the title suggests.",
+        "The motivating locality analysis is narrow: it visualizes top-4K tokens only at Layer 4 of Qwen3-8B on AIME-24. The experiments select tokens at Layer 12/20, so the observed locality is not shown at the layers where selection is actually performed, nor across models, tasks, or layers.",
+        "The claim of the 'first detailed token-level analysis' is overclaimed; recency/attention-sink behavior is well known (e.g., StreamingLLM), and head redundancy in GQA has been studied before. The paper does not sufficiently distinguish its findings from prior work.",
+        "Algorithm 1 and Section 3.2 are ambiguous about the core selection operation: how UnionFlatten orders/ranks tokens across heads, how ties and duplicate indices are handled, how the budget is enforced if the union is smaller than K*(1-r), and how attention sink tokens are incorporated.",
+        "Reproducibility is weakened by missing implementation details: the code URL is blank, custom GQA kernels are not described, and practical issues such as behavior when sequence length is shorter than the recency budget K*r are not addressed.",
+        "The description of the TidalDecode backbone is inconsistent: Section 3 says two selection layers, while experiments set 'the same selection layer' (Layer 12/20) for LessIsMore and TidalDecode. It is unclear whether the comparison modifies TidalDecode and whether all selection layers are handled identically.",
+        "The method's novelty is incremental: it combines per-head top-k union with a fixed recent-token window. There is no theoretical analysis of why global union improves recall, and no comparison to alternatives such as per-KV-group union or adaptive budgets."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper targets a genuine and important problem: the decode-heavy computational profile of reasoning models, where tens of thousands of output tokens are generated from short prompts, making sparse attention appealing.",
+        "The accuracy retention results are the strongest part of the work: LessIsMore maintains near-lossless accuracy at very small token budgets (e.g., 73.75 vs. 74.48 full attention on AIME-24 at K=2000 on Qwen3-8B, Table 1/Table 2), while training-free baselines like Quest and TidalDecode collapse (18.15 and 53.33 respectively). This is a meaningful margin.",
+        "The paper includes a reasonable breadth of evaluation (AIME-24/25, MATH500, GPQA-Diamond; Qwen3-8B and 4B; 1K-6K budgets) and reports both accuracy and generation-length behavior.",
+        "The observation-driven design is coherent: the recency-window ablation (Figure 9) and the aggregation-scheme ablation on GQA (Figure 8) support the specific design choices, and the paper is honest about limitations (Sections 5.1-5.4), including that selection overhead is implemented with PyTorch primitives and that the full KV cache is still retained.",
+        "The approach is training-free and is shown to generalize to other sparse-attention backbones in principle, which lowers adoption cost."
+      ],
+      "weaknesses": [
+        "The central efficiency claim is weak and arguably within noise. The headline result is a 1.1x average decoding speedup over full attention and a 1.13x end-to-end speedup over TidalDecode. For a paper whose entire motivation is efficiency, these margins are marginal, and the end-to-end figure is largely driven by 7% shorter generation length (an accuracy side-effect) rather than by the mechanism itself, conflating two different notions of 'speedup'.",
+        "There is a serious inconsistency in the efficiency evaluation. Section 4.3 and Figure 7 state the latency/accuracy measurements are on LLama-3.1-8B, yet the reported points (73.75, 53.33, 74.48) are exactly the Qwen3-8B AIME-24 numbers from Table 1. Either the figure is mislabeled or accuracy and latency were measured on different models, in which case the accuracy-efficiency tradeoff plot (Figure 7) is not a valid comparison. This undermines the reproducibility and interpretability of the key efficiency figure.",
+        "The 'improves over full attention' claim (e.g., AIME-24 76.67 vs. 74.48 at K=6000; MATH500 94.55 vs. 94.43) is presented as a benefit but never analyzed. With only 16 samples for AIME and 8 for MATH500/GPQA and no confidence intervals or significance testing anywhere, these differences are plausibly sampling variance. The paper needs error bars and a discussion of why sparse attention could beat full attention.",
+        "Novelty is limited. The 'Stable Recency Window' is essentially StreamingLLM's sliding window (which the paper itself cites) with a budget-ratio twist, and the spatial-locality observation within a KV group is largely a consequence of GQA sharing the same KV across query heads. Unified cross-head selection is a straightforward union/top-k aggregation. The paper overstates the discovery of 'fundamentally challenging' prior assumptions; the across-head overlap is the only genuinely interesting observation and it is not quantified (e.g., no overlap statistics, only a heatmap at one layer/step).",
+        "The analyses are thin: spatial/recency observations are shown for a single layer (Layer 4) and selected decoding steps on one task (AIME-24) with one model (Qwen3-8B). Whether the locality patterns hold across layers, tasks, and models is not established, yet the method is justified on them.",
+        "Attention recall is used as a central proxy metric, but the link from recall to accuracy and to efficiency is asserted rather than demonstrated; the argument that recall 'serves as an indicator of both selection accuracy and computational efficiency' is somewhat circular given the generation-length discussion.",
+        "Fairness of baselines is not fully established: Quest, SeerAttention-r, and TidalDecode results are taken from reported configurations in Gao et al. (2025), selection layers are hand-picked (Layer 12/20) via an in-house NIAH test (Appendix A.1), and the unified-selection benefit is compared against baselines that were not re-tuned under the same aggregation scheme.",
+        "Scope is narrow (only GQA-based Qwen3 models); the paper concedes that MLA/MoE and non-reasoning tasks are unaddressed, so the generality of the 'global locality' principle is asserted rather than shown.",
+        "Presentation issues reduce clarity: Algorithm 1 line 11 uses an ambiguous slice notation P[:, :-(K·r)] for 'excluding recent tokens', the selection overhead/kernel details are only partially described, and there are typos (e.g., 'taht' in A.1)."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "The paper is well-motivated and observation-driven: it first analyzes attention distributions in reasoning (spatial locality across heads, recency locality across decoding steps) and then derives the method (Unified Attention Head Selection + Stable Recency Window) directly from those observations. This gives a clear and intuitive rationale for the design.",
+        "The empirical evaluation is broad and convincing: two reasoning-focused models (Qwen3-8B, Qwen3-4B), four benchmarks (AIME-24/25, MATH500, GPQA-Diamond), and multiple token budgets (1K-6K). LessIsMore consistently matches or exceeds full attention and clearly beats both training-free (Quest, TidalDecode) and training-required (SeerAttention-r) baselines, which is a strong result for a training-free method.",
+        "The method is simple, training-free, and practical, and the authors show its components (unified aggregation) generalize to other sparse-attention pipelines beyond TidalDecode, as evidenced by the aggregation ablation in Figure 8.",
+        "The paper goes beyond raw accuracy: it analyzes generation-length behavior (Table 1), showing that inaccurate sparse attention lengthens reasoning and that LessIsMore avoids this, which is a useful and under-appreciated angle.",
+        "The limitations discussion (Section 5) is honest and specific, covering the fixed short-context ratio, the GQA-only scope, missing memory savings, and the potential for native training, which is a good practice.",
+        "Reproducibility is reasonable: the algorithm is formalized (Algorithm 1), the pipeline and configuration are described, and code is stated to be available."
+      ],
+      "weaknesses": [
+        "The efficiency claims are modest relative to the motivation. The headline gains are a 1.1x average decoding speedup and 1.13x end-to-end speedup, which is small for a paper whose central selling point is efficiency on decode-heavy reasoning. The abstract's '2x fewer tokens' does not translate proportionally into wall-clock gains, and this gap is not analyzed in depth.",
+        "The latency evaluation is performed on Llama-3.1-8B rather than Qwen3-8B, while all accuracy numbers are on Qwen3. Using a different model as a 'reference' for latency weakens the directness of the efficiency conclusions, since attention distributions and achievable speedups can differ across models.",
+        "Methodological novelty is incremental. The method is essentially TidalDecode with (a) a union of per-head top-k selections and (b) a fixed recency ratio. Both are simple heuristics; the paper does not provide theoretical or mechanistic justification for why unified ranking should generalize to future layers, beyond the empirical recall curves.",
+        "Part of the 'spatial locality' observation is close to expected: heads within the same KV group share the same K/V tensors under GQA, so overlap among them is partly structural rather than surprising. The more meaningful claim (overlap across KV groups/all heads) is less sharply separated from this trivial component, and the strong 'first detailed, token-level analysis' novelty claim is therefore somewhat overstated.",
+        "Statistical rigor is limited: accuracies are averaged over 8-16 samples on small benchmarks (AIME) with no confidence intervals or variance reported, yet several headline comparisons (e.g., 75.83 vs. 74.48) are small. It is difficult to judge whether 'lossless' or 'improved' accuracy claims are statistically supported.",
+        "Presentation issues reduce clarity: figures are referenced out of order (e.g., the TidalDecode walkthrough in Figure 4 is discussed in Section 3 before the method is defined), the term 'spatial locality' is used unconventionally to mean across-head rather than positional locality, and some figure/legend text appears garbled in the provided version.",
+        "Generalization is untested beyond Qwen3/GQA; the paper acknowledges this but the core observations (head-overlap, recency ratio stability) are only demonstrated on Qwen3-8B at Layer 4, raising questions about how robust the 25% ratio and the unified-selection benefit are across layers and architectures.",
+        "The recency ratio r=0.25 is fixed and its optimality is only validated on a single AIME-24 run; the ablation (Figure 9) is a single-task, single-example demonstration, which is thin evidence for such a central hyperparameter."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Addresses an important and timely problem: the decoding bottleneck in long-horizon reasoning, where sparse attention must preserve accuracy over tens of thousands of decoding steps without retraining.",
+        "Extensive empirical evaluation across four reasoning models (Qwen3-4B/8B/14B and DeepSeek-R1-Distill-Llama-8B), multiple reasoning benchmarks (AIME-24/25, MATH500, GPQA-Diamond), and long-context tasks, with large numbers of sampled traces (e.g., 64 per AIME problem).",
+        "Demonstrates strong practical potential: LessIsMore often matches or exceeds full-attention accuracy at high sparsity and reports up to 1.6x end-to-end decoding speedup and up to 1.72x faster sparse-attention kernel computation with custom FlashInfer kernels and SGLang integration.",
+        "The core observation of cross-head spatial locality and temporal recency locality in reasoning attention is interesting and well-motivated, and the proposed method is simple, training-free, and architecture-agnostic enough to be integrated into existing selection-based sparse attention frameworks.",
+        "Includes useful ablations on recency-window ratio, re-selection layer choice, generation-length inflation, and long-context/MHA generalization, which help validate several design choices."
+      ],
+      "weaknesses": [
+        "The central method description is inconsistent: the abstract claims LessIsMore uses 'two CUSA layers', while Section 4.1 states it uses 'a single CUSA layer' and later says 'the same one re-selection layer' is applied. This directly undermines clarity and reproducibility of the main contribution.",
+        "Algorithm 1 does not define how the union of per-head top-k proposals is 'globally ranked' before truncation to K*(1-r). The text says the aggregated tokens are globally ranked, but no ranking function or ordering procedure is specified, making the core Cross-Head Unified Token Selection mechanism underspecified and difficult to reproduce.",
+        "The evidence for the central insight—that token importance is globally shared across heads and stable across decoding steps—is largely qualitative visualizations (Figures 2, 9, 10) without quantitative overlap metrics (e.g., Jaccard similarity across heads/steps) or controls for attention sinks and recency tokens. The observed cross-head overlap could be substantially driven by trivial sink/recent tokens, which are separately reserved anyway.",
+        "No statistical significance testing is reported. With 64 AIME samples, many claimed improvements over full attention are within noise (e.g., Qwen3-4B AIME-24 73.03 vs. 71.25; DeepSeek-8B AIME-24 44.28 vs. 44.16), yet the paper claims 'consistently achieves the highest accuracy' and 'matches or improves' full attention. Some 2K-budget results are actually lower than full attention (e.g., Qwen3-4B AIME-25 62.87 vs. 66.41; Qwen3-14B AIME-25 66.56 vs. 70.52), contradicting the overclaim.",
+        "Important baselines are missing. For example, R-KV (Cai et al., 2025), a reasoning-focused KV cache compression method, is cited but not evaluated. The comparison set is also limited for a paper claiming broad reasoning efficiency.",
+        "Efficiency claims are sometimes overstated or unclear. Table 1 shows only ~5% latency improvement over TidalDecode in SGLang (23.0 vs. 24.3 ms at 16K), while kernel-level speedups compare primarily to TidalDecode, not full attention. Table 4 also shows LessIsMore retains the same memory footprint as full attention (8.38 MB), so the abstract's framing may imply memory benefits that are not realized.",
+        "The paper lacks a limitations section. It does not discuss failure cases, sensitivity to the fixed recency ratio r=0.25, reliance on a needle-in-the-haystack search for re-selection layers, generalization limits across model families/tasks, or potential negative societal impacts beyond a generic statement.",
+        "Presentation quality is weak in places: the sentence 'Code is available at such as DeepSeek-R1...' is broken and does not provide a usable code link; cross-references are wrong (e.g., 'Section 2.3 visualizes...' for Figure 2; 'As shown in Section 2.3' for temporal locality); citation formatting is inconsistent; and there are typos such as 'LLama' and 'Dimond'.",
+        "The attention-recall diagnostic is not causally linked to accuracy. The paper asserts high recall is necessary but does not prove it, and Figure 1b actually shows similar recall decline for AIME and needle-in-the-haystack, weakening the claim that reasoning-specific degradation is distinct from general long-context degradation.",
+        "The re-selection layer is selected using needle-in-the-haystack tests on TidalDecode and then reused for LessIsMore; only Qwen3-8B receives reasoning-specific layer validation (Table 11). The choice may be suboptimal for other models and tasks. The recency-ratio ablation is also limited to a single task/model (AIME-24, Qwen3-8B), so the fixed r=0.25 may not generalize."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "Training-free method that can be integrated into existing selection-based sparse attention frameworks (e.g., TidalDecode) with minimal changes.",
+        "Extensive evaluation across multiple model families (Qwen3-4B/8B/14B, DeepSeek-R1-Distill-Llama-8B) and reasoning benchmarks (AIME-24/25, GPQA-Diamond, MATH500), plus long-context and retrieval tasks.",
+        "Provides empirical observations of cross-head spatial locality and temporal recency locality in reasoning attention, which motivate the design.",
+        "Kernel-level optimizations for GQA models yield notable speedups in sparse attention computation (up to 1.72x vs. TidalDecode) and moderate end-to-end decoding speedups (up to 1.6x vs. full attention at 64K context).",
+        "Includes ablation studies on recency window ratio and re-selection layer choice, offering some insight into design decisions."
+      ],
+      "weaknesses": [
+        "Limited novelty: The method is a straightforward combination of existing ideas—cross-head aggregation of top-k indices and a proportional recency window—applied as an extension of TidalDecode. The core insight that token importance is global across heads is empirically shown but not deeply analyzed or theoretically grounded.",
+        "Overclaims: The paper claims 'lossless' or 'matches or improves' accuracy, yet several results show drops (e.g., Qwen3-14B on AIME-25 at 2K: 66.56 vs. 70.52 full attention). No statistical significance tests are provided, and sub-1% improvements may be noise.",
+        "Unfair comparison: The re-selection layer (e.g., Layer 12) is tuned using a needle-in-the-haystack search and applied identically to LessIsMore and TidalDecode. However, the optimal layer for TidalDecode may differ; the paper does not verify this, potentially biasing results in favor of LessIsMore.",
+        "The 'attention recall' metric is used as a proxy for accuracy, but the correlation is not established. Recall improvements do not always translate to accuracy gains, and the analysis is limited to specific layers and models.",
+        "Efficiency gains are modest for practical reasoning workloads: At 16K context (typical for reasoning), end-to-end speedup is only ~1.1x. The headline 1.6x requires 64K context, which is beyond the tested reasoning generation length (32K max).",
+        "The method requires tuning hyperparameters (recency ratio r=0.25, re-selection layer) that may not generalize across tasks/models. The fixed r=0.25 is only validated on one task/model/budget combination.",
+        "Presentation issues: Several typos and formatting errors (e.g., 'Code is available at such as DeepSeek-R1...', 'PassageRetrival', inconsistent naming). The impact statement is generic and does not discuss potential negative consequences.",
+        "Lack of comparison to other relevant sparse attention methods for reasoning (e.g., R-KV) and no dedicated limitations section."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "The paper targets a timely and important problem: decoding-time attention is a major bottleneck for long-horizon reasoning, and training-free sparse attention that preserves reasoning accuracy is practically valuable.",
+        "The proposed method is simple, architecture-agnostic, and easy to integrate into existing selection-based sparse attention frameworks. Cross-head unified selection plus a proportional recency window directly addresses error accumulation and length inflation observed in prior sparse methods.",
+        "The empirical evaluation is broad: multiple model families (Qwen3-4B/8B/14B and DeepSeek-R1-Distill-Llama-8B), reasoning benchmarks (AIME-24/25, MATH500, GPQA-Diamond), long-context tasks (NIAH, LongBench), and both GQA and MHA architectures. LessIsMore consistently preserves or improves accuracy and avoids the generation-length inflation seen in baselines.",
+        "The efficiency results are compelling: up to 1.6x end-to-end decoding speedup and up to 1.72x faster sparse attention kernels, with kernel-level profiling showing reduced global-to-shared memory transfer due to unified token selection.",
+        "The paper provides useful analyses of attention recall, recency locality, and ablations on the recency ratio and re-selection layer. The recency-window ablation (Section A.1.2) and re-selection-layer study (Section A.5) are informative.",
+        "Reproducibility is reasonably supported: the algorithm is provided, hyperparameters are largely specified, and a code link is included (though truncated in the extracted text)."
+      ],
+      "weaknesses": [
+        "The central observation that token importance is global and stable across heads is supported mainly by qualitative heatmaps (Figure 2, Figures 9-10) rather than quantitative overlap metrics such as Jaccard similarity, rank correlation, or attention-mass overlap across heads, layers, and decoding steps. This weakens the core motivation for CUSA.",
+        "The attention-recall diagnostic is confounded. Figure 1b shows TidalDecode's recall on NIAH degrading similarly to AIME-24 (roughly 0.95 to 0.62), yet the text claims NIAH accuracy is preserved. The paper needs to clarify why recall degradation hurts reasoning but not retrieval, and whether recall is a reliable diagnostic for reasoning.",
+        "Accuracy results lack error bars or confidence intervals. Several reported differences are small (e.g., AIME-24 2K on Qwen3-8B: 73.00 vs 74.48 full attention; DeepSeek-8B: 43.22 vs 44.16), so claims of matching or improving full attention, and especially the abstract's 'no accuracy loss at 87.5% sparsity,' are not statistically substantiated.",
+        "The experimental setup for selection and re-selection layers is ambiguous. The abstract says 'two CUSA layers,' while the experiments describe 'a single token selection layer' and 'the same one re-selection layer' at Layer 12/20. It is unclear how layers before and after the selection layer obtain token indices, how many full-attention vs sparse layers are used, and whether TidalDecode and LessIsMore are truly matched in layer placement.",
+        "Algorithm 1 does not specify how UnionFlatten ranks the aggregated candidate tokens (frequency of head votes? summed attention scores? rank aggregation?) or how ties are broken. This is a critical implementation detail for reproducing CUSA.",
+        "Ablations for cross-head aggregation and recency ratio are limited. Figure 8 appears to evaluate a single AIME-24 problem, and Figures 4/7 report attention recall rather than aggregate end-to-end accuracy. There is no broad accuracy ablation isolating cross-head unification across models and benchmarks.",
+        "The paper lacks a limitations section and does not discuss failure modes: e.g., when critical tokens are head-specific, under extremely small budgets, or on tasks requiring multiple long-range retrievals. Sensitivity to model, layer choice, and task type is not sufficiently characterized.",
+        "Presentation and overclaim issues remain: the code URL is broken/truncated, there are grammatical errors ('Section 2.3 visualizes...', 'are not heuristic but direct consequences...'), and speedup numbers are inconsistent across Table 1 and Figure 6a (different GPUs: A5000 vs A100). The training status of SeerAttention-r (trained checkpoint vs retrained by the authors) is also unclear.",
+        "The efficiency comparison against TidalDecode may conflate algorithmic gains with kernel-friendliness. The paper should more clearly separate the accuracy contribution of cross-head unification from the kernel-level benefit of reduced KV loading in GQA."
+      ]
+    }
+  }
+}

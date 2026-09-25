@@ -1,0 +1,175 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 2,
+      "strengths": [
+        "Addresses a timely and practically important problem: unavoidable off-policy mismatch (implementation divergence, MoE routing flips, distributed staleness) in long-horizon LLM reinforcement learning, where classical trust-region bounds become vacuous.",
+        "Provides a clean formalization of the surrogate objective, the performance-difference error decomposition, and the relevant divergence measures (token-level vs. sequence-level KL), which makes the analysis easy to follow.",
+        "The core observation that the bounds hinge on D_KL^{tok,max}, a genuinely sequence-level quantity, and that token-independent methods (PPO clipping, token masking) cannot control it, is a valid and useful insight, and Proposition C.1 (no pure D_KL^{seq} bound exists) is correct.",
+        "The two derived bounds have improved dependence on horizon length (O(T^{3/2}) and O(T)) relative to the classical O(T^2), and the derivations (Pinsker on marginal KL + simulation lemma + KL chain rule) are internally consistent and appear arithmetically correct.",
+        "The proposed Trust Region Masking algorithm is simple and implementable, and the discussion of exact vs. sample-based KL estimation (including the choice between |log rho| for max and the unbiased non-negative k_3 estimator for the average criterion) is thoughtful."
+      ],
+      "weaknesses": [
+        "The central 'non-vacuous monotonic improvement guarantee' claim is unsupported and, by the paper's own standard, false. With rewards R in [0,1], J in [0,1], so the maximum attainable improvement J(pi_theta)-J(pi_roll) is 1. The reported bounds of 35.0 (Pinsker-Marginal) and 8.2 (Mixed) both exceed 1, so they are still vacuous—exactly the criterion the paper uses to dismiss the classical bound of 1677 as 'far exceeding any plausible improvement.' The abstract, contributions, and conclusion nonetheless advertise 'the first non-vacuous monotonic improvement guarantees,' which the numbers contradict.",
+        "There is no empirical evaluation whatsoever. For a paper that proposes an algorithm (TRM) for LLM-RL, the absence of any experiment—no learning curves, no comparison to PPO/token masking, no mask-rate or stability analysis, no cost measurement—is a decisive evidential gap. Claims about practical utility are entirely unsupported.",
+        "The O(T) vs O(T^{3/2}) framing is misleading. D_KL^{seq} is itself a sum of per-token KLs and grows with T; the Mixed bound's headline value of 8.2 assumes D_KL^{seq}=0.01, which TRM does not guarantee. Under TRM, accepted sequences only satisfy D_KL^{seq} <= T*delta, which makes the Mixed bound approximately 2 T^{3/2} delta—worse than the Pinsker-Marginal bound. So the advertised O(T) advantage is not realizable under the proposed algorithm, and the scaling table conflates holding D_KL^{seq} fixed with a guarantee.",
+        "Theorem 5.1 (monotonic improvement under TRM) is asserted rather than proven and is not sound as stated. Masking replaces the objective with a different masked surrogate (J_masked != J); the error bound was derived for the unmasked L, and the claim that masked-out sequences 'simply choose not to learn from them, which is a valid reweighting' conflates a selection/rejection bias with an unbiased estimator. No argument connects the masked-gradient update to improvement in J.",
+        "Technical novelty is limited. The two bounds are straightforward combinations of Pinsker's inequality, the simulation lemma, and the KL chain rule; the improvement is incremental, and the masking rule is an immediate corollary of the max-KL observation rather than a new mechanism.",
+        "The 'only solution' framing in Section 4.3 is overstated: soft importance weighting, KL-penalized rewards, and adaptive thresholds are acknowledged in future work but excluded from the dilemma table, which artificially forces the conclusion that whole-sequence masking is the unique fix.",
+        "Practical feasibility is unexamined. A threshold small enough to make the bound meaningful (roughly < 4x10^{-6} for T=4096) would likely mask the vast majority of sequences, and the per-token full-vocabulary exact KL computation for the max criterion is expensive; neither the mask-rate/variance tradeoff nor the compute cost is analyzed or measured.",
+        "Presentation and references are careless: the bibliography is garbled and misattributed (DeepSeek-V2 is credited to 'Cover and Thomas' and rendered as 'DiepeSeek-V2'; 'Kaka de' for Kakade, 'A. K. K.' for Kakade & Singh, 'A. S. Espeholt' for Espeholt), which undermines confidence in the manuscript's preparation.",
+        "Reproducibility is weak: no code, no experimental protocol, and no datasets; only checkable theory is offered, while the algorithm's claimed benefits cannot be verified or built upon."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 1,
+      "strengths": [
+        "Addresses an important and timely problem: off-policy mismatch and trust-region guarantees in long-horizon LLM RL.",
+        "Derives tighter O(T^{3/2}) and O(T) bounds via Pinsker and the KL chain rule; these derivations are mathematically plausible for the standard per-token surrogate.",
+        "Correctly highlights that max token-level KL is not bounded by sequence-level KL alone (Proposition C.1), motivating sequence-level control.",
+        "The proposed TRM is simple and easy to implement in principle if full rollout logits are available; the limitations section acknowledges bounded rewards and sample-based approximation."
+      ],
+      "weaknesses": [
+        "Fundamental inconsistency in the surrogate objective. Eq. (5) defines L = E_{π_roll}[A ∑_t ρ_t] with trajectory advantage A=R-b, but the performance-difference identity (14) holds for the standard surrogate L_std = E_{π_roll}[∑_t ρ_t A_t^{roll}], not for L. These are not equal; e.g., a simple T=2 example gives L=0.625 vs L_std=0.5. Thus Theorems 3.1/3.2 bound the wrong quantity, and the TRM masked objective (23) is also misdefined.",
+        "The masking guarantee is invalid. L_masked ignores masked sequences, but J(π) includes them; bounding max token KL only on accepted sequences does not control the global D_KL^tok,max or the error |J-J_roll-L_masked|. The mask also depends on π_θ, so L_masked is not a fixed minorizer. The claim 'If L_masked > bound then J(π)>J(roll)' is unsupported.",
+        "The bounds remain vacuous for the stated reward scale. With R∈[0,1], the true improvement is at most 1, yet the reported bounds are 35.0 (Pinsker-Marginal) and 8.2 (Mixed) for T=4096, δ=10^{-4}. Calling these 'non-vacuous' is misleading; they require L_masked>35 or >8.2 to guarantee improvement, which is a very strong and likely impractical condition.",
+        "No empirical validation. The paper proposes an algorithm but provides no experiments, synthetic or real, to test mask rates, optimization behavior, or whether the bounds correlate with performance. Practical claims about sample efficiency and training health are unsubstantiated.",
+        "Exact KL computation is impractical at LLM scale. Storing full π_roll logits for every token (vocab size × T × batch) is prohibitive, and the sample-based alternative loses the rigorous guarantee, which Theorem 5.1 relies on. The paper does not address this memory/compute tradeoff.",
+        "Overstated novelty and false dilemma. Sequence-level filtering/rejection based on importance weights or KL is not new; token-level methods can be combined with sequence-level penalties/trust regions. The claim that excluding entire sequences is 'the only solution' is too strong.",
+        "Presentation and reproducibility issues. References are corrupted (e.g., DeepSeek-V2 attributed to Cover & Thomas), names are misspelled, the baseline b is not specified, and there is no code or experimental protocol. These hinder verification and reproducibility."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a timely and important problem: the off-policy mismatch (π_roll ≠ π_θ) that arises from implementation divergence, MoE routing discontinuities, and distributed staleness in modern LLM-RL, and its interaction with long sequence lengths.",
+        "The two derived bounds appear mathematically correct. I verified the algebra: Pinsker-Marginal ((4/3)T^{3/2}D_KL^{tok,max}) and Mixed (2T√(D_KL^{tok,max}·D_KL^{seq})) follow correctly from the KL chain rule (Lemma B.4) plus Pinsker, and both improve on the classical T(T−1)D_KL^{tok,max} bound (48× and 200× at the reported settings).",
+        "The observation that D_KL^{tok,max} is a max over the sequence (and the clean Proposition C.1 showing no function of D_KL^{seq} alone can bound it) is a valid and useful framing for why token-level operations cannot control the relevant quantity.",
+        "The discussion of the k3 estimator vs. |log ρ| for average- vs max-based filtering is a sensible, if minor, practical contribution.",
+        "Limitations are discussed honestly (bounded rewards, sample-based estimation being conservative and approximate)."
+      ],
+      "weaknesses": [
+        "No empirical evaluation whatsoever. The paper proposes an algorithm (TRM) as one of its three main contributions and makes concrete practical claims (mask rates as a diagnostic, robustness to MoE noise, sample efficiency), yet none of these are tested. For an ICML paper whose headline contribution is an algorithm, this is a decisive evidential gap.",
+        "The central 'non-vacuous monotonic improvement' claim is overstated. With R∈[0,1], the true improvement J(π_θ)−J(π_roll) is bounded by 1, but the reported error bounds at T=4096, δ=10^{-4} are 8.2–35. The guarantee M = L_masked − |Error|_bound > 0 therefore only triggers when the surrogate exceeds the error bound (e.g., L>8.2), a very narrow regime. The classical 1677 is indeed vacuous, but 8.2 is still large relative to the achievable improvement scale, so 'non-vacuous' is a stretch and should be softened.",
+        "Theoretical gap in the algorithm's justification. Theorems 3.1/3.2 use a global D_KL^{tok,max} = max over all reachable contexts (t, c_t), but TRM only enforces the per-sequence max over observed tokens, so the 'exactly verifiable' claim only holds for the sampled trajectory. More fundamentally, masking changes the optimization target (the paper itself cites this as the flaw of token masking), and the relationship between the masked surrogate L_masked and J via the performance-difference identity is never rigorously established. Dividing by the total batch size N rather than the accepted count yields a sub-distribution expectation, not the standard surrogate; the paper does not resolve why sequence masking avoids the same target-change objection it raises against token masking.",
+        "The 'O(T)' claim for the Mixed bound is only in the explicit T dependence. Since D_KL^{seq} = Σ_t E_{c_t}[D_KL(c_t)] grows with T when per-token KL is roughly constant, the Mixed bound is O(T^{3/2}) unless D_KL^{seq}=O(1) (the sparse regime). The scaling claim should be stated conditionally and the sparse-regime condition made explicit.",
+        "Practical feasibility is under-analyzed. Exact D_KL(π_roll||π_θ) requires storing full π_roll logits over the vocabulary for every token of every rollout, and the sample-based fallback explicitly invalidates the guarantee. No memory/compute analysis is given to show the 'exact' variant is feasible at the scales (T=4096, large vocab) that motivate the paper.",
+        "Novelty is not situated against prior work. The T^{3/2}/T improvement comes from a fairly standard application of Pinsker to the marginal KL, and the paper neither compares against existing tighter performance-difference bounds nor argues why these rates are (near-)optimal, leaving the significance of the theoretical delta unclear.",
+        "Internal inconsistency: the surrogate (Eq. 5) uses a trajectory-level advantage A, while the PPO discussion (Eq. 21, Table 1) uses per-token advantages A_t; the relationship between the two objectives is not reconciled.",
+        "Presentation problems: the reference list is garbled (e.g., 'DiepeSeek-V2' merged into the Cover & Thomas entry, 'Kaka de', 'A. K. K.'), suggesting the manuscript was not carefully prepared, and Section 6 'Future work' is a dangling header with no content."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "The paper derives new error bounds for the surrogate objective in long-horizon LLM RL: the Pinsker-Marginal bound (O(T^{3/2})), the Mixed bound (O(T)), and an Adaptive bound that generalizes the Pinsker-Marginal bound. These improve upon the classical O(T^2) TRPO-style bound and are mathematically correct (based on Pinsker's inequality and the performance difference identity).",
+        "It provides a clear theoretical explanation of why token-level interventions like PPO clipping and token masking cannot control the maximum token-level KL divergence, which is a sequence-level quantity. This motivates sequence-level masking.",
+        "The proposed Trust Region Masking (TRM) is simple, easy to implement, and directly follows from the theory. The paper also proposes a length-neutral variant and practical sample-based estimators for memory-constrained settings.",
+        "The experiments, though limited, show that TRM stabilizes training and improves AIME25 score compared to standard PPO clipping under simulated backend discrepancies."
+      ],
+      "weaknesses": [
+        "The central claim of 'enabling the first non-vacuous monotonic improvement guarantees' is overstated. The guarantee in Theorem 6.1 requires the global condition D_KL^tok,max ≤ δ to hold for all reachable contexts, which cannot be verified from a batch. The paper only uses the acceptance rate as heuristic confidence, so the practical algorithm does not actually enforce the theoretical precondition.",
+        "The error bounds remain large even in the small-divergence regime (e.g., 8.2 for T=4096, δ=10^{-4}), and the monotonic improvement condition L > B(δ) is not demonstrated to be satisfiable in the experiments. The paper does not report whether this condition holds during training.",
+        "The theoretical analysis assumes an unclipped surrogate L = E[A Σ_t ρ_t], but modern LLM RL pipelines (including the GRPO setup used in the experiments) typically use clipping and per-token advantages. The guarantee does not directly apply to the clipped objective, creating a gap between theory and practice.",
+        "The experimental evaluation is limited: one model (Qwen3-8B-Base), one dataset (DAPO-MATH-17k), one benchmark (AIME25), no multiple seeds or error bars, and no comparison to other off-policy correction methods (e.g., importance weighting, V-trace, or recent work on training-inference mismatch).",
+        "A critical missing baseline: the paper's own Figure 1 shows that Token-level Importance Sampling (Token IS) already outperforms PPO clipping and appears stable, yet TRM is only compared against PPO clipping in Figure 2. Without a direct comparison to Token IS, the necessity of sequence-level masking is not established.",
+        "The Adaptive bound, a key theoretical contribution, is not used in the main TRM algorithm and is not empirically validated. Its claimed strict superiority over the Pinsker-Marginal bound is only illustrated in a table where the Mixed bound is always the minimum.",
+        "The paper lacks important practical details: acceptance rates, length-stratified rejection rates, sensitivity analysis on δ, and the actual max token KL values during training. The PPL Gap is an average metric, not the max KL required by the theory.",
+        "The novelty is incremental: the bounds are straightforward applications of Pinsker's inequality and existing performance difference identities, and the sequence-level masking idea is simple. The paper does not engage with recent related work that already addresses off-policy mismatch in LLM RL."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "Addresses an important and timely problem: off-policy mismatch in long-horizon LLM reinforcement learning due to backend discrepancies, MoE routing, and distributed staleness.",
+        "Provides a clear theoretical framework based on the performance difference identity, KL chain rule, and Pinsker's inequality, and derives tighter error bounds than the classical O(T^2) bound: Pinsker-Marginal O(T^{3/2}), Mixed O(T), and an Adaptive bound via an importance-ratio decomposition.",
+        "Proposes a simple, easy-to-implement sequence-level masking algorithm (TRM) that shows promising empirical stabilization on mathematical reasoning with vLLM/FSDP backend mismatch, improving AIME25 score compared to PPO clipping.",
+        "Identifies length bias as a practical concern for sequence-level masking and proposes length-neutral extensions (LN-TRM and SER) in the appendix.",
+        "The Adaptive bound is a novel combination of an exact error identity, the tower property, and adaptive per-position Pinsker application, which may be of independent theoretical interest."
+      ],
+      "weaknesses": [
+        "The central claim that TRM enables non-vacuous monotonic improvement guarantees is not established for the actual algorithm. Theorem 6.1 requires the global condition D_KL^tok,max <= delta, but Algorithm 1 only enforces this on accepted sampled sequences. A high acceptance rate is heuristic evidence, not a proof. The guarantee is also stated for the full surrogate L, while the algorithm optimizes the masked surrogate L_masked; the approximation L_masked ~ L is not rigorous.",
+        "There is a mathematical inconsistency between the surrogate used in the algorithm and the surrogate used in the proofs. Eq. (5)/(49) use L = E[A * sum rho_t] with advantage A = R - b, while the proof in Appendix C uses L' = E[R * sum(rho_t - 1)]. These differ by a pi-independent constant T(J(pi_roll) - b). This constant shifts the approximation error and invalidates absolute error bounds unless b = J(pi_roll). Remark 3.1 incorrectly claims the bounds apply equally to both forms.",
+        "The masking criterion M_i = I[max_t D_KL(pi_roll || pi_theta) <= delta] depends on the current policy pi_theta. The masked objective is therefore non-stationary, and treating M as fixed while normalizing by total batch size N does not yield an unbiased gradient for a fixed objective. The paper provides no analysis of this bias, yet claims unbiasedness/rejection sampling.",
+        "Empirical validation is limited: a single model (Qwen3-8B-Base), a single training dataset (DAPO-MATH-17k), a single benchmark (AIME25), no multiple seeds or error bars, no reported acceptance rates, no length-stratified rejection analysis, and no direct validation of the theoretical bounds against measured approximation error. Threshold sensitivity is only partially explored.",
+        "Practicality and reproducibility are concerning. Exact KL computation requires storing full rollout logits over the vocabulary for every token, which is memory-prohibitive for large LLMs. The sample-based alternatives in Appendix B are heuristics that lose the theoretical guarantees. No code, compute details, or implementation specifics are provided.",
+        "Presentation quality is poor: numerous typos, missing equation numbers, broken section headings (e.g., '##' with no title, 'roof.' instead of 'Proof.'), inconsistent notation (pi_g vs pi_theta in proofs), and a messy reference list. This hinders clarity and reproducibility.",
+        "Originality is moderate. The improved bounds largely follow from standard tools (Pinsker, KL chain rule, performance difference identity), and the paper itself notes the linear bound was independently discovered by Qi et al. (2026). TRM is a straightforward sequence-level rejection scheme whose practical benefits have likely been explored in systems work, though not with the claimed theoretical framing."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 2,
+      "strengths": [
+        "Addresses an important and timely problem: off-policy mismatch and instability in long-horizon LLM reinforcement learning.",
+        "Derives tighter error bounds for the standard per-step advantage surrogate, providing a useful theoretical insight that the approximation error depends on the maximum token-level KL divergence rather than only its average.",
+        "Proposes a simple sequence-level masking method (TRM) that is easy to implement and shows empirical stability on AIME25 with vLLM/FSDP backend mismatch.",
+        "Discusses limitations, including length bias, and proposes length-neutral variants (LN-TRM, SER) to mitigate it."
+      ],
+      "weaknesses": [
+        "Central theoretical inconsistency: Eq. (5) defines the surrogate with a trajectory-level advantage A = R - b and a sum of per-token ratios, but the error analysis in Section 4 and Appendix C is for a per-step advantage surrogate (or L' = E[R sum_t (rho_t - 1)]). These objectives are not equivalent up to a pi_theta-independent constant; the error for the trajectory-level surrogate includes an extra term T(E[R] - b) that is not bounded by the derived bounds. Since the experiments use GRPO with trajectory-level group-relative advantages, the theoretical guarantee does not apply to the proposed algorithm.",
+        "The global condition D_KL^{tok,max} <= delta in Theorem 6.1 is not verifiable from the batch: masking only ensures accepted sequences satisfy it, not all reachable contexts. The claim of 'first non-vacuous monotonic improvement guarantees' is therefore overstated and conditional on an unverifiable assumption.",
+        "The Mixed bound is advertised as O(T), but in the worst case D_KL^{seq} <= T D_KL^{tok,max}, yielding O(T^{3/2}); the O(T) scaling requires D_KL^{seq} = O(1), which is not generally true and is not clearly stated.",
+        "Empirical validation is limited: only one model (Qwen3-8B), one dataset (DAPO-MATH-17k), and one benchmark (AIME25); no comparison to standard KL-penalty trust regions or other off-policy corrections such as truncated importance sampling; no error bars or seeds; no direct measurement of max token KL or acceptance rate, despite these being central to the theory.",
+        "The PPO clipping failure analysis is well known, and Proposition 5.1 (token masking preserves D_KL^{tok,max}) is nearly tautological. The novelty of TRM as a sequence-level masking method may be limited relative to prior work on training-inference mismatch (e.g., Liu et al., 2025), which is cited but not empirically compared.",
+        "Reproducibility is weakened by the absence of code and insufficient experimental details (e.g., variance across seeds, exact masking rates, sensitivity to delta)."
+      ]
+    }
+  },
+  "v5": {
+    "exp1_quality": {
+      "oa": 2,
+      "strengths": [
+        "Derives a family of tighter bounds (Pinsker-Marginal, Mixed, Coupling, Adaptive) using KL and TV routes, with complete proofs in appendices. The Adaptive bound via telescoping and tower-property factorization is a technically interesting decomposition.",
+        "Provides a useful theoretical insight: all bounds depend on the maximum token-level divergence, which token-level PPO clipping cannot control (Proposition 3.10, Lemmas 3.1 and 3.2). This motivates sequence-level masking.",
+        "Remark 4.3 is an unusually honest and detailed discussion of limitations, explicitly acknowledging that masking does not close the population-level gap and that the guarantee is conditional on a global precondition.",
+        "TRM is simple to implement, and the experiments on Qwen3-8B-Base/AIME25 suggest it can stabilize training and improve score relative to PPO clipping."
+      ],
+      "weaknesses": [
+        "The central claim of enabling non-vacuous monotonic improvement guarantees is not supported. Theorem 4.2 requires the global precondition D_KL^{tok,max} <= delta for all reachable contexts, which TRM cannot enforce. If the precondition holds, M ≡ 1 and masking is redundant; if it fails, B* is invalid. Remark 4.3 admits exactly this, contradicting the abstract and conclusion. The precondition-free guarantee in Proposition G.1 has an exponential-in-tau penalty and is not shown numerically to be non-vacuous.",
+        "Empirical evaluation is limited: only one model (Qwen3-8B-Base), one benchmark (AIME25), no seeds or error bars, no reported acceptance rates, no comparison to alternative off-policy correction methods (e.g., truncated importance sampling, V-trace, MIS), and no ablation on threshold sensitivity. The PPL-gap metric is not precisely defined in the main text.",
+        "The TRM-Avg criterion (average KL <= delta_avg) does not control the max token divergence required by the theory, so its empirical success is heuristic and not covered by the guarantee. The paper notes this in Table 2 but still uses it as a main experimental variant.",
+        "Reproducibility is limited: no code, no compute details, no hyperparameter search, no discussion of memory overhead for storing full logits to compute exact KL over the vocabulary, and no details on how sequence masking interacts with GRPO group normalization.",
+        "Presentation is dense and some claims are overstated. The abstract and conclusion state 'first non-vacuous monotonic improvement guarantees' without the global-precondition caveat. There are minor typos (e.g., D_KL^{soq} in Proposition 3.10) and the length-bias issue is acknowledged but only addressed in the appendix, not in the main experiments."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "The paper systematically derives a family of performance-difference bounds (Pinsker-Marginal, Mixed, Coupling, Adaptive) and the algebra in Appendices B–D appears correct. The core observation—bounding the context-shift term sublinearly via the KL chain rule plus Pinsker (sqrt((t-1)delta/2)) instead of the linear coupling bound (t-1)epsilon, and taking a per-position minimum over routes—is a legitimate tightening of the classical O(T^2) TRPO-style bound, reducing it to O(T^{3/2}) and, in some regimes, O(T).",
+        "The honesty about limitations is commendable. Remark 4.3 explicitly states that masking does not close a population-level gap and that B* is invalid when the precondition fails; Section 4.5 and Appendix F (length bias, LN-TRM, SER) show genuine awareness of practical failure modes. This is better than most papers in this space.",
+        "The Adaptive bound (Theorem 3.6) retains per-position divergence D_bar_t rather than a worst-case maximum, and the recovery argument (Remark 3.7 / Step 5) showing it subsumes the PM and Coupling routes via index reversal is clean and, as far as I can check, valid.",
+        "The length-bias analysis (Appendix F) is a useful, practically relevant observation that a length-invariant per-token threshold produces exponentially decaying acceptance with T."
+      ],
+      "weaknesses": [
+        "The central 'non-vacuous' claim is contradicted by the paper's own numbers. With R in [0,1], the bound must be < ~1 to certify anything. The tightest bound reported is B* <= 4.1 (TV-Mixed; 8.2 KL-only) at T=4096—still far larger than the entire range of J. The condition L(pi_theta) > B* is effectively unsatisfiable in the small-step regime that trust regions operate in, so the guarantee is still vacuous at the target scale. The '409x improvement' over 1677 is real but does not cross the vacuity threshold, and the abstract/conclusion claim of 'the first non-vacuous monotonic improvement guarantees' is not supported.",
+        "The main algorithmic guarantee (Theorem 4.2) is circular, and the paper effectively admits this. Part (3) requires the global precondition D_KL^{tok,max} <= delta over all reachable contexts—an unverifiable condition over unseen contexts. If it holds, M ≡ 1 and masking is redundant (Remark 4.3); if it fails, B* is invalid. So the theory provides no guarantee about the actual masked update. Section 4.5's precondition-free result prices rejection at r + D_TV^seq but requires a B_A that either re-invokes the precondition or costs e^{(T-t)tau}. Net: the theory does not justify the method, which directly undermines the headline contribution.",
+        "Novelty of Trust Region Masking is limited and unsubstantiated. Masking/filtering sequences (or tokens) by importance ratio or KL divergence is standard practice in LLM-RL frameworks. The paper neither surveys nor compares against existing masking/filtering heuristics, and provides no argument that its specific criterion (max_t D_KL) is superior to alternatives.",
+        "Experiments are minimal and disconnected from the theory. Only one model (Qwen3-8B-Base), one algorithm (GRPO), and one benchmark (AIME25) are used. There is no measurement of the acceptance rate, D_KL^{tok,max}, or B*, despite the paper's own recommendation to monitor acceptance above 70% as a precondition diagnostic. No ablation isolates which component matters. The baselines are inconsistent across figures (Fig. 1 contrasts 'Token IS' vs 'PPO Clipping', while Fig. 2 contrasts 'PPO Clipping' vs TRM variants), and the finding that plain Token IS beats PPO clipping is a strong claim left unexplained. Figure 3's combined-criterion result is anecdotal.",
+        "Overclaiming throughout. 'Tightest known guarantee' and 'first non-vacuous' are asserted without comparison to the existing literature on tighter performance-difference bounds (e.g., variance-aware / state-space bounds following Achiam et al. 2017 and later work). No such baselines are cited or numerically compared.",
+        "The Mixed bound's O(T) headline is regime-dependent and potentially misleading. D_KL^seq = sum_t E[D_KL(c_t)] grows linearly in T when per-token divergence is fixed, in which case B_Mix^KL = 2T sqrt(delta * T delta) = O(T^{3/2}), not O(T). The O(T) claim holds only if D_KL^seq is bounded independently of T, which is not the regime implied by the fixed-delta tables.",
+        "Presentation and reproducibility issues: typos and garbled symbols ('D_KL^{soq}', 'pi_g' for pi_theta), dense and sometimes inconsistent notation, and several equations rendered unclearly. No code or detailed hyperparameter/implementation specification for the baseline is provided, limiting reproducibility.",
+        "The theoretical improvement is incremental relative to its practical impact: even granting correctness, the family of bounds shifts constants and asymptotic exponents without crossing the threshold needed to make the guarantee meaningful at LLM scale, and the one operational procedure (TRM) is a known filtering heuristic whose guarantee is conditional in a way that makes it inapplicable exactly when it would matter."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Addresses an important and timely problem: off-policy mismatch in LLM RL from backend discrepancies, MoE routing, and distributed staleness, where classical trust-region bounds become vacuous at long sequence lengths.",
+        "Provides a rigorous family of tighter bounds (Pinsker-Marginal O(T^{3/2}), Mixed O(T), Coupling, and Adaptive) with detailed proofs; the Adaptive bound's per-position decomposition and future-trajectory min over Pinsker/coupling routes are technically novel, and the recovery of prior bounds is correctly shown.",
+        "Proposition 3.10 correctly establishes that token-level average divergence cannot control the token-level maximum, motivating sequence-level interventions.",
+        "TRM is simple, easy to implement, and the experiments on Qwen3-8B with vLLM/FSDP mismatch show improved training stability and AIME25 score relative to PPO clipping.",
+        "The paper is candid about limitations: Remark 4.3 explicitly acknowledges that masking does not close the population-level gap, and the appendix discusses length bias and a precondition-free guarantee."
+      ],
+      "weaknesses": [
+        "Central claim is overclaimed and not supported by the evidence: the abstract/conclusion state that TRM enables non-vacuous monotonic improvement guarantees, but Theorem 4.2 requires the global precondition D_KL^{tok,max} <= delta for all reachable contexts. TRM only enforces this on sampled accepted sequences. If the precondition holds, masking is redundant; if it fails, B* is invalid. Remark 4.3 itself states masking does not close this gap. The paper does not show L > B* for any experiment, and B* <= 4.1 in the numerical illustration is still larger than the reward scale (max 1), so 'non-vacuous' is not demonstrated.",
+        "The unified bound depends on delta, epsilon, D_KL^{seq}, D_TV^{seq}, and bar{D}_t. TRM only controls the sampled max KL (delta). It does not directly control the other quantities; for the experimental threshold delta=0.05, simple estimates of B* remain large (e.g., Pinsker-Marginal with delta=0.05 is ~10^3), so the theoretical guarantee is not shown to be non-vacuous for the experimental settings.",
+        "Algorithm 1 requires exact KL over the full vocabulary for pi_roll and pi_theta at every token. This is memory-prohibitive for standard LLM-RL pipelines and not how vLLM/FSDP typically expose logits; the paper does not explain how experiments stored full logits or report memory overhead. The sample-based fallback is only in the appendix and is not used in the main experiments.",
+        "Empirical evaluation is limited: a single dense model (Qwen3-8B-Base), one dataset, one evaluation (AIME25), no seeds/error bars, no acceptance rates, no computed B*, and no comparison to other mismatch-correction methods (e.g., truncated importance sampling, routing replay). The MoE routing motivation is not tested on an MoE model. The unusual asymmetric clip range (0.8, 1.28) and lack of PPL Gap definition further weaken reproducibility.",
+        "The theory is for a trajectory-reward surrogate L', while standard PPO optimizes a token-level advantage-clipped objective. Remark 2.1 addresses gradient equivalence at the reference, but the error bound does not directly bound the clipped PPO objective. Thus the argument that PPO clipping fails to control the trust region is plausible but not a formal guarantee against PPO's actual objective.",
+        "Length bias is not addressed in the main experiments: TRM-Max's rejection probability grows with T, penalizing long reasoning chains. The length-neutral variants (LN-TRM, SER) appear only in the appendix and are not evaluated, so the reported AIME25 gains may be confounded by sequence-length filtering."
+      ]
+    }
+  }
+}

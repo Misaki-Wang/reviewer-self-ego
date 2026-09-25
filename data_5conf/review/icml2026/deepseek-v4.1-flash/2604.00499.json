@@ -1,0 +1,131 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Clear and well-motivated core insight: the paper convincingly argues that point estimates of output length mismatch the stochastic decoding process, and that fitting a distribution is the more appropriate modeling choice. The empirical demonstration that identical prompts yield varying output lengths (Fig. 1) directly supports this framing.",
+        "The distributional analysis is thorough: heavy-tailedness is characterized both theoretically (Theorem 3.2 with a proof in Appendix A) and empirically via KS goodness-of-fit tests across 1K prompts and six candidate distributions, with log-t (93.1% pass rate) clearly outperforming alternatives (log-normal 60.3%, gamma 32.0%).",
+        "The evaluation is comprehensive and consistent: three datasets (LMSYS-Chat-1M, ShareGPT, Alpaca), two main models plus six additional models including MoE and reasoning models (Appendix D.1), online (PTLA, TTFT) and offline SDG (time@3K, throughput) scenarios, and cross-dataset/cross-model generalization (Table 2).",
+        "The ablations are informative: comparing distribution families (log-t vs log-normal) and score computation (SEPT E[X] vs E[X]+beta*CVaR) within a fixed framework isolates the contribution of the tail-aware scoring and shows that better fitting quality translates to better scheduling.",
+        "The systems-level implementation (asynchronous prediction, dynamic batching, min-heap waiting queue, waiting-time decay for starvation prevention) is a practical and well-described contribution, with reported scheduling overhead (4.26 ms/request) that is small relative to the gains."
+      ],
+      "weaknesses": [
+        "Confounded comparison: TIE uses a DeBERTa-v3-base encoder and an asynchronous, dynamically-batched prediction pipeline, whereas the baselines SSJF (BERT-base) and LTR (OPT-125M) are described as using their original encoders and 'synchronous' prediction. It is not made clear whether the baselines also benefit from the async/batched infrastructure. The headline gains (2.31x PTLA over LTR) are far larger than the within-framework gain from CVaR (0.67 vs 0.75 for SEPT), suggesting a substantial portion may come from encoder/implementation differences rather than the distributional scheduling metric. A matched-encoder/matched-implementation control is missing.",
+        "Methodological novelty is incremental: risk-sensitive scheduling via CVaR (Rockafellar et al., 2000) and shortest-expected-processing-time are long-established in stochastic scheduling. The contribution is largely the application of these to LLM serving with a fitted log-t distribution; the design (E[X]+beta*CVaR) is reasonable but not conceptually new.",
+        "The theoretical result is somewhat assumption-driven: Assumption 3.1 directly encodes a power-law density for the termination rate near zero, from which the power-law tail follows by construction. The step from trajectory-varying termination probabilities p_t to a single fixed per-trajectory rate (Assumption A.2, the 'type' argument) is asserted rather than justified, so the theory is more intuition-building than a genuinely mild assumption yielding a surprising result.",
+        "Several hyperparameters appear heuristic and are under-justified: the adaptive beta bounds [0.1, 0.5] and coefficient 0.1 (Eq. 12), gamma=0.9, tau=30s, alpha=0.9, and fixed nu=3.5. The ablation shows adaptive beta (PTLA 0.67) only marginally beats a fixed beta=0.3 (0.71) and beta=0.1 (0.72), which weakens the claim that adaptive risk sensitivity is a key ingredient.",
+        "Decoding settings (temperature, top-p, sampling configuration) are not reported, yet the entire premise ('output length is uncertain by nature') hinges on stochastic sampling. Under low-temperature/greedy serving the distributional advantage would shrink; this boundary condition is not discussed.",
+        "No direct predictor-accuracy comparison against baselines (e.g., Kendall's tau, MAE of length ranking) is reported, which would be needed to attribute the scheduling gains to better distributional prediction rather than to the encoder or implementation.",
+        "The starvation-prevention mechanism (exponential waiting-time decay) is introduced but never ablated, so the fairness/throughput trade-off it induces and its necessity are not quantified. The qualitative heatmap concentration argument (Fig. 5) is used as supporting evidence but is not a quantitative metric."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The core observation is valid and well-motivated: LLM output length is inherently stochastic (determined by when EOS is sampled), so a per-request distribution is a more natural object than a point estimate, and this framing is useful beyond scheduling (KV cache, cost estimation).",
+        "The empirical distributional analysis is solid and potentially reusable: 1K prompts x 100 generations, reported skewness/CV, quantile ratios, and a comparative KS goodness-of-fit table showing log-t (93.1% pass) clearly outperforms log-normal (60.3%), Gamma (32.0%), etc.",
+        "The evaluation is broad and non-trivial: online chatbot and offline SDG scenarios, three datasets, multiple model sizes (8B/70B), six additional model families including three MoE models, plus an industry model in the appendix.",
+        "The systems contribution (asynchronous batched prediction with dynamic batching, min-heap priority queue, O(log n) updates) is a sensible, practically relevant engineering design that addresses a real inefficiency of synchronous prediction-based schedulers.",
+        "Within-system ablations (Table 4) credibly support the log-t choice over log-normal and show that adding a tail term to the score improves over expectation-only scheduling.",
+        "Limitations are honestly acknowledged (e.g., the need to generate repeated responses per prompt for training-data collection)."
+      ],
+      "weaknesses": [
+        "The headline claim (distribution-aware scheduling beats point-estimate scheduling) is not cleanly isolated. TIE differs from SSJF/LTR on at least three orthogonal axes: a stronger encoder (DeBERTa-v3-base vs BERT-base/DistilBERT/OPT-125M), asynchronous batched prediction (baselines use synchronous prediction), and a waiting-time decay/starvation mechanism. No experiment controls for these, so the reported 2.31x/1.42x gains cannot be attributed to distribution modeling.",
+        "Within-TIE ablation (Table 4) actually weakens the central thesis: expectation-only SEPT scores 0.75 PTLA vs. 0.67 for full TIE, and dynamic-nu matches fixed-nu (0.69 vs 0.67). The distributional/tail components thus contribute modestly, suggesting the large gaps to baselines in Tables 2-3 come largely from the confounded factors above.",
+        "No variance or error bars anywhere; all numbers are single runs. Combined with the extreme operating points (e.g., FCFS TTFT of 319-618s on 70B), the large multipliers may reflect a heavily overloaded regime that is not representative.",
+        "The theoretical contribution (Theorem 3.2) is close to circular. Assumption 3.1 / A.2 effectively assumes the p^{alpha-1} tail density, and the 'effective termination rate' is treated as a fixed per-trajectory quantity, which is hard to justify given that p_t depends on the trajectory autoregressively. The proof then recovers the assumed power law; alpha is never estimated or connected to data.",
+        "The score E[X] + beta*CVaR double-counts the tail (CVaR already contains the upper-tail mean), and both the adaptive beta (Eq. 12) and the starvation decay (gamma=0.9, tau=30s) use hand-tuned constants with no principled justification or sensitivity analysis. It is also unclear whether the starvation mechanism is applied to the baselines, which would be a fairness concern.",
+        "Reproducibility gaps: code is referenced ('available in our code') but no link is given; the fixed nu=3.5 is selected by an offline sweep; the R^2=0.82/0.76 numbers are reported without stating the held-out protocol; training requires 45K prompts x 20 generations, which is expensive and may not transfer to online serving data.",
+        "Presentation problems: Section 5 contains garbled/duplicated text ('under high load, many requests are exclusively predicted one at a time, and (3) under high load, many requests are not unpredicted'), a missing word ('we measure the system pressure'), and inconsistent formatting in Table 4's caption and Figure 5/9/10 labels.",
+        "Novelty is modest: Shortest Expected Processing Time and CVaR-based risk-sensitive scheduling are classical (the paper cites Weber 1983 and Rockafellar 2000); the contribution is essentially transplanting these to LLM output-length prediction, which is a reasonable but incremental step.",
+        "The heatmap analysis (Figures 5, 9, 10) is purely qualitative and the claim that TIE 'accurately captures possible output lengths' is an over-interpretation of visual clustering."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Novel and well-motivated problem framing: the paper identifies a mismatch between point-estimate output-length prediction and the stochastic autoregressive decoding process, and proposes distributional modeling of output length for scheduling.",
+        "Theoretical analysis in Theorem 3.2 provides a plausible mechanism linking low termination rates to heavy-tailed output lengths, and the empirical KS tests show the log-t distribution fits 93.1% of prompt distributions, substantially better than log-normal, Gamma, Weibull, and Exponential alternatives.",
+        "The TIE scheduling score is simple, principled, and practical: it combines censored expectation with CVaR and an adaptive risk-sensitivity coefficient, and reduces to a drop-in replacement for output length in SJF scheduling.",
+        "Comprehensive evaluation across online chatbot and offline SDG scenarios, three datasets (LMSYS-Chat-1M, ShareGPT, Alpaca), multiple models (8B, 70B, MoE, OpenPanGu), and cross-model/cross-dataset generalization tests.",
+        "Strong empirical results: 2.31x per-token latency reduction versus LTR online and 1.42x time@3K speedup offline, with consistent improvements across many additional models in the appendix.",
+        "Practical systems contributions: asynchronous prediction, dynamic batching, min-heap priority updates, and starvation prevention make the approach deployable on vLLM, with reported scheduling overhead of only 4.26 ms/request.",
+        "Ablation studies isolate the value of distributional modeling and tail-risk scoring: log-normal degrades performance, expectation-only (SEPT) is worse than adding CVaR, and adaptive beta outperforms fixed beta.",
+        "Honest limitations section acknowledges that training requires repeated generations per prompt and discusses future work on online adaptation."
+      ],
+      "weaknesses": [
+        "The theoretical tail result (P(L>n) ~ n^{-α}, a power-law in n) is not consistent with the chosen log-t distribution, whose tail decays like (ln x)^{-ν}; the paper does not reconcile this mismatch or empirically validate Assumption 3.1 about the termination-rate density.",
+        "Fairness of the baseline comparison is unclear: TIE is implemented with asynchronous prediction and dynamic batching, while SSJF and LTR are described as typically using synchronous prediction. It is not specified whether the baselines received the same system-level optimizations, so headline gains may partly reflect implementation advantages rather than scheduling quality alone.",
+        "Training data is not perfectly comparable: TIE uses 45K unique prompts with 20 repeated generations each, while SSJF and LTR use 900K unique prompts with one generation each. Total sample count is equal, but prompt diversity differs substantially, which could affect generalization claims.",
+        "The abstract overstates offline throughput improvement: the reported 1.42x is a time@3K speedup, not a throughput improvement (throughput gain versus LTR is about 1.30x). This is a minor but avoidable imprecision.",
+        "The paper does not empirically compare against recent preemptive/iterative prediction methods such as TRAIL and ELIS, instead dismissing them on overhead grounds. This limits the strength of the state-of-the-art comparison.",
+        "Reproducibility is only partially addressed: the manuscript references 'our code' but provides no URL or artifact, and key details such as the exact asynchronous-prediction integration, baseline implementation choices, and hyperparameter search are not fully specified.",
+        "Some presentation issues remain: a garbled sentence in Section 5, inconsistent reference years (e.g., Cassidy et al., 2010 vs. 2023), typos such as 'e measure', and dense figure layouts reduce polish.",
+        "Sensitivity of scheduling performance to prediction errors is not analyzed: the predictor achieves R² of 0.82/0.76 for μ/σ, but the paper does not quantify how errors in σ or tail estimation propagate to scheduling decisions and tail-latency metrics."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Novel and well-motivated perspective: treats output length as a distribution rather than a point estimate, aligning with stochastic autoregressive decoding. Empirical analysis shows heavy-tailedness and log-t fits well (93.1% KS pass), motivating distributional scheduling.",
+        "TIE is simple and effective: combines expected length with CVaR to account for tail risk, uses adaptive β based on queue pressure, and includes a waiting-time decay for starvation prevention. Ablations (Table 4) show CVaR and adaptive β improve over pure SEPT and fixed β.",
+        "Extensive evaluation: online chatbot and offline SDG, multiple datasets (LMSYS, ShareGPT, Alpaca), 8B/70B models, seven additional models including MoE, cross-dataset/model generalization, and sensitivity analyses (sample size, ν, temperature, β, σ noise). Results consistently favor TIE.",
+        "Practical system design: asynchronous prediction thread with dynamic batching on vLLM avoids synchronous prediction overhead, enabling batched prediction and low scheduling latency (4.26 ms), with O(log n) heap operations.",
+        "Thorough appendix: theoretical proof attempt, derivations for censored log-t, additional experiments, heatmaps, and detailed dataset/model characteristics.",
+        "Clear presentation of method, algorithm, and experimental protocol, with good use of figures to illustrate scheduling behavior."
+      ],
+      "weaknesses": [
+        "Theoretical inconsistency: Theorem 3.2 proves a power-law tail P(L>n) ~ n^{-α}, but the chosen log-t distribution has a log-power tail (ln x)^{-ν}, not a power-law. The theorem's Assumption 3.1 is not empirically validated, and the derivation assumes a fixed per-trajectory termination rate, a strong simplification. Moreover, Pareto/power-law is not included in the distribution comparison (Table 1), despite being the theoretically motivated family.",
+        "Distribution fitting ignores right-censoring at max_tokens: they fit uncensored log-t via MLE to observed lengths, but outputs hitting max_tokens are censored observations. This can bias μ and σ estimates and downstream TIE scores. The max_tokens value and censoring rate are not reported.",
+        "Potential baseline confounds: TIE uses DeBERTa-v3-base (86M) with multi-pooling, while SSJF/LTR use smaller point-estimate models (BERT/OPT-125M). No experiment controls for encoder capacity. Training data also differs: TIE uses 45K unique prompts ×20 generations, baselines use 900K unique prompts, so prompt diversity is not equal.",
+        "Train/test split and leakage are not specified: In the online LMSYS-Chat-1M 8B experiment, training data comes from the same dataset (first 45K prompts for TIE, first 900K for baselines) without stating that test prompts are disjoint. If test prompts overlap with training, TIE's distribution fitting may memorize per-prompt parameters, inflating in-distribution results. Cross-dataset results mitigate but do not eliminate this concern.",
+        "Reproducibility is incomplete: no code/artifact link, missing max_tokens, sampling parameters, exact data splits, baseline training details, and how μ/σ ground truth is computed. The two-stage training and z-score normalization details are vague. No statistical significance or error bars are reported.",
+        "Starvation prevention is claimed but not evaluated: no fairness, starvation, or long-term queueing metrics are provided; the waiting-time decay is not ablated. The adaptive β formula uses arbitrary constants without sensitivity analysis.",
+        "Offline SDG evaluation only measures throughput/time; it does not assess output quality, diversity, or length bias, which aggressive SJF scheduling could affect. The claim that shorter responses are preferred is not empirically validated in this context.",
+        "The log-t distribution has infinite uncensored expectation; while they censor for scheduling, fitting an uncensored infinite-mean distribution to bounded/censored data is conceptually mismatched. The interplay between the theoretical power-law and log-t fit is not resolved."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Novel and well-motivated framing: modeling output length as a distribution (log-t) rather than a point estimate, grounded in the stochastic EOS-driven decoding process. This is a fresh angle relative to SSJF/LTR-style point predictors.",
+        "Solid empirical distributional analysis: the paper fits multiple heavy-tailed families and reports KS pass rates (Table 1), showing log-t (93.1%) and fixed-ν log-t (90.6%) clearly beat log-normal (60.3%), gamma (32.0%), etc. The diagnostic breakdown by prompt family (Table 7) supports the universality of the heavy-tailed pattern.",
+        "Practical systems engineering: asynchronous prediction thread, dynamic batching (3 ms / 32-request caps), min-heap priority updates, censoring at max_tokens, and an explicit waiting-time decay for starvation prevention. The O(log n) scheduler complexity is sensible.",
+        "Broad evaluation: online chatbot and offline SDG scenarios, three datasets, two Llama sizes plus seven additional models (including MoE), and a range of ablations (distribution family, score form, β sensitivity, sample size, temperature, σ-noise robustness, comparison with preemptive TRAIL).",
+        "Honest limitations discussion: the training-data requirement (multi-generation per prompt) is clearly acknowledged in Section 7 and Appendix D.5, and the amortization argument is reasonable. This is not penalized."
+      ],
+      "weaknesses": [
+        "Central claim is confounded by the predictor. The ablation (Table 4) shows the E[X]-only variant (essentially a point/mean estimate from the same distribution predictor) already reaches 0.75 s/token vs. LTR 1.55 and SSJF 1.95, whereas the full distributional score (E[X]+β·CVaR) only improves this to 0.67 (~11%). Thus most of the reported gain over baselines comes from the predictor/training methodology (DeBERTa-v3 backbone, multi-pooling, multi-generation fitting), not from uncertainty-aware distributional modeling. The paper never compares against a genuine point-estimate predictor sharing the same backbone and training data, so the thesis that 'point estimates do not match stochastic decoding' is not cleanly substantiated.",
+        "Theoretical contribution is weak/overstated. Theorem 3.2 follows from Assumption 3.1, which posits a regularly-varying termination-rate density f(p) ~ c·p^{α-1}; this essentially encodes the heavy-tailed conclusion and is a strong, not 'mild', assumption. The derivation replaces trajectory-dependent p_t with a fixed per-trajectory rate p̃, an unjustified simplification, and the resulting mixture-of-geometrics power-law result is a known construction rather than a new insight.",
+        "Modeling concern: the log-t with ν=3.5 has no finite mean or variance (as the authors admit in Appendix B). Consequently the scheduling score is entirely determined by censoring at max_tokens, so tail behavior is dictated by the max_tokens cap rather than the fitted distribution, undermining the 'distributional' characterization.",
+        "No statistical rigor: all reported latencies/throughputs are single numbers with no error bars, confidence intervals, or repeated runs. Given the stochasticity of decoding and load-dependent queueing, the headline 2.31× / 1.42× claims are not statistically validated.",
+        "Reproducibility gaps: 'Details are available in our code' but no code/artifact link is provided; training specifics, the request arrival process, and the workload-replay setup are underspecified.",
+        "The adaptive β (Eq. 12, β = clip(0.1·L_q/B, 0.1, 0.5)) is an ad hoc heuristic with no derivation, and Table 10 shows the adaptive scheme largely matches the best fixed β, so the 'adaptive' advantage is modest and load-dependent.",
+        "Selective baseline placement: TRAIL (preemptive) beats TIE at low load (Table 11, ≤40 RPS) and is relegated to an appendix rather than the main comparison, while the paper's abstract claims broad superiority.",
+        "Presentation/care issues: reference year mismatches (e.g., Alasmar et al. 2021 cited as 2023; Chatterji et al. 2025 cited as 2024) and cross-reference errors (SSJF/LTR attributed to 'Section 1' though they appear in Related Work) suggest insufficient preparation."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Clear and well-motivated core insight: the paper convincingly argues that point estimates of output length clash with the inherently stochastic autoregressive decoding process, and reframes scheduling as a distributional/risk-sensitive problem. This is a genuine conceptual advance over SSJF/LTR.",
+        "The empirical distributional analysis is thorough (1K prompts x 100 generations) and well supported: heavy-tailedness is quantified via skewness, CV, P90/P50, and P99/P50, and the log-t fit is validated with a 93.1% KS pass rate against several alternatives (Table 1), with sensitivity to nu explored in Appendix D.3.",
+        "The TIE score (Eq. 11) elegantly unifies the SEPT expectation with a CVaR tail-risk term, and the adaptive beta (Eq. 12) plus the learning-augmented algorithms framing (Section 7) give the design a principled consistency/robustness interpretation that is empirically validated by ablation (Table 4, Table 10).",
+        "The evaluation is comprehensive and convincing: online chatbot and offline SDG scenarios, three datasets, 8B/70B models plus seven additional models including MoE variants (Appendix D.1), with substantial and consistent gains (e.g., 2.31x PTLA over LTR, 1.42x throughput over LTR).",
+        "Practical engineering contributions (asynchronous prediction thread, dynamic batching with 3ms/32-request bounds, min-heap scheduling, and waiting-time decay for starvation prevention) make the method deployable rather than a purely theoretical proposal.",
+        "The heatmap analysis (Figure 5) provides a useful qualitative explanation of why distributional modeling clusters requests better, especially for longer/uncertain outputs, and is a nice complement to the quantitative results.",
+        "Honest limitations discussion (training data requirement of multiple generations per prompt) and a solid sensitivity suite (training scale D.5, temperature D.6, sigma noise D.9, preemptive TRAIL comparison D.8)."
+      ],
+      "weaknesses": [
+        "The theoretical result (Theorem 3.2) rests on Assumption 3.1 (f(p) ~ c*p^{alpha-1}) and the intervening 'effective termination rate' tilde-p_n (Eq. 16), which is introduced informally. The link between the assumption and real decoding trajectories is asserted rather than empirically verified, so the theorem is more illustrative than load-bearing.",
+        "The heavy-tail result does not uniquely favor log-t: log-normal also exhibits power-law tail decay, and the theory does not explain why log-t should fit better. The choice of nu=3.5 is tuned on the same fitting data, and other hyperparameters (beta range [0.1,0.5], gamma=0.9, tau=30s) appear chosen heuristically without a principled derivation.",
+        "The magnitude of the headline gains (2.31x PTLA over LTR, 1.42x throughput) is large and, combined with no reported error bars or multi-run variance, raises questions about run-to-run stability and whether the baselines were tuned to comparable strength under the same serving configuration.",
+        "The training-data comparison deserves more scrutiny: SSJF/LTR use 900K single-generation samples while TIE uses 45K x 20 generations. The paper claims 'equal training data scale' by generation count, but the cost/quality trade-off of these two regimes (and whether baselines could benefit from comparable multi-generation data) is not fully disentangled.",
+        "Reported scheduling overhead of 4.26 ms per request is non-trivial; while small relative to multi-second TTFT in the tested high-load regime, its impact at low load or on latency-critical short-request workloads is not characterized.",
+        "Reproducibility is only partially addressed: the text defers many details to 'our code' (e.g., training details, L-BFGS-B setup), and there is no explicit statement of seeds, number of repetitions of the scheduling experiments, or statistical testing on the reported speedups."
+      ]
+    }
+  }
+}

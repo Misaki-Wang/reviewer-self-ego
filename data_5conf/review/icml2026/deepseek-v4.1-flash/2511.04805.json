@@ -1,0 +1,117 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Training-free, task-agnostic, single-pass MoE compression that retains near-original accuracy at 25% and 50% sparsity across four MoE models (Mixtral-8x7B, Deepseek-MoE, Qwen1.5-MoE, Qwen3-MoE) and seven zero-shot benchmarks; e.g., ~99%/92%/84% retention on Math-500/AIME24/AIME25 at 25% sparsity versus HC-SMoE's collapse.",
+        "Novel element-level sparse expert merging using a well-motivated dual-mask design (magnitude-similarity mask plus activation-saliency mask) that explicitly separates shared vs. expert-specific weights; the design is supported by a probabilistic analysis of inter-expert entry similarity in Appendix B.2.",
+        "Clean system co-design: the bit-packing scheme that reuses underutilized Bfloat16 exponent bits to embed masks and signs (metadata-free storage) plus a custom decoding GEMV kernel is a coherent and practical idea, and Table 1 shows the exponent shift itself incurs no perplexity loss.",
+        "Extensive and well-controlled experiments: 16 random seeds with reported means and standard deviations, plus thorough ablations on calibration data, merge-group size, random vs. searched grouping, similarity threshold, and importance-scoring function.",
+        "Very low compression cost (2 minutes for Mixtral-8x7B, 10 minutes for Deepseek-MoE) versus D2's 55 minutes, and a clear advantage over exhaustive-search methods like NAEE."
+      ],
+      "weaknesses": [
+        "Baseline results are suspiciously weak (e.g., HC-SMoE reaching WikiText-2 perplexity 174.68 and 24.8 MMLU on Qwen3-MoE; Sub-MoE and D2 similarly collapsing), which is worse than the baselines report in their own papers. Since the headline 'up to 16.7% on MMLU' margin rests entirely on these numbers, unfair or suboptimal baseline reproduction would substantially undercut the central claim.",
+        "When combined with quantization (Table 10), PuzzleMoE does not beat plain AWQ at comparable bitwidth (72.4 vs 73.0 avg accuracy; 4.50 vs 4.41 Wiki perplexity), so the practical value over straightforward quantization is not demonstrated.",
+        "Bit-accounting inconsistency: the text repeatedly claims '3 redundant bits' (and uses this to argue merging 3 experts requires 5 bits > 3), but Algorithm 1 uses bits 12–15 (2 mask + 2 sign = 4 bits), i.e., 4 freed bits. The layout and the '3 bits' argument are mutually inconsistent.",
+        "Router handling after expert merging/removal is never described; 'keeping the other modules unchanged' is ambiguous, since reducing the expert count normally requires modifying router rows. This is a meaningful reproducibility gap.",
+        "The reported 1.28x inference speedup is marginal and essentially equal to the baselines (Wanda and HC-SMoE ~1.27x in Figure 4c). Because top-k routing/activation per token is unchanged, the mechanism producing any speedup is not explained, and the custom kernel is not benchmarked at the kernel level (e.g., against cuBLAS).",
+        "No dedicated limitations section; the honest AIME25 observation is relegated to the conclusion, and the fact that pure quantization can match the method is not discussed. Some references are malformed and several figures/tables are dense and hard to read."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Introduces a genuinely novel method for MoE compression: fine-grained, entry-wise sparse expert merging using a dual-mask (similarity mask for shared entries + complementary saliency masks for expert-specific entries) plus stored per-expert signs. This is, to my knowledge, the first application of sparse-merge principles at the weight-entry level for MoE experts, and it is well motivated by the shared-vs-specialized-knowledge tension.",
+        "The bit-packing design is clever and internally coherent: the merged weights are stored as magnitudes (freeing the sign bit) and the exponent shift (8->5 bits) frees three more bits, giving exactly 4 bits to embed the two masks and two signs. Algorithm 1 and Eq. (7)-(8) are consistent, and the reconstruction is effectively lossless (Table 1).",
+        "Empirical results are strong and the core claim (near-lossless compression at 25%/50%) is well supported: across four MoE models (Mixtral-8x7B, Deepseek-MoE, Qwen1.5-MoE, Qwen3-MoE) and seven benchmarks plus GSM8K/Math-500/AIME, PuzzleMoE retains most of the vanilla accuracy (e.g., Mixtral 72.6 vs 74.1 avg at 50%).",
+        "Reproducibility of the variance is addressed: 16 random seeds are reported with means and standard deviations (Appendix B.4), and the ablations (calibration data, merge group size, grouping strategy, threshold, quantization combination, scoring function) are thorough.",
+        "Compression is genuinely fast and training-free (2 min for Mixtral, single forward pass with the Wanda-style saliency), and the method is task-agnostic/robust to calibration-data choice (Table 5), which is a practical advantage over NAEE/STUN.",
+        "The Appendix B.2 analysis deriving the probability of element-wise magnitude similarity under a half-normal model, and comparing to empirical correlation, adds useful understanding and helps justify the design."
+      ],
+      "weaknesses": [
+        "The efficiency contribution is weak relative to its prominence in the title. PuzzleMoE achieves only 1.28x (Mixtral) and 1.19x (Qwen3) speedup, essentially identical to the baselines it is compared against (Wanda 2:4 and HC-SMoE also show ~1.27x/1.18x in Figure 4c). The custom kernel is a GEMV kernel that only helps the decode path; prefill still uses dense GEMM, and the overhead of on-the-fly decoding across batch sizes/regimes is not explored. Thus 'bit-packed inference' delivers little runtime benefit, even if it does help memory.",
+        "The claim that exponent-shifting/bit-packing is lossless is validated on only two models (Table 1). The fixed shift of 112 and the 5-bit (0-31) range are model-specific; the justification that clamping exponents <112 to 112 'follows a similar procedure' to FP16-from-BF16 is hand-wavy, and robustness to models with wider/different exponent distributions or after quantization is not established.",
+        "Reproducibility gap: the abstract ends with 'The code is available at' with no URL, so the artifact cannot be located. Given that the bit-packing/CUDA kernel is a core contribution, this is a meaningful omission.",
+        "Potential unfairness in baseline comparison: several baselines collapse catastrophically at 50% (e.g., HC-SMoE Wiki perplexity 174.68 and MMLU 23.0-24.8 for Qwen3/Deepseek), which is suspicious and may reflect baselines run without model-specific tuning. It is unclear whether baselines were reproduced with optimal hyperparameters or quoted from other papers. This uncertainty inflates the headline 'up to 16.7% on MMLU' claim, which is taken against the weakest baseline at each point.",
+        "Presentation inconsistencies: Figure 1's bar values do not clearly match Table 2 (e.g., the HC-SMoE MMLU value for Qwen1.5), and baseline comparisons mix sparsity definitions (D2 at 20%/40%, Wanda 2:4 weight sparsity vs. 50% expert-count sparsity), which makes apples-to-apples comparison harder.",
+        "No statistical significance testing is provided despite small average-accuracy margins (0.2-0.4) and standard deviations of comparable magnitude (0.2-0.4), so some of the reported gains over the strongest baselines may be within noise."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Strong empirical results: PuzzleMoE retains near-vanilla accuracy at 50% expert sparsity across four MoE models (Mixtral avg 72.6 vs 74.1 vanilla; Deepseek 62.1 vs 62.6; Qwen1.5 65.4 vs 65.9; Qwen3 71.2 vs 72.6), while baselines such as HC-SMoE collapse (e.g., Qwen3 50% avg 37.2). On domain-specific reasoning, GSM8K reaches 51.7 vs NAEE 28.6/38.8, Math-500 96.2 vs HC-SMoE 24.6, and AIME24 71.1 vs 0.0.",
+        "Novel and effective method: Pairwise dual-mask sparse expert merging combines a similarity mask based on symmetric percent difference with an activation-aware saliency mask (Wanda-style) to preserve both shared and specialized knowledge at fine-grained entry level. Appendix B.2 provides theoretical analysis for why entry-wise weight similarity exists in MoE experts.",
+        "Practical bit-packing innovation: Exploits the concentrated Bfloat16 exponent distribution (112-128) to embed masks and signs into exponent/sign bits, eliminating metadata storage overhead. A custom GEMV CUDA kernel performs on-the-fly decoding. Table 1 shows no perplexity degradation from the exponent shift, and the method enables 1.28x/1.19x inference speedup.",
+        "Efficiency and robustness: Compression takes 2 minutes for Mixtral vs 90 min for NAEE and 55 min for D2, and 10 minutes for Deepseek-MoE. Extensive ablations show robustness to calibration dataset, random expert grouping, similarity threshold (0.3-0.5 optimal), importance scoring, and compatibility with quantization (4.8x compression with only 1.7% accuracy drop).",
+        "Thorough evaluation and reproducibility: Four MoE models, seven benchmarks, 16 random seeds with standard deviations, and detailed appendix results. The method is training-free and single-pass, making it practical."
+      ],
+      "weaknesses": [
+        "Inference and routing mechanics are not clearly described. The paper states it reduces the number of experts to 75%/50%, but also says 'once an expert is activated, its weights are reconstructed element-wise.' It is unclear whether the router still operates over N experts while only N/2 weight matrices are stored, or whether routing is changed. This ambiguity affects understanding of compute vs. memory savings and reproducibility.",
+        "Bit-packing assumptions are not fully validated. The fixed exponent shift (subtract 112, clip <112 to 112) assumes exponents fit in 5 bits (112-143), but no handling is described for exponents >143 or for models with wider exponent distributions. The claim of 'standard Bfloat16 data format' is imprecise because the stored format is a custom bit-packed representation. The similarity metric also does not address the zero-denominator case when both weights are near zero.",
+        "Baseline comparison fairness is unclear. Some baseline results have missing entries (e.g., STUN lacks Wiki, Piqa, Avg; Sub-MoE lacks Piqa/Avg), and it is not specified whether all baselines were rerun under identical calibration and evaluation protocols or taken from prior papers. This weakens direct average comparisons.",
+        "The code link is missing in the abstract ('The code is available at' with no URL), which hinders reproducibility despite the detailed method description.",
+        "Limitations discussion is incomplete. The conclusion mentions the AIME25 gap and the infeasibility of merging 3 experts, but does not discuss the exponent-range assumption, routing details, or potential failure cases on models with different weight distributions."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Introduces a novel fine-grained element-wise expert merging method with dual masks (similarity and saliency) that preserves shared and expert-specific weights, showing strong empirical gains over coarse-grained baselines across four MoE models and multiple sparsity levels.",
+        "Proposes a clever bit-packed encoding scheme that repurposes underutilized BFloat16 exponent bits to embed masks and signs directly into weight tensors, eliminating auxiliary metadata and enabling a custom decode-GEMM kernel with reported ~2x kernel speedup and up to 1.80x end-to-end throughput gain.",
+        "Conducts extensive experiments: four MoE models, seven zero-shot tasks, math/coding benchmarks, 25% and 50% sparsity, 16 random seeds, and ablations on calibration data, expert grouping, similarity threshold, saliency metrics, and quantization compatibility.",
+        "Compression is fast (minutes) compared to SVD-based methods, and the method is shown to be compatible with low-bit quantization, achieving 4.8x combined compression with minimal accuracy loss."
+      ],
+      "weaknesses": [
+        "Critical missing detail: the paper does not describe how the router is modified when the number of experts is reduced. Merging experts requires updating router weights or probabilities; without this, the reported accuracy and implementation cannot be reproduced or verified. The claim 'keeping the other modules unchanged' is inconsistent with reducing expert count.",
+        "Baseline comparisons are potentially unfair: D2 is evaluated at 20%/40% sparsity while PuzzleMoE is at 25%/50%; some baselines (NAEE, STUN, Sub-MoE) are missing for certain models; baseline numbers (e.g., Sub-MoE MMLU 48.0 at 50% on Mixtral) are suspiciously low and may not reflect proper tuning or official implementations. No comparison to simple unstructured pruning (e.g., Wanda per expert) at the same sparsity is provided.",
+        "The exponent-shift bit-packing is lossy: clamping exponents below 112 to 112 and limiting the exponent range to 112-143 changes weight magnitudes. The claim of 'no perplexity degradation' is only shown for two models (Table 6) and lacks theoretical justification; overflow for exponents above 143 is not discussed.",
+        "The decode-GEMM kernel is not fully specified: Algorithm 1 decodes a single weight, but the actual fused GEMM must handle different masks and signs for different rows (experts). The implementation details (e.g., how the kernel branches per row, how it achieves 2x over cuBLAS) are insufficient for reproducibility.",
+        "Ablation on saliency metrics (Table 11) shows weight-only saliency performs nearly as well as activation-based saliency, questioning the necessity of the dual-mask design's saliency component.",
+        "No limitations section in the main text; the paper omits discussion of failure cases (e.g., models with wide exponent distributions, arbitrary compression ratios) and ethical considerations beyond a generic impact statement.",
+        "The code link is missing ('available at' with no URL), hindering reproducibility.",
+        "The theoretical Lemma 3.1 assumes independent Gaussian weights, but Mixtral violates this (correlation 0.26), so the motivation is not universal and the derivation has minor notation errors (e.g., σ_j^2 instead of σ_i^2)."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Novel, coherent technical idea: fine-grained element-wise expert merging (dual similarity + saliency masks) combined with a bit-packing scheme that reuses the underutilized exponent field and the sign bit of BFloat16 to store masks/signs, so the merged expert is the same size as one original expert (a genuine 2-to-1 compression). The algorithm-plus-kernel co-design (custom Triton decode-GEMM) is a sensible way to realize the benefit without metadata overhead.",
+        "Strong and consistent empirical results: across four MoE models (Mixtral-8x7B, DeepSeek-MoE, Qwen1.5-MoE, Qwen3-MoE) and many benchmarks (WikiText perplexity, seven zero-shot tasks, GSM8K, Math-500/AIME, HumanEval), PuzzleMoE retains most of the dense accuracy at 25% and 50% sparsity and substantially outperforms NAEE, HC-SMoE, Sub-MoE, D2, and Wanda. The claimed 16.7% MMLU gap at 50% is directly supported (65.7 vs 49.0 for HC-SMoE).",
+        "Good reproducibility practice: code is provided, 16 random seeds are averaged with standard deviations reported (Appendix A.9), and the appendix documents kernel microbenchmarks, exponent distributions, per-model weight distributions, ablations, and quantization compatibility.",
+        "Practical efficiency: compression is training-free and fast (minutes vs. tens of minutes for SVD-based D2 and intractable exhaustive search for NAEE), and the design yields meaningful throughput gains.",
+        "Thorough ablations: sensitivity to τ_sim, random vs. searched grouping, calibration dataset, saliency metric, merge group size, and combination with AWQ quantization are all examined.",
+        "The bit-packing design is internally consistent and elegant: because at dissimilar positions only the more salient expert contributes, sharing a single exponent for the merged value does not conflict between the two reconstructed experts."
+      ],
+      "weaknesses": [
+        "The efficiency story conflates the benefit of compression with the benefit of the kernel. The \"~2× speedup over cuBLAS\" and Figure 5 appear to compare the uncompressed two-expert workload (two GEMMs, two weight tensors) against the compressed single-tensor fused GEMM. In that case most of the speedup simply comes from halving weight memory traffic, not from the kernel's decode cleverness. The kernel baseline (same compressed shapes, or decode+cuBLAS with materialization) should be stated explicitly; as written, the 1.80× end-to-end and 2× kernel claims overstate the kernel contribution.",
+        "Baseline comparisons are incomplete and not always matched: many entries are missing (\"-\"); D2 is evaluated at 20%/40% rather than the paper's 25%/50%; STUN appears only at 25%. This weakens the generality of the \"outperforms prior methods\" claim, even though the head-to-head 50% comparisons against HC-SMoE/Sub-MoE/NAEE are fair.",
+        "The theoretical result (Lemma 3.1) is a standard ratio-of-independent-Gaussians computation that holds for essentially any two independent Gaussian weight vectors, not specifically for MoE experts, and it does not drive the method (τ_sim is chosen empirically and the method does not use the predicted similarity). It is largely descriptive/ornamental rather than a load-bearing contribution.",
+        "The saliency ablation (Table 11) shows that pure magnitude saliency |W| matches the activation-aware Wanda-style saliency almost exactly (Mixtral 72.6 vs 72.6; DeepSeek 61.8 vs 62.1). This undermines the emphasis on the \"activation-weight saliency mask\" and suggests the method is effectively magnitude-based winner-take-all selection dressed up as a dual-mask formulation.",
+        "Losslessness of the exponent shift/clamp (exponents below 112 rounded up to 112, then re-encoded in 5 bits) is validated only on two models via perplexity (Table 6); the approximation could matter for other models or value ranges, and the merged value is additionally rounded to BFloat16 mantissa precision, which is not separately analyzed.",
+        "No dedicated limitations section; the appendix only briefly notes that the bit-packing is tailored to 2-to-1 merging and that higher-order merging requires explicit mask storage. Failure cases and negative results are absent.",
+        "Minor presentation issues: Figure 1(b) is a subjective Low/Medium/High table not backed by numbers; typos (\"Merit et al.\" for Merity, \"Du-anmu\" for Duanmu, \"prefetch/decode\" for prefill/decode); and the code URL is redacted."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Novel fine-grained element-wise expert merging via dual-mask (similarity + saliency) that preserves shared and expert-specific parameters, significantly outperforming coarse-grained methods.",
+        "Innovative bit-packed encoding that reuses underutilized exponent bits in BFloat16 to embed masks and signs without extra memory overhead, enabling practical compression.",
+        "Custom decode-GEMM kernel in Triton that fuses decoding with matrix multiplication, achieving up to 2x kernel speedup and 1.8x end-to-end throughput.",
+        "Extensive experiments on four MoE models and nine benchmarks, showing consistent improvements over strong baselines, with up to 16.7% MMLU gain at 50% compression.",
+        "Comprehensive ablation studies on calibration data, grouping strategies, similarity threshold, saliency metrics, and compatibility with quantization.",
+        "Fast compression time (minutes) and robustness to random seeds."
+      ],
+      "weaknesses": [
+        "The bit-packing scheme assumes a narrow exponent distribution and rounds up small exponents; while validated on Mixtral and Deepseek, its impact on other MoE models (e.g., Qwen series) is not fully evaluated.",
+        "The handling of the router (gating network) after expert merging is not described, which is crucial for reproducibility and understanding how the reduced expert count is mapped.",
+        "Some baselines have missing results at certain sparsity levels (e.g., D2 at 50%), making comparisons incomplete; the extremely large drops of baselines on Deepseek-MoE raise questions about baseline implementation or model sensitivity.",
+        "The kernel speedup comparison against cuBLAS may conflate the benefits of compression (2 experts -> 1 GEMM) with the kernel's efficiency; a more controlled comparison would isolate the kernel's contribution.",
+        "The paper lacks a dedicated limitations section, and the code link is missing in the abstract, hindering reproducibility."
+      ]
+    }
+  }
+}

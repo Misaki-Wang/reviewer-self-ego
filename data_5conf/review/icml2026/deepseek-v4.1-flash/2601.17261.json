@@ -1,0 +1,127 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Novel and intuitive idea: leveraging forward-pass activation structure to construct low-rank, activation-guided zeroth-order perturbations, addressing a real limitation of isotropic ZO methods.",
+        "Provides a theoretical framework connecting activation subspaces to gradient alignment, including closed-form expected cosine similarity and a condition under which AGZO provably outperforms MeZO.",
+        "Memory analysis and empirical measurements confirm that AGZO maintains the favorable memory profile of forward-only ZO methods, with negligible overhead from storing activation bases.",
+        "Experiments on Qwen3-0.6B and Pangu-1B across multiple benchmarks show improvements over MeZO and LOZO on many tasks, and a diagnostic experiment indicates higher gradient alignment than MeZO.",
+        "The method is straightforward to implement, using power iteration for on-the-fly subspace extraction without storing activations across iterations."
+      ],
+      "weaknesses": [
+        "The theoretical guarantee depends on an unverified condition (Eq. 33) that the top-r activation directions have at least average alignment with upstream gradients. With r=1, Figure 1(c) shows low projection cosine similarity for many layers, suggesting this condition often fails; yet the experiments use r=1 and provide no ablation on r.",
+        "The noiseless single-query analysis ignores cross-layer interactions: the scalar φ=(f_+-f_0)/μ aggregates contributions from all layers, so the per-layer estimator contains cross-layer noise not accounted for in Theorem 5.4, making the theoretical comparison with MeZO incomplete for the multi-layer setting.",
+        "The diagnostic alignment plot (Figure 2) appears to report cosine similarity on the order of 1e-4 (axis suggests a 1e-4 multiplier), implying that both ZO estimators are nearly orthogonal to the true gradient. If so, the claim of meaningful directional fidelity is undermined; the scale should be clarified.",
+        "Missing key experimental details: learning rates, batch sizes, sequence lengths, random seeds, and error bars are not reported, and the paper claims grid search without specifying ranges. No code is released, limiting reproducibility.",
+        "The first-order baseline is trained for only 1000 steps while ZO methods are trained for 20000 steps, making the comparison unfair and weakening the claim that AGZO 'narrows the gap' to first-order fine-tuning.",
+        "No ablation isolates the effect of activation guidance: there is no comparison to AGZO with a random orthonormal A or to LOZO with matched scaling/rank, so the improvement over LOZO could be due to implementation differences rather than activation structure alone.",
+        "There is no limitations section or discussion of when AGZO might fail (e.g., high-rank gradient regimes, nonlinear layers, or computational overhead). The paper also does not measure training time or the cost of power iteration, only memory.",
+        "Some claims are overstated: 'consistently outperforms' is contradicted by results such as BoolQ on Qwen3 (AGZO 0.724 vs. MeZO 0.730) and CB on Pangu NPU (AGZO 0.696 vs. MeZO 0.732).",
+        "The theoretical comparison is restricted to the noiseless single-query limit (μ→0), yet the abstract and introduction state 'provably yields update directions with higher cosine similarity' without qualification; finite-μ and stochastic minibatch noise are not analyzed.",
+        "The activation spectral concentration motivation is demonstrated only on GPT-2/SST-2 (Figure 1), not on the Qwen3 or Pangu models actually used in the main experiments, so the premise is not directly validated for the evaluated models.",
+        "Minor presentation issues: Algorithm 2 line 16 writes f(W; B) instead of f(W+μΔ; B); Appendix Eq. (53) has a typo in the denominator (sum over r instead of s); and the paper lacks a thorough discussion of hyperparameter sensitivity."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The core structural observation is correct and usefully framed: for a linear layer the weight gradient is exactly Q_ℓ H_ℓ^T, so its row space is contained in col(H_ℓ). Using this to design ZO perturbations is a sensible and relatively underexplored direction.",
+        "The theory, while limited in scope, is mathematically correct. Prop. 5.1/5.2 (subspace-smoothing view), Thm. 5.4 (closed-form expected cosine β_{mr}·||GA||_F/||G||_F), the β_D bounds (Lemma 5.6), and the energy-capture decomposition in (31) are internally consistent; I checked the derivations and they hold.",
+        "The method is simple and compatible with existing ZO pipelines (per-layer hooks, in-place perturbation, seed regeneration for the perturbation), and the memory argument is plausible: only the d_in×r bases A_ℓ must be retained, which is small when r=1.",
+        "The empirical results show a consistent pattern of improvement over MeZO/LOZO across two models and two hardware platforms, with an aggregate ~+3 points over MeZO on Qwen3-0.6B and ~+1.4 on Pangu-1B, while matching the forward-only memory profile."
+      ],
+      "weaknesses": [
+        "The central empirical claim ('consistently outperforms state-of-the-art ZO baselines') is not statistically supported. No seeds, standard deviations, or confidence intervals are reported anywhere (Tables 1–3, Figure 2). Many reported margins are 0.001–0.01 on small benchmarks (CB: 250 examples; RTE: ~2.5k), which is plausibly within run-to-run variance. AGZO is also *worse* than MeZO on Qwen3 BoolQ (0.724 vs 0.730) and on Pangu NPU CB (0.696 vs 0.732) and SST2 (0.765 vs 0.766), so 'consistently' is overstated.",
+        "The theoretical contribution is shallow relative to how it is advertised. The comparison is only against full-space MeZO, never against the more relevant low-rank baseline (LOZO). The sufficient condition (30)/(54) essentially reduces to 'the activation subspace captures more gradient energy than a random r-dim subspace,' which is nearly always true, making the 'provably better alignment' result close to vacuous. Assumption (54) is never verified empirically for the layers used.",
+        "The theory is developed in a noiseless, single-query, μ→0 regime that ignores estimator variance, estimator magnitude, minibatch noise, and convergence. Because cos(Ĝ,G) reduces to |cos(Δ,G)| in this limit, the result is essentially a statement about the perturbation direction, not about optimization quality; the abstract's 'provably yields update directions with higher cosine similarity' is conditional and overstated.",
+        "No ablation on the rank r. The paper fixes r=1, but the theory's benefit and the energy-capture factor both depend on r; Figure 1(c) itself shows rank-1 projection similarity is far below 1 for several layers, which sits awkwardly with the r=1 choice. There is also no control using a fixed *random* low-rank subspace of the same rank, so it is not isolated whether 'activation guidance' or simply 'low-rank projection' drives the gains.",
+        "Reproducibility gaps: no code/artifact link, and key hyperparameters are underspecified (μ/zo_eps, learning rate, per-layer ranks, optimizer, schedule). The only concrete settings given are '20,000 ZO steps / 1,000 FO steps' and 'K=3'. There is no compute-cost accounting for the subspace extraction (hooks + power iteration), which the paper asserts is 'negligible' without measuring it.",
+        "Presentation problems throughout: 'min_{Wa∈R^d}' in Eq. (1), 'irections', 'analsis', a stray '###' line in §5.2, 'L-Lipschitz' vs 'L-smoothness' used interchangeably, and inconsistent notation (m=b·T in §3 vs m=d_out in §5; n=d_in in §5 vs d_in in §3). The motivation study (Figure 1) uses GPT-2/SST-2 while all experiments use Qwen3/Pangu, leaving the connection to the actual testbed unestablished.",
+        "Figure 2's y-axis (values on the order of 10^-4) implies the single-step ZO estimator is nearly orthogonal to the true gradient, which is never discussed; this raises legitimate questions about how meaningful the reported alignment improvement is in practice.",
+        "No limitations section and only a boilerplate impact statement; the biased (projected-gradient) nature of the estimator and the fact that the subspace is data-dependent per iteration are not discussed as limitations."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "The paper identifies a simple, intuitive structural link: for linear layers, the gradient row space is contained in the column space of forward activations (Eq. 8-9), and uses this to motivate activation-guided ZO perturbations.",
+        "AGZO is practical: it extracts a low-rank activation basis on the fly with a few power iterations, perturbs only inside this subspace for linear layers, and keeps memory overhead O(d_in r) per layer (with r=1 in experiments), preserving the memory advantage of ZO.",
+        "The theoretical analysis provides a subspace-smoothing interpretation (Prop. 5.1-5.2, Cor. 5.3) and a closed-form expected cosine similarity for the noiseless estimator (Thm. 5.4), yielding a comparison with MeZO (Cor. 5.5, Thm. 5.7) under stated spectral conditions.",
+        "Experiments cover Qwen3-0.6B and Pangu-1B on multiple SuperGLUE and other tasks, with comparisons to MeZO, LOZO, zero-shot, ICL, and FO; AGZO achieves the best average ZO performance on Pangu (0.720 vs 0.706 MeZO) and generally better Qwen3 results.",
+        "The memory sweeps show AGZO matches forward-only ZO baselines across sequence lengths and batch sizes, while FO hits OOM; the alignment diagnostic shows AGZO has higher cosine similarity than MeZO during training.",
+        "The work addresses a practically important problem (memory-constrained LLM fine-tuning) with a simple method that could be adopted in existing ZO pipelines."
+      ],
+      "weaknesses": [
+        "The central theoretical guarantee (Thm. 5.7) relies on a strong, unverified assumption (Eq. 33: average of first r diagonal entries of B_l is at least the average of all diagonal entries) and on the activation matrix being low-rank (s_l < n_l). Neither is empirically validated, and the low-rank condition can fail when the number of tokens m exceeds the hidden dimension n.",
+        "The paper uses r=1 per layer in experiments, but Fig. 1(c) shows the activation subspace must be larger (r>=10) to capture nearly all gradient energy; no ablation over r or K is provided, and the theoretical condition may be violated at r=1.",
+        "Empirical gains are modest and lack error bars or multiple seeds: e.g., Qwen3 BoolQ AGZO 0.724 vs MeZO 0.730; Pangu NPU SST2 0.765 vs 0.766 and CB 0.696 vs 0.732. Without variance estimates, it is hard to tell if differences are significant.",
+        "The gradient-alignment diagnostic (Fig. 2) reports cosine similarity on the order of 1e-4, which is very low in absolute terms; the practical significance of a small relative improvement in such a low-alignment regime is not discussed.",
+        "Reproducibility is limited: no code or full hyperparameter settings (learning rate, mu, K, batch size, rank, grid-search ranges) are given; the FO baseline uses 1000 steps vs 20,000 ZO steps, and exact tuning protocols for MeZO/LOZO are unclear.",
+        "The novelty is incremental relative to MeZO/LOZO: activation-guided subspace selection is natural but not deeply surprising, and the paper does not compare against other ZO variants (e.g., HiZOO, DeepZero) or discuss when activation guidance fails.",
+        "Presentation has multiple typos, notation inconsistencies (m/b/n, W_l vs W_ell, LOZO/LoZO), a dangling '###' subsection heading, and unclear algorithmic wording (e.g., 'Compute f_+ = f(W; B) with perturbed weights').",
+        "There is no explicit limitations section; issues such as power-iteration approximation error, finite mu, batch-size dependence, and behavior on non-linear/embedding layers are not analyzed."
+      ]
+    }
+  },
+  "v4": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Novel and well-motivated idea: leveraging the forward-pass activation subspace to construct low-rank zeroth-order perturbations. The observation that gradients of linear layers are confined to the column space of activations is correctly formalized and exploited in a practical algorithm.",
+        "Solid theoretical analysis: AGZO is shown to estimate a projected gradient of a subspace-smoothed objective, and a closed-form expression for expected cosine similarity is derived. Theorem 5.6 provides conditions under which AGZO provably achieves higher expected cosine similarity than MeZO.",
+        "Extensive empirical evaluation across multiple models (Qwen3-0.6B, Qwen3-4B, Pangu-1B) and benchmarks (SuperGLUE, SQuAD, DROP), including cross-platform NPU results, gradient alignment diagnostics, peak memory sweeps, rank ablation, power-iteration ablation, and comparisons with LoRA.",
+        "Memory efficiency is convincingly demonstrated: AGZO's peak GPU memory matches MeZO/LOZO across varying sequence lengths and batch sizes, while FO methods run out of memory, confirming the negligible overhead of storing activation bases.",
+        "Adequate reproducibility: the paper specifies model names, datasets, hardware, hyperparameters (μ, learning rate, rank, power-iteration steps), and training budgets, enabling reproduction.",
+        "The method is simple to implement, requiring only a lightweight power iteration during the forward pass, and is compatible with existing ZO frameworks."
+      ],
+      "weaknesses": [
+        "Empirical gains at larger scale (Qwen3-4B) are small and often within noise (e.g., BoolQ: AGZO 0.820 vs MeZO 0.823), and no standard deviations or statistical significance tests are reported. The claim of 'consistently outperforms' is overstated given occasional ties or slight losses (e.g., Pangu-1B CB tie, NPU CB AGZO 0.696 vs MeZO 0.732).",
+        "The theoretical advantage relies on condition (22) — that the average upstream gradient energy along the top-r activation directions is not less than the global average. This condition is plausible but not empirically verified, so the practical applicability of the theorem is not fully established.",
+        "The rank-1 choice is counterintuitive and only ablated on one model/task (Qwen3-0.6B SST-2). There is no theoretical analysis of the variance of the estimator or of optimization performance to justify why r=1 is superior to slightly larger ranks, especially since the single-query estimator's variance could affect convergence.",
+        "The comparison with first-order fine-tuning is not compute-matched: ZO methods are trained for 20,000 steps while FO is trained for only 1,000 steps. Although FO is included only as a reference, the large step-budget difference limits the fairness of the comparison.",
+        "The evaluation of larger models is limited (up to 4B), and the rank ablation, power-iteration ablation, and cosine-similarity diagnostics are performed on relatively small models (GPT-2, Qwen3-0.6B). It is unclear how well the method scales to much larger LLMs.",
+        "The temporary storage of activation matrices H_l for power iteration could increase peak memory for very long sequences or large hidden dimensions, although the paper shows negligible overhead in tested regimes; this potential limitation is not stress-tested."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The core idea—restricting zeroth-order perturbations to a subspace derived from the current forward-pass activations—is sensible, clearly motivated, and, to my knowledge, a novel twist in the ZO LLM fine-tuning setting.",
+        "The empirical evaluation is broad: multiple model families/scales (Qwen3-0.6B/4B/8B, Pangu-1B), a wide task suite (SST-2, COPA, CB, BoolQ, MultiRC, RTE, WiC, SQuAD, DROP, OpenMathReasoning), and two hardware platforms (GPU and Ascend NPU), plus memory sweeps over sequence length and batch size.",
+        "The theoretical treatment of expected cosine similarity (Theorem 5.4, the closed-form β_D and its Gautschi/Wendel bounds, and the comparison in Thm 5.6) is non-trivial and gives an interpretable decomposition (dimension factor × gradient-energy-capture factor).",
+        "The paper is comparatively honest about scope: the LoRA comparison, the rank ablation (Table 9), and the throughput comparison (Table 7) are framed as context rather than as claims of universal dominance."
+      ],
+      "weaknesses": [
+        "The central 'structural insight' is a textbook identity: ∇_{W} f = Q H^T immediately implies row(∇_W f) ⊆ col(H). Presenting this as a 'crucial/fundamental link' that the paper 'identifies and formalizes' oversells a standard fact; the genuine contribution reduces to 'use this known subspace to restrict ZO perturbations.'",
+        "Empirical gains are marginal and inconsistent. AGZO underperforms MeZO on BoolQ in Table 1 (0.724 vs 0.730), ties MeZO on CB in Table 3 (0.732 vs 0.732), and loses on CB in Table 4 (0.696 vs 0.732). On Qwen3-4B (Table 2) the AGZO-vs-MeZO differences are within ~0.001–0.011 and ICL matches or beats AGZO on SST-2 (0.887 vs 0.892), CB, BoolQ, and MultiRC. The claim of 'consistently outperforming' and 'significantly narrowing the gap' is not supported at these margins.",
+        "There are no error bars, seeds, or variance estimates anywhere, so it is impossible to judge whether the small reported improvements are significant. This, together with the absence of any code/model release and sparse implementation detail (hooking, per-layer rank handling), makes reproducibility weak.",
+        "The theory is developed only in a noiseless, single-query, μ→0 setting (Eq. 17) that explicitly ignores finite-difference and minibatch noise. In practice the measured cosines are ~10^{-4} (Fig. 2), so the 'provable superiority' concerns a tiny idealized gap that does not clearly translate to optimization behavior.",
+        "The theory compares AGZO only to MeZO. The most relevant baseline, LOZO, is also low-rank and would enjoy the same β_{d_out r} dimension-reduction factor, so the theory does not explain the paper's key differentiator—activation-guidance vs. data-independent low-rank perturbation. That separation rests entirely on the diagnostic in Table 8, which is not integrated into the theory.",
+        "All main experiments use rank r=1, so the 'low-rank subspace' framing collapses to a single direction, while the theory is stated for general r. The post-hoc justification of rank-1 is not reconciled with the subspace-energy argument that underlies Theorem 5.6.",
+        "The memory claim is asserted rather than demonstrated. Power iteration requires materializing H_ℓ (d_in × m) per layer—exactly the activation tensor ZO aims to avoid—so the 'negligible overhead' argument (which counts only the persistent A_ℓ basis) ignores the transient peak. Figure 3 shows AGZO bars identical to MeZO/LOZO but gives no measurement methodology (e.g., whether hooks or graph retention are counted).",
+        "The first-order baseline is trained for only 1,000 steps vs. 20,000 for all ZO methods; the comparison is not controlled and it is unclear whether FO is undertrained, which inflates the apparent 'gap closing.'",
+        "Presentation/proofreading problems indicate limited review: inconsistent model names (QwEN3 vs Qwen3), the heading 'A.3 AGZO defeat MEZO', 'Theorem A.5 (Copy of Theorem 5.4)', a '[label=()]' artifact in Theorem A.4, garbled equation formatting, and incorrect reference entries (Chen et al., 2019 cited for a 2025 ICLR paper; Yang et al., 2024 for the 2025 Qwen3 report)."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "The paper introduces a simple but novel idea: using the forward-pass activation subspace to guide zeroth-order perturbations for LLM fine-tuning. The connection between linear-layer gradients and activation row spaces is well-motivated and formalized.",
+        "The theoretical analysis is a clear strength. It shows AGZO estimates a projected gradient of a subspace-smoothed objective, bounds the smoothing bias, and derives expected cosine similarity to the true gradient. The comparison with MeZO under an energy-distribution condition provides useful insight into when activation guidance helps.",
+        "The empirical evaluation spans multiple models (Qwen3-0.6B/4B/8B, Pangu-1B), datasets (SuperGLUE, SQuAD, DROP, OpenMathReasoning), and platforms (GPU and Ascend NPU). AGZO generally improves over MeZO and LOZO, and the gradient-alignment diagnostic directly supports the theoretical prediction.",
+        "The memory analysis is convincing: AGZO stores only compact activation bases and preserves the peak memory profile of forward-only ZO baselines, as validated by sequence-length and batch-size sweeps.",
+        "The appendix includes useful ablations on rank, power-iteration steps, throughput, and comparisons with LoRA, which help characterize the method's practical behavior."
+      ],
+      "weaknesses": [
+        "The empirical results lack statistical rigor. No error bars, multiple seeds, or variance estimates are reported, yet many reported gains are small (e.g., 0.01–0.02 on several SuperGLUE tasks). This makes it difficult to determine whether the improvements over MeZO/LOZO are statistically significant.",
+        "The abstract and introduction claim AGZO 'consistently outperforms' ZO baselines, but the tables show counterexamples (e.g., Qwen3-0.6B BoolQ: 0.724 vs MeZO 0.730; Qwen3-4B BoolQ: 0.820 vs 0.823; Pangu NPU CB: 0.696 vs MeZO 0.732). The claim should be softened or supported by significance tests.",
+        "The choice of rank r=1 is somewhat in tension with Fig. 1(a), which shows that a rank-1 activation subspace captures relatively little gradient energy in many layers. The justification relies on a single rank ablation on Qwen3-0.6B/SST-2, and the trade-off between subspace dimension and directional fidelity deserves more systematic study.",
+        "The theory requires condition (22) and a low-rank activation matrix H_l. The abstract states AGZO 'provably yields' higher cosine similarity without mentioning these assumptions. The condition may not hold for all layers/tasks, and the practical robustness of the guarantee is not fully established.",
+        "Reproducibility details are incomplete. LOZO's rank and hyperparameters are not specified, learning-rate search ranges/values are omitted, and no random seeds or code are provided. These omissions make it hard to reproduce the exact comparisons.",
+        "The temporary memory required to materialize the activation matrix H_l and run power iteration during subspace extraction is not explicitly quantified. For large batch/sequence sizes or embedding layers, this overhead could be non-negligible, and the paper does not discuss whether embeddings are treated as linear layers.",
+        "The paper lacks a dedicated limitations section. It does not discuss potential failure modes (e.g., when upstream gradient energy is adversarially aligned with low-energy activation directions) or the computational overhead beyond throughput measurements."
+      ]
+    }
+  }
+}

@@ -1,0 +1,125 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "Proposes ReVisiT, a simple, training-free, model-agnostic decoding method that leverages intrinsic vision token hidden states as reference signals, avoiding extra forward passes or external models.",
+        "Clearly formalizes the problem and method with equations, an algorithm, and an intuitive pipeline: constrained vocabulary construction, vision-token projection and selection via JSD, and output distribution refinement.",
+        "Comprehensive empirical evaluation across three hallucination benchmarks (CHAIR, POPE, AMBER), two LVLM backbones (LLaVA-1.5-7B, Qwen2.5-VL-7B), plus an MoE model (DeepSeekVL2), with comparisons to several intra-alignment baselines.",
+        "Demonstrates consistent improvements over greedy decoding and competitive performance against baselines in many settings, while showing low per-token inference overhead (2.3%/3.5% vs up to roughly 2x for baselines).",
+        "Includes ablation studies on vocabulary subset constraint, layer selection, and the threshold alpha, as well as qualitative examples and numerical case studies that help illustrate the method's behavior.",
+        "Addresses an important problem (visual grounding and hallucination mitigation in LVLMs) and offers a practical, lightweight decoding intervention suitable for open-weight models.",
+        "Provides reproducibility details: datasets, metrics, sampling procedure, hyperparameter ranges, algorithm pseudo-code, and references to official evaluation code."
+      ],
+      "weaknesses": [
+        "The technical novelty is incremental: the method combines existing ideas (contrastive decoding, logit lens, early exit, DoLa-style decoding, vision token projection) with a simple JSD selection and element-wise multiplication, limiting the conceptual advance.",
+        "No statistical significance tests or confidence intervals are reported. Many gains are small (e.g., POPE Qwen2.5-VL: +0.28 accuracy, +0.07 precision), and CHAIR uses only a single 500-image sample with no multiple seeds, so the robustness of the improvements is unclear.",
+        "A key design choice, selecting the vision token that minimizes JSD to the vanilla distribution, is not ablated. There are no comparisons to random selection, max-probability selection, or max-divergence selection, leaving the effectiveness of this criterion unproven.",
+        "There is no ablation that replaces vision token hidden states with text token hidden states (e.g., early-exit/DoLa-style reference signals) under the same constrained-vocabulary framework, so the claim that vision tokens are specifically the better reference signal is not directly tested.",
+        "Hyperparameters (layer selection and alpha) are tuned per model and benchmark, but no held-out validation protocol is described. This risks overfitting to evaluation sets and weakens the fairness of the comparison.",
+        "The memory and full computational cost of precomputing projections over the entire vocabulary for all vision tokens and candidate layers is not reported. Algorithm 1 caches a |J| x |v| x |V| tensor, which can be very large, yet only per-token latency is analyzed.",
+        "Baselines use default hyperparameters while ReVisiT's hyperparameters are tuned per benchmark, making comparisons potentially uneven. Some baselines (VCD, SID, M3ID) underperform greedy on Qwen2.5-VL, suggesting they may be mistuned or poorly suited to this backbone.",
+        "Results are mixed across metrics: ReVisiT is not uniformly best (e.g., POPE precision on Qwen2.5-VL is worse than DoLa; AMBER Hal/Cog on Qwen2.5-VL is worse than M3ID/SID), so claims of state-of-the-art superiority are overstated.",
+        "The title and framing around 'language prior in vision tokens' is somewhat misleading: the method uses vision tokens as visually grounded references, not to disclose a language prior, which in the literature usually denotes text-only bias causing hallucination.",
+        "The qualitative analysis in Figure 2 relies on a manually defined semantic subset V_env for illustration. This subset is not scalable and is not used in the final method, making the connection to the adaptive subset construction indirect.",
+        "Evaluation is limited to 7B-scale models and three hallucination benchmarks, with no larger models or broader VQA/reasoning tasks. Generalization claims beyond these settings are not substantiated.",
+        "No human evaluation or fine-grained error analysis is provided to support the qualitative examples and claimed improvements in grounding fidelity."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3.5,
+      "strengths": [
+        "Proposes a training-free, model-agnostic decoding method with a clearly specified algorithm (Algorithm 1). The efficiency advantage is the paper's strongest and best-supported claim: ReVisIT adds only ~2.3%/3.5% per-token latency over greedy decoding (Table 7, Figure 3), whereas the compared intra-alignment baselines (VCD, M3ID, SID) roughly double inference cost. This is a genuine practical differentiator over prior work.",
+        "Evaluation breadth is good for a decoding-method paper: three hallucination benchmarks (CHAIR, POPE, AMBER), 18 POPE sub-settings (Table 6), two dense LVLM backbones (LLaVA-1.5-7B, Qwen2.5-VL-7B) plus a sparse MoE model (DeepSeekVL2, Table 5), ablation over layer selection and the threshold alpha (Table 4), and qualitative case studies (Figures 4-6). The appendix provides the numerical logit/probability tables (Tables 8-10) behind the motivating figures.",
+        "The motivating analysis is insightful: the observation that vision-token logit-lens distributions become interpretable only under a constrained vocabulary (Figure 2, Table 9) and that hallucinated top-1 tokens often have visually grounded alternatives in the vanilla top-K (Figure 2 right, Table 10) is a useful, well-illustrated finding that plausibly justifies the design.",
+        "Clear organization and a helpful related-work taxonomy (pre-/post-/intra-alignment) that positions the contribution relative to prior alignment strategies. Writing is generally precise and the method section is easy to follow.",
+        "The method is lightweight and composable (cache-once vision-token projections, no extra forward passes, no external models), making it plausibly integrable with other decoding-time techniques such as RAG, as the limitations section notes."
+      ],
+      "weaknesses": [
+        "The empirical gains are small and inconsistent. On CHAIR, ReVisIT ties or barely beats SID (LLaVA CHAIR_S 50.6 vs 50.6; CHAIR_I 13.43 vs 13.58), and on AMBER it is only marginally better (6.2 vs 6.3). On Qwen2.5-VL, CHAIR Recall actually drops below greedy (70.83 vs 71.79), and on several POPE settings ReVisIT is worse than a baseline (e.g., MS-COCO adversarial F1 80.99 vs SID 82.25; MS-COCO popular accuracy 85.80 vs SID 86.03). No statistical significance tests or variance estimates are reported for the main hallucination results, so many 'best' numbers are plausibly within noise.",
+        "Hyperparameters are tuned per model and per task while baselines use their original default settings, creating an asymmetric comparison. Section 4.1 states 'The APC threshold alpha is set for each task,' and Appendix A.2 confirms alpha is selected from a log range with per-model layer pools ('last' for LLaVA, 'all' for Qwen). This risks benchmark-specific tuning that could inflate gains; a single fixed alpha and layer set across all benchmarks would substantially strengthen the generality claim.",
+        "The abstract's claim of 'reducing computational costs for up to 2x' is misleading. The method does not reduce cost relative to vanilla greedy decoding (it is slightly slower); it merely avoids the ~2x overhead incurred by the compared baselines. The claim should be stated as such.",
+        "The motivating analysis in Figure 2/Table 9 relies on a hand-crafted, image-relevant vocabulary subset V_env = {river, mountain, person, sky, tree, cloud, sea, grass, rock}. Because this subset is derived from knowledge of the image content, the resulting distributions are partly circular and may overstate how much semantic information vision tokens actually carry. The method's dynamically constrained subset is constructed differently (from the vanilla output distribution), so this analysis does not directly validate the proposed mechanism.",
+        "A fundamental limitation is not adequately discussed: since refinement is restricted to the vanilla top-alpha candidate set, the method can only re-rank tokens that the vanilla decoder already considered and cannot recover grounded tokens outside that set. The precision/recall trade-off induced by alpha, and the fragility of the CHAIR metric it exposes, deserve more analysis. The 'w/o subset' ablation (CHAIR_S 0.2 with Recall 0.83) is a degenerate result that appears to reflect near-empty/degenerate outputs rather than supporting the design choice.",
+        "No human evaluation or failure-mode analysis is provided, and there is no explicit code/data release statement in the main text, which limits confidence in reproducibility despite the otherwise detailed appendix."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2.5,
+      "strengths": [
+        "The proposed ReVisIT decoding method is simple, training-free, and model-agnostic, modifying only the decoding function. This makes it easy to reproduce and apply broadly, which is a genuine practical virtue.",
+        "The paper is clearly written and well-organized, with a coherent narrative that motivates the method (vision tokens carry visual semantics), a formalized problem setup, an algorithmic box (Algorithm 1), and extensive appendices with detailed numerical values.",
+        "The computational efficiency claim is credible and well-supported: Table 7 and Figure 3 show that ReVisIT adds only ~2-3% per-token latency compared to greedy decoding, whereas baselines (VCD, M3ID, SID) roughly double it. This is the strongest and most defensible contribution of the paper.",
+        "The evaluation is broad in coverage, spanning three hallucination benchmarks (CHAIR, POPE, AMBER) plus LLaVA-Bench-In-the-Wild, two base LVLMs (LLaVA-1.5, Qwen2.5-VL), and an additional MoE model (DeepSeek-VL2), which demonstrates some generality.",
+        "The ablation study (Table 4) and qualitative examples (Figures 4-6) provide useful insight into the design choices (subset constraint, layer selection, threshold α) and the failure modes of unconstrained projection."
+      ],
+      "weaknesses": [
+        "The central empirical claim ('consistently enhances visual grounding', 'superior results relative to state-of-the-art baselines') is only weakly supported. The margins are tiny and no statistical significance is reported. On Qwen2.5-VL (Table 1), CHAIR_S improves by only 0.6 (32.2 -> 31.6) and Recall actually *decreases* (71.79 -> 70.83). On POPE (Table 2), the accuracy gain for Qwen2.5-VL is only 0.28. Several comprehensive POPE settings (Table 6) are essentially identical to greedy (e.g., MS-COCO Random 89.07 vs 89.10). Without confidence intervals or significance tests, it is impossible to tell whether these differences are real or noise, which undermines the paper's core claims.",
+        "The theoretical justification for the JSD-minimization selection (Eq. 7) is questionable. The method selects the vision token whose projection is *most similar* to the vanilla output distribution. But the paper's own motivation is that hallucinations occur when the vanilla output *diverges* from the visual content. Selecting the most agreeing vision token risks reinforcing the existing (possibly hallucinated) distribution rather than correcting it. The authors provide no argument or analysis for why agreement is the right criterion, and no comparison to a divergence-maximizing or alternative selection rule.",
+        "The baseline comparison is potentially misleading. On Qwen2.5-VL, DoLa, VCD, M3ID, and SID all *underperform* vanilla greedy decoding on CHAIR (Table 1). It is implausible that four published intra-alignment methods are all worse than greedy on a stronger model; this strongly suggests the baselines were not re-tuned for Qwen2.5-VL, so ReVisIT's apparent 'win' may reflect baseline misconfiguration rather than a genuine advance.",
+        "The 'w/o subset' ablation (Table 4) is uninformative and arguably misleading: it reports CHAIR_S = 0.2 and CHAIR_I = 7.14, which are *better* than the full method, but Recall collapses to 0.83 because generation degenerates into repetition (Figure 5). This means the ablated variant is not a valid comparison point, and it also raises the concern that low CHAIR scores can be trivially obtained by degenerate output rather than by improved grounding.",
+        "The method requires per-task and per-model tuning that undercuts the 'free lunch' framing: α is set per task (1e-5 to 1e-4), and the decoder layer pool is model-specific ('last' for LLaVA-1.5, 'all even-numbered' for Qwen2.5-VL). The paper offers no principled rule for selecting these, which limits reproducibility of the reported gains and generality of the claims.",
+        "Novelty is incremental. The approach is essentially a combination of existing ideas: logit-lens applied to vision tokens, DoLa-style layer contrast, contrastive-decoding-style logit fusion, and top-K vocabulary truncation. The conceptual delta over prior work is small, and the paper does not clearly delineate what is genuinely new beyond repurposing logit-lens for vision tokens.",
+        "There is no human evaluation of generation quality despite claims about 'faithful' and 'visually grounded' responses. The qualitative examples (Figures 4, 6) appear cherry-picked, and no systematic measurement of fluency, informativeness, or coverage is provided beyond Recall, which itself degrades on Qwen2.5-VL.",
+        "Minor inconsistencies reduce confidence in the reporting: the text in Section 4.3 states a '3.5%' latency increase for Qwen2.5-VL while Table 7 implies ~2.1% (71.7 -> 73.2); and the abstract's claim of 'up to 2x' cost reduction refers to baselines, not to ReVisIT's own behavior, which is framed in a way that could be misread."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 3.5,
+      "strengths": [
+        "Novel and well-supported analysis: the paper provides both quantitative (at-least-one recall@k, Wilcoxon signed-rank tests) and qualitative evidence that vision tokens intrinsically encode object-level semantics that become explicit only under semantically constrained vocabularies, which is a genuinely interesting insight into LVLM decoding.",
+        "Practical efficiency advantage: ReViSiT is training-free, model-agnostic, and adds only +1.9% (LLaVA) and +0.6% (Qwen) per-token latency over greedy decoding, while baselines such as VCD/M3ID/SID/CODE roughly double or triple runtime. This is a meaningful and clearly demonstrated benefit.",
+        "Comprehensive evaluation: results span seven model sizes and three architecture families (LLaVA, Qwen, InternVL) and five benchmarks (HallusionBench, CHAIR, POPE, MMMU, VQAv2), with per-benchmark breakdowns, ablations, and an inference-speed study.",
+        "Clear methodological presentation and good reproducibility: the decoding algorithm is given in pseudocode, hyperparameters (α, layer scope) are specified, and official benchmark implementations and seeds are cited.",
+        "Consistent gains on hallucination-focused benchmarks, most notably HallusionBench (qAcc 11.55→20.22 for LLaVA), where the improvement over the second-best method is substantial."
+      ],
+      "weaknesses": [
+        "A potential confound between the vocabulary constraint and the vision-token reference signal is not fully disentangled. The ablation shows that projecting over the full vocabulary with min-JSD collapses (F1=1.52) while the constrained subset reaches 81.16, which suggests the vocabulary subset is doing much of the work. The paper never reports a control of constrained-vocabulary decoding without the vision-token reference, so it is unclear how much of the gain is attributable to vision tokens per se versus simply masking to a high-probability subset.",
+        "Improvements on general-purpose benchmarks are modest (MMMU 34.39→35.13; VQAv2 69.47→70.40 for LLaVA), and on several POPE setups (e.g., MS-COCO Random/Popular, A-OKVQA) SID or DoLa remain best, so ReViSiT is not uniformly superior despite the headline framing.",
+        "Key hyperparameters are tuned per task and per model: α is 'set for each task', and layer scope differs between models ('last' for LLaVA, 'all' for Qwen). Although the sensitivity study shows roughly 1.5 F1 variation around the peak, the per-task tuning raises fairness and generalization concerns.",
+        "The method selects only a single vision token per decoding step via min-JSD, but there is no analysis or justification for why one token is sufficient; combining or weighting multiple reference tokens is not explored.",
+        "Some analytical claims are stronger than the evidence supports; e.g., the language-prior narrative for hallucinated steps rests on n=190 steps with a non-significant Wilcoxon result (p=0.95), which the paper reports but does not reconcile with its broader framing."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Introduces a novel, training-free decoding method (ReViSiT) that leverages intrinsic semantics in vision tokens to mitigate hallucinations, with a clear three-step process: adaptive vocabulary constraint, vision token selection via min-JSD, and output distribution refinement.",
+        "Provides strong empirical evidence across five benchmarks (HallusionBench, CHAIR, POPE, MMMU, VQAv2) and multiple LVLM architectures/sizes, consistently improving visual grounding and hallucination metrics over strong baselines such as DoLa, VCD, M3ID, CODE, and SID.",
+        "Achieves efficient inference: ReViSiT adds negligible overhead compared to greedy decoding (e.g., +1.9% on LLaVA-1.5-7B, +0.6% on Qwen2.5-VL-7B) and is significantly faster than baselines that require additional forward passes (VCD/M3ID/CODE/SID approach or exceed 2× greedy runtime).",
+        "Includes thorough analysis motivating the method, with quantitative evidence that vision tokens encode object-level semantics when projected over constrained subsets, and that ground-truth objects remain in top-k predictions even at hallucinated decoding steps.",
+        "Comprehensive ablation studies on vocabulary constraint, token selection criterion, layer scope, and threshold alpha, demonstrating the importance of each component and showing that min-JSD with constrained vocabulary is crucial.",
+        "Clear writing and well-organized presentation, with helpful figures, qualitative examples, and detailed appendices covering metrics, evaluation protocols, and additional results."
+      ],
+      "weaknesses": [
+        "Hyperparameter specification for the APC threshold alpha is incomplete: the paper states alpha is selected per task from a logarithmic range with 10^-5 as default, but does not report the exact alpha used for each benchmark, which hinders exact reproducibility.",
+        "For larger models (13B, 14B, 26B, 32B) in Table 9, only greedy decoding is used as a baseline, so the claimed superiority over state-of-the-art decoding baselines is not demonstrated across model scales.",
+        "The analysis of vision token semantics (Figure 4) uses a predefined object-centric vocabulary subset (CHAIR-derived), while the proposed method uses an adaptive subset derived from the model's output distribution; the connection between these two settings is not fully explored, leaving ambiguity about whether the analysis directly validates the method's adaptive constraint.",
+        "The element-wise multiplication fusion of base and vision token distributions is not ablated against alternative fusion strategies (e.g., addition, weighted sum), so it is unclear whether this specific choice is critical.",
+        "The abstract's claim of 'reducing computational cost by up to 2×' is potentially misleading, as ReViSiT's per-token cost is nearly identical to greedy decoding; the reduction is relative to slower baselines, not absolute.",
+        "Some strong decoding-based hallucination mitigation baselines (e.g., OPERA, HALC) are not compared, which limits the assessment of state-of-the-art performance.",
+        "The choice of min-JSD for selecting vision tokens is empirically validated but lacks theoretical analysis explaining why it outperforms alternatives, and the paper does not discuss failure cases where the base distribution is extremely confident on a hallucination."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "The paper is clearly written and well-organized, with a useful taxonomy of alignment strategies and a straightforward, training-free decoding method.",
+        "The proposed ReViSiT is model-agnostic and preserves inference latency close to vanilla greedy decoding, unlike several baselines that require extra forward passes.",
+        "The authors conduct experiments across five benchmarks, multiple model sizes, and three architectures, and provide ablation studies on vocabulary constraint, token selection, layer scope, and threshold.",
+        "The analysis of projecting vision tokens through the language modeling head is an interesting direction, and the qualitative examples illustrate how vision-token references can shift decoding toward visually grounded outputs."
+      ],
+      "weaknesses": [
+        "Hyperparameters (APC threshold α and layer scope) are tuned per task/benchmark without a validation set, making the reported gains difficult to reproduce and the comparison with untuned baselines potentially unfair.",
+        "The motivation analysis is partially circular and lacks key controls: the constrained vocabulary is derived from the same object categories used as ground truth, and there is no comparison to random subsets, text-token hidden states, or mismatched-image vision tokens.",
+        "Main results show only modest and inconsistent improvements; ReViSiT is not best on several metrics (e.g., CHAIR F1 on LLaVA, POPE on Qwen), and no statistical significance tests or confidence intervals are reported for the main benchmarks.",
+        "The paper omits relevant training-free decoding baselines such as OPERA, and does not discuss why it is excluded, limiting the strength of the empirical comparison.",
+        "There is an implementation inconsistency between Eq. 6 (normalization of probability products) and Algorithm 1 (applying softmax to the product), which raises reproducibility concerns.",
+        "The memory and precomputation overhead of caching vision-token projections over the full vocabulary is not quantified, despite claims of minimal computational overhead.",
+        "The paper's central framing around 'language prior in vision tokens' is somewhat overclaimed; the evidence primarily supports object-level visual semantics rather than a general language prior, and the analysis is limited to one model (Qwen2.5-VL-7B)."
+      ]
+    }
+  }
+}

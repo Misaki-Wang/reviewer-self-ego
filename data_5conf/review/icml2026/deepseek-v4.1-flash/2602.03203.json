@@ -1,0 +1,124 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 3,
+      "strengths": [
+        "The paper tackles an important and timely problem: KV cache memory/latency in long reasoning traces, where existing training-free eviction methods often fail to capture dynamic, head-specific attention patterns.",
+        "The proposed two-stage framework is clearly motivated and reasonably original: Golden Eviction constructs future-aware importance labels, supervised pairwise ranking initializes the scorer, and GRPO refines the eviction policy with a reward focused on low-entropy tokens whose loss increases after eviction.",
+        "The empirical results are strong and consistent across three reasoning models (Qwen3-1.7B, Qwen3-4B, DeepSeek-R1-Distill-Qwen-7B) and two challenging math benchmarks (AIME2024/AIME2025), often outperforming R-KV/SnapKV/H2O with half the cache budget.",
+        "The efficiency evaluation is compelling: ForesightKV achieves up to 9.79x throughput gain at 32K generation length, and the eviction mechanism itself accounts for only 2.7% of end-to-end time on Qwen3-4B.",
+        "The ablation studies on reward design, scorer inputs, and sampling strategy provide useful insights, especially the finding that targeting severely impacted low-entropy tokens is more effective than optimizing overall or high-entropy loss.",
+        "Generalization experiments on GPQA, LiveCodeBench, and MiniCPM-4.1-8B, though limited, support the claim that the learned scorer captures transferable importance patterns beyond the math training domain.",
+        "The theoretical analysis in Appendix A gives a simple bound showing that attention-output error scales with evicted probability mass, which supports the intuition behind attention-score-based eviction."
+      ],
+      "weaknesses": [
+        "The reinforcement learning reward definition appears mathematically inconsistent: the paper defines ΔL(w_t)=L_ori(w_t)-L_evict(w_t) and then selects E={w_t | w_t in w_low, ΔL(w_t)>η}, but a loss increase means L_evict>L_ori, so ΔL should be negative. As written, the condition selects tokens whose loss decreased, directly contradicting the stated goal. This undermines the central RL component and reproducibility.",
+        "Golden Eviction labels are computed using full-cache attention scores over future queries, but at inference the scorer operates on an already-evicted cache. The labels are therefore not self-consistent with the compressed generation process; the paper acknowledges distribution shift but does not rigorously quantify or resolve it.",
+        "The paper does not compare against training-based KV eviction methods such as Locret, Attention-Gate, or the trained compression approach of Lancucki et al., despite claiming to be the first to jointly use supervised and reinforcement learning for eviction. This makes the claimed superiority over prior trained methods unsupported.",
+        "There is no limitations section and no substantive discussion of training cost, deployment overhead, hyperparameter sensitivity, or failure modes. The impact statement is generic and does not address potential risks of learned eviction policies.",
+        "Reproducibility is limited: no code, checkpoints, or training data are released, and key details such as the number of scoring models per layer/head, training compute, and exact implementation of the Top-K + multinomial sampling are not fully specified.",
+        "The ablation in Table 5 shows extreme sensitivity to the sampling algorithm (e.g., AIME24 drops from 51.7 to 16.5 with multinomial sampling alone), suggesting the method's performance depends heavily on a specific heuristic combination that is not deeply analyzed.",
+        "Some claims are overbroad: the abstract states 92% and 99% preservation at 2K and 4K budgets, but the figures suggest notably lower preservation for Qwen3-1.7B, and the claimed synergy between supervised and RL stages is weak on GPQA/LiveCodeBench where RL gains are within noise or even negative.",
+        "The theoretical result only bounds the error for a single query's attention output and does not justify the future-score-based Golden Eviction objective, which optimizes a max over future blocks rather than current attention mass. The proof is therefore of limited relevance to the proposed algorithm.",
+        "Presentation issues reduce clarity: Eq. (2) is ambiguous about what is retained versus dropped, the MDP reward subscript R_t conflicts with its sequence-level definition, and Table 6 is malformed with missing full-model entries."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The two-stage paradigm (supervised Golden Eviction followed by GRPO-based reinforcement learning) is a reasonable and relatively fresh angle for KV cache eviction, and the reward-design ablation (Table 4) thoughtfully isolates which tokens matter.",
+        "The empirical motivation is well done: the attention-pattern taxonomy (global / position-dependent / semantic-dependent) in Section 2.1 and the low-entropy token loss analysis (Table 1, Appendix D) give a concrete, data-grounded reason for the design choices.",
+        "The evaluation is fairly broad for a paper of this type: three reasoning models, two math benchmarks, generalization to GPQA and LiveCodeBench, an efficiency/throughput study (Table 3), and an extra architecture (MiniCPM).",
+        "Golden Eviction is a strong oracle and Table 2 quantifies its advantage over R-KV/SnapKV/H2O, which is useful evidence that future-attention-based selection is genuinely better than current-window heuristics."
+      ],
+      "weaknesses": [
+        "The theoretical analysis does not support the core method. Proposition A.1 bounds the single-query output error by 2C·ε_t for evicted mass ε_t, which only justifies greedy eviction using the *current* query's attention scores. Golden Eviction, however, retains pairs by the *maximum over future blocks* (Eq. 5), and eviction must serve all future queries simultaneously. The bound is also essentially trivial (of course low-attention tokens should be dropped), so the claim that Appendix A 'theoretically validates our Golden Eviction strategy' is overstated and misaligned with the actual algorithm.",
+        "There is a sign inconsistency in the reward definition. ΔL(w_t) is defined as L_ori(w_t) − L_evict(w_t) (Eq. 7) but is described as the 'loss increase'; the selection criterion ΔL > η would then pick tokens whose loss *decreased* under eviction. The intended quantity must be L_evict − L_ori, and as written the reward (Eq. 8) is mathematically inconsistent with the stated motivation.",
+        "Closely related training-based KV eviction methods are cited but never compared: Locret (trained retaining heads, Huang et al. 2024), Attention-Gate (Zeng et al. 2024), and the learned one-shot method of Lancucki et al. (2025) are the most direct competitors, yet none appear in the experiments. This is a significant evidential gap, and the 'first to jointly use supervised and reinforcement learning' claim is unverified against this prior work.",
+        "Baseline numbers in Table 10 look implausibly low (RPC at 1K = 10.0, DuoAttention at 1K = 3.3) relative to what those methods report in their own papers, suggesting the baselines may be misconfigured or run under mismatched settings; without tuning details this undermines the fairness of the comparison.",
+        "Reproducibility is weak: no code or artifacts are provided, the training recipe (Appendix E.1) omits key details (e.g., how rewards are computed at scale, what 'immediate size of 16' means, memory/time cost of generating full attention matrices and running the evicted model for each trace), and a separate scorer must be trained per LLM, limiting practical adoption.",
+        "The primary evaluation is AIME (30 problems) with 32 samples, which has high variance; combined with training data generated from the STILL dataset, there is unaddressed risk of distribution overlap/leakage between training and evaluation, and no direct comparison showing how close the learned policy gets to the Golden oracle.",
+        "Presentation and notation need work: t is overloaded as both token and eviction-step index, Eq. 2's Multinomial_L notation is unclear, and there are reference/citation errors (e.g., Xiao et al. 2025a/2025b, Yuan et al. 2023 vs. 2024)."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Proposes a novel two-stage training framework for KV cache eviction, combining supervised learning with future-attention labels (Golden Eviction) and GRPO-based reinforcement learning to handle distribution shift and low-entropy token degradation. This is a meaningful advance over training-free and one-shot trainable eviction methods.",
+        "Strong empirical results across three reasoning models (Qwen3-1.7B/4B and DeepSeek-R1-Distill-Qwen-7B) and two math benchmarks (AIME2024/AIME2025): ForesightKV consistently outperforms SnapKV, H2O, and R-KV, often matching baselines with 2x larger budgets using only half the cache (e.g., Qwen3-4B AIME24 1K: 54.5 vs. R-KV 2K: 44.8).",
+        "Comprehensive evaluation includes reward ablations, scoring-model input/sampling ablations, generalization to GPQA and LiveCodeBench, additional model MiniCPM-4.1-8B, and efficiency analysis showing up to 9.79x throughput improvement at 32K generation length.",
+        "The method is well motivated by empirical studies of attention patterns and low-entropy token loss increases. The reward design is grounded in these observations and directly ablated, showing that targeting severely affected low-entropy tokens is most effective.",
+        "Appendix provides detailed training hyperparameters, baseline adaptation settings, and supplementary experiments, and there are no apparent ethical concerns."
+      ],
+      "weaknesses": [
+        "Reproducibility is limited: no code or compute details are provided, and key implementation details are missing, such as the exact number/nature of scoring models per layer/head, how π_θ(a_t|s_t) is computed for subset actions in GRPO, and whether training traces for each LLM are generated by that LLM or by Qwen3-4B.",
+        "There is a likely sign inconsistency in the reward definition: ΔL(w_t)=L_ori-L_evict with E={ΔL>η} selects tokens whose loss decreases after eviction, contrary to the stated intent of selecting tokens with large loss increases. Table 4 suggests the intended behavior, but the manuscript should correct this.",
+        "Theoretical support is thin: Proposition A.1 bounds single-query attention-output error by evicted attention mass, but Golden Eviction uses maximum future block scores and does not directly optimize this bound. The distribution shift from full-cache labels to evicted-cache inference is acknowledged but not analyzed.",
+        "No explicit limitations section. Training cost (offline full-attention label generation, RL rollouts) and per-model training overhead are not discussed, and generalization to much longer contexts or non-reasoning architectures remains underexplored.",
+        "Some reported gains, especially from the RL stage, are small and lack confidence intervals or variance estimates despite multiple runs; AIME results can be noisy, so the significance of certain improvements is not fully established.",
+        "Minor presentation issues remain: unclear notation in Eq. 2, inconsistent terminology (e.g., 'immediate size' for hidden size, 'w.o. RL'), and some typos, which slightly hinder clarity."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Addresses an important and timely problem: KV cache eviction for long reasoning traces, where existing training-free heuristics often fail to capture dynamic and semantic attention patterns.",
+        "Proposes a well-motivated two-stage framework: Golden Eviction provides future-aware supervision, and GRPO-based RL refines the scorer with a low-entropy-token loss reward while keeping the LLM frozen.",
+        "Extensive empirical evaluation: three reasoning models (Qwen3-1.7B/4B, DeepSeek-R1-Distill-Qwen-7B), AIME2024/2025, multiple budgets, and baselines (SnapKV, H2O, R-KV), plus ablations on rewards, inputs, and sampling.",
+        "Reports strong practical gains: half-budget performance often exceeds baselines, up to 9.79x throughput improvement, and useful generalization to GPQA, LiveCodeBench, LongBench, and larger models (Qwen3-14B/32B, MiniCPM).",
+        "Ablations support the design: both supervised and RL stages contribute, attention+KV input beats attention-only, and top-K multinomial sampling outperforms pure top-K or pure multinomial.",
+        "Provides a theoretical intuition connecting future attention mass to output/loss perturbation under bounded-value and Lipschitz assumptions, and includes implementation/training details in the appendix."
+      ],
+      "weaknesses": [
+        "Does not compare against relevant training-based KV eviction methods (e.g., Locret, Attention-Gate, or other learned eviction policies), despite claiming to outperform 'prior methods'; most baselines are training-free, so the comparison is not fully apples-to-apples.",
+        "No variance, confidence intervals, or statistical tests are reported, while AIME2024/2025 are small benchmarks (30 problems each); many reported differences (e.g., 53.8 vs 54.5) may be within noise.",
+        "Reproducibility is weakened by a blank 'Code is available at' link, unclear details about whether scoring models for each LLM are trained on model-specific traces or all on Qwen3-4B-generated traces, and an underspecified RL action likelihood for the top-K multinomial sampling procedure (especially if sampling is without replacement).",
+        "The RL reward definition contains a likely sign error: Eq. (7) uses delta L = L_ori - L_evict > eta to identify loss increases, which should be L_evict - L_ori > eta or an absolute increase; this makes the reward condition inconsistent with the stated goal.",
+        "The theoretical analysis is loose and relies on strong assumptions (bounded value vectors, locally Lipschitz logits/loss). It bounds attention-mass perturbation, not loss directly, so the 'Golden Eviction' optimality claim is only heuristic under this surrogate.",
+        "The MDP/GRPO formulation broadcasts a single sequence-level reward to all eviction decisions, which may provide weak credit assignment; sparse rewards when E is empty and the combinatorial action space are not analyzed.",
+        "Generalization/efficiency claims are somewhat overbroad: training is on math reasoning traces and evaluation is mostly math/reasoning, with possible distribution overlap; some results (e.g., 4K underperforming 2K in Table 17) are not explained.",
+        "The paper lacks an explicit limitations section and uses overclaims such as 'first' and 'optimal' without sufficient support; minor presentation issues include reference inconsistencies and missing/blank details."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a timely and important problem (KV cache eviction for long reasoning traces) with a genuinely novel angle: learning a scoring model via a two-stage supervised + RL (GRPO) pipeline, which is, as far as I can tell, the first attempt to jointly use SL and RL for dynamic eviction.",
+        "The motivation is grounded in a concrete empirical study: Section 2 visualizes three attention-pattern types (global, position-dependent, semantic-dependent) and Table 1 quantifies that low-entropy tokens suffer disproportionate loss increases after eviction. This gives the design (Golden Eviction + low-entropy-focused reward) a coherent rationale rather than being ad hoc.",
+        "Evaluation breadth is reasonable: three reasoning LLMs (Qwen3-4B, Qwen3-1.7B, DeepSeek-R1-Distill-Qwen-7B), two math benchmarks plus GPQA/LiveCodeBench/LongBench generalization, ablations on reward design (Table 4), input features and sampling (Table 5), and appendix studies on larger models, MiniCPM, and length transfer.",
+        "Efficiency analysis (Table 3, Appendix E.9) is useful, showing up to ~9.79x throughput gains and that the eviction mechanism itself adds only ~2.7% wall-clock overhead, which addresses the obvious concern that a learned scorer would dominate latency."
+      ],
+      "weaknesses": [
+        "Reproducibility is compromised. The abstract promises 'Code is available at' but the link is absent, and several experimental knobs (scoring-model initialization for each LLM, exact data filtering for SFT/RL, how attention features are pooled per group) are only partially specified. The reference list contains systematic errors (e.g., Xiao et al. 2024 appears three times for distinct papers; Wang et al. 2024, Yang et al. 2024, Wu et al. 2024 duplicated; 'Cai et al. (2024)' in the bibliography vs. '(Cai et al., 2025)' in text), and there are cross-reference mistakes ('Appendix E.6' cited as if a main-text section).",
+        "Fairness of the headline comparisons is not fully established. ForesightKV w/o RL beats R-KV on GPQA 1K by roughly 2x (44.2 vs 23.0) and on AIME24 1K by a very large margin (54.5 vs 14.4 for SnapKV). Such gaps could reflect a genuinely better learned scorer, but the paper never reports the actual LM loss of the final learned ForesightKV scorer (Table 2 only reports the oracle Golden Eviction loss), so there is no direct evidence of how close the trained policy comes to the oracle or of whether baselines were tuned comparably.",
+        "The Golden Eviction oracle in Table 2 is an unfair reference point for loss comparison: it is constructed using the full future attention matrix, so it trivially dominates training-free baselines. Presenting it as a 'method' obscures that the real question is the gap between the learned scorer and the oracle, which is not quantified in the main text (only a cosine-similarity proxy in Appendix C).",
+        "The theoretical contribution (Proposition A.1 and its extension) is standard (a 2C*epsilon_t triangle-inequality bound) and the link to Golden Eviction relies on strong assumptions (bounded values, locally Lipschitz logits/loss) plus a loose block-level surrogate upper-bounded by a factor H_t. It does not meaningfully strengthen the method's justification.",
+        "The MDP/GRPO framing is superficial: the 'policy' is a per-KV-pair MLP applied independently, with a sequence-level reward broadcast uniformly to every eviction step and all layers/heads sharing one advantage. This gives coarse credit assignment and the state is only implicitly represented through features, so calling it an MDP policy oversells the formalism. The reward also requires computing the evicted model's loss on low-entropy tokens, which is an expensive and somewhat circular training signal (6h x 8 GPUs for RL).",
+        "Practical cost is under-discussed relative to the training-free baselines. A separate scoring model must be trained per backbone, and training needs full attention matrices and per-token losses on long reasoning traces; the paper provides no comparison of this end-to-end training cost against the zero-training baselines, and there is no limitations section in the main text (the impact statement is a one-line boilerplate).",
+        "The claim of 'synergistic' SL+RL benefits is supported mainly by small deltas (e.g., AIME24 51.7 -> 54.5, GPQA 52.4 -> 53.7, LiveCodeBench 55.7 -> 55.7), and on LongBench (Table 7) the RL stage provides essentially no gain, so the contribution of the RL stage is weaker than the abstract implies."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Introduces a novel two-stage training framework that combines supervised learning with a future-aware Golden Eviction oracle and reinforcement learning with GRPO, moving beyond static or rule-based KV cache eviction for long reasoning traces.",
+        "Delivers strong empirical gains: on AIME2024 with Qwen3-4B, ForesightKV at 1K budget reaches 54.5 vs. R-KV at 2K (44.8), and it preserves about 92%/99% of full-model performance at 2K/4K budgets across three reasoning models.",
+        "Evaluation is broad: ablations on reward design, scoring-model inputs, and sampling; generalization to GPQA, LiveCodeBench, and LongBench; additional model families (MiniCPM-4.1-8B, Qwen3-14B/32B) and more baselines in the appendix.",
+        "Efficiency analysis shows practical benefits: up to 9.79x throughput improvement at 32K generation length, larger max concurrent batch sizes, and only about 2.7% overhead from the eviction mechanism.",
+        "Provides theoretical intuition via an attention-output error bound and a future-block evicted-mass upper bound, with a clear motivation for using future attention scores as supervision.",
+        "Appendix supplies substantial reproducibility details: data preparation, training hyperparameters, hardware cost, reward sensitivity, length transfer, and additional baseline comparisons."
+      ],
+      "weaknesses": [
+        "The RL reward definition contains a sign inconsistency: Eq. 7 defines ΔL(w_t)=L_ori(w_t)-L_evict(w_t) and selects tokens with ΔL>η, but this actually selects tokens whose loss decreases after eviction; it should likely be L_evict-L_ori. As written, the central RL reward is ambiguous and hard to reproduce.",
+        "The scoring-model architecture and parameter sharing are not fully specified: it is unclear whether one scorer is shared across layers/heads or whether separate scorers are trained per layer/attention group, and the pairwise ranking loss over all pairs is not described with pair sampling or computational complexity.",
+        "No limitations section is included, and the abstract's code URL is missing ('Code is available at' is incomplete), reducing reproducibility and transparent discussion of training cost, failure modes, and per-model training requirements.",
+        "The main experiments report pass@1 averages over 32 runs but no variance or confidence intervals, despite AIME having only 30 problems; several reported gains (e.g., RL vs. no-RL) are small and could be within noise.",
+        "The appendix comparison to RPC is potentially unfair or apples-to-oranges: RPC is a reasoning-path compression method rather than a standard KV-cache eviction method, and its very low scores (10.0 at 1K) are not explained.",
+        "The theoretical analysis relies on local Lipschitz assumptions and bounds block-averaged evicted attention mass; it does not formally justify the pairwise ranking objective or directly bound the language-modeling loss.",
+        "The threshold η=1.5 in the reward and the exact definition of 'large loss increase' are ambiguous (absolute vs. relative), and sensitivity to other hyperparameters (margin m, KL coefficient β, etc.) is only partially explored."
+      ]
+    }
+  }
+}

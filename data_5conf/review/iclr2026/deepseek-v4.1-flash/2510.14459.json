@@ -1,0 +1,137 @@
+{
+  "v1": {
+    "exp1_quality": {
+      "oa": 1,
+      "strengths": [
+        "Addresses an important and practical problem: data selection/reweighting for LLM finetuning.",
+        "Proposes an efficient in-context approximation (ICA) that avoids training a separate reference model, unlike RHO-Loss.",
+        "Evaluates across SFT, DPO, and SimPO, multiple backbones (LLaMA/Qwen, 3B/4B/8B), and both full fine-tuning and LoRA.",
+        "Reports very low computational overhead (~1.5%) compared to RHO-Loss (~10%) and one-shot learning (~4%).",
+        "Includes ablations on top-k holdout examples, score update frequency, filtering vs. reweighting, and embedding model."
+      ],
+      "weaknesses": [
+        "Fatal experimental design flaw: the holdout set is included in the training set in all main experiments (Yahoo_Answers_Topic, UltraFeedback, SHP-2; likely Alpaca too). This invalidates the holdout-loss premise: the model is trained on the very examples used to define the selection objective, making the method closer to domain adaptation/data cleaning than holdout-loss-based data selection. The evaluation cannot support the central claim.",
+        "The central theoretical claim in the abstract ('Under a local linearization, ICA is equivalent to a first-order update toward the holdout optimum') is not derived or proven anywhere in the paper. The ICA approximation is only loosely motivated by an analogy to in-context learning as implicit gradient descent; no formal guarantee or local linearization analysis is provided.",
+        "The Bayesian derivation used to justify the score assumes a negative log-likelihood over p(y|x), but DPO and SimPO use pairwise ranking losses. The paper does not re-derive the approximation for preference-based objectives, nor does it specify how preference pairs are formatted as in-context demonstrations. Applying the same score to DPO/SimPO is therefore unjustified.",
+        "Potential confounding from unnormalized reweighting: weights are max-min normalized to [0,1] and used directly to scale gradients without mean normalization. This reduces the effective learning rate relative to standard training. Improvements over standard training may be due to a lower effective LR rather than data selection. No control experiment (e.g., random weights with the same distribution, or normalized weights) is provided.",
+        "Evaluation is weak and potentially circular: only GPT-4o win rate against target/holdout outputs is used, with no standard benchmarks (e.g., MT-Bench, AlpacaEval) or human evaluation. The judge prompt explicitly considers length and style, and the paper's own analysis shows the method mimics holdout response length. This suggests the metric may reward stylistic matching to the holdout rather than true alignment.",
+        "Baselines are insufficient: only RHO-Loss and a reimplemented one-shot learning are compared. Many relevant data selection methods (e.g., influence functions, LESS, AlpaGasus, Data Shapley, datamodels) are discussed but not evaluated. The one-shot baseline is modified from its original formulation, making the comparison less faithful.",
+        "The default setting uses R=1 (scores computed only at initialization), so the method is not actually dynamic in the main experiments, contradicting the abstract's claim of 'dynamically reweighting gradient updates as model parameters evolve.' The ablation shows more updates help only marginally, but the main results do not use them.",
+        "Reproducibility and clarity issues: dataset split descriptions are inconsistent or suspicious (e.g., Alpaca training set reported as 84,022 examples, larger than standard Alpaca), details for preference-pair in-context formatting and kNN embedding are missing, Algorithm 2 has notation errors, and no statistical significance is reported for main tables (single training run per model).",
+        "Theoretical derivation in Appendix A is sketchy: the first equality is not standard Bayes' rule, the approximation of the holdout-trained model term is asserted rather than justified, and the sign/term manipulation is unclear. The derivation does not establish the validity of the in-context approximation for LLMs.",
+        "Novelty is limited: the method is closely related to RHO-Loss and one-shot learning, and the main performance results against RHO-Loss are essentially a tie (many win rates around 50%). The contribution is primarily an efficiency improvement, which is incremental given the unsupported theoretical claims and flawed evaluation."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Addresses an important problem: data selection for LLM fine-tuning, with potential to improve alignment while reducing data and compute requirements.",
+        "Proposes a resource-efficient alternative to RHO-Loss by using in-context learning to avoid training a separate reference model on the holdout set.",
+        "Evaluates the method across multiple model families (LLaMA, Qwen), scales (3B, 4B, 8B), and alignment paradigms (SFT, DPO, SimPO).",
+        "Includes ablation studies on key hyperparameters (k, R, filtering, embedding model) and an analysis of computational overhead and score distributions."
+      ],
+      "weaknesses": [
+        "Theoretical grounding is weak. The core ICA approximation is heuristic; the claim that 'under a local linearization, ICA is equivalent to a first-order update toward the holdout optimum' is not derived or substantiated in the main text or appendix. The Bayesian derivation only reproduces the RHO-Loss score and does not justify replacing retraining with in-context conditioning.",
+        "Application to preference-based alignment (DPO/SimPO) is unclear. The ICA score is defined for per-example negative log-likelihood, but DPO/SimPO use pairwise losses. The paper never explains how to compute ICA scores for preference pairs, what y_i represents (chosen, rejected, or both), or how holdout preference pairs are formatted as in-context demonstrations. This makes the DPO/SimPO results difficult to interpret and reproduce.",
+        "Efficiency claims are inconsistent with the provided numbers. Table 10 reports 800s for score computation and 1.5% additional runtime, implying standard fine-tuning on Yahoo (12k examples) takes ~14.8 hours, which is implausible. The overhead calculation likely misreports or relies on an unstated standard runtime, undermining the central efficiency advantage.",
+        "Evaluation is limited and potentially flawed. Win rate by GPT-4o against target outputs is non-standard for DPO/SimPO; using chosen responses as targets may favor imitation over true preference optimization. No absolute performance metrics (e.g., reward accuracy, MT-Bench, AlpacaEval) or comparison to the base pretrained model are provided. Only one training run per setting is used, and training variance is not assessed.",
+        "Against RHO-Loss, the method achieves roughly 50% win rate, i.e., no significant improvement. The main claimed advantage is efficiency, but that claim is questionable. Baselines are limited to RHO-Loss and One-Shot; many recent data selection methods are not compared.",
+        "The method may reduce to similarity-based reweighting: examples similar to the holdout set receive higher scores, as shown in Figure 1 where Sports examples score higher when the holdout is Sports. This is expected and not a novel insight; the theoretical framework adds little beyond this heuristic.",
+        "Ablation results show R=1 is suboptimal (R=5 yields 52.77% vs. default), yet main experiments use R=1. This suggests the method could be improved with more computation, but the paper does not use the best setting, weakening the reported results.",
+        "Critical implementation details for DPO/SimPO are missing, including how holdout pairs are formatted, how the in-context demonstrations are constructed for pairwise data, and how the score is aggregated for preference pairs. This hinders reproducibility."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3,
+      "strengths": [
+        "Introduces a computationally efficient data reweighting framework that uses in-context learning to approximate holdout loss without training a reference model or performing additional fine-tuning.",
+        "Evaluates the method across SFT, DPO, and SimPO, multiple model families/scales, and both full fine-tuning and LoRA, which shows broad empirical effort.",
+        "Reports low computational overhead (~1.5% additional runtime) relative to RHO-Loss (~10%) and one-shot learning (~4%) in the default setting.",
+        "Includes ablations on the number of in-context holdout examples k, score update frequency R, filtering thresholds, and embedding models.",
+        "The paper is generally well-written and the method is clearly described at a high level."
+      ],
+      "weaknesses": [
+        "The holdout set is not disjoint from the training data. For Yahoo_Answers_Topics and SHP-2, the holdout examples are explicitly included in the training set. For Alpaca and UltraFeedback, the holdout set is drawn from the training set or corresponding training examples remain in training. This violates the holdout-loss premise and leaks target-domain information, invalidating the core evaluation of holdout-loss-based selection.",
+        "The extension to DPO and SimPO is not formally justified. The derivation and ICA score are based on negative log-likelihood ℓ(y|x), but DPO/SimPO use pairwise preference objectives. It is unclear how ICA scores are computed for preference pairs, how chosen/rejected responses are formatted as in-context demonstrations, and whether the Bayesian approximation still applies.",
+        "The abstract claims that 'under a local linearization, ICA is equivalent to a first-order update toward the holdout optimum,' but no such derivation or proof appears in the main text or appendix. The theoretical grounding is therefore incomplete and the central theoretical claim is unsupported.",
+        "The method is described as dynamically reweighting as model parameters evolve, but the default setting uses R=1, i.e., scores are computed only once at initialization. Thus the main experiments actually use static reweighting, contradicting the central dynamic claim. The ablation shows more frequent updates improve results, making the default suboptimal.",
+        "Evaluation relies solely on GPT-4o win rates against baselines, with no absolute performance metrics, human evaluation, or task-specific accuracy. The judge may reward stylistic similarity such as response length, and the paper itself notes length as an alignment indicator and presents a wrong answer ('Polo') as an example of successful alignment, raising concerns about metric validity.",
+        "Novelty is limited: the method is essentially RHO-Loss with an in-context approximation, closely related to one-shot learning. Improvements over RHO-Loss are marginal, often near 50% win rate or below, so the practical advantage is mainly efficiency rather than better data selection.",
+        "Baselines are limited to standard training, RHO-Loss, and one-shot learning. Missing comparisons to other data selection methods (e.g., LESS, AlpaGasus, influence-function methods) and simple heuristics such as training on holdout+training or directly upweighting high-quality data weaken the empirical claims.",
+        "Reproducibility is insufficient for the preference experiments: it is not specified how ℓ(y|x) is defined for DPO/SimPO, how holdout preference pairs are placed in context, or how ICA scores are computed for pairwise data. Algorithm 2 also contains an ambiguous and likely incorrect score-update condition.",
+        "Each model is trained only once, and no variance across training seeds is reported. Evaluation stability is checked only for one setting, which does not address training randomness.",
+        "The reported 1.5% overhead corresponds to R=1; if the dynamic updates that the method advocates were used, overhead would be higher and the efficiency advantage would shrink."
+      ]
+    }
+  },
+  "v2": {
+    "exp1_quality": {
+      "oa": 5,
+      "strengths": [
+        "Addresses an important problem: data selection and reweighting for LLM fine-tuning.",
+        "Proposes a resource-efficient In-Context Approximation (ICA) that avoids training a separate reference model, building on RHO-Loss and in-context learning.",
+        "Broad empirical evaluation across SFT, DPO, and SimPO, with multiple model families/scales and datasets.",
+        "Reports consistent improvements over standard training and one-shot learning, with low measured overhead (~1.5%) under the default setting.",
+        "Includes useful ablations on top-k holdout examples, score update frequency, filtering vs reweighting, and embedding models.",
+        "Provides additional analyses of score distributions, weight dynamics, computational cost, and example responses.",
+        "Code and prompts are promised to be released, supporting reproducibility in principle."
+      ],
+      "weaknesses": [
+        "Limited novelty: the core idea is an incremental combination of RHO-Loss's holdout-loss score with in-context demonstrations; it is closely related to one-shot learning and other ICL-based scoring methods.",
+        "Theoretical justification for ICA is weak: no formal guarantee that conditioning on a few in-context holdout examples approximates the parameter updates from training on the full holdout set.",
+        "Application to DPO and SimPO is not theoretically grounded: the Bayesian derivation assumes per-example negative log-likelihood, but preference objectives are pairwise; the paper does not explain how scores are computed for preference pairs.",
+        "Main experiments use R=1 (scores computed only at initialization), contradicting the abstract's claim of dynamic reweighting as model parameters evolve; the ablation shows R>1 improves performance, making the default setting suboptimal.",
+        "Main experiments include the holdout set in training, which may leak information and inflate results; when the holdout is strictly excluded, the method slightly underperforms RHO-Loss, weakening the central comparison.",
+        "Evaluation relies heavily on GPT-4o win rates, with no human evaluation; absolute metrics are mostly in the appendix and not reported for all settings. Statistical significance is not established for most comparisons.",
+        "Comparisons against RHO-Loss are often near 50% and not clearly superior; the claim of consistent outperformance is overstated, and the advantage is mainly computational.",
+        "Reproducibility is incomplete: details are missing for DPO/SimPO score computation, prompts, generation, and evaluation protocols for preference data.",
+        "The overhead analysis focuses on the default R=1; if R>1 is needed for best performance, the computational overhead increases and is not fully characterized.",
+        "Strong assumption of a high-quality, representative holdout set; sensitivity to noisy or unrepresentative holdouts is acknowledged but not thoroughly explored."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper addresses an important problem: efficient data selection/reweighting for LLM fine-tuning and alignment.",
+        "The proposed ICA method is resource-efficient, adding only ~1.5% overhead compared to standard fine-tuning, and avoids training a separate reference model unlike RHO-Loss.",
+        "The experimental scope is broad, covering SFT, DPO, SimPO, multiple model families/scales, full fine-tuning and LoRA, and several datasets.",
+        "The paper includes useful ablations on the number of in-context holdout examples (k), score update frequency (R), filtering thresholds, and embedding models.",
+        "The analysis of score distributions, weight dynamics, and qualitative examples provides some intuition about the method.",
+        "Limitations regarding noisy holdout sets and on-policy settings are discussed."
+      ],
+      "weaknesses": [
+        "Novelty is limited: the method is largely a combination of RHO-Loss-style holdout-loss scoring with in-context learning, closely related to one-shot learning and RHO-Loss. The core contribution is incremental.",
+        "Critical technical details for applying ICA to DPO and SimPO are missing. The score definition in Eq. (7) is for per-example negative log-likelihood, but DPO/SimPO use pairwise preference losses. The paper never explains how conditional losses with holdout context are computed for preference optimization.",
+        "The abstract and introduction claim dynamic reweighting as model parameters evolve, but the main experiments use R=1, i.e., static scores computed only at initialization. The dynamic aspect is only ablated and not used in the primary results.",
+        "Main experiments include the holdout set in the training data, which is an unrealistic data-selection setting and may inflate gains. When the holdout set is excluded from training (Appendix C.5), the method performs below RHO-Loss, undermining the central comparison.",
+        "Against RHO-Loss, the win rates are often around 50% or below (e.g., SimPO), so the claimed advantage over RHO-Loss is marginal and mostly efficiency-based. The efficiency gain is real but may not be sufficient for a top-tier contribution.",
+        "Evaluation for DPO/SimPO relies solely on GPT-4o win rates; no absolute metrics or human evaluation are provided. It is also unclear what the 'target output' is for preference datasets and how pairwise outputs are judged.",
+        "The default hyperparameters are not the best ones: R=5 and stronger embeddings improve win rates, yet the main results use R=1 and all-mpnet-base-v2. This weakens the claim of consistently strong performance.",
+        "The max-min normalization in Eq. (8) is not well-justified: it forces the lowest-scoring example in each batch to weight 0 and the highest to 1, regardless of absolute scores, which can distort contributions and discard data. No comparison to alternative normalizations is provided.",
+        "Eq. (3) appears to have a sign error for the holdout-loss term (should be +L(D_ho; theta_t) in the derivation), though the final score is unaffected. This suggests a lack of technical rigor.",
+        "Reproducibility is limited: code is not yet released, and important implementation details are missing, e.g., whether scores are detached, how kNN is applied to preference pairs, and how DPO/SimPO losses are conditioned on in-context holdout examples.",
+        "Ethical considerations, such as whether data reweighting may amplify biases or disproportionately discard certain data, are not discussed."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Proposes a principled and resource-efficient framework that connects holdout-loss-based data selection to in-context learning, eliminating the need for an auxiliary reference model or per-step retraining.",
+        "The practical implementation with kNN-selected in-context holdout examples and periodic score updates makes the method computationally attractive, with reported overhead of only ~1.5% versus ~10% for RHO-Loss.",
+        "Broad empirical evaluation across SFT, DPO, and SimPO, multiple backbones (LLaMA and Qwen at 3B/4B/8B), diverse datasets, full fine-tuning and LoRA, and additional ablations on k, R, filtering, and embedding models.",
+        "Includes useful analyses such as score distributions by domain, dynamics of ICA weights, qualitative high/low-score examples, and robustness on corrupted GSM8K CoT data.",
+        "Reproducibility details are largely provided, including training configurations, dataset splits, prompts, and a promise to release code and prompts.",
+        "The method consistently improves over standard training and one-shot learning in many settings, and the GSM8K noise-robustness result is a promising practical signal."
+      ],
+      "weaknesses": [
+        "The main experiments include the holdout set in the training data, so the 'holdout loss' is not truly held out. This likely inflates results and confounds reweighting with upweighting examples that the model already trains on. When the holdout is used strictly for scoring (Appendix C.5), the method underperforms RHO-Loss, weakening the central comparative claim.",
+        "It is unclear how the ICA score and the underlying per-example loss are defined for preference-based methods such as DPO and SimPO. The Bayesian derivation assumes a per-example negative log-likelihood, but DPO/SimPO use pairwise objectives; the paper does not specify how in-context conditioning interacts with the reference policy or how the holdout loss is computed for preference pairs.",
+        "The theoretical derivation is largely reproduced from RHO-Loss and contains a sign inconsistency between Eq. (3) and Appendix A. More importantly, the ICA approximation is heuristic: there is no direct validation that conditioning on in-context holdout examples approximates the parameter updates from fine-tuning on D_t ∪ D_ho.",
+        "The claim of dynamic reweighting is overstated. In the default setting R=1, scores are computed only once at initialization, so weights are largely static during training. The ablation shows that more frequent updates only modestly improve performance (e.g., 52.77% vs. 50% for R=5).",
+        "Evaluation relies heavily on GPT-4o win rates comparing responses to a 'target output,' which is non-standard for preference optimization and may reward imitation of the holdout distribution rather than genuine alignment. Standard benchmarks such as MT-Bench, AlpacaEval, or reward-model evaluations are absent.",
+        "Novelty is incremental: replacing RHO-Loss's reference model with in-context holdout examples is a natural combination of existing ideas. Against RHO-Loss, the main results are near parity (often around 50% win rate), so the primary advantage is efficiency rather than better data selection.",
+        "The method reweights all training examples rather than selecting a subset, so it does not reduce training data size or training cost. The title 'Data Selection' is somewhat misleading, as the main procedure is data reweighting with additional scoring overhead."
+      ]
+    }
+  }
+}
