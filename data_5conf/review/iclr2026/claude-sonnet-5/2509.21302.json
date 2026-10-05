@@ -19,6 +19,45 @@
         "Baseline methods (GPTQ, SmoothQuant, QuaRot) are generic techniques not specifically adapted to the VGGT architecture, so the comparison, while informative, may not represent the strongest possible baseline tuning effort, potentially inflating the apparent margin of improvement.",
         "Limited discussion of failure cases, sensitivity to hyperparameters (e.g., cluster count K, filtering threshold T), or scenarios where the proposed method might not generalize (e.g., very different scene types or extreme frame counts)."
       ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a genuine and practical problem: the first PTQ framework specifically targeting VGGT, a billion-scale 3D reconstruction transformer whose deployment costs are a real bottleneck.",
+        "Reasonably comprehensive empirical evaluation across two tasks (camera pose estimation on Co3Dv2, point map estimation on DTU) and multiple bit-widths (W8A8, W6A6, W4A4), with consistent improvements over several PTQ baselines (RTN, BRECQ, QDrop, DopQ-ViT, GPTQ, SmoothQuant, QuaRot).",
+        "Includes ablations isolating the contribution of rotation vs. scaling, filtering vs. clustering, and quantization granularity, which helps attribute gains to specific design choices.",
+        "Reports real-hardware latency/memory numbers and calibration cost, giving some practical grounding to the claimed speedups and compression ratios.",
+        "Identifies plausible and specific failure modes of generic PTQ methods on VGGT (data-independent special tokens causing heavy tails; multi-view redundancy destabilizing calibration), which is a useful empirical observation even if the fix is incremental."
+      ],
+      "weaknesses": [
+        "Limited methodological novelty: the core quantization technique is essentially a straightforward combination of existing rotation-based (QuaRot/Hadamard) and smoothing-based (SmoothQuant-style channel scaling) techniques applied in a particular order; the technical delta over prior art is incremental rather than a substantively new mechanism.",
+        "Theorem 3.2 is a generic maximum-entropy/uniform-sampling argument that is disconnected from the actual PTQ objective stated in Eq. 7 (minimizing quantization error); the proof shows that uniform sampling over regions maximizes entropy, not that it minimizes the quantization loss that the paper purports to approximate. This makes the 'theoretical justification' largely decorative rather than rigorously supporting the proposed calibration strategy.",
+        "The frame-aware clustering and noise-filtering heuristics, while intuitively motivated, are fairly ad hoc (percentile thresholding, fixed K, choice of correlation vector) and the comparison against vaguely defined 'label-clustered' and 'feature-clustered' baselines lacks sufficient detail to judge fairness or generality.",
+        "Evaluation is narrow in scope: only two datasets/tasks are tested, both using the same base model (VGGT-1B); no evaluation on other VGGT variants, other 3D transformer backbones, or additional tasks (e.g., depth, tracking) despite the architecture supporting them, which limits evidence that the method generalizes beyond the specific benchmark setup.",
+        "Claimed hardware speedups (2.5x) and compression (3.7x) lack sufficient implementation detail (e.g., actual INT4 GEMM kernels used, hardware platform specifics) to assess whether these are realistic deployment gains or based on idealized/simulated quantization.",
+        "No comparison to more recent or stronger rotation/quantization baselines beyond QuaRot/SmoothQuant/GPTQ (e.g., AWQ, SpinQuant, OmniQuant), despite these being natural and relevant comparators for a 2024/2025-era PTQ paper.",
+        "The paper's narrative overstates generality (e.g., 'first quantization framework for VGGTs' and broad claims about 3D reconstruction models) while the actual contribution and validation are tightly scoped to a single architecture and two benchmarks, raising concerns about the significance and impact claimed in the abstract/intro relative to the evidence provided."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Addresses a practical and underexplored problem: PTQ for large-scale 3D reconstruction transformers (VGGT), which is timely given VGGT's 1.2B parameters and high deployment costs.",
+        "Clear empirical identification of VGGT-specific quantization challenges (heavy-tailed activations from data-independent camera/register tokens, and calibration instability from multi-view data), motivating the proposed design choices with supporting visualizations (Fig. 3, Fig. 4).",
+        "Strong quantitative results: QuantVGGT consistently outperforms a comprehensive set of strong baselines (RTN, BRECQ, QDrop, DopQ-ViT, GPTQ, SmoothQuant, QuaRot) across W8A8, W6A6, and W4A4 settings on two different tasks/datasets (camera pose on Co3Dv2, point maps on DTU), with especially large margins at the aggressive W4A4 setting.",
+        "Thorough ablation studies isolating the contribution of each sub-component (rotation-only vs scale-only vs combined; filter-only vs cluster-only vs combined NFDS; rotation-then-scale vs scale-then-rotation ordering; quantization granularity choices), which helps validate the design.",
+        "Real-hardware efficiency validation (latency and memory) rather than only theoretical FLOPs/bit-width reduction, showing a credible 2.5x speedup and 3.7x memory compression with minimal extra overhead from the smoothing scheme.",
+        "Reasonable reproducibility effort: detailed hyperparameters, calibration costs, and stated intent to release code."
+      ],
+      "weaknesses": [
+        "Technical novelty is incremental: the two core techniques (Hadamard rotation and channel-wise smoothing) are adaptations/combinations of existing LLM quantization techniques (QuaRot, SmoothQuant, QuIP#) rather than fundamentally new mechanisms; the main contribution is engineering adaptation and the particular ordering/fusion of these known tricks for VGGT.",
+        "Theorem 3.2 is essentially a restatement of the maximum-entropy/uniform-distribution principle under a stratified sampling setup; it is mathematically simple and its practical instantiation (K-means clustering with heuristic K=8) is only loosely connected to the theorem's idealized assumptions (e.g., unknown true subdomain scales V_i), making the 'theoretical' framing somewhat overstated relative to its actual rigor and novelty.",
+        "Evaluation is limited to two tasks/datasets (camera pose on Co3Dv2, point maps on DTU) and a single base model (VGGT-1B); it remains unclear how well the method generalizes to other VGGT outputs (e.g., depth estimation, point tracking) or to other emerging 3D foundation models (e.g., Fast3R, Pi3), which the paper itself cites as related work but does not test against.",
+        "Despite headline claims of '98% of full-precision accuracy,' the W4A4 results show substantial degradation on stricter/tighter metrics (e.g., AUC@3 drops from 56.9 to 45.1, roughly 20% relative drop), suggesting the abstract's framing is somewhat optimistic and cherry-picks the most favorable metric.",
+        "No comparison against more recent/strong PTQ methods beyond QuaRot (e.g., AWQ, OmniQuant, SpinQuant, or other state-of-the-art rotation/learnable-equivalent-transformation methods), making the 'surpassing SOTA with a great margin' claim less convincing since QuaRot (2024) may not represent the true current best rotation-based baseline.",
+        "The calibration sampling pool size (400) and number of selected calibration samples (40) are relatively small and fixed; no sensitivity analysis is shown for how robustness scales with calibration set size or K (number of clusters) beyond the ablation bar chart with fixed settings.",
+        "Minor writing/clarity issues, including grammatical errors (e.g., 'Quantvggt preserves 99.9% performance') and some overly promotional language in places that slightly undercuts scientific rigor."
+      ]
     }
   },
   "v3": {
@@ -43,6 +82,46 @@
         "The fixed choice of α=0.5 for the scaling factor, while shown to be relatively robust in a narrow sensitivity sweep (0.3–0.7), is not deeply analyzed for its interaction with the rotation step across varied layer types.",
         "No explicit limitations section discussing where the method still underperforms (e.g., tight-threshold pose accuracy at 4-bit, or scenarios with atypical first-frame statistics beyond the constructed extreme-case test).",
         "Comparisons omit possibly relevant recent quantization methods tailored to multi-view or geometric transformers (if any exist), and the baseline set, while reasonably broad, is drawn mostly from LLM/ViT quantization literature adapted post hoc."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a practical and timely problem: compressing the billion-scale VGGT 3D reconstruction transformer for deployment, which has not previously been studied for PTQ.",
+        "Reasonably comprehensive empirical evaluation across multiple tasks/datasets (CO3Dv2 camera pose, DTU point maps, 7-Scenes/NRGBD point cloud reconstruction) and multiple bit-widths (W8A8, W4A4).",
+        "Real-hardware latency/memory measurements (CUTLASS INT kernels on RTX4090) rather than only simulated quantization error, giving practical credibility to the claimed speedups.",
+        "Extensive ablations in the appendix (granularity, Hadamard seed/alpha sensitivity, calibration set size/threshold/cluster count, extreme-case robustness, cross-architecture test on Fast3R, comparison with token-merging acceleration FastVGGT).",
+        "Clear component-wise ablation (Table 4, Fig. 5) showing incremental contributions of rotation, scaling, and the sampling strategy."
+      ],
+      "weaknesses": [
+        "Limited technical novelty: the core method is essentially a combination of existing rotation-based (QuaRot/QuIP#-style Hadamard) and smoothing-based (SmoothQuant-style channel scaling) quantization techniques, applied sequentially with a tweak to compute the scale on the rotated space. Prior works (SpinQuant, OmniQuant, AffineQuant, QuIP#) already combine rotation and scale/clip optimization; these are cited in related work but never used as experimental baselines, leaving the actual incremental contribution versus these closely related hybrid methods unclear.",
+        "Theorem 3.2 is a fairly trivial maximum-entropy/uniform-sampling argument dressed up with heavy notation; its practical implication (cluster the data and sample proportionally/uniformly within clusters) is a long-standing heuristic in calibration-set construction and does not provide much new insight specific to 3D/VGGT.",
+        "The abstract's headline claim ('maintaining reconstruction accuracy above 98%') is cherry-picked from the easiest metric (AUC@30); stricter metrics such as AUC@3 degrade far more severely (54.9 → 43.6, ~79% retention at W4A4, 20 frames), which is a meaningfully overclaiming summary of the actual results.",
+        "The noise-filtering score (Eq. 9-11) and frame-correlation clustering (Eq. 12) are somewhat ad hoc heuristics tailored narrowly to VGGT's camera/register-token structure; while a Fast3R generalization experiment is included, the broader applicability of these specific design choices to other 3D transformer architectures is not well established.",
+        "Baseline comparisons at W4A4 are mostly against generic LLM/ViT quantization methods not designed for 3D multi-view transformers (unsurprising they underperform); stronger, more directly comparable hybrid rotation+smoothing PTQ baselines (e.g., SpinQuant, OmniQuant) are missing.",
+        "Writing/presentation issues: inconsistent capitalization ('Quantvggt'), some unclear phrasing, and the overall narrative overstates the significance of combining two well-known smoothing techniques as a major new 'dual-smoothed' contribution.",
+        "Efficiency results are reported on a single GPU (RTX 4090) and largely a single setting, limiting confidence in generalization of speedup claims across hardware and larger-scale deployment scenarios."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Addresses a novel and practically relevant problem: no prior work has studied PTQ for billion-scale 3D reconstruction transformers like VGGT, and the paper provides a clear, well-motivated analysis of why generic LLM/ViT quantization methods fail in this setting (data-independent special tokens, multi-view calibration instability).",
+        "Technical contributions (Dual-Smoothed Fine-Grained Quantization, Noise-Filtered Diverse Sampling) are grounded in clear empirical observations (Figs. 3-4) and are logically connected to the identified challenges.",
+        "Extensive experimental validation across multiple tasks (camera pose estimation, point map estimation, point cloud reconstruction) and datasets (CO3Dv2, DTU, 7-Scenes, NRGBD), with comparison to a broad and reasonably strong set of baselines (RTN, BRECQ, QDrop, DopQ-ViT, RepQ-ViT, GPTQ, AWQ, SmoothQuant, QuaRot).",
+        "Real hardware efficiency measurements (not just theoretical FLOPs) showing 2.5x speedup and 3.7x memory compression on actual GPU inference with CUTLASS kernels.",
+        "Thorough ablations isolating the contribution of each component (rotation vs. scale vs. combined, filtering vs. clustering vs. combined) and sensitivity analyses (Hadamard seed, alpha, cluster number, threshold, calibration size) that strengthen confidence in robustness.",
+        "Appendix is unusually comprehensive, proactively addressing many likely reviewer concerns: generalization to another architecture (Fast3R), comparison to orthogonal acceleration methods (FastVGGT), mixed-precision/asymmetric/QAT variants, and detailed computation cost breakdowns.",
+        "Provides a theoretical justification (Theorem 3.2, maximum-entropy argument) for the calibration sampling design, which is a nice touch even if the proof itself is simple."
+      ],
+      "weaknesses": [
+        "Individual technical components are largely adaptations of existing ideas (Hadamard rotation from QuaRot, channel smoothing from SmoothQuant, outlier filtering/clustering for calibration) rather than fundamentally new mechanisms; the core contribution is primarily a careful combination/adaptation to a new domain rather than a conceptually novel quantization technique.",
+        "Theorem 3.2's maximum-entropy proof is fairly generic and only loosely connects to the actual practical heuristic used (K-means clustering + uniform sampling); the gap between the idealized proportional-sampling guarantee and the heuristic clustering implementation is not rigorously bridged.",
+        "Since no VGGT-specific quantization baselines exist, all comparisons are against generic PTQ methods applied out-of-domain, which may somewhat inflate the perceived margin of improvement; a more apples-to-apples ablation showing how much of the gain is domain adaptation vs. genuinely better technique would strengthen claims.",
+        "Performance degradation at W4A4 is still substantial on stricter metrics (e.g., AUC@3 drops from 54.9 to 43.6, and AUC@5 drops further), which is understated by the abstract's headline '98%' claim that appears to reference only the least strict metric (AUC@30); this selective framing could mislead readers about the true quality gap at aggressive quantization.",
+        "Measured latency speedup (2.5x) is notably below the naive 4x expectation from W4A4 quantization, and the paper offers limited analysis of this gap (e.g., kernel/hardware bottlenecks).",
+        "Generality claims are based on only two architectures (VGGT and Fast3R); broader architectural diversity (e.g., different 3D foundation models) would better support claims of general applicability to '3D reconstruction transformers'.",
+        "Clarity could be improved regarding how the frame-aware correlation features are computed and clustered at scale, and how sensitive the method is to frame ordering or non-standard first-frame selection beyond the single extreme-case ablation provided."
       ]
     }
   }

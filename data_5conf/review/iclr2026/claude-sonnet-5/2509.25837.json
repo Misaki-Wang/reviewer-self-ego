@@ -20,6 +20,45 @@
         "Task-specific distillation experiments use a single teacher/student pair per task and relatively small training sets (~1,000 samples), which may limit generalizability of the task-specific results.",
         "The paper's motivating examples (e.g., Fig. 1b) are somewhat exaggerated for illustration but real-world logit gaps of that scale may be less common, and the paper does not quantify how often such large smoothing effects actually manifest in the models studied."
       ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Clear theoretical motivation: identifies a real limitation of direct logit distillation (lack of shift invariance) and grounds the proposed fix in the concrete score / discrete score-matching framework with formal proofs (consistency, solution superset).",
+        "Addresses a genuine practical obstacle (O(|V|^2) cost and training instability of naive concrete-score matching) with an efficient O(|V|) analytic gradient derivation (Theorem 3), which is a non-trivial and useful technical contribution.",
+        "Reasonably broad empirical scope: task-agnostic instruction-following (GPT-2, OpenLLaMA) and task-specific (summarization, translation, math) experiments, plus combination with on-policy techniques (ImitKD, GKD, DistiLLM) showing orthogonality.",
+        "Thoughtful analysis of the fidelity-diversity trade-off and how the two weighting functions (w1, w2) can interpolate between mode-seeking and mode-covering behavior, supported by Self-BLEU/Distinct-N and temperature ablations.",
+        "Ablation studies (Table 4, Figure 5, Figure 8) help isolate the contribution of the broader solution set versus the weighting choices and justify the analytic gradient over Monte Carlo estimation."
+      ],
+      "weaknesses": [
+        "Empirical gains over the strongest baselines are often marginal and within/near one standard deviation (e.g., Table 1: CSD avg 20.65 vs SRKL 20.00, with overlapping per-benchmark confidence intervals; CSD does not win on Self-Instruct or Vicuna Eval), making the practical significance of the improvement unclear without formal significance testing.",
+        "The baselines in Table 1/3 (SKL, AB, SRKL, TV) reportedly underperform relative to their original papers, which the authors attribute to lacking pretraining/on-policy components; this raises concerns that comparisons may not be fully apples-to-apples or that baseline tuning was not equally thorough as for CSD.",
+        "Several baselines catastrophically fail on GSM8K (zero accuracy for TV, SKL, SRKL) with degenerate repetitive outputs, which seems more consistent with an implementation/training instability issue for those methods than a fundamental property of their divergence choice; this makes the task-specific comparison on GSM8K look cherry-picked or under-debugged for baselines, weakening the credibility of the advantage claimed for CSD.",
+        "All experiments are capped at a 7B teacher / 3B student scale, and most detailed analysis uses a very small GPT-2-0.1B/0.3B student; it is unclear whether the benefits of CSD (versus simpler KL/RKL variants) persist at the much larger scales relevant to real-world LLM deployment.",
+        "The core idea largely combines two existing techniques — concrete score matching (Meng et al. 2022; Lou et al. 2024) and the log-transform stabilization trick for likelihood-ratio objectives (Higuchi & Suzuki, 2025) — adapted to autoregressive LLM distillation; the conceptual novelty beyond this combination is limited, and the paper does not clearly differentiate itself from straightforward engineering of known ideas.",
+        "Reliance on ROUGE-L as the primary metric for instruction-following is a known weak proxy for generation quality; GPT-4-based evaluation is reported only for one model pair/setting (Figure 4), limiting the robustness of the human-alignment claims.",
+        "The paper does not report wall-clock/memory overhead comparisons between CSD and simpler baselines (KL, DLD) despite emphasizing efficiency, nor sensitivity analysis to the weighting-function design choices beyond a small discrete set (T, U, S), leaving the practical tunability/robustness of the method under-explored."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Clear and well-motivated theoretical contribution: identifies a concrete limitation of direct logit distillation (lack of logit shift invariance) and addresses it by adapting concrete score matching to autoregressive LLMs, with rigorous proofs of consistency (Prop. 1) and solution-set superiority over DLD (Thm. 2).",
+        "Solves a genuine practical obstacle (training instability from likelihood-ratio blowup and O(|V|^2) cost) via a log-transform trick and an efficient analytic O(|V|) gradient computation (Thm. 3), which is both theoretically justified and empirically shown to outperform Monte Carlo approximation.",
+        "Comprehensive empirical validation across three model families (GPT-2, OpenLLaMA, GEMMA) up to 7B parameters, multiple tasks (instruction-following, summarization, translation, math reasoning), and consistent gains over 9+ strong baselines (KL, RKL, GJS, SKL, SRKL, AB, TV, Jeffrey, Sym-KL).",
+        "Demonstrates orthogonality/complementarity with on-policy distillation techniques (ImitKD, GKD, DistiLLM), showing that CSD can be combined with existing pipelines for further gains, which strengthens the practical relevance of the contribution.",
+        "Good supporting analysis: fidelity-diversity trade-off curves showing CSD Pareto-dominates prior losses, temperature-based control, gradient analysis connecting CSD to KL's structure, and informative qualitative case studies showing baseline failure modes (e.g., degenerate repetition) that CSD avoids.",
+        "Ablation studies isolate the effect of the broader solution set (CSD vs DLD under matched weighting) and the design-space flexibility (w1, w2 choices), providing good empirical support for the theoretical claims."
+      ],
+      "weaknesses": [
+        "Absolute performance improvements over the best prior objectives (e.g., SRKL in Table 1) are often modest and sometimes within overlapping confidence intervals, which somewhat tempers the practical significance of the gains.",
+        "The efficient gradient computation relies on the factorization assumption w(yt,x) = w1(yt)w2(x), which restricts the practically usable weighting function design space relative to the fully general objective in Eq. (8); the paper does not explore how restrictive this is in practice.",
+        "The choice/search over (w1, w2) combinations (S,S), (U,S), (T,S), etc. appears largely empirical/heuristic rather than principled, and the paper does not provide guidance on how to select weights a priori for a new task without trial and error.",
+        "Scale is limited to 7B teacher models; no evidence is given for how CSD behaves at larger (e.g., 13B+) scale or with more modern/larger-vocabulary tokenizers, which is relevant given LLM deployment trends.",
+        "Some reported baseline numbers (e.g., SKL, AB) are acknowledged to underperform their original papers due to lacking pretraining loss or on-policy components, which complicates fair comparison and may understate baseline competitiveness.",
+        "Task-specific GSM8K results still show a large absolute gap to the teacher (e.g., ~26% vs ~60% accuracy), and while CSD is the best among compared losses, the practical utility of logit-level distillation for complex reasoning tasks remains only partially demonstrated.",
+        "No analysis of additional computational/memory overhead (training time, GPU memory) of CSD relative to standard KL/RKL baselines despite the stated efficiency improvements over the naive O(|V|^2) approach."
+      ]
     }
   },
   "v2": {
@@ -42,6 +81,45 @@
         "The efficient linear-time gradient (Theorem 3) requires the restrictive factorized weighting assumption w(yt,x)=w1(yt)w2(x); the more general joint-weighting case must fall back to higher-variance Monte Carlo estimation, limiting the practical flexibility touted as a contribution.",
         "The theoretical solution-superset result (Theorem 2) holds only in the infinite-capacity limit; it is not clear how much this matters in practice for finite-capacity students, and the empirical evidence for this (Figure 9, Table 5) is somewhat indirect/qualitative.",
         "Some case studies (Tables 11-15) show baselines degenerating into repetitive loops, which, while illustrative, may partly reflect insufficiently tuned baseline training/sampling settings rather than a fundamental property of those losses, weakening the strength of the qualitative comparison."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "The paper provides a well-motivated theoretical framework connecting concrete score matching (from discrete diffusion models) to autoregressive LLM knowledge distillation, with rigorous proofs for consistency (Prop. 1) and a strictly larger optimal solution set compared to direct logit distillation (Thm. 2).",
+        "An efficient O(|V|) analytic gradient computation (Thm. 3) is derived to avoid the naive O(|V|^2) cost of the double-summation loss, which is a genuinely useful engineering contribution with accompanying algorithmic details and Monte Carlo alternative.",
+        "The experimental scope is broad, covering task-agnostic instruction following, task-specific (summarization/translation/math), and general chat distillation across model scales from GPT-2-0.1B up to Gemma2-9B-IT, together with extensive ablations (weighting choices, temperature scaling, calibration, gradient coefficient diversity, logit offset visualizations).",
+        "The flexible (w1, w2) weighting design is an interesting conceptual contribution that unifies mode-seeking/mode-covering behavior and recovers existing baselines (e.g., DLD-mean) as special cases, offering a design space rather than a single fixed loss.",
+        "The orthogonality experiments (combining CSD with on-policy methods like ImitKD/GKD/DistiLLM) and consistent small improvements across these combinations show some practical versatility."
+      ],
+      "weaknesses": [
+        "Quantitative improvements over strong recent baselines are frequently marginal and within or close to reported standard deviations (e.g., Table 1 CSD avg 20.65 vs SRKL 20.00/TV 19.97; Table 4 CSD vs DistiLLM-2 differences of ~0.01-0.4 points on several benchmarks), which weakens the claim of \"consistently surpasses\" recent objectives.",
+        "Several baselines (RKL, DLD(S), TV, SKL, SRKL) collapse to near-zero or degenerate repetitive outputs in Table 3 and the qualitative case studies (Tables 11-15), which is an unusually severe failure mode for well-established methods from the literature; this raises concern about whether baselines were adequately tuned for these specific low-resource/task-specific settings, potentially inflating the apparent advantage of CSD.",
+        "The core practical instantiation requires manually selecting among several weighting combinations (S,S / U,S / T,S / etc.) per task via empirical trial (e.g., CSD(S,S) fails on GSM8K/summarization while CSD(T,S) must be used instead), undermining the \"flexible design space\" framing since there is no principled, a priori rule for weighting selection and practitioners must still search.",
+        "Theorem 2's core insight—that softmax logit shift invariance expands the solution set relative to a plain MSE logit loss—is a comparatively simple observation once stated, and the practical benefit of this broader solution set is not isolated cleanly from other confounds (e.g., different gradient dynamics, normalization) in the empirical comparisons.",
+        "Scale of experiments is still modest relative to current LLM distillation practice: most ablation analysis and the most favorable results are on GPT-2 (0.1B-1.5B) students; the only large instruction-tuned, modern-model experiment (Table 4, Qwen2.5/Gemma2) shows mixed results across judges (e.g., AlpacaEval win rate where DistiLLM-2 actually beats CSD(T,S) is a tie and CSD(S,S) loses on Qwen2.5), limiting confidence in scalability claims.",
+        "Task-specific results (Table 3) report single-run numbers without variance, and the explanation for CSD(S,S) catastrophic failure there (mode-seeking collapse) is somewhat post-hoc and not rigorously diagnosed.",
+        "The paper's writing is dense and heavily notation-laden in the main text, pushing most illustrative/intuitive content (e.g., key visualizations of logit offsets, calibration) to the appendix, which can hinder accessibility and verification by readers without working through all appendix material."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Provides a well-motivated theoretical framework (concrete score matching) that elegantly generalizes/extends direct logit distillation (DLD) to remove the logit-shift-invariance restriction, with rigorous proofs of consistency (Prop. 1) and solution-set superiority over DLD (Thm. 2).",
+        "Solves a genuine engineering challenge: converts an O(|V|^2) concrete-score objective into a stable, linear-time analytic gradient (Thm. 3), with both analytic and Monte Carlo variants provided and compared.",
+        "Extensive empirical validation across a wide range of settings: task-agnostic instruction following, task-specific (summarization/translation/math), and general chat distillation, spanning model scales from GPT-2-0.1B up to Gemma2-9B-IT teachers, with 9+ competitive baselines.",
+        "Demonstrates orthogonality with on-policy distillation techniques (ImitKD, GKD, DistiLLM), showing consistent complementary gains when CSD is substituted as the loss function.",
+        "Thorough ablation studies (weighting function choices, temperature scaling, calibration error, gradient coefficient diversity, logit-offset analysis) that convincingly support the theoretical claims about solution-set breadth and fidelity-diversity trade-offs.",
+        "Good diagnostic/qualitative analysis (e.g., GSM8K case studies) showing that several baselines degenerate into repetitive or diverging outputs while CSD remains stable, adding credibility beyond aggregate metrics.",
+        "Clear, well-organized presentation of theory, algorithm, and the connection/distinction to KL, DLD, and prior score-matching literature; code snippet provided for reproducibility."
+      ],
+      "weaknesses": [
+        "Empirical improvements over strong recent baselines (e.g., SRKL, DistiLLM-2, AB) are often modest/incremental rather than dramatic (e.g., Table 1 average 20.65 vs. 20.00 for SRKL; mixed results in Table 4 where DistiLLM-2 wins on AlpacaEval WR for one backbone), which tempers the significance of the claimed consistent superiority.",
+        "The practical usability of CSD is complicated by the need to select among many weighting instances (S,S), (U,S), (T,S), adaptive schedules, etc., with the best choice being task/data-dependent (e.g., (S,S) fails badly in low-data task-specific settings while (T,S) is needed) — this undermines the simplicity/plug-and-play appeal and suggests additional tuning overhead not fully quantified.",
+        "Some reported baseline numbers are noted by the authors themselves to underperform relative to original papers, which could raise concerns about fairness/faithfulness of the baseline reproduction despite stated justifications.",
+        "Scale of experiments, while broader than many papers, still tops out at 9B teacher / 2B student; true large-scale (tens of billions of parameters) validation and wall-clock/memory trade-off analysis against the strongest current distillation baselines is limited to one appendix table.",
+        "GSM8K results show very poor absolute performance for most methods (many near-zero accuracy), raising questions about whether the experimental protocol (model scale, data size) is adequate to showcase meaningful differences in reasoning ability, even though CSD is comparatively best.",
+        "Limited discussion of how sensitive CSD's gains are to hyperparameters such as weighting temperature or learning rate beyond the ablations already shown, and no analysis of failure cases where CSD underperforms."
       ]
     }
   }

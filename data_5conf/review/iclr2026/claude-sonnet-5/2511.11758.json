@@ -22,6 +22,48 @@
         "The method currently ignores side-chain geometry and sequence information entirely, limiting its immediate applicability to full multimodal protein modeling as motivated in the introduction.",
         "The paper is very dense with heavy notation and 20+ algorithms relegated to appendices, which, despite aiding reproducibility, significantly hinders readability and may hamper independent verification and adoption by the community."
       ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The core idea—a BPE-style hierarchical, geometry-grounded tokenizer that avoids fixed-size continuous codebooks—is conceptually novel and well-motivated relative to VQ-VAE PSTs such as ESM3/ProToken.",
+        "The paper provides a very thorough algorithmic specification (k-medoids clustering, SE(3) forward/inverse kinematics for glue correction, merge-tree construction), which in principle supports reproducibility.",
+        "A fairly broad battery of experiments is attempted: compression/distortion Pareto curves, OOD generalization, data efficiency, token utilization/perplexity, downstream transfer across 12 tasks, a small generative language-modeling proof of concept, and qualitative interpretability case studies.",
+        "The hierarchical representation-transfer idea (propagating pretrained PLM embeddings up/down a merge tree) is an interesting way to inject structural inductive bias into existing feature extractors."
+      ],
+      "weaknesses": [
+        "Misleading/overstated claims: the Results text states GEOBPE \"is capable of generating 99% unique and designable backbones,\" but Table 7 shows Designability (scTM>0.5) is only 3-4%, while 99% refers to Uniqueness, a different and much weaker metric. This conflation materially overstates the generative quality of the method.",
+        "The abstract claims GEOBPE is \"consistently outperforming leading PSTs across 12 tasks,\" yet Table 1/4 show GEOBPE underperforming ESM3/AminoASeed by large margins on several splits (e.g., Rep -24%, FlexRMSF -8%, Homo-Fold -21%), contradicting the \"consistent\" framing.",
+        "Downstream transfer comparison is confounded: GEOBPE-induced features use Θ = ESM3 (a 236M-structure pretrained model) as the base feature extractor, whereas VQ-VAE baselines use their own jointly-trained encoders as both Θ and V. The reported gains may largely reflect the strength of ESM3 embeddings rather than the GEOBPE vocabulary itself, making the comparison apples-to-oranges.",
+        "Hyperparameters (num_p, bins, bin_strategy) are explicitly re-tuned per experiment (token efficiency vs. Pareto vs. downstream transfer), which raises concerns about cherry-picking configurations for each benchmark rather than demonstrating a single robust, general-purpose tokenizer.",
+        "The ablation showing GEOBPE(1% data) matches full-data performance is framed positively as \"data efficiency,\" but the paper itself admits this likely reflects underfitting/limited capacity to learn task- or data-specific signal, which undercuts the headline \"data efficiency\" selling point.",
+        "No comparison is made to simpler, well-established structural alphabets (de Brevern blocks, Geometricus, HMM-based alphabets) that are extensively discussed in Related Work, despite these being natural baselines for a motif-vocabulary approach.",
+        "The CATH FunFam domain-agreement results (99.97% recall, F1≈0.996) seem implausibly close to perfect and are only contrasted against a weak random-partition baseline; no comparison is made to other PSTs or structural alphabets on this metric, making it hard to assess whether this is a genuinely strong result or an artifact of the fragment-based scoring protocol favoring many small segments.",
+        "The interpretability case studies (SLC25A20, 14-3-3:Tau) are qualitative narratives with substantial hedging language (\"likely,\" \"could,\" \"suggests\") and no quantitative validation against known functional annotations beyond the domain-overlap statistic, limiting their evidentiary value.",
+        "The method has very high implementation complexity (dozens of algorithms, many hyperparameters, several distinct quantization/optimization subroutines), which raises reproducibility concerns in practice despite the pseudocode being provided; no public code link is actually given in the submission.",
+        "The computational complexity analysis (App. H) shows potentially quadratic worst-case behavior in merge-step sizes, and scalability beyond ~21K vocabulary / larger proteins is explicitly left as an open question, limiting confidence in practical deployment at scale."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Introduces a genuinely novel idea: a geometry-grounded analog of byte-pair encoding for protein backbones, combining k-medoids clustering of geometric fragments with differentiable inverse-kinematics-based 'glue' correction to control drift — a creative departure from the now-standard VQ-VAE paradigm for protein structure tokenizers.",
+        "Extensive and fairly comprehensive empirical evaluation: compression-distortion Pareto analysis, OOD generalization (CAMEO/CASP14), data efficiency, token utilization/perplexity, a custom small-scale generative evaluation protocol (SSLM-Eval), 12 downstream tasks across 24 splits, and interpretability case studies against CATH FunFam annotations and expert review.",
+        "Strong quantitative results on compression (0.27-0.36x BPR of ProToken) and robustness to distribution shift (test/train RMSD ratio ~1.1-1.3 vs 6.4x for VQ-VAE baselines), with much less training data, which if correct are meaningful practical advantages.",
+        "The paper provides an unusually detailed methods section with formal definitions (SE(3) frames, glue parameters, motif formulation) and a very extensive appendix with full pseudocode for all subroutines, complexity analysis, and hyperparameter tables, which aids reproducibility.",
+        "Interpretability analysis (agreement with CATH functional families, expert case studies on real proteins like SLC25A20 and the 14-3-3:Tau complex) is a nice differentiator from prior vector-quantized tokenizers whose codes are not directly interpretable.",
+        "Good set of ablations (removing glue optimization, varying Mmax, task-specific vs task-agnostic vocabularies, 1% data training) that help validate design choices."
+      ],
+      "weaknesses": [
+        "Hyperparameters (num_p, bins, bin_strategy) are explicitly tuned differently for different experiments/tables (token efficiency vs Pareto vs downstream transfer, as listed in App. I), which raises concerns about cherry-picking configurations per benchmark rather than using one fixed, principled recipe — this complicates fair comparison and interpretation of 'the' GeoBPE result.",
+        "The BPR compression comparison against ESM3 (0.016-0.021x) may be misleading since BPR includes the tokenizer's description length L(T); a 236M-parameter model's encoder/decoder weights dominate this term in a way that is not really comparable to GeoBPE's much simpler non-parametric construction — the comparison conflates model-size cost with per-sample tokenization efficiency.",
+        "Downstream transfer results are inconsistent: GeoBPE underperforms ESM3/baselines substantially on several tasks (e.g., Rep -24%, Homo Fold -21%, CatInt SupFam -1.3%), and the headline average gains are driven by a few large wins (e.g., BindBio +51%), which is not clearly discussed or explained — raising questions about when/why the method helps or hurts.",
+        "The near-perfect CATH FunFam agreement scores (99.97% recall, F1=0.996) seem almost too good and likely reflect a lenient evaluation protocol (selecting the best consecutive block of many short predicted segments to cover a domain), which could trivially inflate recall/IoU regardless of tokenizer quality; the random-segmentation baseline comparison, while included, does not fully allay this concern given the construction still allows arbitrary combination of many fine segments.",
+        "The generative evaluation (SSLM-Eval) uses a very small transformer (8 layers, d=256) and only 100 generated structures, which is a weak proxy for assessing true generative utility of the tokenizer at scale; the paper itself acknowledges this is only a 'small-scale proof of concept.'",
+        "The method's practical complexity (multiple interacting hyperparameters: Mmax, num_p, bins, glue_opt_every, bin_strategy, quantizer snapping, etc.) combined with its multi-stage alternating local/global optimization pipeline raises reproducibility and usability concerns beyond what the pseudocode alone can mitigate, especially for practitioners who are not the original authors.",
+        "No side-chain or amino-acid sequence information is incorporated, limiting applicability to tasks that depend on side-chain-level function, and this is only briefly acknowledged as future work rather than explored.",
+        "Worst-case computational complexity is quadratic in corpus/motif size absent capping (Mmax), and while the authors argue empirically that larger Mmax gives no benefit, this is only validated in one ablation setting rather than systematically."
+      ]
     }
   },
   "v2": {

@@ -20,6 +20,27 @@
         "Novelty is incremental relative to REST and PIA: the core algorithmic ideas (suffix-array datastore, prefix backoff, tree-based candidate merging) are extensions/re-implementations of existing methods with engineering improvements (sampling continuations, batch parallelization) rather than a conceptually new mechanism, which somewhat tempers the paper's claimed contribution."
       ]
     },
+    "exp3_negative": {
+      "oa": 2.5,
+      "strengths": [
+        "Addresses a practically important problem: making speculative decoding effective at the large batch sizes typical of production LLM serving, which is under-studied relative to single-batch SD.",
+        "The method is an interesting engineering combination of prompt/self-output retrieval and a REST-style suffix-array datastore, with several concrete, well-motivated optimizations over REST and PIA (regular-interval sampling of continuations instead of truncation, batch-parallel OpenMP retrieval, adaptive shorter-prefix fallback with merging).",
+        "The roofline/FLOPs-IO analysis in Section 3.2 relating batch size, speculation length, and context length is a useful conceptual contribution that helps explain why naive SD underperforms at scale and clarifies when speculation is 'free'.",
+        "The empirical evaluation spans multiple context lengths, two model families (Llama2-7B, Llama3-8B), and a real continuous-batching serving stack (vLLM-based), going beyond toy single-request benchmarks common in prior SD papers.",
+        "The ablation decomposing contribution of input-based vs. datastore-based candidates (Fig. 4a) supports the paper's central claim of complementarity between sources."
+      ],
+      "weaknesses": [
+        "All empirical results are obtained on a single, non-mainstream accelerator (Huawei Ascend 910B4); there is no validation on standard NVIDIA GPUs with production kernels (e.g., optimized cuBLAS/FlashAttention implementations), which undermines the generality of the throughput/latency claims and the roofline analysis despite a brief, unvalidated mention that 'similar outcomes' hold on NVIDIA hardware.",
+        "The large-batch comparison only includes parameter-free baselines (REST, PIA) and omits head-to-head comparison with the trained/hybrid methods the paper itself identifies as effective at large batch sizes (e.g., ReDrafter, Medusa, EAGLE-2, MagicDec), so the central claim that the method is competitive 'without training' at scale is not directly substantiated against the strongest competitors.",
+        "Key hyperparameters (prefix length P, candidate cap M, scaling/discount/calibration factors) are set via an underspecified 'simple grid search' with no reported values, sensitivity analysis, or discussion of overfitting risk to the specific benchmark/datastore combination used.",
+        "No code, datastore, or system artifacts are released or promised, and the custom vLLM integration and Ascend-specific kernel details are not described in enough depth to reproduce the pipeline or performance numbers.",
+        "The paper notes float16-induced output differences between baseline and speculative decoding without clarifying whether the verification procedure is strictly distribution-preserving/lossless in all reported settings (greedy vs. sampling), leaving the correctness guarantee somewhat underspecified.",
+        "Evaluation model sizes (7B/8B) are small relative to the paper's own motivating claim about 'tens to hundreds of billions of parameters' models in data-center deployment; no experiments at larger scale or in actual multi-GPU/distributed settings are shown despite extensive discussion of disaggregated serving.",
+        "Figures lack error bars, multiple seeds, or variance reporting, and statistical significance of the reported speedups is not assessed.",
+        "The contribution is primarily a systems/engineering optimization for LLM inference with limited direct relevance to core NLP/computational-linguistics questions (e.g., no analysis of output quality, task performance, or linguistic properties beyond token-acceptance rate), raising questions about fit for an ACL venue versus an MLSys-oriented one.",
+        "Some claims are stated more strongly than the evidence supports (e.g., 'we disprove the widespread claim that Speculative Decoding is impractical for real LLM serving systems'), given the narrow hardware/model scope of the experiments."
+      ]
+    },
     "exp3_positive": {
       "oa": 3,
       "strengths": [
@@ -77,6 +98,25 @@
         "Despite stating results are \"averaged over five runs\" in several places, the paper does not report variance, confidence intervals, or statistical significance for the latency/throughput/speedup comparisons, making it hard to assess whether some of the close margins (e.g., vs. EAGLE-3) are robust.",
         "The theoretical hardware-aware analysis explicitly ignores inter-GPU communication costs under tensor parallelism, which is precisely the regime used for the larger 70B experiments, weakening the rigor of the claimed near-optimal speculation-length rule in the settings where it is most needed.",
         "Overall claims in the abstract (\"performance on par with leading training-based approaches\") are somewhat optimistic relative to the body of results, where EAGLE-3 wins on several standard short-context English benchmarks; the paper would benefit from more calibrated framing of when SSSD is/isn't competitive."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3.5,
+      "strengths": [
+        "Addresses a practically important problem: training-free speculative decoding that avoids the deployment/maintenance burden of draft models, with a clear focus on real-world serving constraints (batching, cold-start, domain/language shift, long context) that much prior SD work ignores.",
+        "Very broad and realistic empirical evaluation: multiple base models (Llama-3.1-8B, Llama-3.3-70B, Qwen3-14B, DeepSeek-R1-Distill-Llama-8B), multiple benchmarks (MT-Bench, GSM8k, MATH-500, HumanEval, SWE-Bench, PG-19), multiple languages including low-resource ones, and multiple deployment regimes (single GPU, tensor-parallel, prefill/decode disaggregation, reasoning with sampling).",
+        "Real system integration into SGLang rather than a simulator, giving credible end-to-end latency-throughput curves that are directly relevant to practitioners, along with fair, matched-datastore comparisons against REST, PLD, and Lookahead.",
+        "The hardware-aware speculation-length selection is grounded in an explicit roofline-model derivation (Section 3.2, Appendix B) rather than being purely heuristic, and is validated empirically across context lengths and batch sizes.",
+        "Useful ablations isolating the contribution of the input vs. datastore sources (Figure 3a) and cold-start/multilingual adaptation curves (Figure 4), which directly support the paper's central claims about robustness under distribution shift.",
+        "Transparent discussion of limitations (MoE, MLA/FlashMLA incompatibility, CPU/host-memory dependency) and of ethical implications (disparate multilingual speedups), which strengthens the credibility of the claims."
+      ],
+      "weaknesses": [
+        "The core algorithmic novelty is modest: the method largely recombines existing ideas (REST-style suffix-array datastore, Lookahead/PLD-style input trie matching, tree-based speculative verification) with engineering refinements rather than introducing a fundamentally new mechanism.",
+        "The candidate-fusion weighting scheme (Section 3.1.3, Algorithm 3) relies on several manually chosen discount/scaling constants (e.g., 0.6, 0.1×match) selected via an unspecified 'simple grid search'; no sensitivity analysis or ablation is given to show robustness of these hand-tuned hyperparameters across the very domain/language shifts the paper claims to handle well.",
+        "Limited reporting of variance/uncertainty: although some results are averaged over five runs, confidence intervals or variance are rarely shown in the main figures (mostly single curves), making it hard to assess the statistical robustness of comparisons, especially where margins between SSSD and EAGLE-3 are small (e.g., MT-Bench, HumanEval).",
+        "Reproducibility is only partially supported by the text: many implementation details (exact dec_len/branch_len values used per experiment, exact grid-search procedure and ranges for fusion weights, minimum-threshold values for prefix shortening) are scattered or unspecified, which could hinder exact replication even with released code.",
+        "Baseline comparison fairness is only partially addressed: Lookahead is evaluated cold in the main end-to-end experiments (since SGLang lacks warm-start support), and EAGLE methods are run with default (non-SSSD-tuned) parameters, which the authors acknowledge but do not fully control for via a systematic hyperparameter sweep for the baselines.",
+        "The datastore/data-generation pipeline for baselines (Magpie-style synthetic generation) differs from original setups in some baseline papers, and while authors argue for fairness by sharing datastores, this could still introduce confounds not fully explored via ablation."
       ]
     }
   }

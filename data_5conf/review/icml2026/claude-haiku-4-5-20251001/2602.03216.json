@@ -22,6 +22,52 @@
         "Overhead quantification limitations: Figure 6(b) overhead measured only on A100 GPUs; performance on TPUs, different GPU generations, or inference serving systems unknown; custom Triton kernel details minimal",
         "Limited scope: Prefill-only acceleration doesn't address full inference pipeline; no evaluation on multimodal models; no theoretical analysis of when residual preservation suffices for information recovery"
       ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Well-motivated empirical analysis (Figure 2) showing layer-wise and head-wise shifts in token importance, clearly justifying the approach over prior token-eviction methods",
+        "Practical compress-and-decompress design that enables reversibility, head-specific selection, and full compatibility with existing kernels (FlashAttention, sparse attention) without modification",
+        "Comprehensive experimental evaluation across multiple models (LLaMA-3.1-8B, Mistral-Nemo-12B) and diverse benchmarks (RULER, InfiniteBench, LongBench, Needle-in-a-Haystack) with systematic comparisons",
+        "Good complementary gains when combined with existing sparse attention methods; achieves ×2.76 speedup with 87.3% accuracy on LLaMA using FlexPrefill vs. ×2.44 standalone",
+        "Thorough ablation studies including dynamic vs. fixed sparsity comparison and token coverage sensitivity analysis; modest but consistent overhead analysis (<11% at 128K)"
+      ],
+      "weaknesses": [
+        "Limited conceptual novelty: The core contribution—selecting tokens, computing attention, and scattering outputs back—is relatively straightforward engineering without significant methodological insight. Token selection via attention scores and scatter/gather operations are standard techniques",
+        "Critical technical details missing or undefined: Algorithm 1 line 2 uses undefined notation 'Q[−last q:]' without explaining what 'last q' means or why recent queries suffice for importance estimation. This is a key design choice presented without justification or sensitivity analysis",
+        "Token coverage parameters (τ=0.005 for LLaMA, τ=0.008 for Mistral) appear arbitrary with no ablation, sensitivity analysis, or principled justification for the choice",
+        "Sparse Layer Selection (Section 2.4) feels ad-hoc: The Inter-Layer Representation Drift metric lacks principled justification (why L2 norm specifically?), δ=0.5 is arbitrary without ablation, Figure 4(b) shows noisy correlation without reporting R², and the approach is validated on only one model",
+        "Modest empirical improvements: Speedups are often 1-2% (×1.36→1.38 for Minference, ×2.44→2.76 for FlexPrefill). Table 5 shows only 1.2% absolute accuracy gain over FastKV at comparable speedup (×1.51). Many InfiniteBench results are negative or marginal (Table 2), including degradation on specific tasks",
+        "Missing theoretical understanding: No analysis of why reversibility improves over permanent eviction, how much residual connections preserve unselected token information, or when/why the method should work. The paper lacks principled design principles derived from the empirical observations",
+        "Limited scope and applicability: Only addresses prefill acceleration at very long contexts (≥64K); significant gains only at 128K+. Does not address decoding bottleneck (KV cache). Only tested on text LLMs; generalization to other architectures/modalities unclear",
+        "Incomplete experimental analysis: Speedup measurements on A100 only; hardware generalization unknown. No absolute end-to-end inference time comparisons including decoder phase. Limited analysis of failure modes; several negative results on InfiniteBench unexplained",
+        "Insufficient justification for key design choices: Why use recent queries for importance scoring rather than static estimates? Why is this choice sufficient? Why is the residual connection sufficient for preserving unselected tokens' information? Could simpler alternatives achieve similar results?",
+        "Reproducibility concerns: No mention of code availability. Critical hyperparameters (τ, δ, recent query window size) lack ablation studies. Implementation details for Triton kernel are sparse. Hyperparameter selection procedure not described"
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Strong empirical motivation: Figure 2 provides compelling evidence that token importance varies significantly across layers and heads, directly justifying the reversible design over irreversible token eviction",
+        "Elegant and practical design: The compress-decompress mechanism effectively enables dynamic per-layer and per-head token selection while being orthogonal to and compatible with existing attention kernels (FlashAttention, sparse methods)",
+        "Comprehensive experimental validation: Multiple models (LLaMA-3.1-8B, Mistral-Nemo-12B), benchmarks (RULER, InfiniteBench, LongBench, Needle-in-a-Haystack), and baselines with consistent, strong results (up to 3.23× speedup at 128K with <1% accuracy degradation)",
+        "Well-designed sparse layer selection: The introduction of inter-layer representation drift as a selection metric is insightful, validated rigorously with 200 random trials (Figure 4b)",
+        "Thorough ablations: Dynamic vs. fixed sparsity comparison, overhead analysis (<11% even at high sparsity), comparison with token eviction methods, and speedup analysis across sequence lengths",
+        "Complementary gains with existing methods: Demonstrated ability to layer on top of FlashAttention and FlexPrefill, with FlexPrefill + Token Sparse achieving ×2.8 vs ×2.4 speedup",
+        "Clear presentation: Well-written with effective figures, clear algorithm specification, and good intuition for the design"
+      ],
+      "weaknesses": [
+        "Limited algorithmic novelty: The compress-decompress mechanism is relatively straightforward once motivated; primary contribution is engineering and empirical validation rather than novel algorithmic insights",
+        "Simplistic token importance scoring: Algorithm 1 uses only recent queries for importance estimation, computed via simple vertical summation of attention weights, without exploring learned or more sophisticated scoring mechanisms",
+        "Prefill-only scope: Method only accelerates prefill; does not address decoding where KV cache loading often dominates latency, limiting real-world applicability for some use cases",
+        "Hyperparameter generalization concerns: Different token coverage τ required per model (0.005 for LLaMA, 0.008 for Mistral); sparse layer selection uses fixed δ=0.5 with no clear guidance for new models/tasks",
+        "Incomplete failure mode analysis: Limited investigation of when/why accuracy drops occur, which task types are more sensitive, or whether removed tokens are truly uniformly irrelevant",
+        "Limited context length scope: Experiments extend to 256K but most practical applications use ≤128K; scalability to 1M+ contexts and overhead trends unexplored",
+        "Overhead contextualization: While <11% overhead, for modest speedups (e.g., ×1.22 at short contexts), overhead becomes a larger fraction of gains; applicability threshold unclear",
+        "Comparison fairness: When matching speedup with token eviction methods (FastKV, GemFilter), advantage may partly stem from not evicting rather than superior token selection; direct mechanism comparison would clarify",
+        "Reproducibility gaps: No code availability mentioned, token coverage selection process unexplained (why different τ per model), and some implementation details briefly mentioned rather than fully specified",
+        "Incomplete practical guidance: Modest speedups at shorter contexts, method requires overhead only justified at very long sequences, but limited discussion of when practitioners should apply this vs. simpler alternatives"
+      ]
     }
   },
   "v2": {
@@ -43,6 +89,50 @@
         "Prefill-only scope and short-context overhead: method doesn't address decoding acceleration (critical for generation); Table 10 shows ×0.97 slowdown at 8K context, limiting utility for mixed-length workloads",
         "Fairness in comparisons: Table 13 uses different efficiency metrics for OrthoRank comparison (attention vs. prefill speedup); Token Sparse Attention applies to bottom 50% drift layers while baselines use different strategies; 'matched efficiency budget' criteria not fully specified",
         "Missing theoretical insights: limited justification for why recent-query scoring reliably identifies important tokens; why representation drift predicts sparsification robustness; lacks deeper analysis of attention mechanism properties enabling the approach"
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Well-motivated empirical analysis of token importance dynamics (Figure 2) showing layer-wise and head-wise shifts, providing clear justification for reversible design",
+        "Elegant compress-decompress mechanism that achieves stated goals of per-head independent token selection with full sequence dimension restoration via residual connection",
+        "Strong framework compatibility: seamless integration with FlashAttention and multiple sparse attention methods (FlexPrefill, Minference, SeerAttention, X-Attention) without kernel modification",
+        "Comprehensive experimental evaluation across multiple models (LLaMA-3.1-8B, Mistral-Nemo-12B), benchmarks (RULER, InfiniteBench, LongBench, Needle-in-a-Haystack), with detailed ablations and overhead analysis",
+        "Consistent speedup gains at 128K context on RULER with good accuracy preservation (<1% degradation)"
+      ],
+      "weaknesses": [
+        "Limited novelty: compress-decompress is straightforward, token selection via attention scores is standard, per-head selection is incremental. Contribution feels like engineering rather than algorithmic insight",
+        "Significant gap between claimed attention speedup and actual prefill speedup: reported 1.36x attention speedup but only 1.27x prefill latency (Table 10, A100). At 8K context, TSA causes 0.97x slowdown on FlashAttention (slowdown). Overhead is substantial (11% in best case)",
+        "Model-specific hyperparameters lack principled selection: τ=0.005 for LLaMA vs τ=0.008 for Mistral appear empirically tuned; δ=0.5 layer selection threshold is arbitrary and poorly justified. Hurts reproducibility and cross-model applicability",
+        "Weak theoretical justification for design choices: (1) Recent-query scoring is ad-hoc—why only recent queries? (2) Representation drift metric (Eq. 1) lacks theoretical grounding; Figure 4(b) correlation shown on only one task/length; (3) 'Long tail' assumption about attention noise insufficiently validated",
+        "Mixed accuracy results on InfiniteBench (Table 2): some tasks degrade with TSA; degradation increases at high sparsity (Figure 5b, τ=0.02). Limited analysis of task-specific behavior or failure modes",
+        "Unfair or incomplete baseline comparisons: Table 5 comparison with eviction methods doesn't control for architectural differences (KV-cache vs Q,K,V selection). Table 13 OrthoRank comparison uses different computational model (skips FFN). No direct comparison with other Q,K,V-level token selection methods",
+        "Limited scope significantly reduces relevance: prefill-only acceleration (decoding uses dense attention), tested only on instruction-tuned models, narrow applicability to text-only settings. Requires custom Triton kernel with deployment concerns",
+        "Lack of statistical rigor: accuracy results show no error bars or confidence intervals. Unclear if single-run results or multiple seeds. Overhead analysis doesn't explore scalability across hardware/batch sizes",
+        "Reproducibility gaps: custom Triton kernel details sparse, preprocessing for layer selection underspecified, τ values appear empirically determined without principled process, batch size and sequence length distributions not always clear"
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Well-motivated design with empirical evidence (Figure 2) showing layer-wise and head-wise variation in token importance, directly justifying the per-head reversible selection approach",
+        "Clever compress-then-decompress mechanism enables tokens to be reconsidered across layers through residual connections, addressing fundamental limitations of prior token eviction methods",
+        "Comprehensive experimental evaluation across multiple models (LLaMA-3.1-8B, Mistral-Nemo-12B), benchmarks (RULER, InfiniteBench, LongBench, Needle-in-a-Haystack), and diverse baselines with extensive ablations",
+        "Practical speedups (×2.8 at 128K context with 0.3% accuracy loss when combined with FlexPrefill) with seamless composability across existing sparse attention methods (FlashAttention, Minference, FlexPrefill, SeerAttention, X-Attention)",
+        "Representation drift metric (Eq. 1) provides effective and model-agnostic criterion for identifying sparsifiable layers, validated empirically across 200 trials (Figure 4b)",
+        "Hardware-aware implementation with minimal overhead (<11% of total attention latency) and clear reproducibility details with error bars",
+        "Demonstrates that token-level and block-level sparsity are orthogonal, enabling complementary granularity as a novel design point for efficient sparse attention"
+      ],
+      "weaknesses": [
+        "Token scoring mechanism lacks theoretical justification: uses recent queries (Q[−last q:]) as proxy for importance but window size, sensitivity, and why recent queries generalize across the full sequence are unexplored",
+        "Coverage parameter τ requires model-specific tuning (τ=0.005 for LLaMA, τ=0.008 for Mistral) without principled selection mechanism; limiting generalization to new models/domains compared to drift-based layer selection",
+        "Layer selection via representation drift is static preprocessing (δ=0.5 fixed threshold) applied to ~50% of layers uniformly; no exploration of input-adaptive or learned layer selection despite potential for improvement",
+        "Inconsistent results on InfiniteBench (Table 2) show accuracy degradation or marginal gains with Token Sparse Attention composition, unexplained and undermining claims of consistent complementary gains across benchmarks",
+        "Significant scope limitations reduce impact: prefill acceleration only (decoding unchanged), text generation only, instruction-tuned models only, affecting end-to-end speedup and generalizability",
+        "Information restoration for unselected tokens relies solely on zero-filling and residual connections; no analysis of information loss or comparison with alternative decompression strategies (e.g., learnable embeddings)",
+        "Comparison fairness concerns: Token Sparse Attention applies to drift-selected ~50% of layers while some baselines apply broader sparsification; OrthoRank comparison (Table 13) doesn't fully account for FFN skipping in that method",
+        "Design choices lack principled justification: recent-query window size not discussed, coverage threshold mechanism is intuitive but not novel, and Table 9 shows δ=0.5 as sweet spot without deeper analysis",
+        "Contribution is somewhat incremental: per-head selection and coverage thresholding build on existing ideas; main novelty is the specific reversible architecture and drift-based layer selection, which are useful but not fundamental innovations"
       ]
     }
   }

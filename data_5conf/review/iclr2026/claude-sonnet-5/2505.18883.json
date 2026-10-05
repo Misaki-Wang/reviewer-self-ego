@@ -19,6 +19,45 @@
         "No error bars or multiple-seed runs are reported for the main perplexity/quality results (only latency/throughput have variance), limiting statistical confidence in the core comparisons, which is acknowledged but not mitigated.",
         "All experiments are conducted on relatively small models (<300M parameters) and moderate context lengths, so scalability of the approach to larger models/longer contexts—where MASK-token overhead claims would matter most—remains unverified."
       ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "The core idea of eliminating MASK tokens via a two-group partitioning scheme with a specialized encoder-decoder/cross-attention architecture is a reasonably novel angle on improving masked diffusion LM inference efficiency, distinct from KV-caching or block-autoregressive hybrids.",
+        "Extensive ablations are provided: architecture (encoder/decoder layer splits, data-dependent vs data-independent GroupSwap queries), isolating the 'complementary masking' effect from the architectural effect via a dedicated MDLM baseline, and comparing uniform vs non-uniform step sampling.",
+        "Latency/throughput improvements (~5x on text, further gains with SDTT distillation) are measured carefully, with attention paid to confounds such as FP16 vs FP64 logit precision that is known to bias generative perplexity.",
+        "Reasonably thorough reproducibility: full hyperparameters, pseudocode for sampling algorithms, compute cost tables, and an honest, detailed limitations section.",
+        "Evaluation goes beyond generative perplexity to include unigram entropy (to catch degenerate/repetitive generations) and downstream accuracy (LAMBADA, ARC, HellaSwag, etc.), and extends (preliminarily) to image tokens."
+      ],
+      "weaknesses": [
+        "On OpenWebText (the paper's main large-context benchmark), PGMs with parameter counts matched to MDLM actually underperform MDLM in validation perplexity (Table 1); the favorable comparisons rely on enlarging PGM (more layers or larger hidden dim), which confounds the 'architecture' contribution with simply using a bigger/more expensive model, weakening the central claim that PGM is a strictly better alternative to MDLM.",
+        "Training is reported to be slower (PGM reaches only 62-75% of MDLM's training throughput on OWT and 68% on ImageNet) and requires larger models to match baseline quality at 1024 context length; the paper never reports a combined train+inference cost comparison, so the net practical benefit of PGM is unclear once training overhead and added parameters are accounted for.",
+        "The distillation results (Table 7) show that MDLM+SDTT clearly outperforms PGM+SDTT in final generative perplexity (36.08 vs 49.48 at 1024 steps), directly undercutting the abstract's framing that PGM+SDTT yields superior quality/efficiency; this is acknowledged only briefly in the Limitations section, while the abstract/intro foreground the positive speed numbers without similarly prominent caveats.",
+        "Image generation experiments are explicitly described as preliminary, small-scale, and not state-of-the-art, with less pronounced gains than text; this limits the generality of the 'masked modeling without masks' claim beyond the text domain.",
+        "No multi-seed runs or statistical significance testing is provided for the main perplexity/quality results, which is a common but non-trivial limitation given some ablation gaps (e.g., Table 1) are fairly small and could be within run-to-run noise.",
+        "The architecture introduces non-trivial additional complexity (separate encoder/decoder, GroupSwap cross-attention layer, dense attention masks via torch.sdpa) relative to standard bidirectional MGM transformers, and the paper notes efficient kernels for this masking are not yet available, suggesting the reported speedups may not transfer straightforwardly to practical, highly optimized serving stacks.",
+        "The comparison against GPT-2 with KV-caching as the autoregressive baseline is somewhat dated/weak; no comparison is made against more optimized or modern autoregressive serving techniques (e.g., speculative decoding, better architectures), which makes the 10.73x claim less informative about PGM's true competitiveness against strong AR baselines."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Introduces a genuinely novel and simple idea for eliminating MASK tokens in masked generative modeling by partitioning tokens into two groups and using an encoder-decoder architecture with sparse group-wise attention, which is conceptually clean and easy to explain.",
+        "Strong empirical demonstration of inference efficiency gains: consistent 5-5.5x latency/throughput improvements over MDLM on OpenWebText at matched sampling steps, and further gains (up to ~280x) when combined with SDTT distillation.",
+        "Reasonably comprehensive experimental scope: language modeling on LM1B and OWT, downstream evaluation on LAMBADA and several lm-eval-harness benchmarks, and a preliminary extension to image generation (ImageNet/VQGAN tokens), showing the idea generalizes beyond a single setting.",
+        "Careful ablation work disentangling the effect of the architecture from the effect of 'complementary masking' alone (Section 5.3), which is a thoughtful experimental design that isolates confounds.",
+        "High transparency and reproducibility: detailed hyperparameters, training/inference compute costs, pseudocode for sampling algorithms, and an extensive, self-critical limitations section including honest reporting of cases where PGM underperforms (e.g., SDTT gains, OWT validation PPL at matched layer counts).",
+        "Uses FP64 logits to avoid the known artifact of underflow-induced perplexity improvements in MDLMs, improving the fairness/validity of the comparisons."
+      ],
+      "weaknesses": [
+        "At matched layer counts, PGM underperforms MDLM in validation perplexity on OpenWebText, requiring larger embedding dimension or more parameters to match/exceed MDLM quality; this weakens the 'better quality with much lower cost' framing in the abstract, since the efficiency comparisons are partly confounded by using a larger model.",
+        "Training PGMs is notably slower/more expensive than MDLM training (e.g., ~75-78% of MDLM throughput on OWT, ~68% on ImageNet) due to reliance on dense attention masks rather than optimized sparse kernels; the paper does not quantify total end-to-end cost (training + amortized inference) tradeoffs, which matters for practical adoption.",
+        "SDTT distillation, originally designed for MDLM, transfers less effectively to PGM (higher generative perplexity and lower entropy retention than MDLM+SDTT at comparable steps per Appendix B.2/Table 7), suggesting the proposed architecture is not yet fully compatible with the distillation gains it borrows, and no PGM-specific distillation method is proposed to close this gap.",
+        "Image generation results are explicitly preliminary, use smaller-scale settings than standard MaskGIT baselines, and show only modest/limited gains, weakening the claim of general applicability across modalities.",
+        "No comparison to other efficient non-autoregressive/diffusion LM baselines mentioned in related work (e.g., Block Diffusion, DUO, Di[M]O) in terms of actual latency/throughput or quality at comparable inference budgets, limiting the positioning of PGM's efficiency claims relative to alternative acceleration strategies.",
+        "Lack of statistical significance across multiple training seeds (acknowledged by the authors) due to compute cost, so single-run perplexity differences (e.g., the headline 1.95 PPL improvement on LM1B) carry some uncertainty.",
+        "The architectural exploration (GroupSwap initialization strategies, encoder/decoder layer allocation) is relatively narrow, and scaling behavior to larger models/longer contexts is left entirely to future work, leaving open whether the reported efficiency and quality trends persist at scale."
+      ]
     }
   },
   "v2": {
@@ -61,6 +100,26 @@
         "The conceptual novelty is somewhat incremental: partitioning into two groups with restricted attention is closely related to existing permutation-based/any-order autoregressive approaches (e.g., XLNet-style), and the 'masks without masks' framing may overstate the departure from standard MGM training, since the two partitions still functionally play the role of masked/observed tokens.",
         "Scale is limited to relatively small models (GPT-2-small-scale text models, ImageNet256 with a fixed pretrained tokenizer trained for fewer steps than the MaskGIT baseline reports, 500k vs 2M), so it's unclear whether the architecture's benefits and the parameter overhead trade-off persist at larger, more realistic model/data scales.",
         "Training instability (loss spikes) is observed for complementary masking/PGM (Fig. 5, Appendix D.4) but not thoroughly analyzed, raising concerns about robustness when scaling further."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Introduces a genuinely novel mechanism (partitioning instead of masking, enforced via a constrained 'Partition Transformer' architecture with encoder/GroupSwap/decoder) that eliminates the need to process [MASK] tokens at inference while retaining parallel, any-order generation—this is a clean and well-motivated architectural contribution.",
+        "Strong and consistently reported efficiency gains: 5-5.5x throughput/latency improvement over MDLM on OpenWebText and LM1B, and 7.5x over MaskGIT on ImageNet, with quality (validation PPL, Generative Perplexity, FID) that is competitive or better in several settings.",
+        "Thorough empirical evaluation across two modalities (text and images), multiple datasets (LM1B, OWT, ImageNet256), multiple samplers (confidence, Halton), and downstream tasks via lm-eval-harness, going beyond a single narrow benchmark.",
+        "Good ablation studies: encoder/decoder layer balance, data-dependent vs. data-independent GroupSwap queries, and an isolated 'complementary masking' baseline that cleanly separates the contribution of the training objective from the architecture.",
+        "Demonstrates compatibility with existing acceleration techniques (SDTT distillation), showing the approach is not orthogonal/incompatible with the broader MGM acceleration literature.",
+        "High transparency: detailed appendices on computational costs, numerical precision effects, training stability (loss spikes), sampling algorithms (pseudocode), and honest discussion of limitations (extra parameters needed on OWT, slower training due to dense attention implementation)."
+      ],
+      "weaknesses": [
+        "On the harder/longer-context setting (OpenWebText, ctx=1024), PGM needs additional parameters (extra layers or larger embedding dimension) to match or surpass MDLM's validation perplexity, indicating the architecture's overhead (attributed to the GroupSwap layer) is non-trivial and gains are partly confounded by increased capacity.",
+        "Training is reported to be slower/less efficient than MDLM (using dense attention rather than exploiting the block-diagonal sparsity), so the paper's efficiency story applies only to inference; the added training cost and engineering burden (specialized attention masks, GroupSwap layer) are real practical costs not fully resolved.",
+        "On ImageNet with the default 32-step Halton sampler—the headline comparison in Fig. 1—PGM actually has a slightly worse FID than MaskGIT (5.54 vs. 5.35); the favorable FID (4.56) requires doubling the number of steps, partially eroding the throughput advantage and making the improvement claims somewhat sampler/step-configuration dependent.",
+        "Experiments are restricted to relatively small models (170M-464M parameters) and moderate context lengths (up to 1024 with quality evaluation; 4096 only evaluated for throughput, not quality/perplexity), leaving open whether the approach scales favorably to larger models or longer contexts where quality-parity might require disproportionately more parameters.",
+        "The explanation for why complementary masking helps on LM1B but not on OWT is left as 'preliminary experiments' in the appendix without a clear resolution, suggesting the underlying mechanism driving PGM's gains is not fully understood.",
+        "Related work positioning versus Eso-LM (Sahoo et al., 2025b) and any-order/any-subset autoregressive models is somewhat brief; a more detailed head-to-head comparison (empirical or conceptual) would strengthen the claim of novelty and relative advantage.",
+        "Generative Perplexity, the primary text-quality metric, is known to be a somewhat unreliable proxy for sample quality (as the authors themselves note when discussing FP64 casting), and no human evaluation or more robust quality metric is used to corroborate the quality-parity claims."
       ]
     }
   }

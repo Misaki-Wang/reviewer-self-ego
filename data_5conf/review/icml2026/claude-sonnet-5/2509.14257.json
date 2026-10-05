@@ -18,6 +18,46 @@
         "The additional inference/training cost of running the large teacher model repeatedly during Mentored Problem-Solving (to detect and correct errors at each step) is not quantified, which is important for a method whose main motivating goal is cost/latency reduction.",
         "The methodological contribution is an incremental combination of established ideas (DAgger/HG-DAgger-style correction, prefix-conditioned RL, reward shaping for sparse rewards) applied to the agent-distillation setting, rather than a fundamentally new technique; this should be weighed against the strong but somewhat narrow empirical validation."
       ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The core idea—letting the student lead trajectory generation and having the teacher intervene only at the first critical error—is an intuitive and practically motivated alternative to full-trajectory behavior cloning, and is clearly illustrated (Figure 1/2).",
+        "The empirical evaluation spans a reasonably wide set of 12 benchmarks across three domains (math, multi-hop QA, deep search) and three student backbones (Qwen2.5-7B/3B, Llama3.1-8B, Qwen3-8B), showing consistent improvements of SCoRe-RL over BC, GRPO, and ARPO baselines.",
+        "The ablation study (Table 3) and the qualitative trajectory examples (Appendix Tables 6-7) help illustrate how the correction-based data and short-horizon RL contribute to the final performance.",
+        "The paper attempts to provide theoretical grounding for its empirical design choices (compounding error reduction, variance reduction from truncated rollouts), which is a nice attempt to connect practice with imitation-learning theory."
+      ],
+      "weaknesses": [
+        "The central theoretical result (Theorem 3.2) is not actually a proof of SCoRe's advantage: it simply swaps the error-rate assumption from the teacher's state distribution d^{π_E}_t (BC) to the student's own distribution d^{π̂}_t (SCoRe) without justifying why the same ε bound should hold under this different, presumably easier, distribution. This assumption essentially posits away the covariate-shift problem that the theorem is supposed to resolve, making the O(H) vs O(H^2) comparison more rhetorical than rigorous.",
+        "The reward computation relies on a Qwen2.5-7B-Instruct verifier to judge semantic equivalence of actions/answers, which is the same scale/model family as the student itself; no analysis is given of verifier noise, reliability, or its effect on training stability, despite this being a central component of the key-step reward scheme.",
+        "Reported baselines (GRPO, ARPO) are stated to be 'mostly taken from Dong et al. (2025b)' rather than reproduced in the authors' own pipeline/infrastructure, raising concerns about fair, controlled comparison (same data splits, same tool implementations, same hardware/hyperparameters).",
+        "Backbone naming and settings are inconsistent across tables (Qwen2.5-7B-Instruct in Table 1 vs 'Qwen3-8B-Instruct' in Table 2, which is not a standard Qwen3 naming convention), raising reproducibility concerns about which exact checkpoints were used.",
+        "No variance/multiple-seed results are reported for the RL experiments, despite RL being known for high run-to-run variance; single-run numbers make it hard to assess whether reported gains (e.g., some cases where the 7B/8B student nominally exceeds the 72B or even 671B teacher) are robust or within noise of the LLM-as-judge evaluation protocol.",
+        "The cost/compute overhead of the MPS data-generation process itself (repeated teacher queries, up to 5 correction attempts per task) is not quantified or compared against the inference cost savings claimed from using a smaller student, undermining the paper's efficiency narrative.",
+        "The GitHub link placeholder is empty and no code/data release is confirmed, which is a reproducibility concern given the complexity of the multi-stage pipeline (BC init, MPS data generation, correction-based SFT, short-horizon RL with custom reward).",
+        "Several reward hyperparameters (R_final, R_key, R_avoid) are presented as fixed specific values with no ablation or sensitivity analysis, despite being central to the claimed 'key-step reward' innovation.",
+        "The comparison in Table 5 to Agent Distillation (Kang et al., 2025) mixes some results taken directly from the original paper with the authors' own numbers, without clarifying whether the evaluation protocol, model versions, or environment setups are strictly identical, weakening the apples-to-apples nature of this comparison."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "The core idea—letting the student lead exploration while the teacher intervenes only at the first critical error—is a clean and intuitively well-motivated alternative to full-trajectory imitation, directly targeting compounding-error issues known from the DAgger literature but adapted specifically to LLM agent distillation with code-as-action trajectories.",
+        "The paper backs its central claims with theoretical analysis (Theorems 3.1–3.3) showing the shift from O(H^2 ε) to O(H ε) error growth under correction-based training, and a variance-reduction argument for short-horizon RL rollouts; proofs are included in the appendix.",
+        "Extensive empirical evaluation across 12 benchmarks spanning math, multi-hop factual QA, and deep-search agents, with three different student backbones (Qwen2.5-7B/3B, Llama3.1-8B, Qwen3-8B), consistently shows gains over BC, GRPO, and ARPO baselines, and in several cases matches or exceeds a 72B teacher.",
+        "Thorough ablations (Table 3) isolate the contribution of correction-based SFT, short-horizon rollout, and key-step rewards, each shown to contribute additively to final performance.",
+        "Additional analyses (teacher intervention frequency, performance on 'hard-to-teach' data, SFT data-scale sensitivity, comparison with Agent Distillation) add useful texture beyond the headline numbers and support the narrative that RL—not just more SFT data—drives most of the gains.",
+        "Reasonable reproducibility: hyperparameters, data construction procedure, and frameworks (LLaMAFactory, VERL) are documented in the appendix, and qualitative trajectory examples are provided."
+      ],
+      "weaknesses": [
+        "The teacher-intervention/data-generation pipeline requires the teacher to repeatedly inspect and correct student rollouts (up to 5 attempts per hard case); the paper does not report the resulting computational/API cost overhead relative to standard one-shot teacher trajectory generation used in BC baselines, making it hard to judge the true efficiency trade-off of the method.",
+        "The key theoretical result (Theorem 3.2) assumes the per-step misalignment rate ε is small under the student's own induced distribution d^π̂, but this assumption is not empirically validated; it is plausible that ε under the student's own rollouts could be large for harder tasks, undermining the tightness of the claimed O(Hε) bound in practice.",
+        "The key-step reward relies on an LLM-based semantic equivalence verifier (Qwen2.5-7B-Instruct) to judge action equivalence; potential noise or systematic bias of this verifier on code-equivalence judgments is not analyzed.",
+        "Benchmarks such as AIME24/25 have very small test sets (30 problems each), yet no variance/repeated-run statistics or confidence intervals are reported, which is important given some observed 72B-level or superior results on noisy LLM-as-judge metrics.",
+        "Teacher and student backbones differ across tables (Qwen2.5-72B teacher with Qwen2.5-7B/3B or Llama students for reasoning tasks vs. apparently different teacher/student combination—Qwen3-8B—for deep search), which complicates a clean, unified comparison and interpretation of 'matching teacher performance' claims.",
+        "The relationship to prior single-step correction/interactive imitation learning methods (DAgger, HG-DAgger) is acknowledged but not deeply contrasted; the novelty primarily lies in combining this idea with RL short-horizon rollouts and key-step rewards for LLM agents, which is a reasonable but incremental conceptual step rather than a fundamentally new idea.",
+        "No explicit, dedicated limitations section is included in the main text; limitations (e.g., reliance on teacher cost, benchmark judge reliability, generalization to other tool types) are only briefly mentioned as future work in the conclusion."
+      ]
     }
   },
   "v3": {
@@ -39,6 +79,45 @@
         "The paper reuses reported baseline numbers from another paper (ARPO, Dong et al.) rather than fully re-running them in-house for all settings, which could introduce protocol mismatches despite claimed identical settings.",
         "No functioning code link is provided (the footnote is empty), which limits practical reproducibility despite detailed hyperparameter descriptions.",
         "The presentation is dense, with three formal theorems whose practical payoff is largely qualitative (motivating short-horizon RL and correction-based SFT) rather than adding rigorous, tight guarantees, and could be streamlined or moved further to appendix for clarity."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Extensive empirical evaluation across 12 benchmarks spanning math reasoning, multi-hop factual QA, and deep search, with multiple student backbones (Qwen2.5-7B/3B, Llama3.1-8B, Qwen3-8B), providing a reasonably broad test of generality.",
+        "Thorough ablation study (Table 3) isolating the contributions of correction-based SFT, short-horizon rollouts, and key-step rewards, plus additional appendix experiments (SFT data-scale sweep, DPO comparison, stronger baselines like PRM-style rewards, on-policy distillation, and ReLIFT) that address plausible alternative explanations for the gains.",
+        "The core idea—letting the student generate trajectories and having the teacher intervene only at the first error, then using the verified prefix for short-horizon RL—is a sensible and reasonably novel combination of ideas (error localization + shortened-horizon policy optimization) tailored to the agentic distillation setting, distinct from naive full-trajectory behavior cloning or vanilla GRPO.",
+        "Some effort toward interpretability of gains (manual inspection of 50 Hard-to-Teach cases, teacher-intervention frequency statistics) rather than relying purely on aggregate numbers."
+      ],
+      "weaknesses": [
+        "The central theoretical justification (Theorems 4.1 vs 4.2) is misleading: the BC bound assumes per-step error ε is measured under the *teacher's* state distribution d^{πE}_t, while the SCoRe bound assumes the same symbol ε is measured under the *student's own* state distribution d^{π̂}_t. These are different quantities by construction (on-policy vs off-policy error rates), so the headline claim of reducing compounding error from O(H²) to O(H) is not an apples-to-apples comparison; it is close to tautological once the assumption is changed rather than a result of the proposed method. This undercuts the soundness of a key selling point of the paper.",
+        "No functioning code link is provided (the footnote '1Code:' is empty), and several implementation choices (reward thresholds, LLM-as-verifier reliability, 5-attempt correction cap, 10% Hard-to-Teach retention ratio) are only lightly justified, raising reproducibility concerns.",
+        "Hyperparameter tuning for the key-step reward scale (Rkey) was done on only a 2k-sample subset over 3 candidate values, and other reward weights (Rformat=0.1, Rfinal) appear fixed without justification or sensitivity analysis, raising concern about robustness and potential overfitting to the chosen benchmarks.",
+        "Most benchmark categories (math, HotpotQA, 2Wiki, Musique, Bamboogle) substantially overlap in domain/format with the MPS training data sources (NuminaMath, Omni, HotpotQA, 2WikiMultiHopQA, WebWalker), so the 'closing the gap with a 72B teacher' claim is demonstrated mostly in-domain; only the deep-search benchmarks are argued to be fully held-out, limiting the generality of the central claim.",
+        "The paper does not quantify the total teacher (72B) query/compute cost incurred during the iterative MPS correction loop (which can involve multiple teacher calls per trajectory) versus standard behavior cloning or RL baselines, making it hard to assess whether reported gains come at a hidden cost increase that offsets the inference-time efficiency argument.",
+        "Results are largely single-run (only AIME24/25 use 5-run averaging), and no variance/confidence intervals are reported elsewhere, limiting the statistical confidence in the comparatively modest gains observed on several benchmarks (e.g., MATH500, 2Wiki).",
+        "The qualitative case study supporting 'interpretable strategy learning' (Table 4, Section 5.4) relies on a single illustrative example and a small manually-inspected subset (50 cases) without inter-rater reliability or systematic criteria, which is weak evidence for the broader claim that RL gains are not due to randomness."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "The core idea—letting the student generate trajectories and having the teacher perform a single minimal correction at the earliest error, rather than full trajectory imitation—is a well-motivated and intuitive response to the compounding-error problem in behavior cloning, and is clearly distinguished from DAgger/HG-DAgger and PRM-style approaches.",
+        "The paper pairs the data-construction idea (MPS) with a complementary RL phase (short-horizon rollout from the verified prefix plus key-step rewards) that is specifically designed to exploit the structure of the corrected trajectories, giving a coherent end-to-end pipeline rather than a single isolated trick.",
+        "Extensive empirical evaluation across 12 benchmarks spanning math reasoning, multi-hop factual QA, and deep search, with multiple backbones (Qwen2.5-3B/7B, Llama3.1-8B, Qwen3-8B) and consistent, often sizable, gains over BC, GRPO, ARPO, and additional strong baselines reported in the appendix (PRM-style step rewards, on-policy distillation, ReLIFT, DPO).",
+        "Thorough ablations isolate the contribution of each component (MPS-SFT vs. BC-only init, short-horizon rollout, key-step rewards), and additional analyses (data-scale sweep, SFT-vs-RL comparison, Hard-to-Teach case studies with qualitative examples) support the claimed mechanism rather than just reporting headline numbers.",
+        "Theoretical results (O(H) vs O(H^2) compounding-error bounds, variance reduction for truncated rollouts) are provided with full proofs in the appendix and are reasonably aligned with the classical DAgger-style analysis, giving some principled grounding to the empirical design choices.",
+        "Implementation details (hyperparameters, data splits, frameworks) and prompts for teacher correction are disclosed in appendix, aiding reproducibility.",
+        "Honest limitations section acknowledges that compounding error is reduced but not eliminated and that the theory is conditional on stated assumptions."
+      ],
+      "weaknesses": [
+        "The theoretical bounds (Theorems 4.1/4.2) rely on a per-step error rate ε defined under the student's own on-policy distribution d^π̂_t for SCoRe but under the teacher's distribution d^πE_t for BC; this comparison implicitly assumes the two ε values are comparable/equal, which is not justified and may not hold in practice, weakening the rigor of the headline O(H) vs O(H^2) comparison.",
+        "The reward/evaluation pipeline uses an LLM-as-judge (Qwen2.5-7B-Instruct or Qwen2.5-72B-Instruct) both for RL reward computation and for final correctness judging on math/deep-search tasks; potential judge biases, noise, or self-consistency issues between judge and student/teacher models are not analyzed or validated against human/exact-match labels for most of the main tables.",
+        "The comparison between SCoRe and baselines is not fully compute/cost-matched: MPS requires substantially more teacher queries and token usage than standard BC or single-pass RL baselines (the paper reports token costs per intervention but does not provide a total compute/cost accounting that normalizes all methods, including prompt-only large models, by inference/training FLOPs or API cost).",
+        "Some design choices (e.g., Rkey=0.5, Rformat=0.1, 20%/80% split between BC-init and MPS data, 10% Hard-to-Teach retention, max 5 correction attempts) appear to be manually tuned via limited small-scale search (2k samples) with little sensitivity analysis beyond one hyperparameter, raising concerns about generalizability to other domains or model scales.",
+        "The qualitative case study in Section 5.4 is based on manual inspection of only 50 cases by the authors, which is a small, potentially subjective sample for drawing the stronger claim that RL gains reflect 'interpretable strategy learning rather than randomness.'",
+        "The paper does not report variance/error bars for most results (except AIME, which uses 5 runs), making it harder to assess the statistical significance of sometimes modest differences between SCoRe-RL and strong baselines like BC+ARPO or ReLIFT.",
+        "The method introduces considerable pipeline complexity (BC init, MPS correction loop with up to 5 teacher interventions, SFT, then short-horizon RL with custom reward shaping), which may limit ease of adoption and reproducibility outside well-resourced labs, despite the code being referenced as available."
       ]
     }
   }

@@ -21,6 +21,46 @@
         "The composite-reward reward function relies on a proprietary closed-source model (gpt-5-mini) for the VLLM-based reward component, which limits exact reproducibility and long-term stability of the reported results.",
         "Evaluation is restricted to the SD1.5/SDXL/SDXL-turbo family; no experiments on more modern flow-matching or DiT-based backbones (e.g., SD3, FLUX), which limits evidence of broader generalizability claims."
       ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "The paper tackles a well-motivated problem: existing RL-based prompt refinement methods apply a single static prompt throughout sampling, ignoring the sequential/timestep-dependent nature of diffusion. Framing this as an MDP analogous to diffusion RL is a reasonable angle.",
+        "Broad empirical coverage: multiple diffusion backbones (SD1.5, SDXL, SDXL-turbo), multiple reward functions (single and composite), and comparisons/compositions with several alignment baselines (DDPO, ReFL, Diffusion-DPO, NPNet, RePrompt).",
+        "Ablation study (Table 4, Fig. 6) is informative, isolating the contributions of GRPO training, multiple refinement steps, and visual feedback.",
+        "The qualitative prompt-evolution analysis (Appendix D.1) linking RL-learned prompt specificity schedules to known CFG scheduling strategies is an interesting, if informal, observation.",
+        "Implementation details, algorithms, and prompts are documented thoroughly, aiding reproducibility of the described pipeline."
+      ],
+      "weaknesses": [
+        "The central claim of 'structural equivalence' to diffusion-model RL is overstated. The actual policy operates on a fundamentally different, discrete action space (text) with a frozen diffusion model in between, and the paper offers no formal argument (e.g., proof of equivalent expressivity or convergence properties) beyond a superficial MDP tuple analogy in Table 1/Fig. 3.",
+        "A critical weakness undermines the paper's own motivation: Section 3.3 states that visual (latent) feedback is 'not strictly necessary at inference' and that refined prompts 'can be generated a priori,' allowing the diffusion process to proceed without interruption. This essentially discards the closed-loop latent-feedback mechanism that is advertised as the paper's main novelty over prior feed-forward prompt refinement methods, reducing the deployed method to a sequence of timestep-conditioned prompts computed in advance -- conceptually much closer to the feed-forward baselines it criticizes.",
+        "Baseline comparison methodology is unclear and potentially favorable to the proposed method: 'Reported performance values correspond to checkpoints where evaluation rewards match those of PromptLoop' (Appendix C.4) is vague and could bias comparisons on non-target metrics, since checkpoint selection criteria for baselines are not independently optimized.",
+        "No human study is conducted despite reward-hacking claims being framed in terms of 'human perspective' judgments; the paper substitutes a VLLM-based score (GPT-5-mini) as a stand-in for human preference, which is itself a model-based metric with potential biases and no validation against human raters.",
+        "Evaluation set sizes, variance, and statistical significance are not reported; results in Tables 2-3 are point estimates without confidence intervals, making it hard to assess whether the generally modest-to-moderate improvements are robust.",
+        "Generalization claims ('generalizes seamlessly to unseen models') are only tested within the closely related SD1.5/SDXL/SDXL-turbo family; no evaluation on structurally different backbones (e.g., different diffusion architectures, DiT-based or flow-matching models) is provided to support a stronger generalization claim.",
+        "The method introduces considerable complexity and inference overhead (a second large MLLM policy, RL training infrastructure) whose costs (latency, memory, training compute) are not quantitatively analyzed or compared against baselines, despite the 'plug-and-play' framing suggesting lightweight integration.",
+        "Writing contains some overclaiming and repeated phrasing (e.g., 'structural analogy/equivalence' repeated many times) without correspondingly rigorous theoretical or quantitative support, and the ablation showing the untrained policy model actually degrades performance (-0.2315 ImageReward) is a reminder that much of the benefit stems from standard RL fine-tuning of the MLLM, not uniquely from the latent-feedback design."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "The core idea—reframing step-wise, latent-feedback-conditioned prompt refinement as an MDP structurally analogous to diffusion-model RL—is a clear and reasonably novel bridge between prompt-based and weight-level alignment methods, well motivated by the observation that prior prompt-refinement work is feed-forward and ignores the evolving denoising trajectory.",
+        "Extensive empirical coverage: multiple diffusion backbones (SD1.5, SDXL, SDXL-turbo), multiple single rewards (ImageReward, HPSv2, aesthetics, incompressibility/compressibility) and a composite RePrompt-style multi-reward setting with GenEval, plus orthogonality tests against DDPO, ReFL, Diffusion-DPO, and NPNet, and generalization tests to unseen backbones.",
+        "Careful ablation (Table 4, Fig. 6) isolating the contribution of the policy model, GRPO training, multiple refinement steps, and visual feedback, showing each component adds incremental value.",
+        "Practically useful design choice: visual feedback is shown to be necessary only during training but not at inference, allowing prompts for all timesteps to be pre-computed, which substantially improves deployability without sacrificing much performance — this is a genuinely useful engineering/algorithmic insight.",
+        "Reasonably transparent reporting: detailed appendix with algorithms, prompts used for the policy and reward models, and additional qualitative figures across many prompts and reward types, aiding reproducibility.",
+        "The qualitative prompt-evolution analysis (Table 5, Appendix D.1) connecting learned prompt trajectories to known CFG scheduling behavior is an interesting, if informal, interpretability finding."
+      ],
+      "weaknesses": [
+        "Reward-hacking mitigation is argued mostly through a few qualitative examples (e.g., the ReFL spider/robot images) rather than a quantitative or systematic metric for over-optimization; the central claim that PromptLoop is more robust to reward hacking is not rigorously substantiated.",
+        "No human preference study is conducted despite the paper's central concern being alignment with human preference; all evaluation relies on learned reward/VLLM-based metrics (ImageReward, HPSv2, aesthetics, an in-house VLLM score using GPT-5-mini/Qwen2.5-VL), which is somewhat circular given these are similar in nature to the training rewards and to each other.",
+        "The claimed \"structural/functional equivalence\" to diffusion RL is a strong framing; while the MDP analogy in Table 1/Fig. 3 is conceptually clean, prompts are discrete, low-bandwidth textual actions compared to the full latent-space actions in diffusion RL, so the equivalence is more rhetorical than formally established, and this framing is repeated without much scrutiny of its limits.",
+        "Gains on the composite-reward (RePrompt-style) benchmark are comparatively modest, e.g., GenEval improves only marginally (0.5445 → 0.5483 on SDXL-turbo), which is not strongly emphasized/discussed relative to the paper's confident claims of \"strong\" performance in that setting.",
+        "No report of variance/seed-to-seed stability for any quantitative results, and no concrete measurement of the computational/inference overhead that is discussed qualitatively in Section 3.3 (only a discursive treatment, no wall-clock/VRAM numbers), which is important given the stated practical trade-offs.",
+        "Only a single MLLM backbone (Qwen2.5-VL-3B) is used as the policy; there is no ablation on policy scale/architecture choice, and no experiment demonstrating a single trained policy generalizing across multiple reward types simultaneously (each reward requires separate training), which somewhat limits the \"general black-box alignment system\" claim.",
+        "Missing direct quantitative comparison with other RL-tuned prompt-refinement baselines mentioned in related work (e.g., OPT2I, RATTPO, TIR, PromptEnhancer) beyond RePrompt, making it harder to judge the method's relative standing against the closest prior art."
+      ]
     }
   },
   "v2": {

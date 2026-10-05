@@ -84,6 +84,46 @@
         "The baseline comparison is somewhat narrow, focusing mainly on TidalDecode, Quest, StreamingLLM, and SeerAttention-r; other recent training-free or hybrid reasoning-specific sparse-attention approaches are not benchmarked, limiting the strength of the significance claim relative to the broader landscape.",
         "The paper inherits its comparison layer-selection procedure directly from TidalDecode's own methodology, which, while argued to be fair, means the overall system design is tightly coupled to and dependent on TidalDecode's amortization structure rather than presenting a fully independent architecture."
       ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a timely and practically important problem: efficient long-horizon decoding for reasoning LLMs, where standard sparse attention methods are known to degrade accuracy.",
+        "The motivating analysis (Figures 1-2, attention recall curves) convincingly illustrates that existing per-head/per-step sparse selection methods (StreamingLLM, TidalDecode) suffer recall degradation specifically on long reasoning traces compared to retrieval tasks, providing a reasonable empirical motivation for the proposed design.",
+        "Broad empirical evaluation across multiple model families (Qwen3-4B/8B/14B, DeepSeek-R1-Distill-Llama-8B) and several reasoning benchmarks (AIME-24/25, MATH500, GPQA-Diamond), plus additional long-context/retrieval experiments (NIAH, LongBench) and an MHA model (LongChat), supporting generalization claims.",
+        "Reasonably thorough ablations (recency ratio r, re-selection layer choice, GQA aggregation strategy, generation-length inflation analysis) that help justify individual design choices.",
+        "Practical systems contribution: kernel-level implementation with FlashInfer/SGLang integration and reported FLOP/memory/latency breakdowns, which is useful for reproducibility and real-world relevance."
+      ],
+      "weaknesses": [
+        "Limited algorithmic novelty: the method is essentially TidalDecode plus cross-head aggregation and a proportional recency window; both ideas (recency windows, index reuse/amortized selection) have precedents (StreamingLLM, TidalDecode itself reuses selection across layers), making the core contribution incremental rather than a fundamentally new mechanism.",
+        "The central claim that 'token importance is global and stable across heads' is supported mainly by qualitative visualizations (a handful of heatmaps at selected layers/steps, Figures 2, 9, 10) rather than systematic quantitative metrics (e.g., average pairwise Jaccard overlap across heads/layers/models with confidence intervals), weakening the evidentiary basis for the paper's key insight.",
+        "Internal inconsistency: the abstract/introduction states LessIsMore uses 'two CUSA layers' to amortize selection cost, while the experimental setup (Section 4.1) explicitly uses only a single CUSA/selection layer for all comparisons — this discrepancy is not reconciled and raises reproducibility concerns.",
+        "At the token-selection layers, LessIsMore still computes full (dense) attention (Algorithm 1, line 10) to obtain scores for ranking, meaning true sparsity/speedup benefits are diluted at those layers; the paper does not clearly quantify how much this undermines the practical compute savings relative to a method that estimates importance more cheaply.",
+        "Reported end-to-end speedups are modest and context-length dependent (1.09–1.1× at 16K, scaling to 1.6× only at 64K), yet the paper's own data shows most AIME/GPQA/MATH problems are solved within 15–18K tokens under full attention — meaning the realistic speedup for the primary target workload (reasoning benchmarks) is likely closer to the lower end (~1.1×), which is understated in the abstract's headline '1.6×' claim.",
+        "Missing comparison to closely related reasoning-focused KV-compression baselines explicitly cited in Related Work (e.g., R-KV, Cai et al. 2025), which would be a more direct and recent point of comparison than SeerAttention-r or Quest.",
+        "The paper truncates the code availability statement ('Code is available at' with no link/footnote shown), and the Impact Statement is boilerplate with no substantive discussion of limitations, failure cases, or potential risks (e.g., scenarios where reasoning requires sparse, non-recent, non-globally-salient tokens, such as rare long-range dependencies).",
+        "Fixed hyperparameters (r=0.25, 4 attention sinks, specific re-selection layers chosen via a small needle-in-haystack search) are tuned per model family but presented as a general, principled design; the sensitivity of results to these choices across more diverse tasks/domains (e.g., coding, agentic workflows) is not explored, limiting confidence in broader applicability.",
+        "Evaluation is restricted to models up to 14B parameters; no evidence is provided for larger-scale reasoning models (e.g., 32B–70B+) that are more representative of real deployment settings where decoding efficiency matters most."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Clear and well-motivated empirical insight: the paper identifies and visually/quantitatively demonstrates cross-head spatial locality and temporal recency locality in reasoning model attention, which directly motivates the method design rather than being a post-hoc justification.",
+        "The proposed CUSA mechanism is simple, training-free, and architecture-agnostic, making it easy to integrate into existing selection-based sparse attention frameworks (demonstrated on top of TidalDecode).",
+        "Extensive empirical evaluation across multiple model families (Qwen3-4B/8B/14B, DeepSeek-R1-Distill-Llama-8B) and multiple challenging reasoning benchmarks (AIME-24/25, GPQA-Diamond, MATH500), plus generalization tests to long-context tasks (LongBench, NIAH) and MHA architectures (LongChat), which supports the generality claims.",
+        "Strong ablation studies (recency ratio r, re-selection layer choice, aggregation strategy under infrequent vs. frequent re-selection) that directly validate the design choices rather than treating them as arbitrary hyperparameters.",
+        "Practical efficiency contribution: kernel-level implementation with FlashInfer/SGLang integration showing consistent, non-trivial end-to-end speedups (up to 1.6x) and reduced memory transfer, going beyond a purely algorithmic contribution.",
+        "The analysis of generation-length inflation under sparse attention (Table 2) is a useful and underexplored angle showing that poor token selection not only hurts accuracy but also increases compute via longer traces—strengthening the paper's motivation and practical relevance."
+      ],
+      "weaknesses": [
+        "The core observations (cross-head similarity, recency locality) are demonstrated mainly through qualitative visualizations (heatmaps) on a small number of cases (specific layers/models/steps); more systematic quantitative statistics (e.g., averaged overlap metrics across many layers/heads/steps with variance) would make the 'stable and global' claims more rigorous.",
+        "Comparisons are restricted to one choice of re-selection layer per model (though justified via NIAH search), and the method is only instantiated on top of TidalDecode; it's unclear how CUSA would perform if layered onto other selection-based baselines (e.g., Quest), limiting evidence for the claimed architecture-agnostic generality.",
+        "The method still relies on a hyperparameter r (recency ratio) fixed at 0.25 across all models/tasks without a principled way to set it other than empirical sweep; limited discussion of sensitivity/robustness of this single global value across different problem types or budgets beyond the ablation on one model.",
+        "Baseline comparisons for SeerAttention-r and Quest might not be perfectly tuned per-model since they're taken from original configurations rather than being optimized the same way as TidalDecode/LessIsMore (which share re-selection layer tuning), raising minor fairness concerns about baseline strength.",
+        "The efficiency gains, while positive, are relatively modest at shorter context lengths (e.g., 1.09x-1.1x at 16K) and the headline 1.6x number is only realized at 64K context, which may not be the most common practical reasoning-length regime; broader context-length coverage or discussion of when gains become significant would help.",
+        "Limited discussion of limitations and failure cases: the Impact Statement is essentially boilerplate, and there is no discussion of potential degradation scenarios (e.g., extremely long CoT tasks beyond 32K, multi-turn or agentic settings) or memory overhead/latency of the full-attention token-selection layers themselves at very long contexts."
+      ]
     }
   }
 }

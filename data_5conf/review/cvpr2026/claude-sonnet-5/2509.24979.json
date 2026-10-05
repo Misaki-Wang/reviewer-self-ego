@@ -39,6 +39,28 @@
         "The 'Limitations' section acknowledges frequent failure modes (holes/missing alpha regions, hallucinated background elements) but these are not quantified in frequency or severity, leaving the reader unable to gauge robustness.",
         "Overall the paper reads largely as a system/engineering report combining existing techniques (LayerDiffuse-style VAE adaptation, LoRA/DoRA, rectified flow, causal 3D conv from Wan-VAE) with a curated dataset, and the core novelty (embedding alpha into RGB latent space via LoRA decoders) is incremental relative to LayerDiffuse and AlphaVAE; without quantitative evidence it is hard to assess whether the claimed 'superior performance' actually holds beyond a cherry-picked set of examples."
       ]
+    },
+    "exp3_positive": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a practically important and under-explored problem (high-quality RGBA/alpha-channel video generation), with clear applications in editing, VFX, and content creation.",
+        "The technical approach is elegant and efficient: rather than training new encoder/decoder branches from scratch (as LayerDiffuse/TransPixeler do), the method reuses the frozen pretrained Wan VAE and DiT, adding only a lightweight feature-merge block and LoRA/DoRA adapters for both the RGB and alpha decoders and the diffusion transformer. This keeps training/inference cost essentially unchanged relative to the RGB-only backbone, in contrast to TransPixeler's doubled token/attention cost.",
+        "The rendering-aware training losses for the VAE (soft-render, hard-render, reconstruction, perceptual, edge/Sobel losses) are a sensible design to jointly supervise RGB and alpha and to handle semi-transparent regions and fine edges (hair, glow, smoke).",
+        "Careful, well-documented data curation and captioning pipeline (multi-source matting datasets + manually verified/augmented Chinese captions with explicit attribute tags) is described in useful detail, aiding reproducibility of the data pipeline concept even if the raw data is proprietary.",
+        "Qualitative results (Figs. 1, 5-18) show diverse, visually convincing outputs including hair strands, glowing/translucent objects, and complex motions, which are historically difficult cases for transparent video generation.",
+        "Practical engineering contributions are highlighted (4-step CFG-free inference, LightX2V acceleration, compatibility with community deployment/acceleration tools), which increase potential usefulness if released.",
+        "The paper explicitly reports failure cases (Figs. 19-20), which is good scientific transparency about current limitations."
+      ],
+      "weaknesses": [
+        "No quantitative evaluation whatsoever is provided. All comparisons to TransPixeler (Figs. 10-16) and all internal design claims are supported only by qualitative side-by-side frames; there is no PSNR/SSIM/alpha-matting error for VAE reconstruction, no FVD/CLIP-score/FID-style metric for generation quality, and no user study. Claims such as \"outperforms in motion consistency, visual quality, alpha edge sharpness, and semi-transparent effects\" are stated as if established facts but rest entirely on a handful of cherry-picked examples chosen by the authors, which is weak evidence for a top-tier venue.",
+        "No ablation studies are reported for any of the proposed components (feature-merge block design, choice of LoRA vs. full fine-tuning, contribution of L_rec/L_per/L_edge, soft- vs. hard-render supervision, random background-color augmentation, DoRA vs. LoRA for the DiT). Several of these are asserted informally in prose (e.g., \"DoRA... yield better semantic alignment... compared to LoRA\") without any supporting comparison, numbers, or even qualitative examples.",
+        "The efficiency comparison (\"15 times faster\") is measured only against the open-source TransPixeler implementation, built on a different, older backbone (CogVideoX-5B) at a different resolution/frame count/FPS; this confounds architecture, backbone scale, and implementation-level optimization, making the speed claim not a fair or clean ablation of the proposed design's actual computational saving over doubling tokens.",
+        "The final text-to-video training set is extremely small (437 curated clips/images), and no analysis is given of generalization, overfitting risk, or diversity coverage beyond the qualitative gallery; given the model is fine-tuned via DoRA on this small curated set, it is unclear how well it generalizes outside the depicted example categories.",
+        "Captions are Chinese-only, with English inputs relying on Wan's underlying multilingual capacity and machine translation for the paper's figures; no analysis is given of English-prompt fidelity, which is relevant since the target community/dataset for CVPR is largely English-prompted.",
+        "The reported failure modes (background leakage, holes in alpha masks, semi-transparent inaccuracies for astronauts) are acknowledged but not analyzed quantitatively (e.g., frequency of failure, common causes), limiting insight into robustness.",
+        "Comparison against AlfaVAE/LayerDiffuse-based VAEs (the closest architectural baselines beyond TransPixeler) is omitted entirely; only TransPixeler is compared, despite AlphaVAE being explicitly discussed in related work as a strong recent VAE-based competitor.",
+        "Method reproducibility for the community is uncertain: while a released model is promised, the training/curated dataset (437 samples), captioning pipeline, and manual labeling process are not going to be released or are not clearly stated as being released, which limits the ability of others to reproduce the T2V fine-tuning step even if the VAE/backbone code is shared."
+      ]
     }
   },
   "v3": {
@@ -64,6 +86,26 @@
         "The paper does not report failure cases or limitations of the proposed method (e.g., complex multi-object scenes, extreme motion, or highly irregular transparent geometries), which would strengthen the credibility of the claims.",
         "Only a single base model architecture (Wan2.1-T2V-14B) is used; no ablation on whether the method generalizes to other video diffusion backbones, limiting evidence of broader applicability.",
         "Details on training cost/compute, hyperparameter sensitivity of the bidirectional loss weighting, and how mask regions (O, S, T) are precisely thresholded in practice are somewhat under-specified in the main text (deferred to supplementary, not included here)."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "Addresses a genuinely underexplored and practically relevant problem (RGB-A video generation) with clear creative-industry applications.",
+        "The core idea of separately shifting the alpha distribution while preserving the RGB distribution in both latent (VAE) and noise space is a reasonable and relatively novel framing, distinct from simply duplicating channels or backbones as in prior work (LayerDiffuse-based pipelines, TransPixeler).",
+        "The method requires no architectural change to the base video DiT at inference (LoRA/DoRA merge), giving a notable inference speed advantage over TransPixeler (claimed 15x), which is a meaningful practical benefit if reproducible.",
+        "Reasonably thorough ablations are provided for VAE reconstruction (rendering losses, TABD) and qualitative ablations for the mean sampler, helping to justify individual design choices.",
+        "The paper proposes to release a curated RGB-A dataset with detailed captions and attribute labels, which could be a useful community resource given data scarcity in this space.",
+        "Demonstrates an interesting controllability feature (Gaussian ellipse mask for shape/position of transparency) and an extension to image-to-video, broadening the application scope."
+      ],
+      "weaknesses": [
+        "The DiT fine-tuning dataset is extremely small (429 total samples: 301 video + 43 image + 85 special-effect videos) for fine-tuning a 14B-parameter video generation model; this raises serious concerns about generalization, overfitting, and the robustness of the reported gains, which the paper does not address with any data-scaling ablation.",
+        "The theoretical justification for the bidirectional diffusion loss (simply flipping the sign of the squared RF loss in non-opaque regions) is weak: minimizing a negated squared-error term is unbounded below and could in principle destabilize or degenerate training (e.g., pushing predictions to diverge) unless implicitly regularized by the frozen DiT and other losses; the paper offers no training curves, stability analysis, or discussion of why this does not collapse, despite explicitly claiming that direct distance-maximizing strategies would destabilize training.",
+        "Quantitative transparency evaluation is limited to a small VAE reconstruction table (PSNR/SSIM/LPIPS) and a subjective user study (Table 2) with no reported number of participants, trials, or statistical significance; there is no quantitative alpha-matting-specific metric (e.g., SAD, MSE, gradient error against ground-truth alpha) for the end-to-end generation pipeline, which is the central claim of the paper (\"stable transparency\").",
+        "Baseline comparison is narrow: only two prior RGB-A video generation methods (TransPixeler, LayerFlow) plus one self-constructed baseline (LayerDiffuse+AnimateDiff) are compared; while this reflects field novelty, it still limits the strength of the SOTA claims, and no ablation isolates how much of the improvement stems from the stronger base model (Wan2.1-14B) versus the proposed distribution-shifting techniques.",
+        "Reproducibility is not currently verifiable: the model/dataset are promised for future open-source release but are not provided with the submission, and the method depends on a large proprietary-scale base model (Wan2.1-T2V-14B) and additional tooling (LightX2V, DoRA, GPT-4o-based evaluation), making independent verification difficult.",
+        "The paper lacks an explicit limitations or failure-case discussion; given the very small fine-tuning set and simple geometric (ellipse) controllability mechanism, it is unclear how the method behaves on complex multi-object or multi-region transparency scenes, which is not analyzed.",
+        "Some notational and presentation issues (e.g., overloaded tilde/hat symbols, inconsistent use of μ as both a learned mean function and a scalar control factor) reduce clarity and could confuse readers attempting to reproduce the method."
       ]
     },
     "exp3_positive": {

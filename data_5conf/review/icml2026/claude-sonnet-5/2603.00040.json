@@ -19,6 +19,46 @@
         "The evaluation of downstream task quality after fine-tuning (Table 3) shows mixed results (e.g., Llama 3.1-70B GPQA drop of ~0.025, MATH-500 drop of ~0.018), and the paper does not fully quantify or discuss the practical significance of these residual gaps for real deployment scenarios.",
         "No comparison against alternative/most recent baseline low-bit attention approaches beyond SageAttention3 (e.g., no comparison with any native low-bit attention training method), leaving open how Attn-QAT compares to a broader landscape of proposed 4-bit attention solutions."
       ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Identifies a concrete, previously undocumented technical issue: naively combining an FP4 forward pass with FlashAttention's BF16 backward pass causes exploding gradients, and pinpoints two root causes (precision mismatch in recomputed P, and the broken P^T dP = dO^T O identity under low precision). This is a genuine, non-trivial systems-level insight.",
+        "Provides a fairly complete ablation (Table 2, Exp 4-8) isolating the contribution of each design choice (K-smoothing, two-level P quantization, high-precision O in backward, fake quantization of P in backward), which supports the mechanistic claims about why naive QAT fails and what fixes are necessary.",
+        "Evaluates across two modalities (video diffusion and LLMs) and multiple settings (continued pretraining and SFT), plus a human win/tie/lose evaluation, which is a reasonably broad evidentiary base for a systems paper.",
+        "Delivers working fused Triton/CUDA kernels with demonstrated inference speedups on real hardware (RTX 5090), going beyond a purely theoretical proposal.",
+        "Honest discussion of partial results (e.g., Llama-3.1-70B not fully recovering BF16 performance) and clearly attributes this to limited compute budget rather than hiding it."
+      ],
+      "weaknesses": [
+        "Results are inconsistent in showing full quality recovery: for Llama-3.1-70B, Attn-QAT only partially closes the gap to BF16 in both continued-training (Table 4, WikiText 0.3076 vs BF16 0.2838) and SFT settings (Table 3, GPQA-Diamond drops from 0.4091 to 0.3838), undermining the headline claim that \"QAT alone is sufficient\" for reliable 4-bit attention at scale.",
+        "The method introduces non-trivial training overhead (extra buffers for fake-quantized Q/K/V and high-precision O, requiring full gradient checkpointing to avoid OOM as noted in Appendix B.1) that is never quantified or compared against the cost of training-free alternatives like SageAttention3; the paper emphasizes inference speedup but omits training-time/memory cost analysis, which is central to judging practicality of a QAT-based solution.",
+        "Baseline comparison is narrow: the only quantization-aware competitor considered is SageAttention3, and language-model experiments explicitly exclude it due to a claimed implementation bug rather than presenting a corrected or alternative strong baseline, weakening the LLM comparisons.",
+        "Hardware/method applicability is limited to NVFP4 on Blackwell-class GPUs (RTX 5090 in the main kernel benchmarks), and the paper itself states that native FP4 attention kernels for other SM100 GPUs (B200/B300) are still \"actively being developed,\" meaning the demonstrated speedup claims (1.1x-1.5x) rest on a narrow hardware configuration.",
+        "Human evaluation (Figure 2) shows a fairly weak preference signal (16 win / 64 tie / 19 lose for Attn-QAT vs BF16) with no statistical test or confidence interval, and automatic VBench metrics for Attn-QAT vs BF16 are often nearly identical or occasionally lower (e.g., Table 2 Overall Quality 0.8252 vs 0.8267), so the \"fully recovers\" claim is not strongly supported beyond rough parity.",
+        "No training seeds/repetitions or variance reporting; given the noisy gradient-norm plots shown in Figure 3, single-run comparisons leave open whether observed differences (including the ablation rankings) are robust or within run-to-run noise.",
+        "Limited hyperparameter tuning is acknowledged for the 70B model and generally across LLM experiments (\"we did not perform any hyperparameter tuning\"), which raises concern that reported gaps/recoveries could shift substantially with better tuning, limiting confidence in the comparative conclusions."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "First systematic study of quantization-aware training (QAT) specifically for the attention operator at FP4 precision, filling a clear gap since prior QAT work focused on linear layers and prior FP4 attention work (SageAttention3) was training-free.",
+        "The paper identifies two concrete and well-motivated failure modes of naive FP4 QAT in FlashAttention-style fused kernels (precision mismatch in recomputed P during backward, and the implicit high-precision O assumption in the P^T dP identity), and proposes principled, minimal fixes grounded in careful derivation (Eqs. 6-9, Algorithms 1-3).",
+        "Extensive empirical validation across both diffusion models (Wan 2.1 at 1.3B and 14B) and LLMs (Qwen3-14B, Llama 3.1-70B), covering continued pretraining and supervised fine-tuning, with VBench, lm-eval-harness, and downstream benchmark suites (MMLU-Redux, GPQA, MATH-500, GSM8K, IFEval).",
+        "Thoughtful ablations (Table 2, Exp. 4-8) isolating the contribution of each design choice (K-smoothing, two-level P quantization, high-precision O in backward, fake quantization of P in backward), showing that the two proposed fixes are necessary and that SageAttention3's additional outlier-mitigation heuristics become unnecessary once QAT is applied.",
+        "Includes blind human evaluation (Figure 2) in addition to automatic VBench metrics, which strengthens the perceptual quality claims for video generation.",
+        "Practical systems contribution: fused Triton training kernels plus custom CUDA inference kernels achieving reported 1.1x-1.5x speedup over SageAttention3 on RTX 5090 by removing smoothing/two-level quantization overhead, with reasonable sanity check that fake-quantized (Triton) and real-quantized (CUDA) forward passes produce near-identical outputs (Figure 4).",
+        "Reasonably detailed reproducibility information in the appendix (training hyperparameters, hardware, dataset shards, step counts) and an honest limitations/future-work discussion (current restriction to RTX 5090/SM120, lack of SM100-native kernels, no 4-bit KV cache yet)."
+      ],
+      "weaknesses": [
+        "Results are inconsistent for the larger/harder setting: Llama 3.1-70B Attn-QAT only partially recovers BF16 quality in both continued training (Table 4) and SFT (Table 3, e.g., GPQA-Diamond drops from 0.4091 to 0.3838), and the paper attributes this to limited training budget/hyperparameter tuning without further investigation, leaving open whether the method scales robustly to larger models.",
+        "There appears to be a naming inconsistency between the main text (\"Qwen3-14B\", \"Llama 3.1-70B\" continued training results in Table 4) and Appendix B.2, which states continued-training experiments were run on \"Qwen3-8B\" and Llama 3.1-70B — this discrepancy is not reconciled and could reflect either a typo or a genuine mismatch that undermines confidence in result traceability.",
+        "SageAttention3 is excluded from all LLM experiments due to claimed numerical errors in its open-source causal-attention kernel, meaning the paper's main competitive baseline is missing exactly where generalization beyond diffusion models is tested; this weakens the LLM comparison's completeness.",
+        "Human evaluation is based on only 99 sampled VBench prompts from a single model (Wan 2.1 14B), and no inter-rater reliability or statistical significance testing is reported for the win/tie/lose results.",
+        "Hardware/software generalizability is narrow: all inference kernels and speedup numbers are specific to RTX 5090 (SM120); native SM100 (B200/B300) kernels are stated as future work, so the practical throughput benefits for the newest Blackwell data-center GPUs remain unverified.",
+        "The LLM continued-training and SFT setups use relatively short training schedules (up to 2000-4000 steps, some without hyperparameter tuning per Appendix B.2), which may understate the training cost needed for QAT to converge and could bias comparisons against BF16 baselines that were presumably pretrained with far more compute.",
+        "The paper claims Attn-QAT removes the need for outlier-mitigation heuristics, but this conclusion is drawn primarily from the 1.3B diffusion ablation (Table 2); it is not verified whether the same conclusion holds for the larger 14B diffusion model or for the LLMs, where SageAttention3-style heuristics are not ablated at all."
+      ]
     }
   }
 }

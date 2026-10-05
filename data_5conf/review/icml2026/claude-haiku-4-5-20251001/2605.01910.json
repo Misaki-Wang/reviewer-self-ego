@@ -22,6 +22,46 @@
         "Key limitations relegated to appendices: prefill bottleneck and S-tuning requirements should be prominent in main paper, not buried",
         "Paper scope unfocused: covers decode, prefill, value stage, score stage across 23 pages plus 18 appendices; Bernoulli qK^T feels disconnected from main SANTA contribution"
       ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Solid theoretical foundations with rigorous proofs of unbiasedness, variance scaling, and concentration bounds",
+        "Thoughtful systems engineering with two kernel variants (S²ANTA-prop and S²ANTA-flash) exploring synchronization vs. efficiency trade-offs",
+        "Comprehensive experimental evaluation across multiple benchmarks (GSM8K, MMLU, RULER) with proper confidence intervals and detailed microbenchmarking protocols",
+        "Clear presentation with well-designed figures and extensive appendices including pseudocode and reproducibility details",
+        "Orthogonal to existing techniques (quantization, GQA, cache policies), enabling potential composition"
+      ],
+      "weaknesses": [
+        "Limited practical impact: 1.5× kernel-level speedup applies only to decode-dominated scenarios; prefill gets no memory access benefit (>94% V-row coverage even with S=16) despite being compute-dominant in most workloads",
+        "Weak accuracy-efficiency trade-offs: 1-2% accuracy drops (e.g., GSM8K 77.33% vs 78.06%, MMLU wide variance) for modest speedups do not justify the approximation to practitioners who want both efficiency and accuracy",
+        "Bernoulli qKT underdeveloped: only evaluated on BitNet 2B and briefly on Llama 8B; combined with SANTA shows 2% accuracy loss (Table 7); 30% score approximation error (Appendix C.1) lacks deep analysis",
+        "Limited empirical scope: evaluation restricted to 8B models; no evaluation on larger models (70B+) where memory pressure is most acute; hardware-specific benchmarks (RTX 6000 Ada only); generalization unclear",
+        "Overstated claims: '1.5× decode-step speedup' cited repeatedly but applies narrowly; '>90% value-stage memory reduction' is misleading—worst-case unique access with GQA is ~12.5%; 'multiplier-free' acknowledged as irrelevant on current hardware",
+        "Incomplete analysis of when SANTA is preferable: comparison to simpler alternatives (top-k, quantization, cache management) not compelling; no end-to-end latency measurements in realistic mixed-phase scenarios",
+        "Narrow applicability: method only benefits decode step; prefill limitation (Appendix F-G) deserves more prominence given it fundamentally constrains real-world utility",
+        "Reproducibility concerns: custom CUDA kernels hardware-specific; kernels not yet released at review time for independent verification; sampling overhead not quantified"
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Well-motivated problem addressing real bandwidth bottleneck in long-context LLM inference",
+        "Sound theoretical foundation: proven unbiasedness, variance scaling as 1/S, concentration bounds, and variance-reduction guarantees for S²ANTA-strat",
+        "Non-trivial systems contributions: two GPU kernel strategies (S²ANTA-prop, S²ANTA-flash) that cleverly parallelize sampling despite sequential CDF dependency; achieves 1.5× decode-step speedup",
+        "Comprehensive empirical evaluation across multiple benchmarks (GSM8K, MMLU, RULER), models (Llama, DeepSeek, BitNet), and detailed ablations (one-hot per layer, layer-wise RL budgets)",
+        "Excellent reproducibility: detailed measurement protocols, tensor layouts, software versions, extensive appendices, and commitment to open-sourcing code",
+        "Clear presentation with helpful figures and honest discussion of limitations"
+      ],
+      "weaknesses": [
+        "Severely limited practical scope: method provides no sparse V-access benefit in prefill (Appendix F shows >94% of V rows accessed even for S=16), yet prefill is critical in many deployments; speedups are kernel-level and subject to Amdahl's Law with unclear end-to-end impact",
+        "Accuracy-efficiency tradeoffs require careful per-application tuning: GSM8K results span 77.33%-78.17% across budgets vs 78.06% baseline; S²ANTA-flash requires 16× higher budget (S=2048 vs S=128) than S²ANTA-prop to match accuracy, creating deployment friction",
+        "Bernoulli qKT is underdeveloped: shows ~30% approximation error on qKT, marginal standalone gains (1.2% accuracy drop on BitNet), and combined SANTA+Bernoulli configuration drops 1.9% accuracy; mean group query approach introduces bias requiring compensation",
+        "Energy efficiency claims are speculative: authors acknowledge 'hardware architectures optimized for sparse, adder-centric computation could realize' benefits; no actual energy measurements provided; current GPUs favor dense multiply-accumulate",
+        "Incomplete comparison with simpler alternatives: top-k attention is much simpler to implement; unbiasedness advantage not convincingly demonstrated to matter in practice; mixed results in Tables 12-15 with only ~5% improvements on some tasks",
+        "Limited hardware scope: evaluation on single GPU (RTX 6000 Ada) with batch size 1; generalization to other hardware generations and realistic batch sizes unclear",
+        "S²ANTA-sys used in experiments despite lacking variance-reduction guarantee—theoretical/practice gap for systematic sampling not fully resolved"
+      ]
     }
   },
   "v2": {
@@ -40,6 +80,51 @@
         "Bernoulli qK^T sampling component is underdeveloped and less convincing; achieves only 63.8% accuracy on GSM8K when combined with SANTA (2% drop), shows model-dependent behavior (e.g., 67.5% key access on BitNet vs. 72.8% on Llama), and lacks broad validation",
         "Claims of complementarity with quantization/compression methods not empirically validated; applicability constrained to specific bandwidth-bound workloads and requires custom CUDA kernels limiting adoption",
         "Systematic sampling (S²ANTA-sys) used in main results but lacks variance-reduction guarantee despite Section 3.4 relying on it; theoretical justification only for stratified variant"
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Clear motivation addressing genuine memory-bandwidth bottleneck in long-context decoding with concrete examples",
+        "Rigorous theoretical foundation: unbiasedness proofs, variance scaling characterization, and Bernstein concentration bounds",
+        "Non-trivial engineering contribution: two distinct GPU kernel strategies (S²ANTA-prop and S²ANTA-flash) with thoughtful synchronization/waste trade-offs",
+        "Comprehensive evaluation: multiple benchmarks (GSM8K, MMLU, RULER, LongBench v2), careful measurement protocols, extensive ablations and variance analyses",
+        "Fair baseline comparisons with FlashInfer, FlashDecoding, and top-k attention at matched budgets",
+        "Strong reproducibility effort: detailed algorithms, explicit measurement protocols, open-source commitment"
+      ],
+      "weaknesses": [
+        "Limited practical impact: 1.5× kernel speedup and only 1.25× end-to-end speedup is modest; applicability restricted to long-context, decode-heavy, dense-KV workloads that are increasingly rare with quantization adoption",
+        "Unsatisfying accuracy-efficiency trades: S²ANTA-prop requires S=128 for 32k context to match baseline (only ~0.4% of keys, or ≲1.56% accounting for GQA), contradicting the 'S ≪ n_k' premise; accuracy drops sharply at smaller S values relevant to shorter contexts",
+        "S²ANTA-flash has fundamental limitations: requires 16× larger sample budget (S=2048 vs 128) due to sample waste, severely limiting practicality; fidelity degrades when attention mass spreads across tiles (Tables 29-30)",
+        "Narrow applicability: no benefit for prefill, weak for short contexts (paper's own GSM8K/MMLU have ~340-420 tokens), marginal benefit when combined with KV quantization (increasingly standard in production)",
+        "Bernoulli qK^T is underdeveloped: only evaluated on BitNet 2B not Llama despite paper focus, achieves ~30% score error, combined approach (Table 9) loses ~2% accuracy, misleadingly claims 'multiplier-free' while still multiplying by original query",
+        "Limited novelty: sampling from softmax is straightforward, stratified/systematic sampling are textbook techniques; contribution is primarily GPU engineering rather than algorithmic innovation or conceptual insight",
+        "Kernel speedups somewhat artificial: measure only decode step in isolation, exclude prefill, ignore overhead; end-to-end 1.25× is more honest but gets less emphasis",
+        "Evaluation uses synthetic/truncated long-context data (RULER is synthetic, LongBench v2 truncated to 30k); no real production long-context workload evaluation; confidence intervals are large (Table 1), complicating interpretation",
+        "Incomplete analysis: extreme layer-wise sensitivity (Fig. 8) remains unexplained; minimal connection to attention distribution properties; learned per-layer budgets (Appendix K) not integrated into main results",
+        "Energy claims (Section 3.6) are purely theoretical with no power measurements; speculates on future 'hardware optimized for sparse, adder-centric computation'; missing analysis of numerical stability and floating-point precision in accumulation"
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Mathematically sound theoretical foundation with rigorous proofs of unbiasedness (Proposition A.2), variance scaling (Proposition A.3), and variance reduction for stratified sampling (Theorem A.6), plus concentration bounds (Theorem B.1)",
+        "Practical GPU kernel engineering with two well-motivated strategies (S²ANTA-prop and S²ANTA-flash) demonstrating real 1.5× decode-kernel and 1.25× end-to-end speedups on RTX 6000 Ada at 32k tokens",
+        "Comprehensive experimental evaluation spanning 3 models (Llama-8B, DeepSeek-7B, BitNet-2B), 8+ benchmarks (GSM8K, MMLU, RULER, LongBench v2, HumanEval), and multiple context lengths (4k-32k tokens) with extensive ablations and sensitivity analyses",
+        "Rigorous treatment of scope and limitations with data-driven explanations (prefill inapplicability clearly demonstrated in Table 11), Amdahl-law analysis explaining speedup bottlenecks, and honest discussion of S²ANTA-flash sample waste phenomenon",
+        "Excellent reproducibility support including detailed pseudocode (Algorithms 2-8), measurement protocols, prompting/grading procedures, hardware specifications, and promise of open-source kernel release",
+        "Empirical validation of theoretical predictions: variance measurements (Appendix D) confirm 1/S scaling; top-k comparisons demonstrate SANTA outperforms on long-context reasoning tasks where evidence is dispersed",
+        "Clear complementary positioning: orthogonal to KV quantization, low-rank projection, and cache compression; can be composed with other optimization techniques"
+      ],
+      "weaknesses": [
+        "Narrow practical applicability: decode-phase only with no benefit during prefill (Table 11 shows >94% value rows accessed even with S=16); only meaningful speedup at long contexts (32k tokens); decode-heavy batch inference required",
+        "Modest absolute speedups: 1.25× end-to-end decode latency is useful but incremental; 1.5× kernel speedup is isolated component; speedups hardware-dependent and evaluated on single GPU class (RTX 6000 Ada); unclear performance on A100/H100/datacenter GPUs",
+        "Accuracy-efficiency trade-off not free: S²ANTA-prop requires S=128 (0.39% of nₖ) at 32k tokens; S²ANTA-flash requires S=2048 (6.25% of nₖ) due to sample waste; significant variance remains even with stratified sampling; no automatic S selection mechanism",
+        "S²ANTA-flash fidelity issues: poor accuracy at low budgets (Table 1: S=256 yields 66-91% vs. 95-98% baseline); high sensitivity to attention distribution spread (Table 29: 0.190 L2 error for dispersed vs. 0.055 for concentrated); 16× budget overhead compared to proportional strategy",
+        "Bernoulli qK^T contribution underdeveloped: modest improvements (Table 8: 2% accuracy loss at B=8); mean group query workaround for GQA is ad-hoc; ~30% numerical error in score computation (Appendix C.1); limited to specific architectures; evaluated primarily on short-context tasks",
+        "Theoretical gaps: boundedness assumption in Bernstein bound (Theorem B.1) not verified empirically; S²ANTA-sys lacks variance reduction guarantee despite strong empirical performance (Appendix D shows 1.29 slope vs. theory's 1.0)—no mechanistic explanation provided",
+        "Incomplete baseline comparisons: top-k is primary baseline; missing comparisons to other stochastic sampling methods; no evaluation against recent specialized long-context techniques beyond top-k",
+        "Presentation issues: dense paper with key results scattered across main text and extensive appendices; Bernoulli section (Section 5) disconnected from main narrative; open-source link unverifiable during review"
       ]
     }
   }

@@ -21,6 +21,24 @@
         "The complexity analysis (Table 3) is derived for a generic MLP abstraction and may not precisely reflect actual transformer architectures, limiting the rigor of the asymptotic comparison though the empirical wall-clock results partially compensate for this."
       ]
     },
+    "exp3_negative": {
+      "oa": 2.5,
+      "strengths": [
+        "Addresses a practically important problem: existing influence-estimation methods (influence functions, DataInf, HyperINF, TracIn) require gradients, Hessians, or fine-tuning, which is prohibitive at LLM/VLM scale; a forward-only alternative is a worthwhile direction.",
+        "The derivation connecting likelihood dynamics to a closed-form score (representation similarity weighted by token-level prediction-error alignment) is a reasonably clean theoretical narrative and gives an interpretable decomposition (embedding alignment × error alignment).",
+        "Broad empirical coverage across model families and sizes (Qwen2.5 1.5B–72B, Llama-2-13B, Qwen2.5-VL-3B, Llama-3.2-11B-Vision) and both LLM and VLM settings, plus a genuine efficiency advantage (seconds vs. hours) that is clearly demonstrated via wall-clock and complexity analysis.",
+        "Reasonably thorough appendix documenting task templates, dataset statistics, and proof details, aiding reproducibility of the experimental protocol."
+      ],
+      "weaknesses": [
+        "Core theoretical assumption (Assumption 1, 'unconstrained features'/neural-collapse-style) is borrowed from classification settings with low-dimensional fixed label sets and is a strong, largely unverified leap for autoregressive generation over large vocabularies; no empirical check of how well this assumption holds for the actual models used is provided.",
+        "Fundamental theory-practice mismatch: Theorem 1 characterizes data value via d/dt ln π_θ(t) during an active training trajectory, but in practice the score is computed once from a static, already pretrained/instruction-tuned checkpoint (θ at t=0, no fine-tuning). The paper does not justify why a ranking derived at initialization should transfer to value during/after fine-tuning on the target task; this gap undercuts the central theoretical motivation for the method.",
+        "The evaluation metrics (AUC/Recall against pseudo-labels based on shared task/class membership) are an indirect, relatively weak proxy for 'influence'; the paper never validates scores against actual counterfactual outcomes (e.g., leave-k-out retraining, linear datamodeling score, or downstream task performance after selecting high/low-value subsets), which is the standard rigorous check in the influence-function literature and is noticeably absent here.",
+        "Empirical gains over the strongest baseline (HyperINF/DataInf) are often marginal and sometimes reversed (e.g., VLM subject-generation Recall: HyperINF 0.902 vs. For-Value 0.897 on Qwen2.5-VL-3B), with large standard deviations throughout and no significance testing, making several 'wins' hard to substantiate statistically.",
+        "Baseline selection procedure (choosing the checkpoint with highest test AUC across training) uses test-set information to pick the reported baseline operating point, which is methodologically unusual and complicates fair comparison against a training-free method evaluated at a single, fixed point.",
+        "Datasets are largely synthetic/templated (10 artificial sentence-transformation rules, 10 templated math word problems, style/subject image captioning, a single cat-vs-dog mislabeling task), limiting external validity for realistic, heterogeneous fine-tuning corpora or real-world noisy-label distributions.",
+        "No code/artifact release is mentioned, and despite detailed templates in the appendix, exact implementation details (e.g., how |V_D| is chosen per experiment, sensitivity to this hyperparameter) are not fully specified, leaving some reproducibility gaps."
+      ]
+    },
     "exp3_positive": {
       "oa": 3.5,
       "strengths": [
@@ -59,6 +77,26 @@
         "Performance advantages are not uniform: in several settings (e.g., PMC-Reasoning 20% data, VLM subject-generation recall) For-Value is second to HyperINF, which somewhat tempers the “matches or outperforms” framing.",
         "Efficiency claims for large (32B/72B) baseline comparisons rely on subsampling 10% of valuation data and linear scaling extrapolation rather than full runs, which may not accurately reflect real-world runtime and could bias the efficiency comparison in the paper's favor.",
         "The method is explicitly restricted to the fine-tuning regime, limiting applicability; combined with reliance on a fairly strong theoretical assumption, the generality of the contribution beyond the tested setups (mostly moderate-scale supervised fine-tuning tasks) is not fully established."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2.5,
+      "strengths": [
+        "Addresses a genuinely important and practical bottleneck: existing gradient/Hessian-based data valuation methods (influence functions, DataInf, HyperINF, TracIn) scale poorly to billion-parameter LLMs/VLMs and cannot be batched; a forward-only alternative is a worthwhile contribution.",
+        "The paper provides a concrete theoretical derivation (Theorem 1/2) connecting likelihood change on a valuation point to an inner product of last-layer hidden representations weighted by token-level prediction-error similarity, giving at least a principled motivation for the proposed score rather than a purely heuristic one.",
+        "Extensive empirical coverage: experiments span multiple LLMs (Qwen2.5 1.5B-72B, Llama-2-13B) and VLMs (Qwen2.5-VL, Llama-3.2-Vision), several task families (influential data identification, mislabeled data detection, and downstream data selection for fine-tuning in math and medical domains), which is a non-trivial empirical effort.",
+        "Efficiency gains are large and consistently demonstrated (seconds vs. hours, up to 5-6x wall-clock speedup, no need for backpropagation or per-sample gradient storage), and complexity/memory analysis (Tab. 6) is provided to support the scalability claim.",
+        "Ablations are included that isolate the role of the prediction-error term α (reducing to an embedding-similarity baseline) and examine performance stability across model scale, which helps substantiate part of the design choices."
+      ],
+      "weaknesses": [
+        "The core theoretical result rests on the 'unconstrained feature' assumption, which is typically invoked for final classification layers under the neural-collapse literature; applying it to autoregressive, context-dependent hidden states of every generated token in LLMs/VLMs is a considerably stronger and less justified leap than the cited precedents, and the paper does not empirically verify that this assumption approximately holds for the hidden representations actually used in the score.",
+        "Assumption 2 (no training input identical to the valuation input), used to make the unembedding-dependent term vanish, is asserted to be 'mild' without concrete empirical check of how much this term is actually being discarded in realistic data, nor any sensitivity analysis when training/valuation inputs are similar (a common real scenario in fine-tuning on near-duplicate or paraphrased data).",
+        "The method only uses the *last-layer* gradient as a surrogate for full-model influence, yet it is reported to consistently *outperform* Hessian-free and sometimes even outperform DataInf/HyperINF, which use gradients from all LoRA layers; this is counter-intuitive if the last layer is merely an approximation of the true influence signal, and the paper does not adequately explain why a strictly smaller information set yields equal-or-better results beyond asserting it is 'an effective measure'.",
+        "Many of the influence-identification benchmarks (sentence transformation, math word problems, image style/subject generation) are synthetic, templated, class-structured tasks where almost all methods (including weak baselines) already achieve AUC/Recall at or near 1.000, leaving very little room to discriminate real differences in valuation quality; the near-ceiling numbers raise concern about whether these benchmarks are informative enough to support claims of 'matching or outperforming' baselines.",
+        "The downstream fine-tuning experiments (Tables 3–5), which are the most practically meaningful evidence, report single-run point estimates with no error bars, seeds, or significance testing, making the reported 1–3% accuracy gains difficult to interpret as reliable improvements rather than noise, especially since some results (Table 5, 20% data) show For-Value losing to HyperINF.",
+        "The complexity analysis (Table 6) is built around a generic MLP abstraction (L layers of size d_in × d) rather than an actual transformer parameterization, which obscures how the stated complexities map onto the real models evaluated (1.5B–72B parameters) and makes the comparison somewhat superficial.",
+        "Selection of baseline checkpoints by 'highest test AUC' (Appendix A.6.1) is an unusual practice that could bias comparisons in favor of or against baselines depending on how representative that single checkpoint is, and is not clearly justified as a fair protocol.",
+        "The scope is explicitly restricted to the fine-tuning stage under a pretrained, pre-fine-tuning model snapshot (t=0), and the paper acknowledges (Limitations) that data value may evolve with training and that the approach does not apply to pretraining — this limits the generality of the claimed contribution relative to methods like in-run Shapley that track value throughout training."
       ]
     },
     "exp3_positive": {

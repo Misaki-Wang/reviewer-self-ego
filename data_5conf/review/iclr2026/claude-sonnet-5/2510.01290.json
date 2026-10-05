@@ -18,6 +18,45 @@
         "Some abstract/intro claims (e.g., 'near-lossless accuracy with <5% of the original KV cache') are optimistic averages; Figure 8 shows accuracy drops of several percentage points to >10% in some low-budget regimes (e.g., token budget=64), and the 'near-lossless' framing could be more carefully qualified relative to the compression level achieved.",
         "The interaction between quantization-induced generation-length inflation and the hybrid scheme's effectiveness (Section 2, Table 3) is an important but somewhat underexplored phenomenon; the paper offers an intuitive explanation ('hybrid regularizes inflation') but no rigorous mechanistic analysis or theoretical grounding for why combining eviction with quantization curbs this inflation."
       ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "The core empirical observation—that attention sparsity exhibits a tri-modal pattern correlating with distinct reasoning behaviors (reasoning/execution/transition)—is an interesting and somewhat novel lens for KV cache compression in LRMs, going beyond purely token-level heuristics used in prior work (H2O, R-KV, RaaS, LazyEviction).",
+        "The system contribution (Continuous Thinking kernel) addressing gather-based compaction overhead is a real and well-motivated problem; Figure 7 convincingly shows that non-contiguous eviction creates substantial TPOT overhead at scale, and the proposed in-place slot reuse mechanism is a sensible engineering solution.",
+        "Extensive experimentation across many model families (DeepSeek-R1-Distill 8B/70B/14B, GPT-OSS 20B/120B, QwQ-32B, AceReason-14B, MobileLLM-R1) and multiple benchmarks (AIME, LiveCodeBench, MATH-500, GSM8K, LongWriter) with reasonably thorough ablations (refresh rate, layer count, thought count, minimum retention, block size, data formats).",
+        "Reasonably strong reported results: near-lossless accuracy with <5% KV cache budget and significant throughput gains (up to 5.8x) over compared baselines, with isolated ablations (iso-batch, iso-compression) that attempt to separate algorithmic and systems contributions."
+      ],
+      "weaknesses": [
+        "The thought decomposition relies on hand-set sparsity thresholds derived via KDE calibration on only 100 prompts, with the paper itself acknowledging 'ambiguous boundaries' and non-tri-modal sparsity in several layers (e.g., GPT-OSS-20B, Fig. 13); the robustness and transferability of this categorization to new domains/models without recalibration is not well established.",
+        "The keyword-based category labels (Table 6) are explicitly said to be illustrative only and not used for actual classification, which leaves the real classification mechanism (sparsity-threshold based) somewhat under-validated as a semantically meaningful 'thought' categorization rather than just an attention-pattern clustering with a convenient post-hoc narrative.",
+        "The method is fragile at the margins: the appendix explicitly shows a failure case where aggressive compression of transition thoughts causes the model to enter an infinite repetition loop ('I'm stuck... I'm failing'), and the fix (minimum retention R=4) is an ad hoc patch rather than a principled solution; the frequency/severity of such degenerate failures within the actual benchmark evaluations is not quantified.",
+        "The system implementation is a 'proof of concept' built on HuggingFace Transformers with a custom reimplementation of PagedAttention rather than integration into a production serving stack (vLLM/TRT-LLM), which limits confidence in the reported throughput numbers generalizing to real deployment settings; this is acknowledged as a limitation but not mitigated.",
+        "AIME evaluation uses only 30 prompts with no reported variance/error bars across runs, raising concerns about statistical robustness of the reported accuracy deltas, especially for fine-grained comparisons between methods at the same token budget.",
+        "The method introduces a large number of hyperparameters (refresh period τ, number of thoughts |T|, optimal layer subset L*, retention schedule R, group size g, quantization bit assignment per thought) each tuned via ablation on specific models/benchmarks, raising concerns about overfitting to the evaluated setups and the practical cost of recalibration for new models.",
+        "Novelty is somewhat incremental relative to existing LRM-specific KV compression works (RaaS, LazyEviction, R-KV, PM-KVQ): the core idea of combining quantization and eviction with reasoning-aware granularity builds directly on these works, with the main new ingredient being the heuristic attention-sparsity-based segmentation rather than a fundamentally new algorithmic idea.",
+        "Throughput comparisons (Table 2) are partly a direct consequence of achieving higher compression ratios (enabling larger batch sizes), which is somewhat expected and not fully disentangled from the CT kernel's intrinsic efficiency benefit, despite the iso-batch comparison attempting to address this."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Novel and well-motivated core idea: decomposing LRM chain-of-thought into reasoning/execution/transition 'thought types' via attention-sparsity patterns, and using this decomposition to drive both quantization precision assignment (TBQ) and progressive eviction (TBE). This moves beyond token-level heuristics used by prior eviction/quantization work.",
+        "Strong empirical validation across a wide range of model families (DeepSeek-R1-Distill 8B/70B, GPT-OSS 20B/120B, AceReason-14B, QwQ-32B, MobileLLM-R1-950M) and benchmarks (AIME, LiveCodeBench, MATH-500, GSM8K, LongWriter), showing near-lossless accuracy at <5% KV cache budget, consistently beating strong recent baselines (R-KV, LazyEviction, RaaS, H2O, KIVI, PM-KVQ).",
+        "Solid systems contribution: the Continuous Thinking (CT) kernel extension of PagedAttention eliminates expensive gather-based compaction by reusing evicted memory slots in place, backed by a clear empirical analysis of gather overhead (Figure 7) and a correctness argument via a KV-permutation-invariance proof (Appendix C.3).",
+        "Comprehensive ablation studies (refresh rate, number of layers/thought types, minimum retention, block size, data format choice, component-wise contribution of TBQ vs TBE) that substantively support the design choices rather than just reporting end results.",
+        "Good throughput/memory analysis on real hardware (A100, GH200) with iso-batch/iso-compression comparisons that isolate the effect of the CT kernel from the compression algorithm, strengthening the systems claims.",
+        "Interesting diagnostic case studies (e.g., endless-loop failure when transition thoughts are over-compressed) that provide insight into why certain design choices (minimum retention, precision hierarchy) are necessary."
+      ],
+      "weaknesses": [
+        "The choice of exactly 3 thought types and the KDE-based threshold/layer-selection procedure is somewhat heuristic; the paper itself notes that some layers (e.g., in GPT-OSS-20B) exhibit ambiguous or unclear tri-modal sparsity, raising questions about robustness of the categorization across architectures beyond the ones tested.",
+        "The system implementation is explicitly described as a 'proof of concept' built on a modified Hugging Face Transformers stack rather than a production serving framework (e.g., vLLM/TRT-LLM), so the reported throughput/batch-size gains, while informative, may not fully transfer to optimized production settings.",
+        "Key hyperparameters (refresh period τ=128, retention schedule R={64,32,16,8,4}, group size g=16, precision assignment R4E4T2) appear tuned via ablation on a small set of models/datasets; it is unclear how sensitive performance is to recalibration for new model families or domains, and the calibration overhead/process is not deeply analyzed.",
+        "Counterfactual thought-importance analysis (Figure 4) and pairwise association analysis (Figure 6) are shown for a limited set of models/prompts (mainly GPT-OSS-20B on AIME/LiveCodeBench), with less evidence that the same importance hierarchy (R > E > T) holds uniformly across all evaluated models.",
+        "No code/artifact release is mentioned, and reproducibility of the attention-sparsity calibration pipeline (which involves several empirically tuned thresholds and layer subsets) could be challenging for external replication.",
+        "Results are generally reported as single-run numbers without variance/error bars (aside from the 50-rollout averaging for counterfactual importance), making it harder to assess the statistical significance of accuracy differences, especially at very low token budgets where variance could be high.",
+        "Evaluation is restricted to single-GPU setups; scalability to multi-GPU/tensor-parallel serving, which is typical for the larger models evaluated (e.g., GPT-OSS-120B), is not discussed or tested."
+      ]
     }
   },
   "v2": {

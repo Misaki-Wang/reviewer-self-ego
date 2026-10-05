@@ -18,6 +18,47 @@
         "Key hyperparameters (accl/acch, âccl/âcch, Gv) appear hand-tuned with no sensitivity analysis, raising reproducibility and generalizability concerns across different domains/datasets.",
         "No mention of code/data release, limiting reproducibility of the self-play synthesis pipeline and prompts beyond the single prompt template shown in the appendix."
       ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Tackles an important and timely problem in RLVR: entropy collapse and Pass@k stagnation, with a clear motivating analysis (Section 2) connecting training-data diversity to entropy maintenance.",
+        "The proposed self-play variational problem synthesis idea is conceptually simple and avoids external distillation or extra human/LLM-based answer annotation by reusing the original ground-truth answer.",
+        "Broad empirical scope: experiments span models from 3B to 32B parameters and 12 reasoning benchmarks, plus Pass@k scaling up to 1024 samples and transfer to general QA/coding tasks.",
+        "Entropy trajectory analysis (Figure 5) and reward-shaping ablation (Figure 4, Eq. 5 vs Eq. 6) provide some insight into why naive self-consistency reward is exploitable and how the proposed fix mitigates reward hacking.",
+        "Reported gains on AIME24/25 Pass@32 are large and the qualitative instance-level analysis (Figure 7) is a nice touch to illustrate which problems benefit."
+      ],
+      "weaknesses": [
+        "The most directly relevant prior work, SwS (Liang et al. 2025), which also synthesizes problems from the policy's failure/weakness cases for RLVR, is discussed but never empirically compared against, despite being the natural baseline for this paper's core claim.",
+        "SVS requires substantially more rollouts per training step (original problem solving + variational synthesis generation + synthetic problem solving), but the paper never reports or controls for the added compute/sample budget relative to vanilla RLVR. The main comparisons (Figure 1, Table 1/2) are plotted against 'training steps,' which is not a fair unit of comparison if SVS consumes several times more generation calls per step; this confounds the central claim that SVS is more 'sustainable' rather than simply using more compute.",
+        "On the DAPO-17k setting with Qwen2.5-32B (Table 2), SVS substantially degrades performance on MATH500, Minerva, Olympiad-Bench and GaoKao2023 relative to plain RLVR, which the authors attribute to overfitting to integer-only answer formats. The proposed fix (adding 8k DeepMath open-ended problems, SvS-D25k) is an ad hoc patch outside the core method and is only tested in one setting, leaving the generality/robustness of SVS to format distribution shift unresolved.",
+        "The proxy reward for variational problem validity (Eq. 6) only checks that the policy's own solve-rate on the synthetic problem falls in a target range; it does not verify that the synthetic problem is semantically faithful to the original or that the shared ground-truth answer is actually correct for the new problem statement. This leaves open the possibility of systematic semantic drift (right-answer/wrong-problem) that is not quantified anywhere in the paper (e.g., via human or LLM-judge checks of problem fidelity).",
+        "Despite claiming the method is 'agnostic to RLVR algorithms' and citing PPO, GSPO, and Reinforce++, all reported experiments use only GRPO; no actual cross-algorithm validation is provided to support this generalizability claim.",
+        "The method introduces many additional hyperparameters (acc_l, acc_h, hat-acc_l, hat-acc_h, G, G_v, buffer/filtering thresholds) without sensitivity analysis, raising reproducibility and robustness concerns.",
+        "No wall-clock/FLOPs efficiency comparison is provided despite the abstract's framing around 'sustaining' and efficient training; given the 3x-rollout overhead, it is unclear whether a compute-matched RLVR baseline (e.g., simply training 3x longer or with 3x larger batches) would close much of the reported gap.",
+        "Ablations isolating the individual contributions of the three data components (original solving, synthesis reward shaping, synthetic solving) on the main Pass@32 results are limited; most of the evidence for the specific reward-shaping choice (Eq. 6 vs Eq. 5) rests on a single qualitative example (Figure 4) rather than systematic quantitative comparison."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "The paper tackles a well-motivated and important problem in RLVR: entropy collapse and plateaued Pass@k, which is a recognized limitation of current RL post-training pipelines for LLM reasoning.",
+        "The proposed SVS method is elegant and practical: it leverages the policy's own correct solutions to synthesize variational problems with provably identical reference answers, avoiding the need for external labeling or distillation, which is a significant practical advantage over prior data augmentation approaches.",
+        "The reward-shaping mechanism (restricting positive reward to a moderate accuracy band rather than simple correctness) is a thoughtful design choice that addresses a concrete reward-hacking failure mode (hint-laden or trivial synthetic problems), and the paper provides a clear qualitative example (Figure 4) illustrating this issue and the fix.",
+        "Extensive empirical validation across model scales (3B to 32B), multiple base models (Qwen2.5, LLaMA-3.1), multiple training sets (MATH-12k, DAPO-17k), and 12 reasoning benchmarks, with consistent and often large gains, especially in Pass@32 on AIME24/25 (18.3% and 22.8% absolute gains).",
+        "Thorough analysis beyond headline numbers: entropy trajectories (Section 5.1), Pass@k scaling up to k=1024 showing genuine expansion of the reasoning boundary (Section 5.2), instance-level accuracy comparisons (Figure 7), and transfer to general QA/coding benchmarks (Section 5.3) showing the method does not sacrifice general capabilities.",
+        "The preliminary analysis in Section 2 (controlled experiment with MetaMath rephrasing and data updates) provides a clear causal narrative motivating the final method design, strengthening the paper's scientific rigor beyond just presenting a heuristic.",
+        "The method is stated to be algorithm-agnostic (compatible with PPO, GSPO, Reinforce++), suggesting broader applicability, and the paper is reasonably reproducible with detailed algorithm pseudocode and prompts provided in the appendix."
+      ],
+      "weaknesses": [
+        "The claim of algorithm-agnosticism (compatibility with PPO, GSPO, Reinforce++) is asserted but not empirically validated anywhere in the paper; all experiments use GRPO with Clip-Higher, so this generality claim is unsupported.",
+        "Mixed/negative results on open-ended answer benchmarks when training on DAPO-17k (which is integer-only) are acknowledged but only partially addressed via ad hoc mixing with DeepMath; this reveals a format-overfitting weakness in the core method that isn't deeply analyzed.",
+        "The computational overhead of SVS (additional problem synthesis and synthetic-solving rollouts per step) is not reported or compared against baseline RLVR in terms of wall-clock time or sample efficiency per compute, making it hard to assess whether gains justify the extra cost.",
+        "The proxy validation for synthetic problem correctness (reward shaping based on moderate group accuracy) is heuristic and could still admit semantically drifted or answer-inconsistent problems; no human or LLM-judge based quality audit of synthesized problems is reported to quantify the rate of valid vs. invalid/semantically-shifted variational problems.",
+        "Hyperparameters such as the accuracy ranges [acc_l, acc_h] and [acc_hat_l, acc_hat_h] appear to be manually tuned; no ablation studies varying these thresholds are shown, leaving open how sensitive performance is to this design choice.",
+        "The comparison baselines in Table 1 (SimpleRL-32B, ORZ-32B) are not trained with the exact same setup/data as the proposed method, making some cross-method comparisons less controlled, though the RLVR vs SVS same-data comparisons are fair.",
+        "Figure 2's preliminary experiment uses external LLM rephrasing (MetaMath) for motivation, but it is not entirely clear how directly this result motivates the specific self-play synthesis design as opposed to generic data augmentation, slightly weakening the logical bridge between Section 2 and Section 3."
+      ]
     }
   },
   "v3": {
@@ -104,6 +145,47 @@
         "The core novelty is a targeted combination of ideas already present in prior work (self-play/adversarial data augmentation, SwS's weakness-driven synthesis, difficulty-based reward shaping akin to curriculum learning); the delta over SwS (Liang et al., 2025) in particular is not deeply discussed or empirically compared head-to-head in the main text.",
         "The reward-shaping hyperparameters (accl, acch, and the synthesis reward range) are fixed empirically without a systematic sensitivity study across datasets/models, raising concerns about how much tuning is required for the method to work well in new settings.",
         "Computational overhead, while reported, can be substantial in early training stages (Figure 9) due to large numbers of synthetic problems/responses generated, and this cost is not clearly quantified in terms of overall wall-clock or GPU-hour overhead relative to RLVR baselines in the main results tables."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "The paper addresses a well-motivated and timely problem (entropy collapse and Pass@k plateauing in RLVR) with a clear diagnostic experiment (Figure 2) that convincingly links data diversity/updating to sustained entropy and Pass@k improvement.",
+        "The proposed SvS mechanism is simple, requires no external model or distillation, and elegantly reuses correct solutions to avoid the need for new ground-truth answer annotation, which is a genuinely useful practical property.",
+        "Empirical results span a wide range of model sizes (3B-32B), multiple architectures (Qwen, LLaMA), both math and code domains, and 12+ benchmarks, showing fairly broad (if not fully uniform) applicability.",
+        "The paper includes an unusually thorough set of ablations and analyses (alternative augmentation strategies, entropy-regulation combination, scaled Pass@k up to 1024, computational overhead, correctness auditing of synthetic problems, failure-mode discussion), which aids transparency and reproducibility.",
+        "The reward-shaping fix for the 'hint-injection' reward hacking failure mode (Appendix G) is a nice piece of honest negative-result reporting that strengthens trust in the final design.",
+        "The scaled Pass@k experiments (k up to 1024) provide reasonably convincing evidence that SvS pushes the reasoning boundary beyond the base model on AIME-level and Beyond-AIME benchmarks, addressing the critique raised by Yue et al. (2025) that RLVR often fails to do so."
+      ],
+      "weaknesses": [
+        "The core reward-shaping mechanism (restricting positive reward to a moderate accuracy band on synthetic problems) is conceptually close to prior weakness-driven/difficulty-targeted problem synthesis work the paper itself cites (e.g., SwS/Liang et al. 2025), and the paper's own ablation (Eup vs Full SvS) shows much of the Pass@k gain comes from simply re-rolling/augmenting underperforming problems rather than specifically from the 'variational problem synthesis via correct-solution context' idea, so the incremental novelty over iteratively updating the training pool is somewhat overstated in the introduction/conclusion.",
+        "The validity of synthetic problems rests on a fairly weak proxy (policy accuracy within a band) rather than verified semantic/answer correctness; the paper's own audit (Section E.5) shows 13-20% of synthetic problems are judged invalid by strong LLM judges, with an increasing trend of invalidity over training steps, meaning a non-trivial and growing fraction of training signal may stem from ill-posed problems despite the central claim of maintaining precision without extra labeling.",
+        "Reward hacking is only partially resolved: an earlier version of the reward collapsed due to hint injection (Appendix G) and was fixed heuristically via a hand-tuned accuracy band, with limited systematic sensitivity analysis of this band across models/datasets, and different thresholds are used for underperforming-problem selection versus synthesis reward without clear justification for generalizability.",
+        "Pass@1 gains are inconsistent: on DAPO-17k, SvS actually hurts performance on several open-ended benchmarks (Table 2: MATH-500 87.0→75.6, Olympiad-Bench 54.8→45.9, Gaokao 78.7→62.9) due to overfitting to integer-answer format, and this is patched by adding an entirely separate dataset (DeepMath) rather than fixed by the core SvS mechanism, undercutting the claim of SvS as a generally robust, plug-and-play strategy.",
+        "The most impressive headline numbers (Pass@32 gains of 18.3/22.8 on AIME) come from a single 32B/DAPO-17k configuration, while 3B/8B results show much smaller (1-3 point) gains, and some benchmarks/settings show SvS underperforming RLVR, which is understated by the abstract's framing of 'consistently outperforms... across all settings.'",
+        "The computational overhead analysis (Section 5.5) reports step-time trends but does not give a clear, compute-fair comparison (e.g., total GPU-hours to reach equal quality) against simply running longer RLVR or increasing rollouts per problem, making efficiency claims hard to fully verify.",
+        "Many of the extensive appendix analyses feel like post-hoc rationalizations with single-run plots rather than statistically rigorous, variance-aware comparisons, which is a concern given RLVR training is known to be high-variance.",
+        "Qualitative case studies claiming SvS 'elicits deeper reasoning' are based on a small number of cherry-picked examples without systematic human or automatic evaluation of reasoning quality beyond final-answer correctness and length.",
+        "The synthetic-problem correctness validation is somewhat circular (using LLM judges to validate LLM-synthesized problems with no independent ground truth), and the manual inspection of judge 'false negatives' is not balanced by any systematic check for false positives (invalid problems incorrectly judged valid), limiting confidence in the reported ~80%+ validity rate."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Addresses an important and timely problem (entropy collapse / Pass@k plateau in RLVR) with a well-motivated analysis in Section 2 that empirically links training data diversity to entropy preservation before proposing the method.",
+        "The proposed SvS method is simple, elegant, and crucially avoids the need for external answer annotation by reusing the original reference answer for variational problems, which is a clean solution to the synthetic-data verification problem.",
+        "Extensive and convincing empirical evaluation: models from 3B to 32B, 12 reasoning benchmarks, Pass@1 and Pass@k (scaled up to 1024) evaluation, code-generation generalization, and multiple RLVR base algorithms.",
+        "Strong, large-magnitude results on competition-level benchmarks (e.g., +18.3/+22.8 Pass@32 on AIME24/25), with sustained improvement curves vs. plateauing RLVR baselines, directly supporting the central claim.",
+        "Thorough ablation and analysis suite (Appendix E/F/G): alternative augmentation baselines (Ext, Eup, SvS-Asp), combination with entropy-regularization methods (Clip-Cov), computational overhead analysis, honest reporting of an initial failed reward design and the fix via reward shaping, and independent LLM-judge-based validation of synthetic problem correctness.",
+        "Good transparency: full algorithm pseudocode, prompts, and extensive case studies/qualitative comparisons are provided, aiding reproducibility."
+      ],
+      "weaknesses": [
+        "The correctness/soundness of synthesized problems is validated only via a proxy accuracy-band heuristic during training and post-hoc by LLM judges (Qwen3/O3) showing ~80% (declining) validity; this leaves open the possibility that 10-20% of training signal comes from flawed or ill-posed problems, with no quantitative study of how this affects final performance.",
+        "Mixed/inconsistent results in some settings: on DAPO-17k with Qwen2.5-32B, SvS underperforms standard RLVR on overall average (57.9 vs 58.6) and clearly degrades on open-ended-answer benchmarks (e.g., MATH-500 drops from 87.0 to 75.6), requiring an ad hoc fix (mixing in DeepMath open-ended problems) that is not deeply analyzed.",
+        "The method adds non-trivial pipeline complexity (three-stage rollout: original solving, synthesis, synthetic solving) and additional inference/generation cost, which is only partially quantified (Section 5.5) and shown to scale unfavorably in early training stages on harder datasets.",
+        "The reward-shaping hyperparameters (acc_l, acc_h bands for both underperforming-problem selection and synthesis reward) appear to require careful tuning (as shown by the failed initial attempt in Appendix G); sensitivity analysis to these thresholds across datasets/model sizes is not provided, raising reproducibility concerns for new settings.",
+        "The theoretical understanding of why problem synthesis specifically (vs. simply more diverse data) yields deeper reasoning/longer CoT is largely empirical/post hoc; a more rigorous mechanistic explanation is missing.",
+        "Evaluation reward/verifier relies on exact-match with integer/rational answers inherited from the original problem; for problems whose variational version might legitimately change intermediate structure (e.g., units, phrasing ambiguity), the correctness-by-original-answer-match criterion could occasionally produce false positives/negatives, which is not fully characterized despite the human/LLM spot checks."
       ]
     }
   }

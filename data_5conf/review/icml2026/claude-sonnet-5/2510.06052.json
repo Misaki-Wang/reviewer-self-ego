@@ -81,6 +81,47 @@
         "Table 2's baseline comparison is conducted only on Qwen3-8B; broader baseline comparisons across the other three backbones used in Table 1 would strengthen claims of general superiority over competing methods.",
         "No variance/error bars are reported despite averaging over five runs, making it hard to assess the statistical significance of relatively small differences (e.g., Pass@1 gains of ~0.5–1 point over the base model on some benchmarks)."
       ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper addresses a practical and well-motivated problem (redundancy within long CoT traces) and proposes a reasonably clean mechanistic solution combining LoRA-strength interpolation with a local uncertainty signal for mode switching.",
+        "Extensive empirical coverage: four backbone models (DeepSeek-R1-7B, Qwen3-8B/14B, QwQ-32B) and multiple benchmarks (AIME24, MATH-500, GPQA, GSM8K), plus additional code-generation and commonsense benchmarks and Pass@k results in the appendix.",
+        "Reasonably thorough ablations on threshold selection, window size, and switching criterion (random/reverse-confidence/keyword baselines), which help isolate the contribution of the confidence-based switching rule.",
+        "A lightweight theoretical analysis (Proposition C.1) connecting the proposed token-confidence metric to a reverse-KL concentration measure, giving some principled grounding beyond pure heuristics.",
+        "Practical engineering discussion of KV-cache reuse and switching overhead, with a vLLM implementation, which is useful for assessing deployment feasibility."
+      ],
+      "weaknesses": [
+        "Core novelty is incremental: the method combines two largely known ingredients (a LoRA-based concise adapter acting as a task vector, and token-confidence-based uncertainty estimation used in prior work such as Kang et al. 2025 and Fu et al. 2025b) with a hysteresis controller; the conceptual leap over existing hybrid/compression methods is limited to applying these at a finer (intra-response) granularity.",
+        "Statistical rigor is weak: despite averaging over 5 runs, no variance, standard deviation, or significance tests are reported anywhere in the main results (Tables 1-3), which is especially concerning for AIME24 (only 30 questions, so a single-problem difference changes Pass@1 by ~3.3%). Several headline claims (e.g., MixReasoning outperforming the full-reasoning baseline Qwen3-8B/Qwen3-14B/QwQ-32B in accuracy while using far fewer tokens) are surprising and plausibly within noise, but this cannot be verified without error bars.",
+        "The fixed-α 'Concise Mode' baselines in Table 1 are a somewhat weak strawman: they apply a single compression strength uniformly to the entire response with no adaptivity, whereas MixReasoning gets to freely interpolate between α=0 and α=64; a more informative baseline would be an oracle or tuned per-query α, or a simpler two-level (problem-level) hybrid baseline matched in token budget.",
+        "The choice of switching hyperparameters (τlow, τhigh = τlow+2, window size m=16) appears to be manually tuned per setup; the claim of 'transferability' rests mainly on visual overlap of confidence-density plots (Fig. 4) rather than a systematic validation showing the same fixed thresholds work well out-of-the-box across all models/datasets without retuning.",
+        "The rollback mechanism (re-generating one window upon switching to thinking mode) adds non-trivial extra compute (regeneration of m tokens) that is not clearly reflected in the reported token counts/latency, raising questions about whether efficiency numbers fully account for this cost.",
+        "Batched/production serving behavior is not empirically evaluated: since different concurrent requests may need different LoRA strengths/switch points at the same time, the practicality of applying this in a real multi-tenant serving system (vLLM) is asserted but not benchmarked (only single-stream latency in Fig. 6).",
+        "Comparisons to other methods in Table 2 are somewhat selective, and some baselines (e.g., Thinkless) perform anomalously poorly (e.g., 27.33 Pass@1 on AIME24, far below the hybrid method's own reported capability), suggesting possible baseline mis-tuning or reproduction issues that are not discussed.",
+        "The switching heuristic, while empirically motivated, is a hand-crafted rule (threshold + dwell + rollback) rather than a learned policy; no comparison to a lightweight learned controller is provided, leaving open whether the heuristic design is close to optimal or merely 'good enough.'",
+        "Presentation issues: dense notation and algorithm details are relegated to the appendix, several figures (e.g., Fig. 5) are hard to parse without additional context, and qualitative examples, while illustrative, are cherry-picked single instances rather than systematic case studies."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "The core idea—fine-grained, intra-response mode switching via continuous LoRA-strength interpolation controlled by a local difficulty signal—is a genuine advance over prior binary hybrid-reasoning and uniform long-to-short compression methods, and is well motivated by the observation that reasoning difficulty is heterogeneous within a single CoT.",
+        "Extensive empirical validation: four base models (DeepSeek-R1-7B, Qwen3-8B/14B, QwQ-32B), four main benchmarks plus additional code-generation (HumanEval, LiveCodeBench) and commonsense (StrategyQA, CommonsenseQA) benchmarks, and six competitive efficient-reasoning baselines (BeConcise, CoT-Valve, NoWait, DeeR, O1-Pruner, Thinkless).",
+        "Thorough ablation studies covering threshold selection, sliding-window size, switching criterion (random, reverse-confidence, keyword-based, entropy, max-probability, margin), and scale/source of SFT data for the concise adapter, which collectively support the design choices.",
+        "A lightweight but useful theoretical justification (Proposition C.1) showing the proposed token-confidence score is a principled reverse-KL concentration measure rather than ad hoc, and relating it to entropy/margin/max-probability alternatives.",
+        "Practical systems-level consideration: KV-cache reuse across mode switches, vLLM implementation, and empirical end-to-end latency measurements showing switching overhead is small relative to generation savings.",
+        "Consistent efficiency gains (13–49% token reduction) while matching or slightly improving accuracy relative to the base model across nearly all settings, which is a meaningful practical contribution; Pass@k results further support robustness beyond Pass@1."
+      ],
+      "weaknesses": [
+        "The mechanism by which scaling LoRA adapter strength α produces a smooth, coherent interpolation between 'detailed' and 'concise' reasoning (rather than producing incoherent or degenerate text at intermediate values) is asserted but not rigorously analyzed; no study of output coherence/quality as a function of α is provided beyond the two extreme settings used operationally.",
+        "The claim that switching thresholds (τlow, τhigh, window size m) are stable and transferable across models/benchmarks rests mainly on qualitative overlap of confidence-score histograms (Fig. 4); this is suggestive but not a rigorous transferability test (e.g., no experiment fixing thresholds tuned on one model/dataset and evaluating zero-shot on another).",
+        "The rollback mechanism (regenerating the last window when switching into thinking mode) adds generation/compute overhead that is not clearly quantified in isolation; the latency analysis in Appendix C.3 treats switching cost generically via prefill cost but does not separately measure the frequency/cost impact of rollback-induced regeneration.",
+        "No variance/standard deviation or significance testing is reported for the 5-run averages in the main tables, making it hard to assess whether the (often small, e.g., sub-1-point) accuracy differences between MixReasoning and the base model are meaningful or within noise.",
+        "The concise adapter is trained using short solutions distilled from Qwen3-14B-nonthinking, which could confound some comparisons (e.g., with CoT-Valve or BeConcise) since MixReasoning's concise behavior is partly inherited from a stronger teacher model's style rather than solely from the proposed method.",
+        "Baseline methods (CoT-Valve, O1-Pruner, Thinkless, etc.) are re-implemented by the authors; it is unclear whether equal tuning effort was applied to these baselines versus the proposed method, raising some risk of comparison bias.",
+        "The human-likeness claim (dual-process/System-1-System-2 framing) is supported mainly by illustrative qualitative examples (Fig. 3, Appendix D) rather than a systematic, quantitative comparison to human problem-solving traces."
+      ]
     }
   }
 }

@@ -20,6 +20,47 @@
         "The core technical components (model averaging, moderate LR decay) are individually well-established in prior work; the primary novel contribution is their combination with curriculum ordering, which, while a useful empirical finding, is somewhat incremental relative to fully new methodology.",
         "Downstream evaluation relies on a modest benchmark suite for a 1.5B model trained on only 30B tokens, where absolute performance is close to chance/baseline levels on several tasks, potentially limiting the reliability of fine-grained comparisons despite the paper's efforts to select higher signal-to-noise benchmarks."
       ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Identifies a plausible and previously underexplored interaction between learning-rate decay schedules and curriculum-based (quality-sorted) data ordering in LLM pretraining, which is a reasonable and interesting observation.",
+        "Reasonably broad empirical sweep: multiple LR schedules (constant, WSD, cosine), two quality metrics (DCLM fasttext, PreSelect), an additional unfiltered dataset (WebOrganizer), and a mid-training setting, lending some robustness to the qualitative claim that aggressive decay hurts curricula.",
+        "Proposes concrete, easy-to-implement remedies (moderate LR decay, model averaging/CMA, and the combined CDMA) that require no extra data curation and could be integrated into existing pipelines.",
+        "Includes a toy 2D theoretical model with formal proofs that qualitatively reproduces the empirical phenomenon, providing at least a stylized mechanistic explanation.",
+        "Reports correlation between validation loss and downstream score (Figure 7) as a sanity check on the evaluation protocol."
+      ],
+      "weaknesses": [
+        "Scale is quite limited for a pretraining-dynamics paper (1.5B parameters, 30B tokens, single architecture, single peak LR in most experiments); there is no scaling study to show the effect persists or how it changes at realistic production-scale token budgets (hundreds of billions to trillions of tokens) or larger models, which is critical since the claimed effect (benefit of curricula fading under decay) could plausibly be a small-scale/short-horizon artifact.",
+        "The headline improvement (1.64% average accuracy) is modest and falls within the kind of benchmark noise the paper itself flags via the \"Core\" vs \"Avg\" signal-to-noise discussion (Heineman et al.); no error bars, multiple seeds, or statistical significance tests are reported despite per-task fluctuations of several points across rows in Tables 1–2 and 6–9.",
+        "Several individual results undercut the paper's own narrative (e.g., WMA/SMA/EMA + Uniform under constant LR underperform the WSD+Uniform baseline in Table 1; PreSelect ascending curriculum ends with a *higher* final validation loss than uniform in Figure 8, explained away post hoc as a validation-set mismatch), suggesting the proposed recipe's benefits are metric- and setup-dependent rather than a robust general principle.",
+        "The validation set used to track progress is itself constructed from high-DCLM-score documents, creating a risk of circularity: curricula sorted by the same (or a similar) quality metric are evaluated against a validation distribution aligned with that metric, inflating apparent gains relative to uniform ordering.",
+        "CMA/CDMA still require additional hyperparameter tuning (choice of ending LR, EMA decay, number of averaged checkpoints) that is dataset/metric-specific in the reported ablations (e.g., different optimal ending LRs and averaging schemes for DCLM vs. PreSelect vs. WebOrganizer), which weakens the claimed practicality/simplicity of the method and raises reproducibility concerns without a clear tuning protocol.",
+        "The theoretical analysis in Section 6 is a highly simplified 2D quadratic toy problem with a specific contrived data/noise structure; while elegant, it is a stylized illustration rather than a rigorous analysis of actual LLM loss landscapes, and risks over-claiming generality (e.g., presenting asymptotic Θ(M^{-2/3}) results as if directly explanatory of Transformer pretraining behavior).",
+        "Comparisons to prior curriculum-learning work (e.g., data folding) are conducted on a much smaller 0.5B model in the appendix, making the claimed \"fragility\" of folding under high LR not fully apples-to-apples with the paper's main 1.5B results.",
+        "The paper is organized as a large collection of ablations and regime explorations (moderate decay, CMA, CDMA, folding, mid-training, multiple metrics) without converging on one clearly validated, generalizable recipe; the \"optimal regime\" is identified empirically per setting rather than derived from a predictive rule, limiting actionable guidance for practitioners at different scales or data distributions.",
+        "No compute-matched comparison or discussion of the added cost/complexity of storing and averaging multiple checkpoints relative to the modest accuracy gains, nor comparison against stronger/alternative baselines such as properly tuned multi-stage mixtures used in production (e.g., OLMo 2, Phi-4) beyond citing them."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Identifies a genuinely interesting and underexplored interaction effect between learning-rate decay schedules and data-quality curricula in LLM pretraining, providing a plausible mechanistic explanation (decaying LR suppresses the influence of late-stage high-quality data) for why prior curriculum-learning work has reported only marginal gains.",
+        "Fairly extensive empirical validation: experiments span constant/WSD/cosine LR schedules, multiple decay lengths and ending LRs, two quality metrics (DCLM fasttext, PreSelect), two pretraining corpora (DCLM-Baseline, WebOrganizer), and both single-phase and mid-training (two-phase) settings.",
+        "Proposes two concrete, simple, and practically adoptable remedies (moderate LR decay, and replacing decay with weight averaging/CMA, plus the combined CDMA), which require no additional data curation and could be easily integrated into existing pretraining pipelines.",
+        "Includes a reasonably careful comparison with prior curriculum-learning and data-folding work, replicating prior findings at low peak LR and showing they do not hold at higher, more practical peak LRs/larger scale, which is a useful negative result for the field.",
+        "Provides a simplified theoretical toy model (quadratic loss, signal/noise decomposition) that qualitatively reproduces the main empirical phenomena (uniform+decay vs ascend+decay vs ascend+EMA), lending some analytical support to the proposed mechanism.",
+        "Validates robustness of the Core benchmark selection via loss-vs-downstream-score correlation analysis, strengthening confidence that reported differences are not purely noise-driven."
+      ],
+      "weaknesses": [
+        "Experiments are conducted at a single, relatively modest scale (1.5B parameters, 30B tokens); there is no scaling study to demonstrate that the identified LR-decay/curriculum interaction and the proposed remedies persist (or strengthen/weaken) at larger model/data scales typical of production LLM pretraining.",
+        "Reported improvements are often small in absolute terms (e.g., 0.39-1.64% average accuracy), and no seeds/variance/confidence intervals are reported for the main results tables, making it difficult to assess whether the reported deltas are statistically meaningful versus run-to-run noise.",
+        "The theoretical analysis in Section 6 is a highly simplified 2D linear-regression-like toy model with a stylized dataset structure; while illustrative, it is quite far from actual Transformer loss landscapes and its connection to the empirical results is more suggestive than rigorous.",
+        "Hyperparameters for CMA/CDMA (EMA decay rate, number of averaged checkpoints, moderate ending LR value) appear to be chosen via limited ablation rather than a systematic search, raising some concern about cherry-picking the best-performing configuration for the headline comparison.",
+        "The practical overhead of model averaging (storing/maintaining multiple checkpoints, extra computation for averaging) is not discussed or compared against the cost of standard LR decay, leaving the practical trade-offs of adopting CMA/CDMA at scale unclear.",
+        "Downstream evaluation relies on a fairly standard but noisy suite of multiple-choice benchmarks at small model scale, and while the paper addresses signal-to-noise concerns by defining a \"Core\" subset, the absolute scores for several tasks are close to chance, which limits the precision of the comparisons.",
+        "The mid-training setup (WebOrganizer + top-10% DCLM) is a single synthetic construction; broader validation across more realistic mid-training mixtures or real production-style data curricula would strengthen the generality claims."
+      ]
     }
   },
   "v2": {
@@ -41,6 +82,48 @@
         "Comparisons to prior curriculum-learning papers (Wettig et al., Dai et al., Zhang et al.) are qualitative/indirect due to differences in scale, benchmarks, and quality metrics, weakening the strength of the claim that this work explains and resolves previously reported negative results.",
         "Limited analysis of why some domains (math, code) do not benefit or slightly regress in the multi-domain continual pretraining experiment, and no exploration of more principled quality metrics there beyond acknowledging the limitation.",
         "The description of 'moderate' LR decay as roughly 1/3 of peak LR is derived from one specific experimental setup and may not transfer to other architectures, learning rates, or training durations without re-tuning."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Identifies a genuinely interesting and underexplored interaction between learning-rate decay schedules and quality-ordered data curricula, which is a practically relevant observation for LLM pretraining pipelines.",
+        "Reasonably extensive empirical investigation: ablations over decay length/ending LR, multiple quality metrics (DCLM, PreSelect), multiple datasets (DCLM-Baseline, WebOrganizer), a mid-training setting, and a larger-scale 3.2B-parameter/150B-token multi-domain continual pretraining experiment.",
+        "Proposes concrete, easy-to-implement remedies (moderate LR decay, curriculum model averaging, CDMA) that could be adopted in existing pretraining pipelines without extra data curation cost.",
+        "Includes a toy theoretical model that qualitatively reproduces the empirical phenomenon, providing some conceptual grounding for the claimed mechanism.",
+        "Honest reporting of negative/mixed results (e.g., PreSelect curriculum underperforming uniform ordering in final loss, fragility of the folding baseline, limited gains on math/code domains), which adds credibility."
+      ],
+      "weaknesses": [
+        "Reported improvements are modest (roughly 1–2% average accuracy) on noisy downstream benchmarks at small model/data scale (1.5B params, 30B tokens), and no variance/seed information or significance testing is provided, making it hard to assess whether the gains are reliable rather than noise, especially given the known high variance of these benchmarks at this scale.",
+        "The core methodological contribution (combining WSD-style moderate decay with checkpoint/weight averaging) is largely a combination of existing techniques (WSD, EMA/SMA checkpoint averaging) rather than a fundamentally new method; the novelty is primarily in the empirical diagnosis of the LR-curriculum interaction rather than in a new algorithm.",
+        "Hyperparameters such as the 'moderate' ending LR (~1/3 of peak) and decay fractions appear to be tuned specifically to the 1.5B/30B-token setting; no evidence is given that these choices transfer across model scales or token budgets, raising concerns about generalizability of the specific recipe.",
+        "The theoretical analysis (Section 4) is a highly simplified 2D linear/quadratic toy model with artificial synthetic data; while it is internally consistent with the empirical trends, its connection to real transformer loss landscapes and gradient noise structure is tenuous and mostly illustrative rather than predictive.",
+        "Generalization across quality metrics is inconsistent: results with PreSelect scores show the ascending curriculum ultimately converges to a higher validation loss than uniform ordering, undermining the claim that the proposed approach robustly resolves the curriculum/LR-decay conflict across quality metrics.",
+        "The large-scale continual-pretraining experiment (3.2B/150B tokens) is a single run per condition with no ablations on its own hyperparameters (ending LR, averaging window, etc.), and shows a regression on code (MBPP) and negligible gains on math (GSM8K), suggesting limited robustness of the method across task domains.",
+        "The paper does not compare against other established curriculum or data-scheduling baselines beyond the folding strategy and simple uniform/ascending/descending orders, nor against alternative practical strategies (e.g., simply up-weighting high-quality data throughout training, or standard multi-stage mixture scheduling as used in OLMo2/Phi-4), limiting the strength of the positioning relative to prior art.",
+        "Overall effect sizes, combined with the use of a relatively small model and token budget by modern pretraining standards, make it unclear whether the findings would hold at the compute scales relevant to current frontier LLM training, despite the 3.2B experiment providing only partial reassurance."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Identifies a clear, previously underexplored and practically important interaction effect: the incompatibility between ascending-quality data curricula and decaying LR schedules. The core empirical finding is simple, intuitive, and well-motivated.",
+        "Extensive empirical validation: experiments span constant/WSD/cosine LR schedules, multiple decay lengths and ending LRs, multiple quality metrics (DCLM, PreSelect), multiple datasets (DCLM-Baseline, WebOrganizer), mid-training settings, and a large-scale 3.2B-parameter/150B-token continual pretraining experiment with multi-domain curriculum, which substantially strengthens external validity beyond a single toy setup.",
+        "Proposes two concrete, practical remedies (moderate LR decay and Curriculum Model Averaging/CDMA) that are simple to implement and are shown to compose synergistically, with consistent gains across benchmark suites (Core and Avg scores) and ablations.",
+        "Provides a theoretical toy model (quadratic loss, signal/noise decomposition) that qualitatively recovers the empirical phenomena (aggressive decay harms curriculum benefit, WSMD/SWA can overcome the lower bound), lending some principled grounding to the empirical story.",
+        "Good related-work positioning and reanalysis of prior curriculum learning papers (e.g., explaining why Wettig et al. 2024 and folding-curriculum papers found limited/counterintuitive results), including reproducing and critiquing the folding-curriculum strategy across LR regimes.",
+        "Reasonably thorough reporting of hyperparameters, algorithms (CMA pseudocode), and ablations (decay function choice, weighting schemes for model averaging), aiding reproducibility.",
+        "The validation loss vs. downstream score correlation analysis (Figure 7) adds some rigor connecting the training-dynamics metric to actual benchmark performance."
+      ],
+      "weaknesses": [
+        "Scale is still modest relative to production LLM pretraining (1.5B/30B tokens for main experiments, 3.2B/150B tokens continual-only for the larger validation); while reasonable for academic compute, the magnitude and robustness of gains at frontier scales (10B+ parameters, trillions of tokens) remains unverified, and the paper's own large-scale results show mixed effects (e.g., MBPP regression, limited GSM8K gain), suggesting the benefits may not transfer uniformly across all capabilities.",
+        "The absolute improvements, while statistically framed as consistent, are numerically modest (1.2-2.3% on average/core accuracy, often <1 point on many individual tasks), and some benchmarks (PIQA, Winogrande) show flat or negative changes in several tables, raising questions about whether the overall gains reflect a few benchmarks dominating the average rather than broad-based improvement.",
+        "Single-seed runs: there is no indication of multiple random seeds or error bars/confidence intervals for the downstream task scores in Tables 1, 2, 6, 7, 10, making it hard to assess whether observed differences (especially sub-1-point changes) are statistically meaningful or within noise, particularly given known evaluation variance highlighted by the very paper the authors cite (Heineman et al., 2025).",
+        "The theoretical analysis in Section 4, while a nice illustrative toy model, is quite far from the practical Adam-based LLM training setting (uses vanilla SGD and a 2D quadratic loss), limiting its explanatory power beyond qualitative intuition; the paper could be clearer that this is a stylized illustration rather than a rigorous account of the phenomenon in deep networks.",
+        "The choice of 'moderate' decay targets (e.g., ending LR ~1/3 or 1/5-1/2 of peak) and best model-averaging hyperparameters (EMA α, number of checkpoints) appear to be tuned specifically to this setup; the paper acknowledges a 'systematic recipe' is left to future work, so practitioners lack clear guidance on how to port these specific numbers to different scales/architectures.",
+        "The mid-training/continual experiments mix several confounds simultaneously (domain mixture shift, quality metric per domain, LR schedule, and model averaging), making it harder to cleanly attribute gains to the proposed LR-decay/curriculum interaction versus other factors like domain-mixture curriculum effects.",
+        "Some presentation issues: dense figures with small insets (e.g., Figure 1-3, 5) are difficult to read, and the paper is long with substantial appendix material that could be better integrated or trimmed for clarity in the main text.",
+        "Comparisons to very recent/strong baselines beyond folding curricula (e.g., other mid-training or optimizer-aware curriculum strategies) are relatively limited, and the quantitative comparison to prior work (e.g., Wettig et al., 2024) is qualitative/indirect due to scale and benchmark differences, as the authors themselves acknowledge."
       ]
     }
   }

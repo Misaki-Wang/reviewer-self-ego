@@ -19,6 +19,47 @@
         "The paper lacks a dedicated Limitations section; the Impact Statement is brief and does not discuss scale limitations, absence of downstream evaluation, or training memory/compute tradeoffs explicitly.",
         "The gains of the SLR surrogate (L+S) and especially the HPA-compressed variant (L̃+S̃) over the strongest baseline (LOST) are often small or mixed across scales (Table 1), and LOST's architectural modification vs. SALAAD's plug-and-play advantage, while conceptually appealing, is not quantified in terms of actual deployment cost/benefit."
       ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "Well-motivated problem: enabling elastic, deployment-time memory/capacity control for LLMs via sparse+low-rank (SLR) decomposition is practically relevant.",
+        "The ADMM/augmented-Lagrangian formulation for inducing SLR structure during training is reasonably principled and the two-stage decomposition (gradient step + proximal update) is a sensible practical approximation to intractable full ADMM for large-scale training.",
+        "The I-controller reduces the large space of per-block (rho, alpha, beta) hyperparameters to a single global coefficient, which is a genuine usability improvement over SLTrain/LOST's fixed, hand-crafted schedules.",
+        "The homomorphic parameter allocation (HPA) strategy gives a simple, efficient mechanism for continuous post-hoc capacity adjustment from a single trained checkpoint.",
+        "Extensive appendix analysis (learning dynamics, embedding-layer behavior, bfloat16 training, sensitivity ablations) provides useful diagnostic detail, and the empirical observation that embedding layers are benignly SLR-inducible while the LM head is not is an interesting, under-explored finding."
+      ],
+      "weaknesses": [
+        "Scale is limited to at most 1B parameters trained on C4 with perplexity as the only metric; there is no downstream task/zero-shot evaluation and no experiment validating the method at scales approaching real 'LLM' sizes, which undercuts the paper's stated motivation around multi-billion-parameter deployment and the claimed scaling law for rho (only tuned/verified on 60M-130M and extrapolated).",
+        "The main comparison in Table 1 is confounded: SALAAD is trained in float32 while all baselines are trained in bfloat16, and the paper openly deprioritizes memory/efficiency accounting for this reason; the bfloat16-trained SALAAD results (Appendix D) are only reported up to 350M, so the paper's headline claim of state-of-the-art perplexity under comparable budgets is not rigorously isolated from precision effects.",
+        "The memory/compute overhead analysis (Appendix B) relies on an unrealistic assumption that the number of GPUs available is at least equal to the number of blocks (e.g., >=560 GPUs for a 70B model, one block per GPU) to argue overhead is negligible; this does not reflect typical large-scale training setups and leaves the real-world training memory/communication cost of maintaining L, S, Y per block largely unaddressed for realistic GPU counts.",
+        "Despite framing the contribution as replacing 'heuristic' designs in prior work (SLTrain/LOST), SALAAD itself relies on several heuristic choices presented without strong theoretical justification: the rho scaling law (eq. 7) is empirically fit rather than derived, and HPA's core assumptions (importance proportional to magnitude, uniform/homomorphic scaling ratios across all blocks) are unvalidated against the actual (intractable) importance objective it aims to approximate.",
+        "Comparisons against LOST show SALAAD underperforming in several settings, with the explanation that LOST 'alters the underlying architecture' used somewhat selectively to justify the gap, while the practical significance of 'architecture preservation' versus modest perplexity loss is not quantified for actual deployment scenarios.",
+        "No wall-clock training-time measurements are reported (only FLOPs estimates for SVD overhead), and no actual inference-time memory/latency benchmarks on resource-constrained hardware (e.g., edge devices mentioned in the introduction) are provided, despite deployment efficiency being the central motivating claim of the paper.",
+        "The core technical contribution is incremental: it largely combines known tools (RPCA/ADMM, proximal operators, a PI-style controller, greedy magnitude-based pruning) rather than introducing fundamentally new theory or an algorithm with provable guarantees, and the convergence/stability claims (e.g., bounded |X - L - S|) are only empirically demonstrated rather than theoretically proven in the main text."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Addresses a practical and important problem: enabling a single pretrained checkpoint to be elastically deployed across diverse memory budgets without architecture-specific modification or retraining.",
+        "The ADMM/augmented Lagrangian formulation with a practical two-stage (guided learning + proximal SLR adaptation) algorithm is a principled way to induce sparse-plus-low-rank structure during pretraining, and is plug-and-play across Transformer blocks.",
+        "The I-controller elegantly reduces per-block hyperparameters (rank/sparsity thresholds) to a single global penalty coefficient with an empirically validated scaling law across model sizes (60M to 1B), improving usability at scale.",
+        "Strong empirical motivation in Appendix A: shows convincingly that post-hoc RPCA on standard-trained weights fails to recover meaningful SLR structure, justifying the need for training-time induction over post-hoc approximation.",
+        "Comprehensive experimental comparison against many relevant baselines (LoRA, ReLoRA, GaLore, LORO, CoLA, SLTrain, LOST) across four model scales, with SALAAD's structured surrogate consistently matching or outperforming prior methods under comparable or smaller parameter budgets.",
+        "Interesting empirical finding regarding the asymmetric SLR-inducibility of embedding layers versus the LM head, which is a novel characterization not previously reported, along with supporting diagnostic plots (loss curves, rank/sparsity convergence, singular-value spectra).",
+        "Extensive ablations (step sizes, ρ, κ) and appendices on memory/compute overhead, learning dynamics, and bfloat16 training demonstrate reasonable robustness and thoroughness of the empirical investigation."
+      ],
+      "weaknesses": [
+        "Experiments are limited to models up to 1B parameters; claims about applicability to very large (e.g., 70B-class) LLMs rely solely on theoretical FLOP/memory estimates in the appendix rather than actual empirical validation, leaving scalability to true LLM scale unverified.",
+        "The main comparison (Table 1) trains SALAAD in float32 while baselines are trained in bfloat16 (numbers taken directly from the LOST paper), which is a non-trivial precision confound; the bfloat16 version of SALAAD (Appendix D) is only evaluated up to 350M, so a fully fair comparison at the largest scale is missing.",
+        "No downstream/zero-shot task evaluation is reported; all results rely solely on C4 perplexity, making it unclear whether the compression gains translate into comparable task-level capability retention.",
+        "No empirical wall-clock time or actual peak memory measurements during training are reported—only theoretical FLOPs/memory estimates—despite memory/compute overhead being central to the paper's practical motivation.",
+        "The HPA truncation strategy relies on strong, largely unvalidated assumptions (importance proportional to magnitude, uniform/homomorphic scaling across all blocks); no empirical comparison against the true (or a better-approximated) importance-based budgeted selection is provided to justify these simplifications.",
+        "Baseline perplexities are reused from a prior paper (LOST) rather than reproduced under this paper's exact pipeline, introducing potential inconsistencies in data ordering, seeds, or implementation details that could affect the fairness of comparisons.",
+        "No empirical or theoretical convergence guarantee is established for the proposed two-stage ADMM approximation applied to nonconvex neural network losses, despite leaning on ADMM theory references; stability claims rest mainly on empirical bounded reconstruction error rather than formal analysis.",
+        "Quantization, a dominant and complementary compression technique mentioned in the introduction, is not compared against or combined with SALAAD, limiting the practical positioning of the method relative to the broader compression landscape."
+      ]
     }
   },
   "v3": {

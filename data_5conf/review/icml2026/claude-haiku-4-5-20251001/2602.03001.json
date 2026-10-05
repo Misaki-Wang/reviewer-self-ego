@@ -16,6 +16,48 @@
         "Incomplete analysis: No investigation of why AdamW fails or when non-Euclidean GNS is essential vs. optional. Composite optimizer handling (specSGD for 2D, AdamW for 1D) is ad-hoc. Hyperparameter choices (θ=0.6, F=100, βᴺ=βᴹ=0.9) lack justification.",
         "Baseline inconsistencies: 'Optimal constant baseline' differs by optimizer (B=256 vs B=64), complicating fair comparison. Variance estimation overhead (AllGather for specSGD) not quantified. Learning rate scaling (ηₖ ∝ √Bₖ) lacks theoretical justification and differs from standard linear scaling."
       ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Novel theoretical framework extending gradient noise scale theory to non-Euclidean geometries (ℓ₁ and nuclear norms), addressing a genuine gap where prior work applied Euclidean GNS to non-Euclidean optimizers",
+        "Rigorous mathematical derivations with formal convergence theorems (A.4, A.5) showing sublinear and linear convergence under stated assumptions",
+        "Practical and efficient variance estimation procedure that leverages local mini-batch gradients across distributed ranks, integrating naturally with DDP/FSDP frameworks",
+        "Comprehensive experimental evaluation across multiple architectures (160M/1B Llama, SimpleViT, ResNet-18), optimizers (5-6 per task), with multiple seeds (n=10 for language) and ablation studies in appendices",
+        "Significant step reductions on specific optimizers (66% for Signum/Muon on 160M models) while maintaining validation loss parity with small-batch baselines",
+        "Clear presentation with well-organized structure and good motivation in introduction"
+      ],
+      "weaknesses": [
+        "Critical scope limitation: method applies only to signSGD and specSGD variants; does not extend to mainstream optimizers (Adam, RMSprop, LAMB), severely limiting practical impact. For composite optimizers, GNS computed only from 2D parameters, which is ad-hoc",
+        "Missing essential experimental comparisons: no comparison to other adaptive batch scheduling methods cited in related work (Chen et al. 2025, Merrill et al. 2025, Belias et al. 2025), nor to simple heuristics (linear/stage-wise ramp-up) mentioned in introduction. Cannot assess whether gains arise from geometry-aware GNS or general adaptive batching",
+        "Inconsistent and weak empirical results: (1) Base signSGD shows modest 22-31% gains vs 66% for Signum/Muon; (2) Performance degrades significantly from 160M to 1B models (Signum: 66%→12%); (3) Method fails entirely for pure AdamW on 1B model (Table 3 shows '-'), yet this failure is not discussed; (4) Vision results are 13-37%, less impressive than language; (5) No statistical significance testing beyond standard deviations",
+        "Substantial theory-practice gap: (1) Theory relies on quadratic loss approximation (Eq. 3, 8) unrealistic for deep networks; (2) Requires non-standard ℓ∞-smoothness and spectral norm smoothness assumptions; (3) Algorithm 1 introduces exponential moving averages, monotonic batch increases, and learning rate scaling not present in theory; (4) All language experiments fix θ=0.6 without sensitivity analysis or principled selection despite θ appearing critical in theory",
+        "Variance estimation approximation unvalidated: Equations 20-22 assume R local gradients are independent despite seeing different data from same parameters. Impact of this approximation is never quantified. No empirical validation that estimated GNS matches true GNS",
+        "Critical missing practical analysis: (1) No computational overhead analysis—does GNS computation cost offset step reduction benefits? (2) No wall-clock time comparisons, only step counts; (3) Hyperparameter tuning required (θ, β^N, β^M, F) with no sensitivity analysis; (4) No analysis of batch size trajectory stability across initializations",
+        "Insufficient analysis of optimizer-specific behavior: why does method work well for Signum/Muon (with momentum) but poorly for base signSGD/specSGD? Why does it fail for AdamW? These patterns are not explained",
+        "Convergence theorems show (1−θ)² factors degrading as θ→1, but practical experiments fix θ=0.6 with no analysis of this choice's relationship to theory",
+        "Table 9 shows ℓ₁ GNS superior to ℓ₂ but uses different θ values (0.6 vs 0.3), making fair comparison unclear. Limited analysis of why geometry matters for this specific case"
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Addresses a real gap in the literature by deriving non-Euclidean GNS for signSGD and specSGD, with a clean theoretical insight that dual norms naturally quantify noise in generalized steepest descent",
+        "Solid mathematical framework with sound theoretical development (Lemmas 3.1-3.3 and Theorems A.4-A.5) that formally links geometry to gradient noise scales",
+        "Practical implementation cleverly leverages existing distributed training infrastructure (AllReduce) without significant overhead, addressing a real engineering challenge",
+        "Strong empirical results on language modeling with up to 66% step reduction (Signum/Muon on 160M Llama) while maintaining validation performance, supported by 10-seed experiments",
+        "Comprehensive experimental evaluation across multiple optimizers (signSGD, Signum, AdamW, specSGD, Muon) and datasets, with ablations (Table 9) convincingly demonstrating ℓ₁ GNS superiority over ℓ₂ for signSGD",
+        "Clear presentation with logical flow from Euclidean background to non-Euclidean extensions, effective geometric intuition (Figure 1b), and extensive appendix supporting reproducibility"
+      ],
+      "weaknesses": [
+        "Theoretical bounds are loose (acknowledged in Section 3.3), making the connection between theory and practice indirect and requiring empirical tuning of θ despite the principled derivation, somewhat undermining the 'principled framework' narrative",
+        "Limited empirical comparison with other adaptive batch size methods—primarily compares against constant batch baselines rather than concurrent approaches (Chen et al. 2025, Merrill et al. 2025, Lau et al. 2024a,b), making it unclear how the method ranks relative to alternatives",
+        "Mixed results across optimizer families: AdamW fails to achieve baseline validation loss in Table 3 (1B Llama) adaptive setting, raising questions about universal applicability that the paper doesn't investigate",
+        "Vision task improvements are modest (13-14% step reduction, Table 4) compared to language modeling, with no analysis of why the method is less effective or when it should/shouldn't be applied",
+        "No wall-clock time comparisons despite claiming practical efficiency—focus is entirely on optimization steps, but variance estimation overhead and actual training time matter for practitioners",
+        "Still introduces multiple hyperparameters requiring tuning (θ varies by task, plus βᴺ, βᴹ, F, I) despite the theoretical motivation, limiting practical principled deployment",
+        "Convergence theorems rely on lower bounds that are inherently loose, so convergence rates may not match practical training behavior; no empirical verification that theory predicts practice"
+      ]
     }
   },
   "v2": {
@@ -41,6 +83,52 @@
         "Unexplained failure case: AdamW fails to reach baseline at 1B scale (Table 3, '−' notation) without explanation. Is this fundamental or a tuning issue?",
         "Smoothness assumptions unclear: Theorems A.4-A.5 assume ℓ∞ and spectral norm smoothness; applicability to neural networks is not established",
         "Signal estimation bias: using stochastic gradient gₖ as signal estimate (Eq. 22) introduces bias; impact on GNS estimation not analyzed"
+      ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Well-motivated problem: Identifies genuine mismatch between Euclidean GNS metrics and non-Euclidean optimizer geometries (ℓ∞, Schatten-∞)",
+        "Solid theoretical framework: Derives explicit GNS metrics for signSGD and specSGD with convergence analysis (Theorems A.4, A.5)",
+        "Efficient practical implementation: Variance estimation leveraging local mini-batch gradients across ranks with <1% overhead for ℓ1 GNS; FSDP-compatible algorithms provided",
+        "Comprehensive experiments: Multiple optimizers, model scales (160M-1B), datasets, and reasonable statistical sampling (10 seeds for language models)",
+        "Clear mathematical exposition: Generally well-written with good structure and notation"
+      ],
+      "weaknesses": [
+        "Loose theoretical bounds: Authors acknowledge CBS-to-GNS constant is loose, reducing θ to empirical tuning parameter; theory-practice gap undermines principled positioning",
+        "Critical failure cases: AdamW fails to reach baseline loss at 1B scale (Table 3); NormalizedSGD and MSGSD show degradation (Table 4)—inadequately explained",
+        "Highly inconsistent results across settings: Signum shows 66.61% reduction at 160M but only 12.11% at 1B; 5× variation for same optimizer suggests lack of robustness",
+        "Missing key comparisons: No empirical comparison to recent prior work (Lau et al. 2024a on Euclidean GNS with distributed variance estimation, Gray et al. 2024); unclear how much improvement stems from non-Euclidean geometry vs. variance estimation implementation quality",
+        "Theory-practice disconnect: Optimal learning rates (Eqs. 12, 16) require unobservable ∥σk∥₁ terms; practice substitutes global gradient (Eq. 22) as heuristic; convergence factor (1-θ)² suggests θ→1 optimal, but experiments use θ=0.6 without justification",
+        "Inadequate noise estimation analysis: Uses local mini-batch gradients as independent samples; assumes stable across ranks/batch sizes but provides no empirical validation; exponential moving averages (βN=βM=0.9 across all experiments) lack ablation studies",
+        "Lack of ablations: No ablation on monotonic increase constraint, learning rate scaling (ηk ∝ √Bk), EMA parameters, update frequency F, or θ sensitivity across multiple configurations",
+        "Limited scope: Only two language model sizes on C4; small vision models on small datasets; no multi-node evaluation where S1 GNS overhead (40% at 1B) becomes critical",
+        "No statistical significance testing: Standard errors only; unclear if modest improvements (e.g., 4% for MSGD) are meaningful; no formal hypothesis tests",
+        "CBS definition conceptually fuzzy: Three different definitions (Appendix B) all ∝ B but differ in constants; fact that κ must vary for non-Euclidean case (unlike SGD) questions naturalness of framework"
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Identifies and addresses a concrete, well-motivated problem: mismatch between Euclidean GNS assumptions and non-Euclidean optimizer geometries",
+        "Principled theoretical framework extending McCandlish et al. (2018) via dual norms (Lemma 3.1); elegant derivation of ℓ₁ and S₁ GNS metrics",
+        "Practical distributed implementation leveraging local mini-batch gradients across ranks; natural integration with DDP/FSDP frameworks",
+        "Comprehensive experimental evaluation: multiple optimizers, large-scale language models (160M, 1B), vision tasks, multiple seeds with error bars",
+        "Strong empirical results on language modeling: up to 66% step reduction for Muon/Signum while maintaining validation loss",
+        "Formal convergence theorems (A.4, A.5) with complete proofs and detailed appendices",
+        "Thorough cost analysis (wall-clock, computational, memory) and implementation pseudocode provided",
+        "Honest discussion of limitations and loose theoretical constants"
+      ],
+      "weaknesses": [
+        "Theoretical bounds are loose; authors acknowledge this but treat θ as tunable hyperparameter, undermining theoretical precision",
+        "S₁ GNS estimator incurs substantial overhead (39.9% at 1B scale); authors defer key optimizations (FSDP-aware sharding, iterative matrix square root) to future work",
+        "Limited applicability: only sign-based and spectral methods; extension to Adam, RMSprop, and other preconditioned optimizers unclear and identified as open challenge",
+        "Vision results significantly weaker than language models: step reductions 4-57% with mixed success (some optimizers show negative improvements)",
+        "Convergence theory assumes ℓ∞-smoothness and strong convexity, which don't hold for modern neural networks; gap between theory and practice",
+        "Algorithm 1 heuristics (exponential moving averages, periodic updates, forced monotonic increases) lack theoretical justification",
+        "Hyperparameter θ fixed at 0.6 for all language experiments; sensitivity analysis limited to narrow range; generalization to new settings unclear",
+        "No empirical comparison to other recent adaptive batching methods (Chen et al. 2025, Merrill et al. 2026, Belias et al. 2025)",
+        "Figure 1b geometric visualization is difficult to interpret; notation (e.g., σₖ) introduced informally"
       ]
     }
   }

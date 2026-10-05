@@ -80,6 +80,45 @@
         "The method still requires white-box access to logits or hidden states, limiting applicability to the common real-world scenario of API-only/black-box auditing, where the paper admits existing methods (including this one) remain weak.",
         "Some statistical simplifying assumptions (e.g., weak independence across identity dimensions under softmax normalization, use of a fixed temperature T=10) are validated only empirically/heuristically rather than being theoretically justified in generality."
       ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Identifies a genuinely interesting and somewhat surprising empirical phenomenon: randomly initialized transformer outputs exhibit seed-dependent biases in 'disfavored' dimensions that remain weakly but statistically detectable throughout pretraining and fine-tuning, connecting to recent theoretical work on inductive biases at initialization.",
+        "Provides a reasonably rigorous theoretical treatment (Appendix C) including a stability analysis showing the proposed mean-based identity-dimension extraction is provably more robust to perturbation than a naive per-sample argmin voting alternative, plus sample-complexity bounds relating n, l, m to detection reliability.",
+        "The method outputs calibrated p-values from a principled hypothesis test rather than a heuristic similarity threshold, which is conceptually appealing for auditing use cases where threshold calibration is otherwise ad hoc.",
+        "Broad and fairly thorough empirical validation: seed-level distinguishability under identical data/order, robustness to large distribution shifts during continual training (OpenWebText→TinyStories/The Stack), a large-scale real pretraining trajectory (OLMo-2-7B, 5B–3.9T tokens), large-scale fine-tuning (up to 700B tokens), and the 65-model/7-family/6-transformation LeaFBench benchmark.",
+        "Good engineering diligence: validation of empirical vs. analytical null distributions (Appendix B), ablations on hyperparameters with FPR reporting, and release of code/model catalog for reproducibility."
+      ],
+      "weaknesses": [
+        "In the most realistic evaluation (LeaFBench, Tables 6-7), SeedPrints does not clearly outperform the strongest existing baselines (Intrinsic, ICS achieve equal or marginally better overall AUC/KS: 0.994/0.989 and 0.994/0.943 vs. SeedPrints' 0.992/0.986), undercutting the paper's central claim of superiority in practical deployment scenarios; the main advantage is confined to the somewhat artificial early-pretraining/seed-distinguishability setting.",
+        "The practical significance of seed-level distinguishability is questionable and is itself acknowledged by the authors ('initialization seeds have no clear copyright status'), raising the question of whether the core novel capability addresses a real threat model, since model theft/misuse in practice almost always occurs after substantial training, not at the literal initialization checkpoint.",
+        "The underlying bias signal is extremely weak (raw correlations near 0.02–0.04 in Figure 2), and statistical significance is achieved only by aggregating over hundreds of dimensions/inputs; some reported p-values are implausibly small (e.g., 10^-41955), which the authors themselves admit are 'not meaningful' in magnitude, raising concerns about numerical calibration and whether the test's false-positive control has been rigorously validated at the scale needed for real auditing (only small-sample empirical FPR checks are reported in Table 8).",
+        "The method requires white-box access to logits/hidden states and scales poorly with vocabulary size (requiring many long random sequences), which the authors note as a limitation that excludes the common black-box API auditing setting where most real infringement detection is needed.",
+        "Core methodological contribution is relatively narrow — a specific identity-dimension intersection procedure plus a Kendall-Tau-based z-test — layered on an otherwise standard representation/logit-comparison fingerprinting framework, making the technical novelty moderate relative to the strength of the paper's rhetorical framing ('Galtonian' fingerprint, 'true fingerprint').",
+        "Controlled experiments use small custom-trained 12-layer models for most of the core claims (seed distinguishability, continual training robustness), with only a single large-scale model family (OLMo-2-7B) for the headline early-pretraining result, limiting confidence in generalization across architectures and scales.",
+        "Robustness under model merging shows a non-trivial drop (0.959, one failure out of seventeen merge cases), suggesting the method may not be reliable under one of the more realistic deployment transformations, yet this is evaluated on a small sample."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Identifies a genuine and underexplored gap: existing LLM fingerprinting methods are evaluated almost exclusively post-training and fail during early pretraining, which is convincingly demonstrated in Figure 1 on OLMo-2-7B checkpoints spanning 5B-3.9T tokens.",
+        "The core idea—that random initialization imprints a seed-specific bias in output/hidden dimensions that persists through training—is well-motivated empirically (Section 3) and theoretically grounded via a concentration/stability analysis (Appendix C) contrasting the stability of mean-based extraction with the provable instability of per-sample argmin voting.",
+        "The statistical testing framework (identity-dimension intersection + Kendall-Tau correlation + analytical/simulation-based null via Gaussian surrogates) is principled, with reasonable justification and empirical validation of the Gaussian null approximation (Appendix B).",
+        "Extensive and fairly comprehensive experiments: seed-level distinguishability, birth-to-lifecycle persistence, robustness to identical-data/order confounds, continual training under large domain shift (OpenWebText -> TinyStories/Code), large-scale pretraining trajectories, large-scale finetuning (up to 700B tokens), and the 65-model LeaFBench benchmark across 6 post-training transformations.",
+        "Good ablation studies on the three hyperparameters (n, l, m) that connect cleanly to the theoretical sample-complexity results.",
+        "Clear, honest discussion of limitations (white-box requirement, early-stage nature of the fingerprinting research area) and reasonably transparent treatment of metric limitations (e.g., converting p-values to AUC/KS scores)."
+      ],
+      "weaknesses": [
+        "Controlled from-scratch experiments use relatively small models (12-layer, 12-head LLaMA/Qwen-style), so it's unclear how well the seed-level distinguishability and persistence results generalize to billion-scale foundation models at true random initialization; the only large-scale validation (OLMo-2-7B) uses existing checkpoints rather than controlled multi-seed initializations, so seed-distinguishability itself is never directly verified at large scale.",
+        "The method is fundamentally white-box (requires access to logits or hidden states), substantially limiting applicability compared to black-box baselines in many real deployment/auditing scenarios, which is acknowledged but not mitigated.",
+        "No explicit adversarial/evasion analysis: since the fingerprint signal is described as 'weak', it is unclear how robust SeedPrints is to deliberate attempts to obscure lineage (e.g., targeted noise injection, deliberate re-scaling, weight pruning) beyond the incidental tests on merging/quantization/distillation included in LeaFBench.",
+        "In the realistic LeaFBench deployment setting (Table 6, Table 7), SeedPrints does not clearly outperform the simplest baselines (Intrinsic, ICS already achieve near-saturated 0.99+ scores), so the practical marginal benefit of SeedPrints in these common settings is limited to the specific early-pretraining use case, which is comparatively rare in practice (most LLM lineage verification happens post-training).",
+        "Some reported p-values are extraordinarily small (e.g., 10^-41955 in Table 5), which raises concerns about numerical computation and the practical meaningfulness/validity of such values; more discussion of how these are computed/stabilized would help credibility.",
+        "The identity-dimension intersection approach (Mf ∩ Mf') is heuristic and its theoretical guarantees (Appendix C) are derived under idealized sub-Gaussian/i.i.d. assumptions on random inputs, while real pretraining corpora and architecture changes (e.g., RoPE scaling, layer modifications across model families in LeaFBench) could violate these assumptions in ways not fully analyzed.",
+        "The one failure case under model merging (dropping to 0.959 AUC) is only briefly discussed; a deeper analysis of when and why initialization signal can be diluted (e.g., merging ratios, number of merged models) would strengthen the robustness claims."
+      ]
     }
   }
 }

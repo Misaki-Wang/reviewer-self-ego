@@ -18,6 +18,42 @@
         "The theoretical bounds (Theorems 1-2) rely on simplified single-layer settings and assumptions (RIP, small ϵ) that are difficult to verify or guarantee in practice for real multi-layer LLMs, limiting their practical predictive power beyond qualitative motivation.",
         "Method applicability is inherently limited to settings where a well-aligned, distillation-quality smaller draft model from the same family is available; performance and guarantees may degrade substantially for mismatched or unrelated draft/target pairs, which is only partially explored in the ablations."
       ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Interesting and reasonably novel idea of repurposing speculative-decoding-style draft models to improve importance estimation for KV cache dropping and prompt compression, rather than only using them for lossless decoding acceleration.",
+        "Very extensive empirical evaluation: multiple model families (Qwen2.5, Llama-3, Qwen3, Gemma-3), multiple benchmarks (RULER, LongBench, MileBench multimodal), multiple Cmax budgets, and numerous ablations (draft size, lookahead length, sparsity level).",
+        "Comparisons against a comprehensive set of relevant baselines (StreamingLLM, H2O, SnapKV, PyramidKV, AdaKV, LLMLingua-2, CPC, R2C) and latency/memory measurements that show the method is practically competitive.",
+        "Results show consistent and sometimes large improvements over baselines, particularly in low-budget regimes, and the method generalizes reasonably across modalities (text and vision-language)."
+      ],
+      "weaknesses": [
+        "The theoretical contribution is thin and somewhat overclaimed: Theorem 1 is essentially a restatement of Lipschitz continuity of softmax/linear maps, and Theorem 2/3 rely on strong, largely unverified assumptions (RIP of transformer embeddings, bounded embedding norms) whose applicability to real LLMs is only hand-waved in a footnote; the theorems mainly restate the obvious intuition that 'if the draft is close to the target, the approximation is good' without providing much additional insight.",
+        "The core motivating empirical evidence (attention correlation between draft and target models, Fig. 4/Fig. 8) is inconsistent — e.g., Qwen2.5 0.5B/14B shows essentially zero correlation (R²=0.00) under mean aggregation, yet SpecKV/SpecPC still perform well on this exact pairing in the main experiments, undermining the paper's own causal story for why the method works.",
+        "SpecKV requires passing the draft output through the full target model during prefill to compute cross-attention; with nlookahead set to 'generate until EOS' for best accuracy (not the fixed 64 tokens used in the latency benchmark), the added compute/latency overhead in the strongest-performing configuration is not clearly characterized, raising concerns about the fairness and completeness of the latency comparison against baselines that do no such extra forward pass.",
+        "Novelty is somewhat incremental: the approach largely substitutes the 'recent window' used by SnapKV/PyramidKV-style methods with draft-generated lookahead tokens, which is a natural and fairly small conceptual step from existing KV-dropping/prompt-compression literature.",
+        "The gains over baselines narrow substantially as Cmax increases (Tables 9/10, Fig. 9), suggesting the method's advantage is concentrated in aggressive-compression regimes and may be less impactful in more realistic/larger-budget deployment settings.",
+        "Some additional-model and ablation results are confined to the appendix, and the main paper's core claims rest on a relatively narrow set of model pairs (0.5B/14B, 1B/8B), with larger-scale verification only lightly covered."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Novel and conceptually clean idea: extending draft models (from speculative decoding) to guide approximate inference (KV dropping and prompt compression) rather than just accelerating decoding, which is a genuinely new angle not previously explored to the reviewers' knowledge.",
+        "Solid theoretical grounding: the paper provides rigorous error bounds (Theorems 1-3) connecting draft-target output similarity to importance-score/attention-approximation error, including a novel connection to compressed sensing (RIP) for the SpecPC bound.",
+        "Extensive and convincing empirical validation: results span RULER and LongBench, multiple model families (Qwen2.5, Llama-3, Qwen3, Gemma-3) and sizes (0.5B-72B), multiple Cmax budgets, and even multimodal experiments on MileBench with Qwen2.5-VL, showing consistent improvements over strong, relevant baselines (SnapKV, PyramidKV, AdaKV, H2O, StreamingLLM, LLMLingua-2, CPC, R2C).",
+        "Latency and memory are carefully profiled (TTFT, peak memory), demonstrating that the draft model's overhead is small and that SpecKV/SpecPC maintain competitive or better efficiency than baselines while improving accuracy.",
+        "Thorough ablation studies (draft model quality/size, number of lookahead tokens, sparse prefill sparsity level) that clarify the trade-offs and design choices, improving interpretability and reproducibility.",
+        "Clear positioning against related work with a well-organized taxonomy (Table 1) and explicit distinction from speculative decoding (Table 2), helping readers understand the contribution's novelty."
+      ],
+      "weaknesses": [
+        "The core assumption (draft/target attention correlation) does not hold uniformly across all model pairs—e.g., Fig. 8(c) shows R²=0.00 for mean aggregation between Qwen2.5-0.5B and Qwen2.5-14B—yet the method still performs well downstream; the paper does not fully explain this discrepancy or characterize when the underlying assumption is likely to fail.",
+        "The theoretical bounds rely on fairly strong/idealized assumptions (single attention layer, RIP-satisfying inputs, bounded output error epsilon) whose practical tightness/relevance to multi-layer, real LLMs is not empirically quantified (e.g., no measurement of actual epsilon or bound tightness in practice).",
+        "Method introduces additional hyperparameters (nwindow, nlookahead, pooling kernel size, lskip, aggregation type) that appear to require per-model/per-task tuning (e.g., different settings for Qwen vs. Llama noted in Appendix D.1), which could limit out-of-the-box generalizability.",
+        "Performance gains over baselines narrow as Cmax increases (as acknowledged in the paper), suggesting the method's advantage may be most pronounced in aggressive compression regimes and less impactful when more budget is available.",
+        "SpecKV's benefit depends on generating a full draft continuation; for tasks with very long expected outputs (e.g., reasoning models), this could add non-trivial latency, and the paper only briefly discusses this as future work rather than providing a concrete mitigation.",
+        "No direct comparison to decoding-time sparse attention methods (e.g., Quest, RetrievalAttention) in the main experiments, even though these are discussed as related work; only prefill-stage sparsity is evaluated for SpecKV, leaving open how the approach compares/composes with decode-time sparsity techniques."
+      ]
     }
   },
   "v2": {
@@ -39,6 +75,45 @@
         "SpecPC's algorithmic novelty relative to SpecPrefill is somewhat incremental (non-uniform window weighting, average+max pooling, position ID reassignment), which may limit the perceived novelty of one of the two main contributions.",
         "The MileBench dataset selection is explicitly biased toward cases where the draft-target performance gap is largest, which could favor the proposed method and limits generalizability of the multimodal results.",
         "The method's practical applicability depends on the availability of a well-aligned, sufficiently fast draft model for the target model, which may not always exist in real-world deployment scenarios; this dependency is not deeply analyzed beyond varying draft size within the same model family."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper addresses a practically important problem (efficient long-context LLM inference) and proposes a unifying conceptual framework connecting speculative decoding ideas to approximate inference (KV dropping and prompt compression).",
+        "Extensive empirical evaluation across two benchmarks (RULER, LongBench), two model families (Qwen2.5, Llama-3), multiple cache/prompt budgets, additional larger target models (32B/70B/72B), and a multimodal extension (MileBench) with Qwen2.5-VL.",
+        "Numerous ablations are provided: draft model size/version, number of lookahead tokens, sparse-prefill sparsity level, and attention correlation analyses across several model families, lending some robustness to the empirical claims.",
+        "The paper is well situated within related work (sparse attention, KV dropping, prompt compression, speculative decoding) and clearly delineates its contribution relative to the closest prior work, SpecPrefill.",
+        "Latency and peak-memory measurements are reported in addition to accuracy, addressing the practical efficiency side of the proposed methods, not just quality."
+      ],
+      "weaknesses": [
+        "The core novelty is incremental: SpecKV and SpecPC are natural extensions of the already-published SpecPrefill idea (using a draft model's lookahead/attention to estimate token importance) applied to KV-cache dropping and an improved prompt-compression pipeline (window weighting, pooling, position-ID reassignment). The conceptual leap beyond SpecPrefill is modest.",
+        "The theoretical results (Theorems 1 and 2) are essentially Lipschitz-type propagation-of-error bounds that mainly restate the assumption (\"if the draft output is epsilon-close to the target output, the importance/attention estimate is close too\") without providing non-trivial insight into when or why draft and target models would actually produce similar outputs/attention; the compressed-sensing (RIP) connection in Theorem 2 is elaborate but adds limited practical value since the RIP assumption on embeddings is unverified and may not hold in practice.",
+        "The key empirical motivation (strong draft/target attention correlation) is inconsistent across model pairs: Fig. 8(c) shows essentially zero correlation (R^2=0.00) for Qwen2.5 0.5B/14B under mean aggregation, directly undermining the paper's central empirical justification; this is glossed over rather than analyzed in depth.",
+        "There is a notable inconsistency between the latency experiments (Fig. 6, using nlookahead=64 for SpecKV) and the main accuracy experiments (Tables 3/4, using nlookahead = \"maximum token limit\"/until EOS). Since SpecKV's draft generation is serial and before the target prefill, using the full generation length for accuracy but a fixed short length for latency measurement likely overstates the method's practical speed advantage in the exact configuration that yields the reported accuracy gains.",
+        "The headline claim of \"up to 25 points\" improvement on RULER is a best-case/small-budget result; the appendix shows the gap to baselines (and to the target model) shrinks substantially as Cmax increases, so the magnitude of the advertised improvement is not representative of the general operating regime.",
+        "The method's effectiveness assumes draft and target models are similarly trained/distilled, which may not generalize to arbitrary draft/target pairings used in practice (e.g., off-the-shelf small/large model pairs without distillation), and the paper does not test settings where this assumption clearly breaks down.",
+        "Some baselines (StreamingLLM, H2O) were modified from their original eviction schedule (dropping once after prefill rather than at every decoding step) to enable comparison, which could bias the comparison in favor of the proposed method and baselines like SnapKV/PyramidKV that already operate this way.",
+        "The overall system complexity (loading and running an additional draft model, plus feeding draft output through the target model for SpecKV) is understated; practical deployment overhead, especially for long generations needed to get strong SpecKV accuracy, is not fully quantified relative to the accuracy gains claimed."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Introduces a clean and general framework (Draft-based Approximate Inference) that unifies KV cache dropping (SpecKV) and prompt compression (SpecPC) under the idea of using small draft models to approximate future tokens/attention, providing a principled generalization of prior work like SpecPrefill.",
+        "Solid theoretical grounding: Theorem 1 bounds importance-score error for SpecKV in terms of draft-target embedding closeness, and Theorem 2 (plus Theorem 3 in the appendix) connects attention approximation error to output approximation error via a compressed-sensing (RIP) argument, giving principled justification rather than purely heuristic motivation.",
+        "Extensive and convincing empirical validation: experiments span two benchmarks (RULER, LongBench), multiple model families and sizes (Qwen2.5, Llama-3, Qwen3, Gemma-3), multiple Cmax budgets, and even multimodal experiments on MileBench with Qwen2.5-VL, plus attention-correlation analyses across many draft/target pairs.",
+        "Strong and consistent empirical gains: SpecKV and SpecPC outperform a comprehensive set of strong baselines (StreamingLLM, H2O, SnapKV, PyramidKV, AdaKV, LLMLingua-2, CPC, R2C, SpecPrefill) across nearly all settings, with SpecPC nearly matching the dense target model performance while retaining compression benefits.",
+        "Careful latency/memory profiling (TTFT, peak memory) demonstrates that the proposed methods retain the efficiency benefits of the base approximate-inference paradigms (sparse prefill, KV dropping, prompt compression) while improving accuracy, with modest and well-quantified overhead from the draft model.",
+        "Thorough ablations (draft model size/version, number of lookahead tokens, sparsity level for prefill) that clarify design choices and show robustness of the method, along with clear complexity/positioning tables relative to prior work (Table 1, Table 2)."
+      ],
+      "weaknesses": [
+        "The correlation between draft and target model attention is inconsistent across model pairs (e.g., R^2=0.00 for Qwen2.5 0.5B/14B mean aggregation in Fig. 8c), which weakens the core empirical motivation in some cases; the paper does not fully explain why performance remains strong despite this poor correlation.",
+        "The theoretical bounds (Theorems 1-3) rely on strong simplifying assumptions (single attention layer, RIP conditions on inputs, ε-closeness of draft/target outputs) that may not hold in practice for deep multi-layer Transformers, so their practical relevance to explaining the empirical gains is somewhat limited.",
+        "SpecKV requires generating a full draft output (often until EOS) before prefilling the target model, which could introduce non-trivial latency overhead for tasks with long outputs; the ablation suggests large nlookahead is needed for best SpecKV accuracy, creating a potential accuracy-latency tradeoff that is not deeply analyzed in the main paper.",
+        "Comparisons for KV dropping use a relatively small set of Cmax values in the main text (256) with additional values relegated to the appendix, and some improvements over strong baselines like Ada-SnapKV are relatively modest, raising questions about the practical significance of the gains at larger cache budgets.",
+        "The method assumes the availability of a well-aligned smaller draft model from the same model family, which may not always be available for arbitrary target LLMs, limiting general applicability; the paper does not discuss failure modes when a suitable draft model is unavailable or poorly aligned beyond the one weak-correlation case shown.",
+        "Some claims (e.g., 'first to leverage draft models for approximate inference directly in the target model', 'first method that leverages a draft output to accurately assess KV pair importance') are strong novelty claims that depend heavily on comparison to the closely related concurrent/prior work SpecPrefill, and the distinction is somewhat incremental (window handling, position embeddings, chunking) rather than fundamentally different."
       ]
     }
   },
@@ -80,6 +155,26 @@
         "Accuracy gains over the strongest baselines are often small on LongBench (e.g., ~1-2 points in 'All' score in several Cmax settings, Table 2/9-13), while the added complexity (draft model, additional hyperparameters: nwindow, k, lskip, nneighbor, nvert, nslash, nlookahead) is substantial; the cost-benefit tradeoff of this complexity versus simpler baselines like SnapKV is not deeply analyzed for the smaller-gain regimes.",
         "SpecPC's cross-family performance degrades notably (Table 7), and the paper's own explanation (reliance on shared attention patterns) suggests a real limitation on generality of the prompt-compression approach that is somewhat glossed over relative to the more robust cross-family SpecKV results.",
         "The method's benefits are shown mainly on synthetic (RULER) and moderately-sized real benchmarks; there is limited discussion of failure cases beyond very long outputs, and the promised 'iterative KV dropping' and 'sparse decoding' extensions for reasoning models with very long generations are left entirely as future work, despite being an increasingly important use case for current LLMs."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Presents a coherent unifying framework (Draft-based Approximate Inference) that connects and extends prior lookahead-based approaches (LAQ++, SpecPrefill) under a single conceptual umbrella, while introducing two concrete new algorithms (SpecKV, SpecPC) and a novel cascaded variant (SpecKV-PC).",
+        "Provides theoretical analysis (three theorems with full proofs in the appendix) that formally justifies why draft-model lookahead improves importance estimation for both KV dropping and prompt compression, grounding the empirical claims.",
+        "Extremely thorough empirical evaluation: multiple model families (Qwen2.5, Llama-3) and scales, multiple context lengths (4k-64k), multiple Cmax budgets, cross-family draft/target experiments, and even multimodal experiments on MileBench with Qwen2.5-VL.",
+        "Strong and fair baseline coverage (H2O, SnapKV, PyramidKV, AdaKV, LAQ++, LLMLingua-2, CPC, R2C, SpecPrefill, FastV), with consistent improvements across most settings, especially at small cache/prompt budgets and long contexts.",
+        "Concrete, credible efficiency analysis (latency/memory breakdowns on H200 GPU) demonstrating that SpecKV avoids the peak-memory blowup of LAQ++ and that SpecKV-PC achieves large latency/memory savings (~40-75% faster, ~25GB less memory at 64k context vs LAQ++), directly supporting the practical value of the approach.",
+        "Extensive ablations (draft model size/version, nlookahead sensitivity, sparse-prefill sparsity level, R^2 correlation analyses) that build confidence in the mechanism and provide useful practical guidance (e.g., diminishing returns of larger nlookahead for SpecPC).",
+        "Good reproducibility: code released, detailed hyperparameters and implementation details in the appendix, clear algorithm pseudocode."
+      ],
+      "weaknesses": [
+        "The core contribution is largely a combination/extension of existing ideas (SpecPrefill for prompt compression, LAQ++-style lookahead for KV dropping) rather than a fundamentally new technique; the main novelty lies in engineering the draft-model-based lookahead to avoid LAQ++'s memory overhead and in the cascaded SpecKV-PC pipeline.",
+        "The theoretical bounds (Theorems 1-3), while a nice addition, are worst-case spectral-norm bounds that mainly formalize the intuitive claim that a better draft model yields a better approximation; Theorem 2 relies on the Restricted Isometry Property holding for attention inputs, which is a strong and somewhat informally justified assumption (acknowledged only via a brief footnote), limiting how much practical insight the theory adds beyond the empirical correlation studies.",
+        "LAQ++ results are based on the authors' own re-implementation since official code is unavailable, which introduces potential risk of implementation bias in this key baseline comparison.",
+        "SpecPC's cross-family performance degrades notably (Table 7), indicating draft/target architectural similarity is still an important practical requirement, somewhat limiting the claimed robustness of the framework.",
+        "Latency/memory experiments are conducted on a single hardware configuration (single H200 GPU, specific model pairs) without batch-size or multi-GPU/production-serving considerations, leaving open questions about real-world deployment gains.",
+        "Limitations around very long generation lengths and lack of extension to sparse decoding are acknowledged by the authors but left largely unaddressed, so the framework's applicability to reasoning models with long CoT outputs remains unproven."
       ]
     }
   }

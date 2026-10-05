@@ -21,6 +21,51 @@
         "Despite being marketed as reducing reliance on external supervision, the framework still depends heavily on hand-crafted role- and task-specific prompt templates and heuristic filters (grounding filter, format penalties), which somewhat undercuts the 'label-free'/'autonomous' framing.",
         "Some ablation results are inconsistent in direction/magnitude across sub-benchmarks (e.g., certain components improve Frames but hurt LB-MQA), making the individual contribution of each component to overall generalization somewhat noisy and harder to interpret cleanly."
       ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Addresses an important and underexplored problem: RLVR for long-context reasoning where verifiable rewards and human annotations are scarce.",
+        "The three-role (questioner/responder/verifier) self-play design within a single shared policy is a reasonably novel combination, extending self-play ideas (AZR, R-Zero, SCA) to the long-context regime.",
+        "Extensive empirical evaluation across 12 open-source models spanning 4B-32B parameters, dense and MoE architectures, and base/instruct/reasoning variants, which is unusually broad for this type of paper.",
+        "Reasonably thorough ablation studies isolating the contribution of the format penalty, grounding filter, questioner updates, history memory, and verifier components, with difficulty-tracking curves (1-pass@1) that support the claimed curriculum effect.",
+        "Comparison of the Gaussian questioner reward against AZR- and R-Zero-style reward mappings, with entropy/response-length/pass-rate diagnostics, is a nice piece of analysis.",
+        "Reasonable engineering details provided (cost analysis, prompt templates, dataset construction pipeline) supporting reproducibility."
+      ],
+      "weaknesses": [
+        "The headline claim that SPELL-trained Qwen3-30B-A3B-Thinking 'surpasses gemini-2.5-pro' is based on pass@4 with 8 self-sampled rollouts under an LLM-as-judge/CEM scoring scheme, which is a favorable, non-standard comparison setting rather than a head-to-head pass@1 comparison; this framing is misleading relative to the actual gain (+2.0-2.3 avg points for the strongest model), which is the weakest reported gain of all tested backbones.",
+        "Potential circularity/reward-hacking risk: the questioner, responder and verifier are all the same evolving policy. The verifier's reward is defined by agreement with its own majority vote (Eq. 4-5), and the questioner's reward is based on the responder's self-assessed success rate verified by the same model family; this creates a risk that the loop can reinforce self-consistent but incorrect behavior (sycophantic collusion) that is not fully analyzed or stress-tested beyond small ablations on one 7B model.",
+        "The grounding filter and 'no-context' check for the questioner only test whether the question is answerable without context by the same responder model, which is a weak and potentially gameable proxy for genuine document-dependence; no human or independent-model audit of generated question quality/factual validity is reported.",
+        "The RLVR baseline is trained on only ~3,000 teacher-distilled samples from DeepSeek-R1-0528, which seems like a weak/small baseline rather than a strong contemporary long-context RLVR system (e.g., QwenLong-L1 is discussed but not directly compared in the main table), making the 'SPELL beats RLVR' claim less convincing as a comparison against the best available alternative.",
+        "Ablations and difficulty-curve analyses are conducted only on a single 7B model (Qwen2.5-7B-Instruct), so it is unclear whether the same design choices (history memory size, Gaussian reward shape, dynamic sampling ratio) generalize to the larger/MoE models that are the paper's most interesting results.",
+        "All training is capped at 16K context; the 100K generalization claim is only tested via direct zero-shot transfer without further curriculum scaling, and the paper's own limitations section admits no experiments beyond 16K training length, undermining the 'evolving long-context' framing in the title for ultra-long contexts.",
+        "Benchmark scoring relies heavily on GPT-oss-120b as an LLM judge for the multi-hop QA sets, and the same verifier/judge model family issues could introduce correlated bias between the self-play verifier and the evaluation judge.",
+        "No statistical significance testing or variance reporting (e.g., std over the 8 runs) is given for the main results table, despite many reported deltas being small (1-3 points) for several models.",
+        "The paper lacks a theoretical or even conceptual analysis of why/when the three co-evolving roles converge rather than collapse or diverge, which the authors acknowledge as a limitation but which is a fairly fundamental gap for a method whose core claim is stable self-evolution."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "The core idea of unifying questioner, responder, and verifier roles into a single self-evolving policy for long-context reasoning is novel and well-motivated, addressing a genuine gap (prior self-play work like AZR/R-Zero/SCA focuses on short-context math/code domains with programmatic verifiers).",
+        "Extensive empirical validation: 12 open-source models spanning 4B-32B, dense and MoE architectures, base/instruct/reasoning model types, across six long-context benchmarks at two context lengths (16K/100K), which is a strong breadth of evidence for generality.",
+        "The reward designs are thoughtfully engineered for the specific challenges of long-context self-play: the Gaussian-shaped questioner reward targeting the competence frontier, the max(rule, verifier-consensus) responder reward to avoid false-negative noise from lexical mismatch, and the self-consistency-based verifier training are all sensible and empirically ablated.",
+        "Strong and somewhat surprising result that SPELL-trained base models surpass their instruction-tuned counterparts trained on large human-annotated datasets, supporting the claimed data efficiency.",
+        "Thorough ablation studies (Table 2, Figure 4) isolate the contribution of each component (format penalty, grounding filter, update mechanism, history memory, verifier components) and include an interesting auxiliary analysis of question difficulty evolution over training steps.",
+        "Comparison against an RLVR baseline trained on R1-synthesized static data is a meaningful and fairly strong baseline rather than a strawman, and the paper shows the advantage of self-play grows as the base model becomes stronger, which is a plausible and interesting trend.",
+        "Good engineering details for reproducibility: full training hyperparameters, prompt templates, dataset construction pipeline (deduplication, decontamination, clustering), and cost/time analysis are provided in the appendix.",
+        "The test-time scaling (pass@k) result showing SPELL widens the exploration gap and surpasses gemini-2.5-pro at pass@4 for a 30B model is a compelling practical result, and the comparison of reward-mapping functions against AZR/R-Zero adds useful insight into design choices."
+      ],
+      "weaknesses": [
+        "The reliance on CEM (cover exact match) combined with self-generated verifier judgments for reward creates a risk of reward hacking or self-reinforcing errors (the model verifying its own output); while the paper acknowledges verifier reliability issues in ablations, there isn't a rigorous analysis of how often verifier errors systematically bias training in one direction over the full run, beyond the step-level entropy/length plots.",
+        "The improvements from SPELL over RLVR are often modest (e.g., 0.1-2.3 points on average for several models), and for weaker models (e.g., Qwen2.5-7B) RLVR is comparable or sometimes better, somewhat tempering the generality claim stated prominently in the abstract.",
+        "The curriculum/memory mechanism (history memory size L=3, subset size m=5) and many hyperparameters appear to be manually tuned without a systematic sensitivity analysis, raising reproducibility/robustness concerns about whether results are sensitive to these choices.",
+        "The paper's synthetic training corpus (Ultra-Fineweb clusters + DocMath) and its overlap/distributional similarity to the benchmark domains (e.g., Frames being Wikipedia-based, DocMath testmini overlapping conceptually with training DocMath instances) raises some question about possible leakage or favorable distribution match, despite claimed decontamination via MinHashLSH.",
+        "LLM-as-a-judge (gpt-oss-120b) is used both for evaluation (multi-hop QA scoring) and indirectly as an external verifier in ablation studies, which could introduce correlated bias between the training signal design philosophy and the evaluation protocol, slightly weakening the independence of the evaluation.",
+        "No comparison to other recent self-play or long-context RL baselines beyond RLVR (e.g., adapting R-Zero or AZR-style methods directly to the long-context setting as an ablation/baseline rather than only comparing reward-mapping curves) would have strengthened the significance claims relative to the broader self-play literature.",
+        "The paper lacks a theoretical analysis or more rigorous justification of why joint optimization of three roles in a single policy remains stable (admitted as a limitation), and the stability claims rest mostly on a single model (Qwen2.5-7B-Instruct) for the detailed ablations, limiting generalizability of the mechanistic claims.",
+        "Some aspects of the questioner reward (e.g., choice of sigma=0.5/3, the specific negative penalty values -0.5/-1) appear to be heuristic choices without ablation over alternative values, which could affect robustness across different model scales or domains not tested."
+      ]
     }
   },
   "v2": {

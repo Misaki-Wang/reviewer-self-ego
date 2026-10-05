@@ -19,6 +19,47 @@
         "Training uses 4-bit quantized LoRA fine-tuning for a single epoch with short (96-token) rollouts, which may bias generation length/content and limits confidence that results would hold under full fine-tuning or with longer, more realistic completions typical of production LLMs.",
         "The paper's own code is not yet linked (\"Code available at\" is left blank), limiting reproducibility despite claims of comprehensive implementation details."
       ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "The paper addresses a real and underexplored problem: fine-tuning generators in the context of a downstream safety classifier rather than in isolation, which is a practically relevant 'compound system' perspective.",
+        "The decision-theoretic framing (Section 3) gives an intuitive, if simple, motivation for why outputs near a classifier's decision boundary can be especially costly in expected utility.",
+        "The method itself is lightweight (LoRA fine-tuning, single logit from an existing guard model), making it cheap to apply relative to approaches requiring auxiliary deliberation or additional large models.",
+        "Multiple ablations (guard-only reward, prompt-aware reward) are included and show at least some analysis of reward design choices and failure modes (e.g., degenerate refusal, reward hacking by making outputs more detectably unsafe)."
+      ],
+      "weaknesses": [
+        "The central claim that Boundary Guidance 'reduces false positives and false negatives' of the filter is never directly measured. No false-positive/false-negative rates, ROC-style analysis, or classifier confidence distributions before/after fine-tuning are reported — only LLM-judge helpfulness/harmfulness scores, which is a significant disconnect between the paper's core theoretical claim and its empirical evidence.",
+        "Evaluation relies entirely on a single LLM-as-a-Judge (GPT-4.1) with coarse ordinal scales (1-4 and 0-3) and no human validation, inter-annotator agreement, or check for judge bias/self-preference, undermining the reliability of the reported effects.",
+        "The practical reward (Eq. 3) used for training is only loosely connected to the theoretically derived utility (Eq. 1/2): Proposition 1 depends on an unrealistic constant-utility assumption that is never revisited quantitatively, and the actual reward omits the λ, 1, and τ parameters the theory emphasizes as important — weakening the paper's claim that the method is theoretically grounded.",
+        "The ablation results undercut the main narrative: the guard-only reward (without the reward model u(x,y)) performs comparably or even better than the full Boundary Guidance method for larger models, directly contradicting the stated theoretical necessity of incorporating utility, yet this tension is not resolved, only noted.",
+        "Train and test prompts are drawn from the same three datasets (jailbreak corpus, Alpaca, HarmfulQA) via a simple train/test split, so there is no genuinely out-of-distribution evaluation; it is unclear whether gains generalize beyond the narrow prompt distribution used for RL fine-tuning.",
+        "No comparison against any of the extensively reviewed baseline methods (Safe RLHF, C-DPO, SafeDPO, SACPO, safe-completions) is provided, despite the related work section positioning Boundary Guidance against them; this leaves the comparative advantage of the proposed method empirically unsubstantiated.",
+        "Reported effect sizes are often small and inconsistent across model scales (e.g., only 2 of 4 models show significant helpfulness gains, and the largest model shows a helpfulness decrease), making the 'Pareto improvement' claim overstated for a method tested on only four base models with a single run each (no seeds/repeats, no variance estimates beyond noisy per-prompt t-tests).",
+        "Reproducibility is weak: the code link is left blank ('Code available at'), and key design choices (e.g., why max completion length is capped at 96 tokens, which could materially bias helpfulness judgments toward truncated responses) are not justified or ablated.",
+        "The single guard model (Llama-Guard-2) and single reward model (Skywork-Reward-V2) are used throughout; no experiments vary the safety classifier or reward model, so robustness of 'boundary guidance' to different filters — central to its generalizability claim — is unestablished.",
+        "Quantization (4-bit NF4) and LoRA fine-tuning are used uniformly without ablating against full fine-tuning, leaving open whether reported effects are partly artifacts of the specific efficient-training setup rather than the reward design itself."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Addresses a practically important and underexplored problem: how to fine-tune generators for compound systems that pair a generation policy with a downstream safety classifier, rather than optimizing the generator in isolation.",
+        "Provides a clean, interpretable decision-theoretic argument (Proposition 1) showing that expected system utility can be minimized near the classifier's decision boundary, which motivates the boundary-avoiding reward design in a principled way.",
+        "Empirical evaluation spans multiple model families and scales (0.5B to 14B, Qwen2.5 and Gemma-2), and the main result (Figure 2, Table 1) shows a fairly consistent pattern of reduced harmfulness with maintained or improved helpfulness.",
+        "The ablation studies are a genuine strength: removing the reward model and adding prompt-awareness both yield instructive negative results (e.g., degenerate refusal collapse on the 0.5B model, and the failure mode where prompt-aware rewards actively train the model to produce more extreme unsafe content), which helps readers understand the mechanism and boundary conditions of the method.",
+        "The limitations and future work sections are candid, acknowledging reliance on classifier accuracy away from the boundary, multi-model training overhead, and the oversimplified binary-safety assumption."
+      ],
+      "weaknesses": [
+        "The entire evaluation (both helpfulness and harmfulness) is conducted exclusively via a single LLM-as-judge (GPT-4.1) with no human validation, inter-annotator agreement check, or calibration of the judge against ground truth, which is a significant reproducibility/validity concern for a safety-focused claim.",
+        "Only one safety classifier (Llama-Guard-2-8B) and one reward model (Skywork-Reward-V2) are used throughout; there is no evidence the approach generalizes to other classifiers/reward models with different calibration properties or decision boundaries, which is important since the method's core assumption is that classifiers are more accurate away from the boundary.",
+        "The decision threshold (t=0.5) used to define 'near the boundary' in the reward (Eq. 3) is fixed arbitrarily and not shown to correspond to the classifier's actual calibrated boundary τ; no sensitivity analysis on this threshold is reported.",
+        "Several of the 'Pareto improvement' claims are overstated: e.g., Qwen2.5-14B shows a (statistically insignificant) helpfulness decrease, and the ablation on reward-model necessity contradicts the main narrative for the 0.5B model, where removing the reward model causes helpfulness to collapse to 1.40 (versus 2.13 base) — undermining the claim that the reward model is merely 'second-order.'",
+        "No comparison against existing safety-aligned fine-tuning baselines mentioned in related work (e.g., Safe RLHF, SafeDPO, or a straightforward 'minimize P(filtered)' reward as actually implemented, not just the paper's own simplified variant) to show Boundary Guidance's advantage over prior approaches empirically rather than only conceptually.",
+        "Train/test prompts are drawn from the same three source datasets (jailbreak corpus, Alpaca, HarmfulQA) with only an in-distribution held-out split; there is no out-of-distribution or red-teaming evaluation to test whether the boundary-avoiding behavior generalizes beyond the training distribution's adversarial style.",
+        "No code repository link is actually provided (placeholder left empty), undermining the reproducibility claim made in the Reproducibility statement.",
+        "Potential reward-hacking risk is only partially explored: the prompt-aware ablation shows the model can learn to produce more extreme harmful content to 'help' the classifier, suggesting the main method could have similar unexamined failure modes under different optimization pressure or longer training."
+      ]
     }
   },
   "v2": {

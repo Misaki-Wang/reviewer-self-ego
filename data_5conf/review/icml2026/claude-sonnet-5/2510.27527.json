@@ -20,6 +20,45 @@
         "The outlier channel selection in OutControl is static/offline per-model; while shown consistent within the studied setting, this may be less robust across domains/tasks or with more heterogeneous data mixtures, and the paper does not rigorously test transfer of selected channels across checkpoints/datasets.",
         "The comparison baselines (Quartet, NVIDIA recipe) are adapted to the fully-4-bit, single hardware/software setting used in this paper's testbed; because NVIDIA's original recipe deliberately keeps some layers/stages in higher precision, the head-to-head comparison in a fully-4-bit regime may somewhat disadvantage it relative to its intended design."
       ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper tackles an important and timely problem (fully quantized 4-bit training) and provides a reasonably thorough theoretical treatment of gradient unbiasedness for NVFP4 linear layers, extending prior TetraJet analysis in a principled way.",
+        "The ablation studies in Sec. 6.2 are extensive and well organized, isolating the effects of block-size choice, gradient unbiasedness, Hadamard transform placement, and outlier channel selection, which helps clarify which design choices actually matter.",
+        "The oscillation analysis (Sec. 4, Fig. 1-2, Fig. 6) is a genuinely useful empirical contribution: visualizing latent weight distributions near quantization thresholds and showing the growth of oscillating weights over training gives a clear mechanistic account of a real phenomenon in LLM FQT.",
+        "The loss decomposition experiments (Tables 5-6) and the FP6xFP4 precision-switching experiment (Fig. 7) provide useful diagnostic insight for future work, identifying activation quantization and mlp.ffn2 as particular sensitivity bottlenecks.",
+        "The writing and mathematical notation are mostly clear and the method descriptions (Algorithms 1-3) are reproducible at the pseudocode level."
+      ],
+      "weaknesses": [
+        "The headline claim that TetraJet-v2 'consistently outperforms' prior methods is not well supported by the downstream results in Table 2: TetraJet-v2-full actually underperforms BF16, Quartet, and/or NVIDIA on several individual tasks (e.g., ARC-c: 24.75 vs. 28.43 BF16/27.43 Quartet; Hellaswag: 41.11 vs. 43.30 BF16; PIQA: 66.59, lowest of all methods). The 'average' improvement claim masks substantial task-level regressions, which undermines the core empirical claim.",
+        "No variance/seed information is reported anywhere in the paper. Given that LLM pretraining at these token/parameter scales (70M-370M, 50-200B tokens) can exhibit meaningful run-to-run noise, and that downstream task accuracies for small models are especially noisy, single-run comparisons make it impossible to assess whether the reported gains (or losses) are statistically meaningful.",
+        "The central motivation of the paper is compute/memory efficiency from 4-bit training, yet the paper explicitly admits (Limitations) that no real hardware speedup or throughput measurement is provided, because NVFP4-capable hardware was unavailable. This leaves the paper's practical value proposition entirely unverified; all efficiency claims are aspirational.",
+        "The method is not actually 'fully FP4' as claimed in several places: OutControl retains 5-10% of activation channels in FP8/BF16, which contradicts statements like 'leverages NVFP4 for activations, weights, and gradients in all linear layers' and 'fully FP4 training.' The paper does not quantify the resulting compute/memory overhead of this mixed-precision component, making it hard to judge whether comparisons to fully-4-bit baselines (e.g., Quartet) are fair.",
+        "Evaluation scale is quite limited (models up to 370M parameters, 200B tokens), far below the regime where FQT efficiency gains and outlier/oscillation effects are most relevant and most convincingly demonstrated (billion+ parameter models). This limits the significance and generalizability of the conclusions.",
+        "Several hyperparameters central to the method (e.g., oscillation threshold τosci=8, suppression start time Tstart, outlier ratio p=5-10%) appear to be fixed by hand without sensitivity analysis or principled derivation, raising concerns about tuning burden and generalization to other model/data scales.",
+        "The comparison to NVIDIA's NVFP4 recipe may be somewhat unfair/apples-to-oranges: NVIDIA's original recipe intentionally keeps some blocks in BF16 and the final training stage in higher precision for stability, while the paper reimplements a fully-FP4 version of it for comparison, which could understate the strength of that baseline relative to its intended use."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Addresses a timely and practical problem: making NVFP4 fully-quantized LLM training more accurate, which has strong relevance given new Blackwell-class hardware.",
+        "The double-block quantization scheme is well-motivated by the numerical constraints of NVFP4's E4M3 scaling factor, and the paper provides a clear, careful derivation of unbiased gradient estimation that improves upon NVIDIA's recipe (alignment of \\hat{X} in backward, stochastic rounding, finer weight block shape).",
+        "Extensive and informative ablation studies (Tables 3-6, Figs 4-7) isolate the contribution of each design choice (block size, unbiasedness, Hadamard placement, oscillation suppression, outlier control), which aids reproducibility and understanding.",
+        "OsciReset is a simple, intuitive mechanism (reset to bin center rather than freeze/dampen) that is shown empirically to outperform prior oscillation-suppression techniques (Q-EMA, Freeze, Dampen) adapted from the vision-Transformer literature, and the authors provide direct evidence (Fig. 6) that oscillation proportion is reduced.",
+        "The loss/module decomposition analysis (Tables 5-6) and FP6xFP4 exploration provide useful insights for the community beyond the core proposed method, pointing to forward-pass activations and mlp.ffn2 as primary bottlenecks.",
+        "Consistent, systematic comparison against two recent strong baselines (Quartet, NVIDIA's NVFP4 recipe) across three model sizes and token budgets, with both pretraining perplexity and 10 downstream benchmarks."
+      ],
+      "weaknesses": [
+        "Scale is limited to 370M parameters and 200B tokens; given FQT benefits are often most relevant/stressed at larger scale, it remains unclear whether the oscillation/outlier phenomena and the proposed fixes generalize to multi-billion parameter models where NVIDIA's own recipe was validated at much larger scale (including partial BF16 fallback for stability).",
+        "No actual hardware throughput/speedup measurements are reported (explicitly acknowledged as a limitation due to lack of Blackwell-class hardware access), so the paper cannot substantiate the practical efficiency gains motivating the work, only accuracy.",
+        "The claimed '51.3% average reduction in gap to full precision' is a somewhat selectively computed summary statistic; raw improvements in Tables 1-2 are often modest (e.g., downstream avg accuracy 43.60 vs 44.13 BF16 vs 42.77 NVIDIA), and on several individual downstream tasks TetraJet-v2-full underperforms baselines (e.g., ARC-c, PIQA), suggesting the overall average may mask inconsistent per-task behavior.",
+        "Results are reported from apparently single training runs per configuration with no variance/error bars or multiple seeds, making it hard to assess whether the reported gains are statistically meaningful given the relatively small absolute differences.",
+        "OsciReset requires multiple hyperparameters (T_start, T_period, T_accu, tau_osci) and T_start is manually tuned per model size (8000/15000/35000 steps), which somewhat undercuts the claim that the method needs 'little tuning' compared to prior approaches.",
+        "The outlier selection in OutControl is static/offline and tuned per precision format (5% for BF16, 10% for FP8); its robustness to distribution shift (e.g., fine-tuning or out-of-domain data after pretraining) is not evaluated.",
+        "The core architectural novelty relative to prior work (TetraJet for MXFP4, NVIDIA's NVFP4 recipe, Quartet) is incremental in places (format swap, refined block shapes, combination of known techniques like RHT), with originality concentrated mainly in OsciReset and OutControl rather than the overall framework."
+      ]
     }
   },
   "v2": {
@@ -41,6 +80,45 @@
         "No indication of statistical variance (multiple seeds / runs) for the main pretraining results, making it hard to assess whether the reported improvements (e.g., 0.3–0.8 PPL differences between competing FP4 methods) are robust or within noise, particularly for the smaller 70M model.",
         "The paper introduces a fairly large number of method-specific hyperparameters (τ_osci, T_start, T_period, T_accu, outlier ratio p, RHT block size) across OsciReset and OutControl; although sensitivity analyses are provided for some, the combined tuning burden across all these knobs for new model/data settings is not fully characterized.",
         "The efficiency benchmarks are conducted on consumer GPUs (RTX 5090/6000 Pro) rather than NVIDIA Blackwell datacenter hardware that natively targets NVFP4, so the reported speedups may not directly transfer to the production training hardware for which NVFP4 was designed."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a timely and practically relevant problem (fully NVFP4 fully-quantized training for LLMs) with an actual CUDA kernel implementation and measured (not just simulated) end-to-end speedups at both layer and full-model levels (Sec. 5.3, Appendix G), including results on 2B/7B-parameter Llama2-structured models.",
+        "The paper clearly diagnoses two concrete failure modes (weight oscillation and structural activation outliers) and proposes targeted, lightweight fixes (OsciReset, OutControl) with reasonable intuition and supporting diagnostic plots (Fig. 1, Fig. 2, Fig. 7).",
+        "Extensive ablation studies are provided: quantization block-size/scaling choices, unbiasedness of gradient estimation versus the NVIDIA recipe, placement of (Random) Hadamard Transform, hyperparameter sensitivity of OsciReset (threshold, start step), and outlier-selection strategy — this level of ablation is commendable and aids reproducibility.",
+        "Comparison against multiple recent strong baselines (Quartet, NVIDIA NVFP4 recipe, Wang et al. 2025, Tseng et al. 2025, Cook et al. 2026) shows fairly consistent improvements in perplexity across model sizes.",
+        "OsciReset is shown to be memory- and compute-efficient (≤3% memory overhead, <0.06% latency overhead) and is demonstrated to transfer across model sizes and an alternative optimizer (Muon), suggesting some robustness of the core idea."
+      ],
+      "weaknesses": [
+        "Model scale is very small relative to the paper's motivating claims about reducing the cost of frontier-scale (hundred-billion-parameter, $100M) LLM pretraining; experiments only reach 370M parameters and 212B tokens, leaving it unclear whether the oscillation/outlier phenomena and proposed fixes generalize to billion-scale models where dynamics (e.g., outlier structure, optimizer behavior) can differ substantially.",
+        "Despite the claimed '51.3% average gap reduction,' the absolute gap to BF16 remains non-trivial and downstream task results are mixed: TetraJet-v2-full's average downstream accuracy (43.60) is still below BF16 (44.13), and on individual tasks (e.g., ARC-c: 24.75 vs. Quartet's 27.43 and NVIDIA's 26.76) the proposed method underperforms competing FP4 baselines, undercutting the narrative of clear overall superiority.",
+        "The 'fully 4-bit' framing is diluted by OutControl, which keeps ~10% of activation channels (and associated computations) in FP8 — this is conceptually similar to the mixed-precision compromises the paper criticizes in the NVIDIA baseline (which keeps some Transformer blocks in BF16), weakening the novelty claim of being a genuinely full 4-bit solution.",
+        "No reported variance across random seeds/runs; given that FQT is known to be unstable, single-run perplexity comparisons (especially the fairly small PPL differences between methods, e.g., 0.07 train PPL for 'Only bwd.dW') leave open whether reported improvements are statistically robust.",
+        "The comparison with the NVIDIA recipe forces an originally mixed-precision method into a strict fully-4-bit setting, which may unfairly handicap that baseline and inflate the apparent advantage of TetraJet-v2.",
+        "OsciReset and OutControl rely on several manually set hyperparameters (Tstart, Tperiod, τosci, calibration window, outlier ratio p) tied to the specific LR schedule and architecture used; while some sensitivity analysis is provided on OLMo-2, this is only tested within a narrow range of model sizes/datasets from the same family, limiting confidence in broader applicability.",
+        "The 'first' claims (first effective oscillation suppression for LLMs) are somewhat incremental extensions of prior ViT-focused techniques (Nagel et al. 2022; Chen et al. 2025), differing mainly in the reset-vs-freeze/dampen mechanism, which somewhat overstates the originality of the core idea.",
+        "The code repository link is left blank in the submission, and efficiency benchmarks rely on consumer-grade GPUs (RTX 5090, RTX 6000 Pro) rather than datacenter hardware typically used for LLM pretraining, somewhat limiting the practical relevance of the reported speedups to real large-scale training settings."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "The paper identifies two clear, well-motivated optimization pathologies in fully NVFP4 training—weight oscillation and structural activation outliers—and backs these observations with concrete empirical evidence (e.g., Fig. 1 trajectory/distribution plots, Fig. 2 persistent outlier channels), rather than just asserting the problems exist.",
+        "The proposed double-block NVFP4 quantization scheme is carefully justified relative to NVIDIA's recipe (alignment of forward/backward operands, stochastic rounding for unbiasedness, finer 1x16 weight blocks), and each design choice is validated in isolation via ablations (Tab. 8a-c), which supports the soundness of the method.",
+        "OsciReset is simple, requires minimal hyperparameter tuning, and is shown to be robust to its key hyperparameters (Tab. 9, 10) and scalable via a memory-efficient top-k tracking variant (Alg. 3, Tab. 7) with quantified low overhead.",
+        "Comprehensive empirical evaluation: multiple model scales (70M/150M/370M), long token horizons (up to 212B), 10 downstream tasks plus two extra PPL benchmarks, multiple strong recent baselines (Quartet, NVIDIA NVFP4, and additional ones in Appendix E), optimizer-compatibility check with Muon (Appendix F), and detailed efficiency/kernel benchmarking including full end-to-end Llama2-structured model speedups (Appendix G), which together make the empirical claims well supported.",
+        "The loss-decomposition and module-sensitivity analyses (Tab. 3, 4) and the FP6xFP4 precision-switching exploration (Fig. 6) provide useful diagnostic insight beyond just reporting final numbers, which can inform future low-bit training research.",
+        "Reasonably detailed reproducibility information (hyperparameter tables in Appendix B, algorithm pseudocode in Appendix C) and code availability is promised."
+      ],
+      "weaknesses": [
+        "All experiments are conducted on relatively small models (up to 370M non-embedding parameters) and moderate token budgets; while the token-per-parameter ratio is high, it remains unclear whether the oscillation/outlier phenomena and the proposed fixes scale similarly to billion-scale models where production FP4 training would actually be deployed. The limitations section acknowledges this but the gap to BF16 (still several PPL points) raises question of whether conclusions transfer to larger scale.",
+        "The OutControl method keeps 10% of activation channels in FP8 (and uses higher precision for the corresponding weight columns), which means the method is not actually 'fully' 4-bit despite the framing as fully-FP4 training; the effective average bitwidth and its impact on the reported speedup/accuracy trade-off could be more explicitly discussed (how much of the claimed advantage over NVIDIA's partially-BF16 recipe is reduced once this mixed-precision overhead is accounted for).",
+        "The oscillation threshold τosci=8 and other OsciReset hyperparameters (Tperiod, Taccu) are presented as robust/insensitive based on sweeps only on the 150M model; broader sensitivity analysis across model sizes/architectures would strengthen the generality claim.",
+        "Single-seed training runs appear to be used throughout (no reported variance/multiple seeds), which is common in this compute-intensive setting but limits statistical confidence in the relatively small perplexity gaps between methods (e.g., Quartet vs. NVIDIA vs. TetraJet-v2-base differences are sometimes within ~0.5 PPL).",
+        "The explanation for why ViT oscillation-mitigation techniques transfer poorly to LLMs (Sec 6.1) is somewhat hand-wavy and based on limited, indirect evidence (TPP argument, single experiment in Fig. 4); a more rigorous comparison or ablation isolating the claimed cause would strengthen this discussion.",
+        "The paper combines several fairly specific, engineering-heavy design choices (block sizes, RHT placement, outlier ratio p=10%, FP8 fallback) that, while each individually ablated, together constitute a complex pipeline; this raises some concern about overfitting the recipe to this particular small-model experimental regime."
       ]
     }
   }

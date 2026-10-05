@@ -79,6 +79,45 @@
         "No variance/statistical significance reporting across multiple calibration-set draws or seeds, making it hard to assess whether the reported improvements are robust or within noise, especially given the relatively small margins in several tables.",
         "The method still relies on calibration data and can be sensitive to distribution shift (as acknowledged for Ridge, but not deeply tested for RCPU itself on out-of-domain calibration/eval mismatches)."
       ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The method is simple, closed-form, hyperparameter-free, and computationally cheap, which is attractive relative to Ridge-regularized least-squares baselines that require expensive λ tuning.",
+        "The paper provides a reasonably thorough empirical study across two to three base models (Llama-7B, Llama-2-13B, Vicuna-7B), multiple pruning ratios, and two calibration-set sizes, along with ablations on which sub-layers benefit most from compensation and an analysis of pruning-time/memory efficiency.",
+        "The comparison between RCPU and a Ridge/least-squares alternative, including a degrees-of-freedom argument and a sweep over λ in the appendix, gives some insight into why an unconstrained linear fit can overfit under small calibration sets.",
+        "The method integrates directly into the existing Wanda-sp pipeline without architectural changes, which aids practical applicability."
+      ],
+      "weaknesses": [
+        "Potential soundness issue that is not addressed: the method independently fits a dout×dout rotation Q for each targeted sub-layer (o_proj, down_proj) using only local calibration outputs. Since these sub-layer outputs feed into a shared residual stream that is consumed by subsequent layers (attention heads, MLP, LayerNorm) whose weights were trained assuming the original output basis, an arbitrary per-layer rotation (not coordinated across layers, unlike SliceGPT's single global orthogonal transform) could misalign the semantic meaning of output coordinates even while preserving norms/angles on the calibration set. The paper never discusses or empirically verifies that the learned per-layer Q stays close to identity or otherwise avoids this problem, which undermines the central claim that rotation constraints 'preserve pretrained knowledge.'",
+        "Missing comparisons to the most directly relevant competing methods explicitly cited in Related Work (RotPruner, DenoiseRotator), both of which also use rotations for LLM pruning; without these baselines it is hard to judge whether RCPU's specific analytic/post-hoc rotation formulation is actually superior to learned rotation approaches.",
+        "The technical novelty is incremental: Orthogonal Procrustes alignment is a classical, well-known technique, and the variance-aware scoring is a straightforward additive extension of the existing Wanda-sp score (multiplying by input variance). The core contribution is largely a combination of known tools rather than a new technical mechanism.",
+        "Benchmark gains are inconsistent at the per-task level (e.g., RCPU underperforms WANDA-sp on BoolQ at 30% pruning ratio in Table 2, and trails FLAP/other baselines on individual tasks in several settings), so the claimed 'consistently better' performance mainly holds for mean accuracy and PPL, not uniformly across tasks/settings.",
+        "The degrees-of-freedom comparison between RCPU's orthogonal constraint (dout(dout−1)/2) and Ridge's effective degrees of freedom (trace of the hat matrix) is a rough heuristic argument rather than a rigorous theoretical justification for why rotation generalizes better out-of-sample.",
+        "Experiments are restricted to older/mid-size LLaMA-family models (Llama-1-7B, Llama-2-13B, Vicuna-7B); no evaluation on more recent or larger architectures, limiting evidence of generality.",
+        "WikiText-2 is used both for calibration and as one of the primary evaluation metrics (PPL), which, while common in the literature, can inflate perceived gains if compensation overfits to this particular distribution despite the rotation constraint.",
+        "The scaled variant (Rot.+Scale) offers only marginal and inconsistent improvement over plain rotation, suggesting the additional design choice adds limited value while still being presented as a core contribution."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Clear and well-motivated formulation: casting post-pruning error compensation as an Orthogonal Procrustes problem is elegant and yields a closed-form, hyperparameter-free solution, avoiding the costly λ search required by Ridge-regularized least squares.",
+        "Good theoretical grounding: the degrees-of-freedom argument (dout(dout-1)/2 for the rotation vs. much larger effective DOF for Ridge) gives a plausible explanation for why rotation-constrained updates generalize better under small calibration sets than unconstrained/Ridge least-squares fits.",
+        "Simple, cheap variance-aware scoring is a natural and well-justified extension of the WANDA-sp score, requiring no architectural changes and only modest extra computation (an SVD per sub-layer).",
+        "Fairly extensive empirical evaluation: multiple models (Llama-7B, Llama-2-13B, Vicuna-7B), multiple pruning ratios (10/20/30%), two calibration sizes (128/512), and both perplexity and seven zero-shot benchmarks, including appendix results that reinforce the main findings.",
+        "Useful ablations: calibration-size sensitivity (Fig. 2), which sub-layer benefits most from rotation (Table 4), LS+Ridge vs RCPU across a λ grid (Figs. 5–6), and efficiency/time breakdown (Table 5) all add to the credibility and interpretability of the method.",
+        "Practical advantages are clearly articulated: no fine-tuning required, no extra hyperparameters, compensation folds directly into existing weights with no inference-time overhead."
+      ],
+      "weaknesses": [
+        "Novelty is somewhat incremental: it combines an existing idea (Orthogonal Procrustes alignment, already used elsewhere for representation matching) with a straightforward additive extension of the WANDA-sp score; the related-work section itself acknowledges several concurrent rotation-based pruning works (SliceGPT, RotPruner, DenoiseRotator), making the conceptual gap narrower than the framing suggests.",
+        "The empirical gains are not uniformly convincing: RCPU is sometimes outperformed by FLAP or WANDA-sp on individual benchmarks/pruning ratios (e.g., Table 2 at 30% pruning ratio, RCPU(Rot.) scores lower mean accuracy than FLAP), undercutting the claim of 'consistently better' performance.",
+        "Baseline coverage is limited: comparisons are restricted mainly to WANDA-sp, FLAP, and SliceGPT; no comparison against more recent or stronger structured-pruning methods (e.g., LLM-Pruner without fine-tuning, AlphaPruning-style layerwise ratio allocation, or other 2024/2025 structured methods) to contextualize the improvement margin.",
+        "Model coverage is limited to relatively older/smaller LLMs (Llama-1-7B, Llama-2-13B, Vicuna-7B); no evaluation on larger-scale or more modern architectures (e.g., Llama-3, Mistral, Mixture-of-Experts models), which limits confidence in generality across today's deployment-relevant models.",
+        "No variance/seed analysis or statistical significance testing is reported, making it hard to judge whether the reported PPL/accuracy differences (often only fractions of a point) are robust or within noise.",
+        "The ablation isolating the contribution of the variance-aware score alone (independent of the rotation compensation) is not clearly presented; Figure 3 mixes score and compensation choices, making it harder to attribute gains specifically to the scoring innovation versus the rotation update.",
+        "The method remains a greedy, layerwise procedure without joint optimization across layers, and error accumulation across many layers is not empirically analyzed (e.g., at very deep pruning or many layers), despite this being a plausible source of degradation similar to the critique leveled at SliceGPT."
+      ]
     }
   }
 }

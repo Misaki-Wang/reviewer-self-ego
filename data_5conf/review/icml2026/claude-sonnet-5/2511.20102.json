@@ -85,6 +85,46 @@
         "The strong claim that \"sparse-attention-trained models exhibit stronger long-context extrapolation than full-attention models\" is drawn from a relatively narrow evidence base (one 1B-scale model family, a few long-context benchmarks) and may not generalize broadly.",
         "No comparison to more recent trainable sparse-attention baselines mentioned in related work (e.g., InfLLM-v2, DeepSeek DSA) beyond acknowledging them as concurrent, leaving open how SSA compares to the current state of the art in practice."
       ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper tackles a well-motivated and practically important problem: reconciling the train-inference distribution mismatch of training-free sparse attention with the gradient-flow deficiencies of fully sparse-trained models, articulated clearly as an 'attention gap' vs 'capability gap' dichotomy.",
+        "The method (dual-stream sampling of full/sparse attention plus bidirectional output alignment losses) is simple, intuitive, and reasonably easy to implement on top of existing block-sparse attention (MoBA-style) infrastructure.",
+        "The experimental protocol is fairly extensive: commonsense reasoning, perplexity, LongBench, NIAH, PG-19 long-context evaluation, extrapolation across sparsity budgets, and multiple ablations (alpha, alignment direction, sampling ratio, receptive field).",
+        "Several auxiliary analyses are genuinely informative and add value beyond the core claim, e.g., the investigation showing NSA's reported gains are largely attributable to its sliding-window module rather than sparse attention design, and the RoPE-scaling aliasing analysis explaining why sparse attention is more robust to length extrapolation.",
+        "Efficiency numbers (training overhead ~17%, inference speedup ~2x at 128k) are reported, giving a practical sense of the method's cost-benefit tradeoff."
+      ],
+      "weaknesses": [
+        "The theoretical contributions are shallow: Theorem 1 is a direct triangle-inequality consequence of the softmax normalization relationship between sparse/full attention weights, and Proposition 4.2 is an elementary KL-divergence decomposition of cross-entropy loss; neither provides non-trivial insight beyond what is already intuitively assumed in prior sparse-attention literature (e.g., NSA, MoBA), making the 'theoretical framework' feel like formalized restatement rather than new understanding.",
+        "All experiments are conducted at very small scale (300M and 1B parameters, 100B-110B pretraining tokens), far below the regime (32K-1M context, deep research/long reasoning workloads) the introduction motivates the work with; there is no evidence the findings (e.g., alignment loss benefits, sparsity gains) hold at scales relevant to practical LLM deployment, which is a significant external validity concern.",
+        "The experimental protocol has a methodological inconsistency that could bias comparisons: SSA's RF=1024 results are obtained by extrapolating an RF=256-trained model rather than training natively at RF=1024 (as baselines MoBA/NSA are), which is explained as giving 'better performance' but conflates the comparison and makes it unclear whether SSA genuinely outperforms baselines under matched training/inference conditions.",
+        "The reported performance gains over strong baselines are frequently marginal (well under 1 point on commonsense averages, overlapping error bars in many rows of Table 1), undermining the 'SOTA' and 'substantially higher attention sparsity' claims; in several settings (RF=1024 perplexity, NIAH long-range retrieval) SSA is actually outperformed by NSA or MoBA.",
+        "Training stability is a serious concern that is underexplored: Table 2 shows that 'Random Each Layer' assignment and single-direction alignment losses (Only Full→Sparse, Only Sparse→Full) all produce NaN losses/0% accuracy, indicating the method is fragile and sensitive to specific design choices; this instability is only superficially explained ('asymmetric over-distillation') without deeper diagnosis or mitigation.",
+        "No functioning code link is provided (the abstract placeholder 'The code is available at' is empty), undermining reproducibility despite the claim of code availability.",
+        "The paper's own appendix analysis (Appendix F, G) reveals that reported perplexity advantages of competing methods (NSA) are confounded by auxiliary components (sliding window); it is not clear the authors apply equally rigorous scrutiny to whether SSA's own gains (e.g., robustness to RoPE scaling, Appendix L) are similarly confounded by its tendency toward local-token attention rather than the proposed alignment mechanism itself.",
+        "Evaluation benchmarks are relatively small/classic (PIQA, HellaSwag, ARC, WikiText) and long-context tasks are evaluated with a single run for LongBench/NIAH (stated due to compute constraints), reducing confidence in the statistical robustness of the long-context claims that form a central part of the paper's narrative."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Clear and well-motivated problem framing, decomposing sparse-attention training failures into an 'attention gap' (train/inference mismatch) and a 'capability gap' (incomplete gradient flow), which cleanly unifies prior Full-Sparse and Sparse-Sparse approaches under one taxonomy.",
+        "Solid theoretical contribution: Theorem 1 provides a clean linear bound relating approximation error to dropped attention mass, and this bound directly motivates the proposed bidirectional alignment loss rather than being a post-hoc justification.",
+        "Comprehensive empirical evaluation across short-context (commonsense reasoning, WikiText PPL) and long-context settings (LongBench, NIAH, PG-19), under both full and sparse inference modes, with multiple sparsity/receptive-field configurations.",
+        "Thorough and honest ablations, including sparsity level, FA/SA sampling ratio, alignment loss direction/type, and a notable transparent investigation (Appendix F/G) showing that NSA's reported gains are largely attributable to its sliding-window component rather than its sparse attention design—this kind of self-critical analysis strengthens the paper's credibility.",
+        "Useful auxiliary analysis explaining why sparse attention is more robust to RoPE scaling (Appendix L), including concrete visualization of frequency aliasing, which is a nice side contribution with practical implications for long-context extrapolation.",
+        "Reasonable reproducibility: detailed architecture/hyperparameter tables, evaluation protocols, and efficiency benchmarking (training/inference wall-clock) are provided in appendices."
+      ],
+      "weaknesses": [
+        "All experiments are conducted at small scale (1B and 300M parameter models, 100B/50B training tokens), which is far from the scale at which sparse attention is actually deployed in practice (e.g., 7B+ models, multi-trillion token training); it is unclear whether the observed benefits of SSA persist or shrink at larger scale, and no scaling-law style analysis is offered to support extrapolation of the claims.",
+        "Many of the reported gains over baselines are small and fall within or close to the reported standard deviations (e.g., Table 1 commonsense averages differ by ~0.3-0.8 points between SSA and FullAttn/NSA with overlapping error bars), which weakens the 'SOTA' claims made in the abstract/intro.",
+        "Results are mixed rather than uniformly favorable to SSA: NSA outperforms SSA on PPL at RF=1024, FullAttn beats SSA on full-attention NIAH after continual training to 32k, and MoBA sometimes extrapolates comparably; this nuance is somewhat underplayed in the framing of 'SOTA performance under both inference modes.'",
+        "The core alignment mechanism doubles the number of attention computations per training step within the active stream (auxiliary counterpart attention at every layer), inflating training cost by ~17-37% (Table A2) for often modest accuracy gains, raising questions about cost-effectiveness versus simpler baselines like MoBA, especially as scale grows.",
+        "Theorem 1's bound, while clean, is a fairly generic triangle-inequality argument that does not by itself explain why the specific SmoothL1-based bidirectional alignment loss is the right mechanism to reduce dropped attention mass versus other plausible regularizers; the link from theory to the specific design choice is more heuristic/motivational than rigorously derived.",
+        "Only one model family/architecture (Llama-3.2-style, block-sparse attention à la MoBA) is tested; generalization to other architectures, attention variants, or modalities is not explored, limiting the breadth of the claimed contribution.",
+        "The paper does not report wall-clock or memory comparisons at the scales where sparse attention matters most (e.g., >128k context, batch training), and inference-time KV-cache is explicitly unsupported in the sparse kernel used for NIAH/LongBench evaluation, which could affect the practical significance of the efficiency claims."
+      ]
     }
   }
 }

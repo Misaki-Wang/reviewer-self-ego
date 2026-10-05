@@ -20,6 +20,46 @@
         "Code and processed dataset releases are deferred to post-deanonymization, and some dataset modifications (e.g., DAPO split, Eurus filtering) are described only briefly, which slightly limits immediate reproducibility.",
         "The method introduces additional hyperparameters (epsilon, alpha, K, delta, pd) beyond PPO's single clip ratio; although the paper shows some robustness to these, the added complexity and tuning burden relative to the simplicity of clipping is not fully discussed as a trade-off."
       ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "The paper provides a rigorous theoretical derivation (primal/dual Lagrangian solution, KKT-based implicit differentiation following OptNet) for a discrete trust-region projection that generalizes Otto et al. (2021)'s continuous Gaussian projection framework to categorical token distributions.",
+        "The sparsification scheme is well-motivated and comes with formal error bounds (Theorem A.1/A.2) showing the approximation introduced by keeping only top-K tokens is provably small for realistic LLM vocabulary/entropy regimes.",
+        "Extensive empirical evaluation across many axes: 5 Qwen3 sizes, 4 Qwen2.5-Instruct sizes, Llama 3.1/3.2, SmolLM3, Apertus, and FineMath-Llama, four advantage-estimation methods (GRPO, Dr.GRPO, PPO, GSPO), and five datasets (DAPO-Math, MATH-Eval suite, GSM8K, Eurus-2-RL-Math).",
+        "Reasonably thorough ablations of key hyperparameters (KL bound epsilon, sparsification K) and a dedicated controlled overhead study (memory/runtime), plus analysis of entropy, response-length dynamics, and clipped/projected token fractions, which adds useful diagnostic insight beyond headline numbers.",
+        "The method is presented as a drop-in, inference-time-free replacement for clipping, which is practically appealing and the reported overhead decreases with model size, a reasonable scalability argument."
+      ],
+      "weaknesses": [
+        "The core technical contribution is largely an application/engineering extension of an existing method (Otto et al. 2021's differentiable trust-region projections for Gaussian policies) to categorical token distributions with sparsification; the novelty over prior projection-based trust-region RL work is somewhat incremental despite the LLM-scale engineering effort.",
+        "The Clip (PPO-style) baseline does not appear to be hyperparameter-tuned with the same rigor as TROLL: the paper explores TROLL's epsilon and K extensively (Fig. 5, 13) but never sweeps the clip ratio epsilon_ppo, raising concerns that the comparison may be biased toward the proposed method.",
+        "Several results are mixed or inconsistent, undermining the claim of uniform superiority: e.g., Table 1 shows PPO+Clip outperforming PPO+TROLL on DAPO Train for Qwen2.5-7B-Instruct (0.444 vs 0.431), and FineMath-Llama-3B on GSM8K slightly favors Clip (0.750 vs 0.746); these exceptions are not discussed in depth.",
+        "A substantial portion of the headline gains (e.g., GSPO divergence under Clip in Table 1, Figures 7/8) stems from what looks like a training instability/implementation issue rather than a fundamental limitation of clipping; GSPO was specifically designed with sequence-level (not token-level) ratios for stability, so applying token-level TROLL as a 'fix' conflates two different design choices and may not be a fully controlled comparison.",
+        "Reported computational overhead is non-trivial for smaller/moderate models (e.g., +54.2% runtime for Qwen3-0.6B, +16.7% for 1.7B in Table 5), which somewhat contradicts the paper's framing of 'negligible overhead'; this is relevant since many practical RLHF/RLVR pipelines still use smaller models.",
+        "The method adds several additional hyperparameters (epsilon, alpha, K, delta, pd, chunk size) and a non-trivial implementation (custom sparse tensor class, n-ary bracketing dual solver, custom backward pass), which may hurt practical adoption and reproducibility relative to the simplicity of PPO clipping, even though the authors promise code release.",
+        "The evaluation, while broad, is restricted to mathematical reasoning with rule-based rewards; no results are shown for RLHF-style reward models, code generation, or other domains, limiting evidence for generality despite such claims in the introduction/future work."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Principled theoretical contribution: derives a closed-form (up to a 1D dual optimization) differentiable KL trust-region projection for discrete/categorical token distributions, extending prior Gaussian/continuous-control projection work (Otto et al. 2021) to the LLM setting, including full OptNet-style implicit-differentiation derivations in the appendix.",
+        "Addresses a real and important gap: all major LLM RL algorithms (GRPO, Dr.GRPO, GSPO, PPO) rely on the same heuristic PPO clip, and this paper proposes a principled drop-in replacement compatible with all of them without changing inference behavior.",
+        "Clever, theoretically justified sparsification scheme (greedy top-mass token selection) that makes the projection tractable for 100k+ vocabularies, backed by a formal error bound (Theorem A.2) showing the sparsification-induced KL approximation error is small relative to the trust-region bound in practice.",
+        "Very extensive empirical evaluation: multiple model families (Qwen3, Qwen2.5-Instruct, Llama 3.1/3.2, SmolLM3, Apertus), sizes from 500M to 14B, multiple datasets (DAPO-Math, GSM8K, Eurus-2-RL-Math, MATH-Eval suite), and multiple RL algorithms (GRPO, Dr.GRPO, PPO, GSPO), showing broadly consistent gains.",
+        "Notable and important finding that TROLL stabilizes GSPO training where PPO-clip causes outright divergence (0% success), suggesting the method has practical value beyond incremental gains.",
+        "Thorough analysis section covering computational/memory overhead (showing it is small and does not scale with model size), entropy preservation versus clip-induced entropy collapse, response-length adaptation dynamics, and hyperparameter sensitivity (KL bound, sparsity K) — these ablations substantially strengthen the empirical case.",
+        "Good reproducibility effort: detailed hyperparameter tables, dataset/model links, pseudocode for forward/backward passes, and a reproducibility statement."
+      ],
+      "weaknesses": [
+        "Scale is still modest relative to current practice: largest model is 14B with no mixture-of-experts or multi-billion-token-scale training runs, so claims about scalability to \"modern LLMs\" are only partially substantiated (acknowledged as a limitation).",
+        "Some reported gains are small or mixed (e.g., Qwen3-8B Dr.GRPO on MATH-Eval: 0.551 vs 0.549; some individual MATH subtask entries in Table 4 favor Clip), so the headline \"consistently outperforms\" claim is slightly stronger than the full per-task evidence.",
+        "The dramatic GSPO divergence under Clip (0.000 success) raises a fairness question: it is unclear whether the Clip/GSPO baseline was tuned as carefully as TROLL, or whether a different clip range/learning rate could have avoided this collapse, which would affect how much credit TROLL deserves for this result.",
+        "Key hyperparameters (e.g., regression weight α=1, sparsification mass threshold δ, default mass pd) are fixed without a systematic ablation beyond the single KL-bound/K-token sweep in Section 5.3, despite claims of robustness to α.",
+        "The method adds noticeable implementation complexity (dual-variable bracketing search, custom implicit-differentiation backward pass, sparse tensor handling) compared to a one-line clip operation, which is only partially offset by the reported runtime/memory overhead figures measured in a narrow controlled setting (few model sizes, short clipped sequences).",
+        "No comparison against other principled alternatives to clipping beyond the PPO-clip baseline itself (e.g., explicit KL-penalty PPO, or other recent non-clip stabilization techniques), which would better contextualize the magnitude of improvement attributable specifically to the projection mechanism versus other known fixes.",
+        "Entropy-preservation and response-length findings are illustrated for only one or two models (e.g., Qwen3-14B), and the paper does not discuss whether preserved entropy could sometimes be undesirable (e.g., slower convergence or reduced sharpness) in other settings."
+      ]
     }
   },
   "v2": {
@@ -42,6 +82,48 @@
         "The regression weight alpha is fixed to 1 without ablation, and the choice of sparsification parameters (K, delta, default mass pd) involves several hand-tuned constants whose sensitivity is only partially explored.",
         "Evaluation of larger models (e.g., Qwen3-14B) is comparatively less extensive than smaller models in the systematic ablation/ablation tables (e.g., Table 1 uses only 8B-scale models), leaving some uncertainty about how benefits and overhead trends generalize at the very largest scales tested.",
         "The paper's theoretical sparsification bound (Theorem A.2) assumes identical top-k support sets between the two compared distributions, an assumption that may not strictly hold during training as the policy shifts, somewhat limiting the direct applicability of the guarantee to the actual algorithm."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 6,
+      "strengths": [
+        "Addresses a well-motivated and longstanding limitation of PPO-style clipping (lack of principled, token-level KL control) with a theoretically grounded alternative based on convex trust-region projections.",
+        "Provides a complete derivation of the primal/dual projection problem, a closed-form interpolation solution, and a differentiable backward pass via OptNet-style implicit differentiation, including formal error bounds for the sparsification scheme (Theorems A.1/A.2).",
+        "Very extensive empirical evaluation spanning multiple model families (Qwen3, Qwen2.5, LLaMA3, SmolLM3, Apertus), sizes from 500M to 14B, multiple advantage-estimation methods (PPO, GRPO, Dr.GRPO, GSPO, REINFORCE++), and multiple domains (math, code), which is unusually broad for this type of methods paper.",
+        "Thorough ablations on KL bound, sparsification threshold K, batch size, entropy preservation, projected/clipped token fractions, and response-length dynamics give good insight into method behavior.",
+        "Reasonable computational/memory overhead analysis showing the approach is practical and scales favorably (constant in vocabulary size, diminishing relative cost with model size).",
+        "Reproducibility materials (hyperparameter tables, public model/dataset links, pseudocode, code snippets) are provided in good detail."
+      ],
+      "weaknesses": [
+        "The core projection formulation is a fairly direct discrete-distribution adaptation of existing continuous trust-region projection work (Otto et al. 2021); the main novelty lies in the sparsification scheme and discrete KL derivation rather than a fundamentally new algorithmic idea.",
+        "No ablation isolating the contribution of the added KL regression term (Eq. 5, with alpha=1 fixed throughout) versus the trust-region projection itself, making it unclear how much of the gain comes from the extra regression signal rather than the projection mechanism.",
+        "Fairness of the clip baseline is questionable: GSPO(Clip) diverges to exactly 0.0 success rate in multiple independent runs, which is an unusually catastrophic and suspicious failure for a published, previously validated method, raising concerns about whether baseline hyperparameters (e.g., clip epsilon, learning rate) were equally well-tuned for each method.",
+        "No reported variance across seeds or confidence intervals for the (often noisy) RL training curves and final success rates, making it hard to assess the statistical significance of the reported 3-10 point / 7-18 point improvements.",
+        "Comparison to alternative principled stabilization approaches is limited (only BAPO as adaptive clipping and brief GPG experiment); no comparison to KL-penalty PPO variants or other proximal methods (e.g., Truly PPO, cited in related work) that could serve as simpler baselines addressing the same motivation.",
+        "Overhead/memory benchmarking is conducted only on small models (0.6B-4B) with artificially truncated 256-token responses, leaving some uncertainty about how well these overhead numbers generalize to the larger 14B-scale runs used in the main results.",
+        "The paper's narrative sometimes restates similar claims across sections (e.g., overhead, entropy preservation) without tying them together into a single clear mechanism explaining why TROLL outperforms clipping beyond general trust-region intuition."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Addresses a core, widely-used mechanism (PPO-style clipping) rather than peripheral hyperparameters, replacing it with a principled, theoretically grounded differentiable trust-region projection derived via Lagrangian duality and OptNet-style implicit differentiation.",
+        "Provides rigorous theoretical support: closed-form primal solution, 1-D convex dual, gradient derivation through the projection, and formal theorems bounding the KL approximation error introduced by sparsification.",
+        "The sparsification scheme is a practical and well-justified solution to the vocabulary-scale problem, with empirical and theoretical evidence that it introduces negligible bias while making the method computationally tractable (overhead shown to be small and to diminish relative to model size).",
+        "Extremely broad and thorough empirical validation: multiple model families (Qwen3, Qwen2.5, LLaMA3, SmolLM3, Apertus), sizes from 500M to 14B, multiple advantage-estimation algorithms (GRPO, PPO, Dr.GRPO, GSPO, REINFORCE++, GPG, BAPO), and multiple task domains (math reasoning, code generation) and datasets (DAPO, GSM8K, Eurus-Math, Eurus-Code).",
+        "Consistent and often substantial improvements over clipping baselines in sample efficiency, final success rate, and training stability, including notable cases (GSPO, GPG, some Llama/Apertus configurations) where the clipping baseline destabilizes/diverges but TROLL remains stable.",
+        "Useful mechanistic analyses (entropy preservation, response length adaptation, projection vs. clip fraction, batch-size robustness, hyperparameter sensitivity) that build confidence the gains stem from the proposed mechanism rather than incidental factors.",
+        "Good engineering details and reproducibility support (pseudocode, PyTorch-style code snippets, hyperparameter tables, public checkpoints, promise to release code/data).",
+        "Drop-in compatibility with existing advantage-estimation pipelines broadens applicability and lowers adoption barriers."
+      ],
+      "weaknesses": [
+        "Experiments are limited to dense models up to 14B parameters; scalability to larger or MoE architectures (acknowledged by the authors) remains unverified, which is relevant given current frontier LLMs are often much larger or MoE-based.",
+        "No explicit reporting of variance across multiple random seeds/runs; most plots show a single training trajectory (with smoothing), making it harder to assess the statistical significance of the reported gains, especially for the smaller/less dramatic improvements.",
+        "Clipping baselines appear to use fixed default hyperparameters (e.g., ϵ_ppo=0.2) without extensive tuning per model/dataset, which could make some comparisons (e.g., GSPO divergence under Clip) partly an artifact of under-tuned baselines rather than an inherent limitation of clipping.",
+        "The additional KL-regression term (Eq. 5) and its weight α are fixed at 1 without ablation beyond a brief mention of robustness; more systematic study of this component's contribution relative to the projection itself would strengthen the claimed mechanism.",
+        "The computational overhead analysis (Appendix E.4) uses an artificial setup (forcing trust-region violations with tight bounds) to measure cost, which may not perfectly reflect overhead under realistic training dynamics where violation rates vary substantially over time, as the paper's own appendix shows.",
+        "While broad, many experiments are run for limited wall-clock/training budgets; it is unclear whether Clip baselines would eventually close some gaps with significantly longer training given sufficient compute.",
+        "The paper does not compare against other principled KL-constrained alternatives beyond BAPO/GPG (e.g., TRPO-style natural gradient approximations or other trust-region adaptations proposed for LLMs), somewhat limiting the related-work empirical contrast."
       ]
     }
   }

@@ -19,6 +19,50 @@
         "Scalability of the bipartite matching cost computation (N×M forward passes) with larger N, M or longer traces is only briefly discussed and not empirically stressed-tested, leaving open how the method behaves as the number of forking tokens/targets grows, which the authors themselves list as future work.",
         "The evaluation is restricted to math/science reasoning tasks; there is no test on other domains (e.g., coding, open-ended reasoning) to establish broader applicability of global forking tokens."
       ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Interesting and reasonably novel reformulation of parallel reasoning as a set-prediction problem, adapting DETR-style bipartite matching to autoregressive SFT for assigning diverse reasoning traces to distinct 'forking token' identifiers.",
+        "The random-matching ablation (SSFT random σ) is a good control that convincingly demonstrates that naive assignment of think-tags to traces collapses reasoning diversity, while optimal matching preserves it — this is the paper's most compelling piece of evidence.",
+        "Reasonably thorough empirical analysis including Pass@1, Cons@k, Pass@k coverage curves, and token-length distributions across forking tokens, providing some insight into what is learned.",
+        "Interpretability case study with controlled teacher-trace composition (same 4 teachers for every question) that shows a degree of consistent/emergent association between forking tokens and specific teacher reasoning styles.",
+        "Practical engineering discussion (Appendix A.1/A.2) addressing the real systems challenge of variable-length multi-target batches under distributed training, which is a useful and somewhat underappreciated contribution.",
+        "Reports a relatively modest training-time overhead (6.6%) for the proposed method, suggesting practicality."
+      ],
+      "weaknesses": [
+        "Main results rely on a very small training set (1,000 questions) and a single base model family/scale (Qwen2.5-32B-Instruct) for almost all headline numbers; the only second validation (7B, OpenR1-93k) uses a different, much smaller set of ablation metrics, limiting confidence in generality across model scales and dataset sizes.",
+        "Results are not fully consistent with the claim of 'SSFT consistently outperforms SFT': on GPQA-Diamond, SSFT-32B (60.39 Pass@1) underperforms both SSFT-32B-random (62.28) and SFT-OSS-distill-32B (60.06 vs 60.39, roughly tied), undercutting the abstract's consistency claim.",
+        "The Pass@1 inference protocol requires a heuristic, post-hoc selection of which forking token to use at test time (largest connected component in the aggregated matching graph), which is somewhat ad hoc, not well justified theoretically, and could be seen as tuned to the evaluation set.",
+        "Diversity is measured almost entirely via token-length distributions and qualitative trace inspection (a single anecdotal AIME example in the appendix); there is no principled or quantitative semantic diversity metric (e.g., embedding-based clustering, n-gram overlap, or verifier-based diagnosis of distinct solution strategies) to substantiate the central claim that forking tokens trigger genuinely different reasoning modes rather than superficially different lengths/styles.",
+        "Baselines are somewhat weak/asymmetric: SFT-mixed-distill-32B uses a single shared <think> token for all 4 traces duplicated as separate datapoints, which is a strawman compared to approaches that might use trace-specific conditioning without the full combinatorial matching (e.g., simple clustering-based or length-based pre-assignment of tags could have been a stronger baseline).",
+        "Combinatorial cost of bipartite matching (O(N choose M · M!) configurations enumerated, or at least Hungarian over N×M costs with N×M forward passes) raises scalability concerns for larger N, M, or longer context, which is not deeply analyzed beyond the small-scale regime tested (N=6, M=4).",
+        "The method's dependence on costly, proprietary multi-teacher distillation (Claude Opus, Gemini, GPT-OSS-120B, DeepSeek-R1) raises reproducibility concerns for other researchers without comparable API access/budget.",
+        "Statistical rigor is limited: no variance/confidence intervals are reported for the main Table 1 results across multiple training seeds, making it hard to assess whether the reported gains (especially smaller ones, e.g., MATH-500 differences) are statistically meaningful versus noise.",
+        "The paper positions itself against very recent concurrent work (Wen et al. 2025, Zheng et al. 2025b, Yang et al. 2025b) but comparisons to these alternative parallel-reasoning training methods are largely qualitative/discursive in the related work rather than direct empirical head-to-head benchmarking."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Novel and well-motivated technical contribution: reframing parallel reasoning as a set-prediction problem and adapting DETR-style bipartite matching to autoregressive language modeling, introducing 'global forking tokens' that are a natural and elegant extension of prior detection-style set losses to sequential generation.",
+        "Strong, carefully designed ablations isolating the core claim: comparing SSFT with optimal matching vs. random matching (Figures 5-8, Table 1) convincingly shows that the Hungarian-matching component—not just multi-target fine-tuning—is responsible for preventing mode collapse and inducing specialized, consistent reasoning styles per forking token.",
+        "Comprehensive empirical evaluation across multiple benchmarks (AIME24/25, MATH500, GPQA-Diamond) and multiple metrics (Pass@1, Pass@k, Cons@6, Cons@32), with consistent gains over single-target and multi-target SFT baselines as well as a prior parallel-CoT method (Multiverse).",
+        "Interesting interpretability analysis showing that the learned forking-token-to-trace matchings are consistent and emergent across different question sets (e.g., consistent association of certain tokens with particular teacher styles in the 4-teacher case study), supporting the claim that meaningful specialization is learned rather than arbitrary.",
+        "Generalization check (RQ5) on a different, larger, less curated public dataset (OpenR1 93k) and a different base model (Qwen2.5-Math-7B) shows the method is not narrowly tied to the curated s1k set or specific distillation pipeline.",
+        "Practical engineering considerations are addressed, including an efficient implementation (vectorized cost-matrix computation, stop-gradient matching, partial-token matching cost) that adds only ~6.6% training overhead, and a queue-based batching scheme for variable numbers of traces under distributed training.",
+        "Clear and illustrative figures/qualitative examples (e.g., Appendix A.4) that make the abstract claims about diverse reasoning modes concrete and inspectable."
+      ],
+      "weaknesses": [
+        "Benchmark evaluation relies heavily on very small test sets (AIME24/25 have only 30 questions each), yet no confidence intervals, variance across seeds, or significance tests are reported despite averaging over multiple generations; given the described gains are sometimes only a few points, this raises concern about whether differences are statistically robust.",
+        "GPQA-Diamond results are mixed/weaker for SSFT (e.g., Pass@1 60.39 is below s1.1-32B's 62.12), and this is not discussed or analyzed, leaving open questions about whether the method's benefits are domain-specific (primarily math/AIME) rather than general reasoning.",
+        "The main Multi-Target SFT baseline (SFT-mixed-distill-32B) duplicates each question with a single generic <think> tag rather than using the natural <think i> tags randomly assigned per trace; while SSFT-32B (random σ) partially addresses this, a more rigorous baseline (e.g., fixed but non-optimal deterministic assignment, or tag-conditioned SFT without matching) could better isolate the specific contribution of optimal matching vs. simply having tag-conditioned multi-target training.",
+        "Scalability of the approach to larger N (number of forking tokens) and M (number of traces) is not empirically explored; the paper only tests N≤6, M≤4, and the combinatorial cost of bipartite matching (N×M forward passes) could become a practical bottleneck as these grow, which is acknowledged only as future work.",
+        "Diversity is assessed mostly through reasoning-length distributions and qualitative trace excerpts; no quantitative semantic diversity metric (e.g., embedding-based clustering, n-gram diversity) is used to more rigorously support the claim that distinct forking tokens elicit substantively different reasoning content rather than just different lengths/verbosity.",
+        "Training data construction relies on an LLM judge (Claude 3.5 Sonnet) for correctness filtering, which can introduce noisy or biased supervision that is not quantified (e.g., false positive/negative rates), potentially affecting the quality and fairness of comparisons across methods trained on this filtered pool.",
+        "The notation-heavy formalization in Section 2, while precise, could be streamlined; the core idea (NTP loss matrix + Hungarian matching) is relatively simple and the extensive mathematical exposition may reduce accessibility without adding substantial insight beyond the figures.",
+        "No comparison against reinforcement-learning-based parallel-thinking approaches (e.g., Parallel-R1, mentioned only in related work) in the main experiments, leaving it unclear how SSFT's SFT-only gains compare quantitatively to RL-based alternatives for inducing parallel reasoning diversity."
+      ]
     }
   },
   "v3": {
@@ -40,6 +84,49 @@
         "Key hyperparameters (N=6 forking tokens, M=4 targets, choice of L for matching) are not extensively justified or ablated beyond the L sweep; sensitivity to N and M is not explored.",
         "The Pass@1 forking-token selection heuristic (largest coverage / most matched edges) is somewhat ad hoc and not shown to be optimal compared to other plausible heuristics; GFPO is presented as the principled alternative but full-sequence GRPO baseline underperforming is not fully explained beyond attributing it to \"small-scale RL setting.\"",
         "Implementation complexity (per-step Hungarian matching, custom batching for variable numbers of traces, distributed training modifications) may pose a nontrivial barrier to adoption and reproducibility despite the algorithmic details provided."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Conceptually interesting adaptation of DETR-style set-based bipartite matching losses from object detection to language modeling, framing parallel reasoning as a set-prediction problem to avoid mode collapse that is observed when naively fine-tuning on multiple traces per question.",
+        "Reasonably extensive empirical scope: experiments across three model families/sizes (Qwen2.5-32B, Qwen3-4B, Llama3.1-8B), two domains (math and code), and several ablations (matching length L, random vs. optimal matching, robustness to data source/scale).",
+        "The visualizations of learned bipartite matchings (Figs. 2, 6, 8) and the qualitative example in Appendix A.10 provide some evidence that distinct global forking tokens elicit distinct reasoning strategies rather than being a trivial relabeling.",
+        "Reasonable attention to implementation/engineering details (VRAM-free stop-gradient matching, vectorized cost computation, queue-based variable-size batching) which aids potential reproducibility.",
+        "Consistent, non-trivial improvements over the constructed SFT and random-matching baselines across most reported benchmarks and scales, suggesting the matching-based objective is doing something beyond naive multi-target SFT."
+      ],
+      "weaknesses": [
+        "Evaluation is dominated by extremely small benchmarks (AIME24/25 have only 30 questions each); differences of a few points in Pass@1/Cons@k (e.g., 64.06 vs 61.77, 58.13 vs 55.10) are reported without any variance, confidence intervals, or significance testing, making it hard to trust the claimed superiority over SSFT (random σ) and other baselines.",
+        "Nearly all baselines (SFT-mixed-distill-32B-tags, SFT-OSS-distill-32B, SSFT-32B random σ) are self-constructed by the authors specifically to be compared against SSFT; there is no comparison to other existing diversity-promoting training techniques (e.g., contrastive/DPO-style diversity objectives, explicit diversity regularizers) beyond a single random-matching ablation, leaving open whether the specific optimal bipartite matching mechanism is necessary versus simpler alternatives.",
+        "The method depends on an expensive, non-trivial data construction pipeline (distilling multiple traces per question from several frontier/paid teacher models: Claude Opus, GPT-OSS-120B, Gemini, DeepSeek-R1) which undercuts the paper's claim of being a 'low-cost' regime and raises reproducibility concerns for the community.",
+        "'Diversity' of reasoning is assessed mainly via thinking-token length distributions and average accuracy per forking token, which are weak/indirect proxies; no semantic or embedding-based diversity metric is used to substantiate that forking tokens yield genuinely different solution strategies beyond the qualitative single-example appendix.",
+        "Comparisons to closely related concurrent work (Parathinker/Wen et al. 2025, Multiverse) are largely narrative/positional rather than direct controlled experimental comparisons under the same training data and base model, making it unclear whether SSFT's gains come from the proposed matching mechanism or from other confounds (different data mixtures, teacher sets, hyperparameters).",
+        "The method adds considerable complexity (Hungarian matching every step, reserved forking tokens, a separate GFPO RL stage with its own hyperparameters) for what are, on the larger and more reliable MATH-500/GPQA-D benchmarks, fairly marginal or mixed gains (e.g., SSFT sometimes underperforms baselines on MATH-500 and GPQA-D in Table 1), suggesting the benefit may be concentrated in the noisiest benchmarks (AIME).",
+        "Robustness experiments on smaller models (Qwen3-4B, Llama3.1-8B) show much smaller or inconsistent gains, and the 93k OpenR1 experiment, while positive, is only run once without repeated trials, limiting confidence that results generalize beyond the curated small-scale s1k setup.",
+        "The presentation is dense and notation-heavy (SP, Sp, σ, multiple matching configurations), which hampers clarity and makes it harder to verify the precise claims being made, especially regarding the GFPO stage, which is under-specified in the main text and pushed largely to the appendix."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Novel framing of parallel reasoning as a set-of-next-token-prediction problem with bipartite matching (DETR-inspired) adapted to autoregressive language modeling, which is a creative and well-motivated conceptual contribution.",
+        "Thorough empirical validation across multiple model families and scales (Qwen2.5-32B, Qwen3-4B, Llama3.1-8B, Qwen2.5-Math-7B), showing the method is not a one-off result tied to a single architecture.",
+        "Good set of ablations: random vs. optimal matching (Figs 4-6), impact of matching length L on training time and performance (Fig 7), and robustness to different fine-tuning datasets/data quality (Table 3).",
+        "Convincing qualitative evidence (Appendix A.10) that different global forking tokens elicit genuinely distinct reasoning styles/strategies while converging on correct answers, supporting the core diversity claim beyond aggregate metrics.",
+        "Consistent improvements over strong SFT and GRPO baselines on Pass@1, Cons@6, and Cons@32 across AIME24/25 and reasonable OOD transfer to LiveCodeBench and from code to math domains.",
+        "Practical implementation details are provided (stop-gradient on matching cost, vectorized cost matrix computation, queue-based batching for variable number of traces), aiding reproducibility of the engineering aspects.",
+        "GFPO is shown to be a lightweight and effective complement to SSFT, improving performance with only ~10 RL steps restricted to forking-token gradients."
+      ],
+      "weaknesses": [
+        "Some baseline numbers (s1.1-32B, Multiverse-32B) appear to be taken from other papers rather than reproduced under the same evaluation pipeline, raising concerns about apples-to-apples comparison (e.g., missing LCB entries for these baselines).",
+        "The matching cost is computed using only the first ~1000 tokens of each trace; while an ablation on L is provided, it remains unclear how this heuristic generalizes to traces that diverge much later or to problems requiring longer deliberation before branching.",
+        "Scalability of the bipartite-matching approach to larger N (number of forking tokens) and M (number of traces) is not deeply explored; current experiments use small N=6, M=4, and the combinatorial growth of matching configurations could become a practical bottleneck at larger scale.",
+        "Results are mixed on some benchmarks (e.g., GPQA-Diamond, MATH-500 Pass@1 where SSFT sometimes underperforms baselines), which is not fully discussed or reconciled with the paper's overall narrative of consistent improvement.",
+        "No confidence intervals, variance, or statistical significance testing is reported for Pass@1 (averaged over 32 generations) or Cons@k results, making it hard to assess whether some of the reported gains are robust versus noise.",
+        "The GFPO component is described as an 'extremely efficient variant' of prior work (Wang et al. 2025b), and its technical novelty beyond restricting policy gradients to forking tokens is relatively incremental.",
+        "Reproducibility may be limited in practice since the training data pool relies on proprietary/commercial APIs (Claude Opus 4.0/4.1, Gemini) for distillation traces, which could be costly or inaccessible for other researchers to replicate exactly.",
+        "The paper is notation-heavy and somewhat dense in Section 2, which may hinder accessibility for readers less familiar with bipartite matching/Hungarian algorithm formulations.",
+        "Comparison to the most closely related concurrent work (ParaThinker, Wen et al. 2025) is only qualitative/brief rather than a direct empirical head-to-head comparison under matched settings."
       ]
     }
   }

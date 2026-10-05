@@ -17,6 +17,43 @@
         "The method's benefit seems to partly stem from combining caching with a hand-tuned \"never cache the last k/2 steps\" heuristic, whose sensitivity and generality across models/tasks is not deeply analyzed beyond a single ablation table.",
         "The paper lacks deeper theoretical or mechanistic justification for why per-block information (as opposed to timestep-level aggregate) yields meaningfully better reuse decisions, given that the actual decision rule is itself an aggregate statistic; the qualitative distinction from TeaCache is somewhat overstated in the text."
       ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper provides a clear motivating analysis (Figure 3) showing a U-shaped pattern of block-wise feature variation across diffusion timesteps, which gives some intuition for why block-level caching could be effective.",
+        "The method is training-free and designed to be plug-and-play across multiple DiT-based video generation backbones (Open-Sora, Open-Sora-Plan, Latte).",
+        "Experimental evaluation is reasonably broad: three base models, multiple quality metrics (VBench, LPIPS, SSIM, PSNR), FLOPs/latency measurements, multi-GPU scaling results, several ablations (threshold, reuse interval, last-step cutoff), and a paired t-test for statistical significance.",
+        "Qualitative visual comparisons across many prompts and models are provided in the appendix, offering some transparency about output quality under acceleration."
+      ],
+      "weaknesses": [
+        "Novelty is limited: the core ideas (feature caching across timesteps, similarity-threshold triggered reuse, periodic recomputation to avoid drift) are directly inherited from existing works (TeaCache, PAB, Cache-Me-If-You-Can block caching), and the main contribution is essentially applying block-granularity caching with an L1-based indicator to video DiTs—an incremental combination rather than a fundamentally new idea.",
+        "Several strong and directly relevant baselines discussed in the related work (AdaCache, FasterCache, DiTFastAttn/DiTFastAttnV2, SmoothCache) are not included in the main quantitative comparisons (Table 1), making it hard to judge whether BWCache truly advances the state of the art versus only outperforming two somewhat dated baselines (PAB, TeaCache).",
+        "The method still requires manually pre-set, model/task-specific hyperparameters (similarity threshold δ, reuse interval R, last-k/2-steps rule), which undercuts the 'training-free, plug-and-play, generalizable' framing; the conclusion itself admits the threshold is fixed and that adaptive threshold selection is left to future work, suggesting the current approach is not robust across tasks without manual tuning.",
+        "The quantitative quality improvements over TeaCache/PAB on VBench are often marginal (e.g., 80.03% vs 79.16% vs 78.10% on Open-Sora), and the full VBench breakdown (Table 6, Appendix) shows BWCache actually underperforms the original model and sometimes other baselines on several sub-dimensions (e.g., Multiple Objects, Temporal Style), which is not clearly discussed or reconciled in the main text.",
+        "The overhead of computing the per-step L1 similarity indicator itself is not quantified or factored into the reported latency/speedup numbers, raising questions about the fairness/completeness of the efficiency claims.",
+        "The design choices such as averaging L1 distance uniformly across all blocks (rather than per-block adaptive thresholds, despite the paper's own emphasis on heterogeneous block behavior) and the heuristic 'reuse only in first half of remaining steps' rule are not well justified theoretically or compared against alternative design choices.",
+        "Writing and presentation have some rough edges (e.g., inconsistent capitalization/typos such as 'bloke' for 'block', dense notation) that reduce clarity, though this is a secondary concern relative to the substantive issues above."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Comprehensive empirical evaluation across three DiT-based video generation models (Open-Sora, Open-Sora-Plan, Latte) with multiple visual quality metrics (VBench, LPIPS, SSIM, PSNR) and efficiency metrics (FLOPs, latency, speedup).",
+        "Reasonably thorough ablation studies (threshold/reuse-rate trade-off, reuse interval, last-step recomputation window) and a statistical significance analysis (paired t-tests) supporting the claim that BWCache outperforms PAB and TeaCache.",
+        "Demonstrates scalability across multiple GPUs (via DSP) and across varying resolutions/video lengths, which strengthens the practical relevance of the method.",
+        "Training-free, plug-and-play design that is easy to integrate into existing DiT pipelines without fine-tuning, which is a practically appealing property.",
+        "Reasonably clear motivating analysis (U-shaped redundancy pattern across timesteps, heatmaps of block feature variation) that provides some intuition for why block-wise caching with a similarity threshold is a sensible design choice.",
+        "Extensive qualitative visual comparisons (multiple figures with diverse prompts) corroborate the quantitative gains and show that BWCache maintains better fidelity than PAB/TeaCache at comparable or lower latency."
+      ],
+      "weaknesses": [
+        "Novelty is somewhat incremental: the core mechanism (feature-difference threshold triggering cache reuse + periodic recomputation to avoid drift) closely resembles ideas already present in TeaCache (threshold-based reuse) and PAB (progressive/periodic recomputation); the main novelty is applying this at block granularity rather than timestep or attention granularity, which is a reasonably natural extension rather than a fundamentally new idea.",
+        "The comparison set is somewhat limited — several recent and relevant training-free caching baselines mentioned in related work (DeepCache, AdaCache, FasterCache, Δ-DiT variants beyond the one used, SmoothCache, DiTFastAttn) are discussed but not all included in the main quantitative comparison table; only PAB, TeaCache, Δ-DiT, and T-GATE are directly compared, and some of these appear only in Table 1 but not the ablation/ VBench full-dimension comparisons (only PAB/TeaCache/BWCache in Table 6).",
+        "The similarity threshold δ and reuse interval R are manually tuned hyperparameters set as fixed presets (noted explicitly as a limitation by the authors, deferred to future work), which raises concerns about generalization to unseen content/tasks without re-tuning, and the paper does not study robustness/sensitivity across datasets beyond a few ablations.",
+        "The theoretical/analytical justification for why block-wise (vs. timestep-wise) caching is more effective is fairly qualitative (heatmaps, aggregated L1 distance) rather than a deeper quantitative analysis of error propagation or why the threshold value chosen (0.15) generalizes across architectures with very different numbers of blocks/parameters.",
+        "Latency numbers and speedups are only reported on NVIDIA A800 GPUs with a specific software stack (FlashAttention, PyTorch); no discussion of overhead introduced by the per-step per-block similarity computation itself in the reported speedups, and no wall-clock/memory overhead analysis of the caching bookkeeping.",
+        "Writing clarity could be improved in places (e.g., Eq. 8 notation and surrounding description of periodic recomputation, and some grammar/typo issues), which may hinder reproducibility for readers trying to reimplement the exact caching schedule."
+      ]
     }
   },
   "v3": {
@@ -38,6 +75,44 @@
         "Evaluation relies solely on automated metrics (VBench, LPIPS, SSIM, PSNR) without human perceptual studies, which is a known limitation for judging generative video quality.",
         "The theoretical justification for the U-shaped redundancy pattern via frequency-domain analysis is asserted via a single citation without a rigorous derivation connecting it to the empirical observations.",
         "The code link in the abstract appears to be a broken/placeholder text ('BetterBetterBetterBetter'), raising concerns about reproducibility at submission time."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Extensive empirical evaluation across five different DiT-based video generation models (Open-Sora, Open-Sora-Plan, Latte, Wan 2.1, HunyuanVideo), with large-scale generation (1000+ videos) and multiple quality metrics (VBench, LPIPS, SSIM, PSNR), which is commendable breadth for a caching paper.",
+        "Thorough appendix material: statistical significance (paired t-tests), memory usage comparisons, ablations on reuse rate/interval/threshold, multi-GPU scaling results, and dynamic-content evaluation, which adds credibility to the main claims.",
+        "The method is training-free and plug-and-play, making it practically appealing compared to architecture-modifying approaches like Skip-DiT.",
+        "Reasonably clear motivating analysis (U-shaped block feature variation across timesteps) that is consistent across several model architectures (Figure 5)."
+      ],
+      "weaknesses": [
+        "Limited methodological novelty: the core idea is a fairly straightforward combination of existing techniques — a similarity-threshold trigger analogous to TeaCache's timestep-embedding-based indicator, applied at block granularity, combined with PAB's periodic-recomputation/progressive-caching strategy and a simple heuristic to always recompute the last k/2 steps. No fundamentally new algorithmic or theoretical insight is offered beyond moving the granularity from timestep to block.",
+        "The 'U-shaped redundancy' observation is incremental relative to prior work already cited in the paper (e.g., ProfilingDiT), and the paper's own appendix shows the pattern is architecture/training-schedule dependent (inverted-L pattern for other settings), undermining the generality of the central empirical claim.",
+        "The similarity indicator requires computing the full block features at each step to decide whether to skip, and the appendix (D.6) shows this overhead is non-trivial (10–22.5% of total inference time), partially offsetting the acceleration benefit and reducing the elegance of the method.",
+        "On Open-Sora-Plan, the proposed method is clearly outperformed by TeaCache in speedup (2.24× vs 4.41×), suggesting the approach is not uniformly superior and that its benefits are architecture/schedule dependent; the explanation given is somewhat post-hoc.",
+        "The threshold δ and reuse interval R are sensitive hyperparameters that require per-model tuning; although 'guidelines' are provided in the appendix, this undermines the claim of a simple, universally applicable plug-and-play method and suggests the reported numbers may be optimistically tuned per model.",
+        "Comparisons to some stronger/more recent caching baselines (ProfilingDiT, TaylorSeer, Skip-DiT) are only possible under reduced settings (shorter videos) due to their memory constraints, limiting the fairness and completeness of these comparisons.",
+        "The paper lacks deeper theoretical grounding for why block-wise caching with this particular indicator is principled beyond empirical tuning; the 'frequency domain' explanation for the U-shape is asserted rather than rigorously validated.",
+        "Presentation issues: dense notation (e.g., Eq. 8 formatting), some redundant/overlapping figures, and reliance on a very large appendix to support core claims suggest the main paper alone may not be fully self-contained or convincing.",
+        "No clear discussion of failure cases or settings where BWCache would degrade quality significantly beyond threshold trade-off tables, limiting understanding of robustness."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "The paper presents a thorough empirical analysis of DiT block feature dynamics across timesteps, identifying a consistent U-shaped pattern of feature variation across five diverse video diffusion models (Open-Sora, Open-Sora-Plan, Latte, Wan 2.1, HunyuanVideo), which provides a reasonable motivation for the proposed caching granularity.",
+        "The proposed method is training-free, architecture-agnostic, and easy to integrate into existing pretrained DiT-based video models without retraining, which is practically valuable given the large cost of retraining video diffusion models.",
+        "Extensive experiments are conducted: comparisons with multiple strong baselines (PAB, TeaCache, FasterCache, Skip-DiT, ProfilingDiT, TaylorSeer), ablations on threshold, reuse interval, last-step handling, block proportion for indicator computation, multi-GPU scaling, memory usage analysis, statistical significance testing (paired t-tests), and qualitative visual comparisons.",
+        "The appendix is unusually comprehensive, covering dynamic scene evaluation, feature patterns in other generative settings (image/class-conditional), latent drift discussion, and parameter-setting guidelines, which strengthens reproducibility and practical usability.",
+        "Reported results show consistent improvements over baselines in both visual quality metrics (VBench, LPIPS, SSIM, PSNR) and latency across multiple models and resolutions, with gains also holding under multi-GPU and varying video length/resolution settings."
+      ],
+      "weaknesses": [
+        "The core technical novelty is incremental: block-wise caching with a similarity-threshold indicator and periodic recomputation is a fairly straightforward combination of ideas already present in prior work (PAB's periodic broadcast, TeaCache's timestep-indicator caching, block caching in image diffusion such as Wimbauer et al.), and the paper does not strongly differentiate the conceptual contribution beyond granularity choice.",
+        "The threshold δ and reuse interval R appear to require per-model/per-resolution tuning (different recommended ranges in Table 15), undermining the 'plug-and-play' claim; the sensitivity analysis suggests practitioners need non-trivial calibration effort for new models.",
+        "The theoretical justification for the U-shaped pattern (via frequency-domain analysis) is asserted rather than rigorously derived or validated, and the explanation for Open-Sora-Plan's oscillatory early-stage behavior is somewhat speculative.",
+        "Memory overhead analysis (Appendix D.5) shows BWCache and other caching methods consume noticeably more GPU memory than the original models, which could limit applicability in memory-constrained deployment scenarios; the mitigation strategies (partial block caching) are only lightly explored.",
+        "No human preference study or perceptual user study is included; evaluation relies solely on automatic metrics (VBench, LPIPS, SSIM, PSNR) which may not fully capture perceptual quality differences, especially for subtle detail loss from caching.",
+        "The paper's claimed 2.6× speedup is only achieved on HunyuanVideo under particular settings, while on other models (e.g., Open-Sora-Plan) the method is explicitly slower than TeaCache, showing the method's benefits are not uniformly dominant."
       ]
     }
   }

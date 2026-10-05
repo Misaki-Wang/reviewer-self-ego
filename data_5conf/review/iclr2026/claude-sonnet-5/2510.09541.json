@@ -19,6 +19,48 @@
         "Additional computational cost of SPG (extra Monte Carlo samples for EUBO/mixture, block-wise masking) relative to baselines is not clearly reported in terms of wall-clock time or FLOPs, despite claims of comparable per-step training time.",
         "The qualitative examples (Appendix E.3) are not particularly compelling evidence of reasoning quality differences and are somewhat anecdotal."
       ]
+    },
+    "exp3_negative": {
+      "oa": 6,
+      "strengths": [
+        "Addresses a concrete and previously under-examined flaw in prior RL-for-dLLM methods: using the ELBO alone for both positive and negative advantage traces is only a valid bound when rewards are non-negative, which is violated by GRPO-style relative/negative advantages. The paper derives a principled fix.",
+        "The evidence upper bound (EUBO) is derived rigorously via the Rényi variational bound (Theorem 1), with a full proof in the appendix, and a tractable continuous-time estimator (Corollary 1) is provided for practical use.",
+        "Proposition 1 gives a theoretical variance-reduction justification for mixing the lower and upper bounds, and this is empirically corroborated by reduced/stabilized gradient norms (Figure 7).",
+        "Extensive empirical evaluation: four benchmarks (GSM8K, MATH500, Countdown, Sudoku), three generation lengths, multiple decoding/inference strategies (semi-AR vs full-sequence, confidence vs random unmasking), and Pass@K diversity analysis, showing fairly consistent improvements over strong recent baselines (D1, WD1, UniGRPO, LLaDA-1.5).",
+        "Reasonably thorough reproducibility: detailed hyperparameters, reward functions, dataset splits, and even training details for a reimplemented baseline (UniGRPO) are documented in the appendix.",
+        "A toy closed-form example (Appendix C.3) nicely illustrates the qualitatively different gradient behavior of ELBO vs EUBO, aiding intuition for why mixing helps."
+      ],
+      "weaknesses": [
+        "The block-wise masking strategy, a secondary/engineering contribution, appears to account for a very large fraction of the headline gains (e.g., Table 3 shows +23.9% on Countdown from switching masking strategy alone for SPG w/ EUBO), while the core theoretical sandwich objective contributes comparatively less on math benchmarks (only 1-2.6% over best baseline on GSM8K/MATH500). This raises concern that the paper's framing over-attributes empirical success to the proposed theoretical bound rather than the masking engineering choice.",
+        "The mixture coefficient ω and the EUBO sharpness β are treated as fixed, manually tuned hyperparameters (ω=0.5, per-task best β), despite Proposition 1 suggesting a theoretically optimal, per-coordinate, data-dependent ω*; this weakens the practical connection between the theory and the actual algorithm used in experiments.",
+        "Performance is highly sensitive to β on some tasks (Table 8): e.g., for SPG w/ EUBO on Sudoku, accuracy swings from 86.1 (β=1.0) down to 29.3 (β=2.0), undermining claims of robustness and suggesting the method requires careful, task-specific tuning.",
+        "The Sudoku benchmark uses a custom train/test split created by the authors (to avoid leakage), making the reported baseline numbers for D1/WD1/UniGRPO reproductions rather than the original papers' numbers; combined with the very large (27%) reported gain on this single modified benchmark, this result is harder to independently verify and could be an outlier driven by setup idiosyncrasies rather than general method quality.",
+        "All experiments use LoRA (rank 128) fine-tuning of a single base model (LLaDA-8B-Instruct); no full fine-tuning results or evaluation on other dLLM backbones (e.g., Dream) are provided, limiting evidence for generality of the claimed state-of-the-art status.",
+        "Despite motivating the method with human preference alignment (RLHF) in the introduction, all experiments are restricted to verifiable/rule-based rewards on math and logic puzzles; no preference-based or open-ended generation evaluation is included to support the broader alignment claims.",
+        "UniGRPO, one of the main baselines, is reimplemented by the authors since official code is unavailable and the original method targets multimodal models, raising some risk that the baseline is not optimally tuned, which could inflate the apparent margin of improvement.",
+        "No variance/seed analysis is reported for the main results in Table 1 (only training-reward rolling std over steps), making it hard to assess whether the reported gains are statistically robust rather than checkpoint-selection artifacts (the paper explicitly selects the best of many evaluated checkpoints per model)."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Addresses a well-motivated and previously under-examined flaw in RL for diffusion LLMs: ELBO-only surrogates are invalid when used to penalize negative-advantage samples (minimizing a lower bound does not guarantee decreasing the true log-likelihood). The paper gives a clean theoretical fix via a Rényi-based Evidence Upper Bound (EUBO), with a rigorous derivation (Theorem 1, Corollary 1) and proof.",
+        "Proposition 1 provides a non-trivial theoretical justification (variance reduction) for mixing the ELBO and EUBO objectives for negative-advantage traces, which is then empirically validated via gradient-norm and reward-dynamics plots (Figure 4, Figure 7).",
+        "Extensive and carefully designed experiments: four diverse benchmarks (GSM8K, MATH500, Countdown, Sudoku), multiple generation lengths, strong and recent baselines (D1, WD1, UniGRPO, LLaDA-1.5), with both reported and reproduced numbers shown transparently (Table 4).",
+        "Thorough ablation suite: contribution of masking strategy, β and ω sensitivity, robustness across six different inference/decoding strategies (Figure 6, Table 13), pass@K diversity analysis, and comparison against a looser unbiased upper bound to justify the biased-but-tighter choice.",
+        "Practical block-wise masking strategy is well-motivated by a genuine train/rollout distribution mismatch problem specific to dLLMs using block-wise semi-autoregressive decoding, and is shown empirically to matter a lot (e.g., +24% on Countdown for EUBO).",
+        "Good reproducibility: detailed hyperparameters, dataset/reward descriptions, and a dedicated section for avoiding train-test leakage in Sudoku (which is a thoughtful methodological detail).",
+        "Consistent and fairly large improvements over state-of-the-art RL baselines for dLLMs across all benchmarks and generation lengths, including Sudoku 3-shot, where gains are substantial (+27%)."
+      ],
+      "weaknesses": [
+        "All experiments use a single base model (LLaDA-8B-Instruct) with LoRA fine-tuning only; it is unclear whether the theoretical benefits of SPG persist under full fine-tuning or transfer to other dLLM architectures (e.g., Dream).",
+        "The main motivation in the introduction invokes alignment with human preferences, but all experiments use verifiable, rule-based rewards for math/logic tasks; no preference-based or RLHF-style evaluation is provided despite this being prominently mentioned as a motivating use case.",
+        "β and ω are tuned per-benchmark (and sometimes per-bound-type, e.g., β=2.0 for Countdown with EUBO), and the theoretical optimal ω* from Proposition 1 is per-coordinate while practice uses a single global scalar — leaving a gap between the elegant theory and the actual implementation choices, with limited discussion of how sensitive results are to this mismatch.",
+        "SPG w/ EUBO alone sometimes underperforms SPG w/ ELBO (e.g., MATH500 in Table 2), which somewhat weakens the central claim that the upper bound is uniformly beneficial for negative traces and makes the mixture's success harder to disentangle from careful hyperparameter tuning.",
+        "No variance/error bars (e.g., across multiple seeds) are reported for the main results in Table 1, making it harder to assess the statistical significance of the reported gains, some of which (e.g., 1-2.6% on GSM8K/MATH500) are relatively modest.",
+        "The block-wise masking contribution, while empirically impactful, is conceptually an adaptation of existing block-wise/semi-AR ideas (acknowledged by the authors as concurrent to other work) rather than a fundamentally new technique.",
+        "The EUBO derivation and overall method are specific to masked diffusion models with the standard linear/absorbing-state noise schedule; generality to other discrete diffusion formulations is not discussed."
+      ]
     }
   },
   "v3": {
@@ -40,6 +82,43 @@
         "The RL algorithm itself is a fairly simple policy-gradient formulation without importance sampling, clipping, or KL regularization (acknowledged by the authors as future work), which may limit stability/scalability to larger-scale or more complex RL setups compared to PPO/GRPO-style methods used elsewhere.",
         "Rewards used are all rule-based/verifiable (math, logic, code) rather than human-preference or noisier reward models, so it remains unclear how well the sandwiched bound approach generalizes to typical RLHF settings with reward models, which was one of the initial motivations mentioned in the introduction.",
         "The core theoretical idea (combining sandwiched bounds and treating positive/negative advantage differently) is a natural, somewhat incremental extension of existing likelihood-bound approaches (ELBO in prior dLLM RL work, Rényi bounds in VAE literature), and the practical implementation still relies on several heuristic combinations (mixture coefficient, confidence-based masking) rather than a fully principled unified objective."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 6,
+      "strengths": [
+        "Identifies a concrete and well-motivated flaw in prior ELBO-only RL approaches for dLLMs: the ELBO is a one-sided bound that is invalid for use with negative advantages/rewards, which is a real limitation of GRPO-style methods adapted to diffusion LMs.",
+        "Provides a rigorous theoretical derivation (via the Renyi variational bound) of a tractable Evidence Upper Bound (EUBO) for masked diffusion models, with a full proof in the appendix and a principled justification for mixing ELBO/EUBO via a variance-reduction proposition.",
+        "Extensive empirical evaluation across six benchmarks (four reasoning, two coding), with consistent and often large improvements over multiple strong, properly re-implemented baselines (D1, WD1, UniGRPO, LLaDA-1.5).",
+        "Very thorough ablation studies: masking strategy, beta/omega hyperparameters, inference-time decoding robustness, Pass@K diversity, full fine-tuning vs LoRA, prompt masking, number of MC samples, computational cost comparisons, and validation-based checkpoint selection to mitigate test-set overfitting concerns.",
+        "Reasonably transparent about limitations of their own method (e.g., biasedness of the EUBO Monte Carlo estimate, looser unbiased alternative performing worse), and provides toy examples and gradient-norm analyses that support the qualitative claims made about bound behavior."
+      ],
+      "weaknesses": [
+        "The core theoretical selling point (a valid sandwiched/true bound on the RL objective) is weakened in practice: the EUBO Monte Carlo estimator is admittedly biased, and the best-performing variant (SPG w/ Mixture) combines ELBO and EUBO in a way that no longer satisfies the clean JSPG <= Jgroup guarantee motivated in Section 3.1, so the practical method departs from the stated theoretical justification.",
+        "Several hyperparameters (beta, omega, block size) require per-task tuning (e.g., different beta for Sudoku vs other tasks), reducing the plug-and-play appeal of the method and raising concerns about sensitivity and generalization to unseen tasks.",
+        "The Sudoku benchmark uses a custom train/test split and 3-shot setting that differs from the original D1/WD1 protocols, making the very large reported gains (27%+) on this benchmark harder to directly compare to prior published numbers and more dependent on this paper's own benchmark construction.",
+        "UniGRPO is re-implemented by the authors since no official code is available, and the vision-language-oriented original method was adapted to this new setting; this introduces some risk of implementation bias favoring the proposed method, despite the authors' good-faith effort.",
+        "All main experiments rely on LoRA fine-tuning (rank 128) of a single base model (LLaDA-8B-Instruct); while a full fine-tuning ablation is provided for two benchmarks, broader validation across model scales/architectures is missing, limiting evidence of general applicability.",
+        "RL stabilization techniques standard in modern policy-gradient methods (clipping, importance sampling, KL regularization) are explicitly not incorporated, which the authors acknowledge as an open question for dLLMs; this makes the final algorithm a fairly simple policy-gradient variant whose robustness in other settings (e.g., larger-scale RLHF with human preference reward models) is untested."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Addresses a well-motivated and important problem: the intractable log-likelihood in masked diffusion LLMs for RL, and clearly identifies a concrete flaw (ELBO-only surrogate can't handle negative rewards) in prior work.",
+        "Theoretically grounded contribution: derives a valid evidence upper bound (EUBO) via Rényi variational bounds with a rigorous proof, and proposes a sandwiched objective with a provable lower bound on the true RL objective.",
+        "Proposition 1 provides a principled theoretical justification (variance reduction) for the proposed mixture of ELBO and EUBO, going beyond a purely heuristic combination, and is further supported empirically via gradient norm analysis (Figure 7) and a toy example (Appendix E.3).",
+        "Extensive and convincing empirical evaluation: consistent, often large improvements across 4 reasoning benchmarks and 2 coding benchmarks, multiple sequence lengths, and strong/recent baselines (D1, WD1, UniGRPO, LLaDA-1.5), with reproduced numbers matching reported ones.",
+        "Thorough ablations covering masking strategy, β and ω hyperparameters, inference-strategy robustness, Pass@K diversity, full fine-tuning vs LoRA, number of Monte Carlo samples, prompt masking, and comparison with a reimplemented trajectory-level baseline (LLaDOU/StepWise), showing component-level contributions.",
+        "Practical considerations are well addressed, e.g., computational cost comparisons showing SPG is not meaningfully more expensive than baselines, and care taken to avoid train-test leakage in the new Sudoku split.",
+        "Good engineering/reproducibility details: comprehensive appendix on hyperparameters, reward functions, datasets, and qualitative examples that illustrate improved reasoning quality."
+      ],
+      "weaknesses": [
+        "The method retains a biased Monte Carlo estimator for EUBO (log outside expectation due to Jensen's inequality); while empirically justified over the unbiased looser bound, this introduces a theoretical gap between the claimed 'sandwiched' bound guarantee and what's actually optimized in practice.",
+        "The core RL algorithm is a simplified policy gradient without importance sampling, clipping, or KL regularization (acknowledged by the authors in Appendix F), which may limit stability/applicability in more off-policy or larger-scale settings; this is left as future work rather than resolved.",
+        "All experiments use LoRA fine-tuning on a single base model (LLaDA-8B-Instruct); although a full fine-tuning ablation is provided for two benchmarks, broader validation across different model scales/architectures would strengthen generality claims.",
+        "Some hyperparameters (β, ω) are tuned per-benchmark based on best test accuracy rather than a principled selection procedure, which could inflate reported gains and raises minor concerns about overfitting to test performance despite the added validation-based checkpoint selection experiment.",
+        "Reward functions and benchmarks largely mirror prior work (D1, WD1) for fair comparison, which is reasonable but means novelty is concentrated solely in the training objective/masking strategy rather than broader evaluation diversity (e.g., no human preference alignment experiments, only verifiable-reward reasoning/coding tasks)."
       ]
     }
   }

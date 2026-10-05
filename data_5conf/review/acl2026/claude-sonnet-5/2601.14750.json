@@ -35,6 +35,23 @@
         "The formalization in Sec. 3.3.1 is imprecise (the index t is overloaded to denote both an autoregressive reasoning step and an index into the K vision-embedding targets), obscuring exactly how variable-length latent generation is aligned against a fixed-length rendered-image embedding sequence.",
         "The work is not compared against any of the closely related \"text-as-image\" context-compression methods discussed in Related Work (e.g., Glyph, PixelWorld), despite the paper's core mechanism (rendering text to images and encoding via a vision encoder) being conceptually very close to that line of work; such a comparison (or clear differentiation with numbers) is needed to support the novelty claims."
       ]
+    },
+    "exp3_positive": {
+      "oa": 2.5,
+      "strengths": [
+        "The paper proposes a reasonably novel idea: rendering CoT text into images and using a frozen pre-trained VLM vision encoder as a distillation target for a lightweight projection head, avoiding costly new pre-training and enabling a 'plug-and-play' upgrade path for existing VLMs.",
+        "Experiments span three different VLM backbones (Qwen3-VL-2B/4B, LLaVa-1.6-7B) and five datasets (in-domain GSM8k-Aug plus OOD GSM-Hard/SVAMP/MultiArith/MATH), with results reported over five seeds with 95% CIs, which is good statistical practice for this subfield.",
+        "Reasonably thorough ablations are provided: two-stage training necessity, rendering configuration (image height/font/padding, single-line vs square layout), projection-head activation/hidden-dim choices, and decoding strategy (fixed budget vs dynamic termination), which help isolate design choices.",
+        "Token compression and inference-time speedups are clearly quantified and are non-trivial (e.g., 8.55s→1.84s on GSM-Hard), which is a concrete practical benefit if the accuracy trade-off is acceptable for a given application.",
+        "The paper is generally clearly written with a coherent narrative and includes a candid limitations section covering language/domain scope, manual token-budget tuning, and training overhead."
+      ],
+      "weaknesses": [
+        "The central motivating claim of 'analyzability via visualization'/'making the latent rationale explicit and traceable' is never actually demonstrated: at inference no image is rendered or decoded from the latent embeddings, and the qualitative analysis in Sec. 4.4/Appendix D only inspects abstract embedding statistics (heatmaps, cosine-similarity matrices, norms) rather than showing that the latent trajectory can be decoded back into human-readable reasoning content. This undercuts the paper's main selling point relative to prior opaque latent-CoT methods.",
+        "The abstract/intro claim of 'maintaining competitive performance' against explicit CoT is not well supported by the actual numbers: on harder tasks the accuracy gap is very large (e.g., GSM-Hard 14.1% vs 53.4%, MATH 33.2% vs 55.8%, GSM8k-Aug roughly half of SFT-CoT), which is a substantial degradation, not near-parity performance; only on the easiest dataset (MultiArith) is the gap small. The framing in the abstract/conclusion appears to overstate the strength of the empirical results.",
+        "The comparison against LLM-based latent-reasoning baselines (Table 2) uses a text-only Qwen3-4B-Instruct backbone for baselines versus a Qwen3-VL-4B-Instruct backbone for RoT; since the VLM backbone brings additional vision-related parameters/pretraining, the reported advantage over CoLaR/Coconut/CODI is confounded and cannot be cleanly attributed to the proposed rendering/alignment mechanism rather than to using a different (possibly stronger) base model.",
+        "The dynamic termination strategy (the more 'natural' inference mode using the learned end-of-thought token) fails dramatically (e.g., 3.87% vs the fixed-budget optimum of 37.8% on GSM8k-Aug), and the fixed-budget alternative requires manual, dataset-specific tuning of the latent length, weakening the practicality and 'plug-and-play' framing of the method.",
+        "Evaluation is restricted to English-language grade-school/competition math and simple logical benchmarks; no results are given for commonsense/other reasoning domains, and no comparison of the added training-time cost (rendering + vision encoding + two-stage training) is quantified against baselines, leaving the overall cost-benefit picture incomplete."
+      ]
     }
   },
   "v3": {
@@ -56,6 +73,44 @@
         "Dynamic termination (the more practically desirable, adaptive stopping mechanism) is shown to fail badly (e.g., 3.87% vs. 37.8% Pass@1 on GSM8k-Aug), and the paper falls back on manually-tuned fixed token budgets that differ per dataset (32 vs. 64), which weakens the claimed 'plug-and-play' and general applicability of the approach and is acknowledged only as a limitation to be addressed 'in future work.'",
         "The 'plug-and-play, no additional pre-training' claim is somewhat overstated given that the method still requires substantial two-stage fine-tuning on large task-specific data (e.g., 385k training samples for GSM8k-Aug) plus online rendering and vision-encoder forward passes, incurring ~1.5x the training cost of standard SFT-CoT.",
         "The code availability link/footnote appears broken or missing ('Our code is available a'), raising minor reproducibility concerns despite otherwise detailed hyperparameter reporting."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2.5,
+      "strengths": [
+        "The paper tackles a real efficiency problem (verbose CoT) and proposes a conceptually interesting idea of using rendered-text visual embeddings as a supervision/anchor signal for latent reasoning, which is a reasonably novel combination of 'text-as-image' and 'latent CoT' lines of work.",
+        "Experimental coverage is broad: three VLM backbones (Qwen3-VL-2B/4B, LLaVA-1.6-7B), five math datasets plus GPQA/ProsQA, multiple LLM- and VLM-based latent reasoning baselines, and results reported with 5 seeds and 95% CIs, which supports reproducibility.",
+        "Reasonably thorough ablations (projection head activation/dimension, rendering font size/height/padding, decoding strategy, two-stage training components, training cost, unified-backbone comparison) that help isolate some design choices.",
+        "Appendix provides substantial implementation detail (LoRA config, optimizer, special-token initialization, hardware) which aids reproducibility.",
+        "Honest reporting of failure cases and the dynamic-termination instability, and transparent discussion of limitations."
+      ],
+      "weaknesses": [
+        "The central motivating claim – that RoT makes the latent rationale 'explicit and traceable' and solves the 'black box' problem – is not actually substantiated: at inference time no images are rendered or decoded; the model still produces continuous latent vectors whose only connection to interpretability is a training-time regression target. No experiment decodes/inverts latents back to readable text or images, nor is there any human or quantitative evaluation of interpretability, so this key selling point is asserted but not demonstrated.",
+        "The claimed 'competitive efficiency-accuracy Pareto' is overstated given the data: on Qwen3-VL-4B, accuracy drops from 79.3% (explicit CoT) to 55.4% (RoT), a ~24-point loss, and on MATH from 55.8% to 33.2% (loss of over 20 points); for LLaVA-7B, RoT (12.4%) is barely above the no-CoT baseline (11.2%) despite the added architecture and training complexity, suggesting the method provides little real reasoning benefit on that backbone.",
+        "A crucial ablation is missing: there is no baseline that distills/aligns the latent reasoning states to compressed *textual* embeddings (rather than rendered-image embeddings) with the same training recipe. Without this, it is not established that the 'visual' aspect itself (rather than simply the existence of an external dense supervisory target distilled via a frozen encoder) is responsible for the reported gains over Coconut/CODI/CoLaR.",
+        "The 'Pass@1/#L' efficiency metric used to declare superiority is non-standard and somewhat arbitrary (a ratio that can favor near-zero-token/low-accuracy regimes); more standard accuracy-vs-compute trade-off curves or fixed-accuracy-budget comparisons would be more convincing evidence.",
+        "Method is reported to be quite sensitive to rendering hyperparameters (font size, image height, padding) and requires per-dataset tuning of the latent token budget (32 vs 64), which raises concerns about robustness/generalizability and practical deployability as claimed ('plug-and-play').",
+        "Training cost is actually ~1.5x higher than SFT-CoT (56.1h vs 36.9h in Table 7), which is in some tension with the abstract's framing of avoiding 'additional overhead,' even though the paper does clarify this refers to pretraining rather than fine-tuning.",
+        "OOD generalization claims rest on a narrow set of simple arithmetic variants (GSM-Hard, SVAMP, MultiArith) and two additional small-scale datasets (GPQA, ProsQA) with near-ceiling or saturated results (e.g., ProsQA at 100%), limiting the strength of generalization claims to 'logical reasoning' more broadly.",
+        "Some presentation issues: Figure 1 and parts of Section 3 are dense and the two-stage pipeline notation (e.g., reuse of index t in Eq. 1) is occasionally unclear, and the paper does not report standard baselines' statistical variance in Table 2/3 in a way that is easy to compare against RoT's reported CIs."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3,
+      "strengths": [
+        "The core idea—using a frozen VLM vision encoder as a supervision target to structure a continuous latent-reasoning space—is a reasonably novel angle within the implicit CoT literature, avoiding the need to learn a latent codebook from scratch.",
+        "Extensive experimentation: three different base models (Qwen3-VL-2B/4B, LLaVa-1.6-7B), multiple in-domain and OOD math datasets, an additional MATH benchmark, a unified-backbone comparison against Coconut/CODI/CoLaR to control for VLM pretraining effects, and extension to non-math tasks (GPQA, ProsQA).",
+        "Thorough ablations on architecture and rendering hyperparameters (projection head activation/width, image height/font/padding, decoding strategy, fixed vs dynamic termination, two-stage training necessity), which support the specific design choices made.",
+        "Reports confidence intervals over multiple runs and includes wall-clock inference-time comparisons, adding some rigor to the efficiency claims.",
+        "Honest limitations section acknowledging the instability of dynamic termination, the need for task-specific token-budget tuning, and added training overhead."
+      ],
+      "weaknesses": [
+        "The headline claim of 'analyzability via visualization' / making the rationale 'explicit and traceable' is not actually substantiated: at inference the model never produces or decodes an interpretable image or text from the latent tokens—only heatmaps/statistics of the continuous embeddings are shown post hoc. This is a central contribution of the abstract/intro that the experiments do not directly support.",
+        "The reported accuracy gap relative to explicit CoT is large in several settings (e.g., MATH: 33.2% vs 55.8% on Qwen3-VL-4B; average GSM-family: 55.4% vs 79.3%), which is difficult to reconcile with the paper's framing of 'competitive accuracy' and a favorable 'efficiency-accuracy Pareto'—the trade-off is real but arguably oversold in the writing.",
+        "A key ablation is missing: whether the improvement stems specifically from the visual/rendering pathway versus simply having any frozen, structured external embedding space as an alignment target (e.g., a frozen text encoder or even a fixed random but structured target). Without this control, the causal attribution to 'vision embeddings as semantic anchors' is not fully isolated.",
+        "Dynamic termination via the special token fails dramatically (e.g., 3.87% vs 37.8% Pass@1 on GSM8k-Aug), and the manuscript both frames this as a general property of continuous latent spaces (citing LVR) and relies exclusively on a manually tuned fixed-budget alternative; this undermines the practicality/plug-and-play claim and is a nontrivial robustness gap not fully resolved.",
+        "In-domain performance is sometimes not better than existing latent-reasoning baselines (e.g., CoLaR-2 outperforms RoT on GSM8k-Aug, 40.0 vs 37.8), with RoT's advantage concentrated in OOD generalization and average scores; the narrative sometimes reads as though RoT is uniformly superior.",
+        "Training cost, added architectural complexity (requiring a full VLM with vision encoder rather than pure LLM), and the need for per-dataset token-budget calibration somewhat offset the plug-and-play efficiency narrative, though these are honestly disclosed in the limitations."
       ]
     }
   }

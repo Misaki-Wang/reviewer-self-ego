@@ -1,4 +1,63 @@
 {
+  "v1": {
+    "exp1_quality": {
+      "oa": 4,
+      "strengths": [
+        "Identifies a concrete and important inefficiency in DLLM block-diffusion decoding: full-block computation is wasted on non-decodable tokens (~90% redundancy), a problem not clearly articulated in prior DLLM acceleration work.",
+        "The core empirical insight — that the Layer1-Layer0 attention 'importance delta' strongly predicts token decodability — is novel, well-motivated, and validated across multiple models (SDAR, LLaDA2.0-mini, LLaDA-8B-Instruct) and both Block-Diffusion and Full-Diffusion paradigms (Appendix B), suggesting the phenomenon may be a general property of MDLMs rather than a narrow artifact.",
+        "Comprehensive ablations: Top/Random/Bottom-K selection comparison (Table 3) convincingly validates that the importance delta is causally useful and not spurious; sensitivity analysis across confidence thresholds and α (Table 4); ablation isolating the contribution of the Intra-Block KV Cache vs. the full token-eviction mechanism (Table 6, Figure 8).",
+        "Strong systems engineering effort: integration into a production-grade engine (LMDeploy) with custom Triton kernels, detailed scheduler design, and careful handling of correctness constraints (AR-Context Preservation, Placeholder Integrity, Neighbor-Aware Stability Criterion), with overhead analysis showing negligible (~1%) added latency.",
+        "Solid empirical results — up to 3.52× throughput over LMDeploy and up to 9.04× over Fast-dLLM v2 — while matching or improving generation quality across five benchmarks, with results reported at multiple batch sizes and block sizes to demonstrate the compute-bound scaling behavior claimed in the motivation."
+      ],
+      "weaknesses": [
+        "The theoretical safety analysis (Appendix D) relies on a simplistic i.i.d. zero-mean/shifted-mean Gaussian model for importance deltas; while the authors acknowledge this is a conservative approximation, the 'proof' is more illustrative than a rigorous guarantee and doesn't account for cross-token/cross-step dependencies inherent in the Markov decoding process.",
+        "All experiments are run on a single NVIDIA A100 GPU; there is no validation on other hardware (e.g., H100, multi-GPU/tensor-parallel settings) that are common in production deployment, limiting confidence in generalization of the reported speedups.",
+        "Only two base model families (SDAR-8B, LLaDA2.0-mini) are used for the main throughput/quality experiments; while the correlation study extends to LLaDA-8B-Instruct, the full FOCUS system (dynamic budgeting + eviction + KV cache) is not demonstrated on this or other architectures (e.g., Dream), leaving some uncertainty about robustness across the broader DLLM landscape.",
+        "The default hyperparameters (α = 1.5, Conf = 0.8) appear to be selected post-hoc based on average performance across the same benchmarks used for evaluation (Section 5.2), raising a mild concern about hyperparameter selection bias/overfitting to the reported benchmark suite.",
+        "Only throughput (tokens/s) is reported; latency (e.g., time-to-first-token or per-request completion time), which matters for interactive/low-batch deployment scenarios, is not analyzed, despite the paper's claims of production relevance.",
+        "The Impact Statement is boilerplate and the paper offers minimal explicit discussion of limitations (e.g., the acknowledged batch=64 regression for LLaDA2.0 on MATH is mentioned only in passing without deeper investigation into when/why FOCUS underperforms)."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Identifies and clearly quantifies a real and important inefficiency in DLLM/block-diffusion inference: only ~10% of block tokens are decoded per step while the full block is computed, and ties this to a compute-bound (rather than memory-bound) regime distinct from ARLLMs.",
+        "The core empirical observation -- that the attention-score delta between layers 0 and 1 correlates strongly with eventual token decodability -- is demonstrated across multiple datasets and across both block-diffusion (LLaDA2.0, SDAR) and full-diffusion (LLaDA-8B) paradigms (Figures 3-4, 12-14), lending some generality to the claim.",
+        "Substantial systems engineering effort: custom Triton kernels for ragged importance computation, sparse selection/compaction, ragged PagedAttention, hybrid CUDA-graph bucketization, and an asynchronous scheduler, integrated into a production-grade engine (LMDeploy) rather than a toy implementation.",
+        "Reasonably thorough ablations: Top/Random/Bottom-K selection validating the importance signal (Table 3), sensitivity to confidence threshold and expansion factor α (Table 4), and an ablation isolating the contribution of the Neighbor-Aware Delayed Cache versus the full eviction mechanism (Table 6, Figure 8).",
+        "Reported throughput gains are large and the paper shows the method scales where the baseline plateaus (up to 3.52x vs LMDeploy, 9.04x vs Fast-dLLM v2), which if reproducible would be a meaningful practical contribution."
+      ],
+      "weaknesses": [
+        "The theoretical safety analysis in Appendix D rests on strong, largely unverified assumptions (non-decodable deltas are exactly zero-mean Gaussian with shared variance, independent of block/model/task) and is presented with more rigor-sounding machinery (Chernoff bound, Q-function) than the assumptions warrant; it functions more as a plausibility sketch than a guarantee, and this is not clearly flagged as a limitation.",
+        "Generation-quality results are reported from only 2 runs with no variance/confidence intervals, so many of the \"FOCUS matches or improves over baseline\" claims (e.g., Table 4, many comparisons within ~1 point) cannot be distinguished from run-to-run noise; some comparisons even show FOCUS underperforming the baseline (e.g., Math500 63.80 vs 64.70 at Conf=0.9, α=1.8) that are not discussed as such.",
+        "All experiments are run on a single A100-80GB GPU, which is in tension with the paper's framing around \"production-grade\" and \"production-scale\" deployment; no multi-GPU, longer-context, or larger-model (e.g., the cited 100B LLaDA2.0) throughput results are shown despite the paper discussing this scale as motivation.",
+        "The central mechanism introduces multiple heuristics/hyperparameters beyond the single stated hyperparameter α (two-layer delta choice, standard-deviation threshold for N_sigma, AR-context preservation and placeholder-integrity rules), each justified empirically/informally rather than derived; it is unclear how sensitive results are to these design choices or how they would transfer to models with different pretraining recipes than CPT-based SDAR/LLaDA2.0.",
+        "The correlation between early-layer attention and later decoding confidence, while nicely documented for DLLMs, is a fairly expected consequence of how attention and output confidence both depend on the same evolving hidden states; the paper's framing as a surprising DLLM-specific discovery may overstate the conceptual novelty relative to known attention-sparsity/heavy-hitter phenomena already exploited in ARLLM KV-cache literature that the paper itself cites.",
+        "Comparisons are limited to LMDeploy and Fast-dLLM v2; other cited parallel-decoding acceleration methods (dKV-Cache, SlowFast, Learning-to-Parallel, dParallel) are not empirically compared for throughput or quality, making it hard to situate FOCUS's gains against the broader competitive landscape.",
+        "The Impact Statement is boilerplate and there is no dedicated Limitations section; given the many engineering caveats documented only in the appendix (e.g., disabling multi-loop optimization, CUDA graphs disabled for throughput benchmarks because overhead counteracted gains), a clearer main-text discussion of when/why FOCUS might underperform would strengthen honest self-assessment."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Clear and well-motivated identification of a key inefficiency in DLLM inference: block-wise diffusion decoding wastes ~90% of FLOPs on tokens that end up non-decodable at each step, backed by concrete empirical statistics (Figure 2, Table 2) across multiple benchmarks and block sizes.",
+        "The core empirical discovery—that the attention importance delta between Layer 0 and Layer 1 strongly predicts token decodability—is novel, intuitively explained (Common Mode Rejection of positional/static priors), and validated extensively, including cross-paradigm generalization to both Block-Diffusion (LLaDA2.0) and Full-Diffusion (LLaDA-8B-Instruct) models in the appendix.",
+        "Accompanying theoretical analysis (Appendix D) using a signal-detection framework gives a principled, if simplified, justification for the dynamic thresholding mechanism and its low expected error rate.",
+        "Strong systems contribution: a production-grade implementation built atop LMDeploy with custom Triton kernels (ragged attention, sparse KV fill, fused state compaction), detailed scheduler design, and CUDA graph handling for dynamic shapes—this level of engineering detail supports reproducibility and practical relevance.",
+        "Comprehensive empirical validation: ablations on selection strategy (Top/Random/Bottom-K), sensitivity to α and confidence threshold, KV-cache delayed-caching ablation, and comparisons against two realistic baselines (LMDeploy, Fast-dLLM v2), showing consistent and sizable throughput gains (up to 3.52× vs LMDeploy, 9.04× vs Fast-dLLM v2) while maintaining or improving task accuracy.",
+        "The method is training-free, requiring only one hyperparameter (α), making it easy to adopt without retraining or fine-tuning existing DLLMs."
+      ],
+      "weaknesses": [
+        "Main quality/throughput experiments are limited to only two base models (SDAR-8B-Chat and LLaDA2.0-mini); the additional LLaDA-8B-Instruct results in the appendix are restricted to the correlation analysis, not full throughput/quality benchmarking, somewhat limiting the generality claims of the main results.",
+        "All experiments are run on a single A100-80GB GPU; no results on more modern hardware (e.g., H100) or multi-GPU/tensor-parallel settings are provided, leaving open questions about scalability in more realistic production deployments.",
+        "The theoretical error bound (Appendix D) relies on a simplified zero-mean Gaussian assumption for non-decodable token deltas; while the authors acknowledge this is a conservative approximation, it is more a plausibility argument than a rigorous guarantee, and the signal-to-noise ratio γ is never estimated empirically.",
+        "The paper states α is the \"only hyperparameter,\" but the confidence threshold, block size B, and the implicit σ-based criterion for Nσ are also tunable design choices that materially affect behavior (as shown in Table 4), so the framing somewhat understates the method's configuration surface.",
+        "No explicit Limitations section; potential failure modes (e.g., behavior under very small blocks, extreme batch sizes, or adversarial/out-of-distribution prompts) are not discussed in the main text.",
+        "Default configuration (α=1.5, Conf=0.8) is chosen based on average score across the same benchmark suite used for evaluation, raising a mild concern about selection bias/overfitting to these benchmarks.",
+        "Results are averaged over only two runs with no reported variance/confidence intervals, making it hard to assess the statistical robustness of the reported accuracy differences, some of which (e.g., Table 4) are fairly small in magnitude."
+      ]
+    }
+  },
   "v2": {
     "exp1_quality": {
       "oa": 5,
@@ -18,25 +77,43 @@
         "The hyperparameter α introduces a non-trivial tuning dimension whose optimal value differs by task/threshold and can produce non-monotonic throughput/quality tradeoffs (Fig. 15, Fig. 16); while a default is chosen, the sensitivity analysis suggests some deployment-specific tuning may still be required despite claims of robustness.",
         "No explicit statement about code/artifact release is provided despite the system's substantial engineering complexity (4,000+ LOC, custom Triton kernels, CUDA graph handling), which raises reproducibility concerns for a systems-heavy contribution."
       ]
-    }
-  },
-  "v1": {
-    "exp1_quality": {
-      "oa": 4,
+    },
+    "exp3_negative": {
+      "oa": 3,
       "strengths": [
-        "Identifies a concrete and important inefficiency in DLLM block-diffusion decoding: full-block computation is wasted on non-decodable tokens (~90% redundancy), a problem not clearly articulated in prior DLLM acceleration work.",
-        "The core empirical insight — that the Layer1-Layer0 attention 'importance delta' strongly predicts token decodability — is novel, well-motivated, and validated across multiple models (SDAR, LLaDA2.0-mini, LLaDA-8B-Instruct) and both Block-Diffusion and Full-Diffusion paradigms (Appendix B), suggesting the phenomenon may be a general property of MDLMs rather than a narrow artifact.",
-        "Comprehensive ablations: Top/Random/Bottom-K selection comparison (Table 3) convincingly validates that the importance delta is causally useful and not spurious; sensitivity analysis across confidence thresholds and α (Table 4); ablation isolating the contribution of the Intra-Block KV Cache vs. the full token-eviction mechanism (Table 6, Figure 8).",
-        "Strong systems engineering effort: integration into a production-grade engine (LMDeploy) with custom Triton kernels, detailed scheduler design, and careful handling of correctness constraints (AR-Context Preservation, Placeholder Integrity, Neighbor-Aware Stability Criterion), with overhead analysis showing negligible (~1%) added latency.",
-        "Solid empirical results — up to 3.52× throughput over LMDeploy and up to 9.04× over Fast-dLLM v2 — while matching or improving generation quality across five benchmarks, with results reported at multiple batch sizes and block sizes to demonstrate the compute-bound scaling behavior claimed in the motivation."
+        "Clear motivating analysis: the paper convincingly documents that only ~10% of tokens are decoded per block-diffusion step (Figure 2, replicated across SDAR, LLaDA2.0, LLaDA-8B-Instruct and multiple block sizes in Appendix A), establishing that DLLM block-wise computation is heavily redundant and compute-bound.",
+        "The central empirical finding—that the attention-score delta between Layer 0 and Layer 1 is a strong, architecture-agnostic predictor of token decodability—is interesting and is validated across both Block-Diffusion (LLaDA2.0, SDAR) and Full-Diffusion (LLaDA-8B-Instruct) paradigms (Figures 3, 4, 12, 13), lending some generality to the core mechanism.",
+        "Substantial systems engineering effort: custom Triton kernels for ragged importance computation, sparse gathering/compaction, ragged PagedAttention, and a hybrid CUDA-graph strategy, integrated into a production engine (LMDeploy) rather than a toy prototype.",
+        "Broad empirical evaluation: results span two different DLLM architectures (dense SDAR, MoE LLaDA2.0), two GPU generations (A100, H100), multiple datasets, a quality-throughput Pareto frontier (Fig. 16), batch-size-1 regime disclosure (Table 7), sensitivity to the only hyperparameter α (Fig. 15), and comparisons against both the official and an engine-matched Fast-dLLM v2 implementation, which is a fairly thorough robustness/ablation effort for a systems paper.",
+        "Reasonable ablations isolating the contribution of each component (Top/Random/Bottom token selection in Table 3, Neighbor-Aware delayed cache vs. naive delayed cache in Table 6, and a throughput breakdown in Figure 8), which support that the importance-delta signal and the stability criterion are both doing meaningful work rather than the gains coming from an uncontrolled confound."
       ],
       "weaknesses": [
-        "The theoretical safety analysis (Appendix D) relies on a simplistic i.i.d. zero-mean/shifted-mean Gaussian model for importance deltas; while the authors acknowledge this is a conservative approximation, the 'proof' is more illustrative than a rigorous guarantee and doesn't account for cross-token/cross-step dependencies inherent in the Markov decoding process.",
-        "All experiments are run on a single NVIDIA A100 GPU; there is no validation on other hardware (e.g., H100, multi-GPU/tensor-parallel settings) that are common in production deployment, limiting confidence in generalization of the reported speedups.",
-        "Only two base model families (SDAR-8B, LLaDA2.0-mini) are used for the main throughput/quality experiments; while the correlation study extends to LLaDA-8B-Instruct, the full FOCUS system (dynamic budgeting + eviction + KV cache) is not demonstrated on this or other architectures (e.g., Dream), leaving some uncertainty about robustness across the broader DLLM landscape.",
-        "The default hyperparameters (α = 1.5, Conf = 0.8) appear to be selected post-hoc based on average performance across the same benchmarks used for evaluation (Section 5.2), raising a mild concern about hyperparameter selection bias/overfitting to the reported benchmark suite.",
-        "Only throughput (tokens/s) is reported; latency (e.g., time-to-first-token or per-request completion time), which matters for interactive/low-batch deployment scenarios, is not analyzed, despite the paper's claims of production relevance.",
-        "The Impact Statement is boilerplate and the paper offers minimal explicit discussion of limitations (e.g., the acknowledged batch=64 regression for LLaDA2.0 on MATH is mentioned only in passing without deeper investigation into when/why FOCUS underperforms)."
+        "The theoretical analysis in Appendix D is largely decorative: it assumes a stylized zero-mean/shifted-mean Gaussian model for ΔI with an unverified \"sufficiently strong\" SNR regime (γ>1), and the paper itself admits the derivation is a \"first-order approximation\"/\"conservative estimation,\" yet the main text and conclusion lean on this analysis (\"theoretically validates\") to claim eviction safety, which overstates what is actually a plausibility argument rather than a rigorous guarantee tied to measurable quantities.",
+        "Statistical rigor is thin: generation-quality and throughput numbers are reported as averages over only two runs with no variance/error bars anywhere in the main tables (3, 4, 5, 6) or throughput figures, making it hard to assess whether the reported gains (e.g., FOCUS occasionally exceeding the uncompressed baseline's quality) are robust or within noise.",
+        "The explanation for why FOCUS sometimes improves generation quality over the baseline (\"proactive safety filter\" purging high-confidence-but-incorrect tokens) is explicitly acknowledged by the authors as \"indirect evidence rather than a strict causal analysis,\" yet this speculative mechanism is used repeatedly (Sections 5.2, 5.4) to justify headline claims of quality preservation/improvement.",
+        "At batch size 1 — arguably the most latency-sensitive and common serving scenario for many DLLM deployments — FOCUS underperforms the LMDeploy baseline on most benchmarks (Table 7), undercutting the generality of the claimed system-level contribution; the proposed mitigation (falling back to vanilla decoding at small batches) is only mentioned post hoc and not evaluated as an integrated adaptive policy.",
+        "The method's design is tightly coupled to specific architectural assumptions (block-diffusion with AR-pretrained CPT backbones, confidence-threshold decoding, exact KV caching) and is only throughput-benchmarked on two models (SDAR-8B dense, LLaDA2.0-mini MoE with just 1.4B active params); no results are shown at the larger 100B scale that is used to motivate the work (LLaDA2.0 full model, SDAR-30B+, etc.), nor in multi-GPU/tensor-parallel serving settings that are standard for production deployment claims.",
+        "Several design choices (confidence threshold defaults, α=1.5, MaxPool kernel size=3, two-layer delta rather than deeper deltas) appear to be selected post hoc from sweeps shown only for SDAR/GSM8K-type settings (Table 4, Figure 16) without a held-out validation protocol, raising some risk of overfitting the reported configuration to the benchmarks used for tuning.",
+        "The Impact Statement is entirely boilerplate and does not engage with any limitations around energy/compute concentration, deployment risk of approximate/early-exit decoding on safety-relevant outputs, or the quality-robustness tradeoffs demonstrated by the paper's own Figure 16 near-vertical degradation region."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Identifies a concrete, well-motivated inefficiency in block-diffusion DLLM decoding (only ~10% of block tokens decoded per step despite full-block compute) with clear quantitative evidence across multiple benchmarks and models (Fig. 2, Appendix A).",
+        "Novel and empirically well-supported insight that the early-layer (Layer1-Layer0) attention importance delta is a robust, low-cost predictor of token decodability; this correlation is validated across both Block-Diffusion (LLaDA2.0, SDAR) and Full-Diffusion (LLaDA-8B-Instruct) paradigms (Figs. 3, 4, 12, 13), suggesting the signal is architecture-agnostic.",
+        "Strong systems engineering contribution: a full production-grade implementation built on LMDeploy with custom Triton kernels (ragged attention, sparse cache filling, fused state compaction) and careful scheduler/state management (Appendix E), going well beyond a toy prototype.",
+        "Comprehensive empirical validation: ablations on selection strategy (Top/Random/Bottom-K), sensitivity to confidence threshold and expansion factor α, KV-cache delayed-caching ablation, quality-throughput frontier analysis, batch-size-1 regime, and cross-GPU-architecture validation (A100 and H100).",
+        "Substantial and consistent speedups (up to 3.52× over LMDeploy, up to 8.35×/1.91× over Fast-dLLM v2 under different comparison protocols) while maintaining or even improving generation quality across math, code, and instruction-following benchmarks.",
+        "Honest discussion of remaining gaps and limitations (batch-size-1 overhead, MoE architecture diminishing relative gains, scheduler/multi-loop incompatibilities, future work directions)."
+      ],
+      "weaknesses": [
+        "The theoretical safety analysis (Appendix D) rests on a simplified, somewhat ad hoc Gaussian model for importance-delta distributions under decodable/non-decodable hypotheses; while illustrative, it is not a rigorous guarantee and the paper itself notes the zero-mean assumption is a conservative approximation rather than a verified model.",
+        "The claimed causal interpretation that importance-based eviction acts as a 'proactive noise filter' improving quality over the baseline is only indirectly supported; the authors themselves acknowledge this as correlational rather than causal evidence.",
+        "Main throughput experiments are conducted on a limited set of two DLLM backbones (SDAR, LLaDA2.0-mini); broader architectural diversity (e.g., larger-scale LLaDA2.0, other CPT-based models) would strengthen generality claims.",
+        "Several interacting hyperparameters (confidence threshold, α, block size, MaxPool1D kernel size fixed at k=3) are introduced or tuned without a systematic justification for some choices (e.g., kernel size is asserted rather than ablated).",
+        "No explicit statement regarding code/artifact release, which raises reproducibility concerns given the complexity of the 4,000+ LOC custom kernel/scheduler implementation.",
+        "Related training-free DLLM caching/eviction systems mentioned in Section 6 (Sparse-dLLM, d2Cache) are discussed qualitatively but not empirically benchmarked against FOCUS, leaving open how much of the gain is attributable to the novel eviction idea versus engineering effort."
       ]
     }
   }

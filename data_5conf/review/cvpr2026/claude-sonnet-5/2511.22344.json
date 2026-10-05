@@ -20,6 +20,43 @@
         "No comparison to simpler ensemble baselines (e.g., naive concatenation/union of strategy selections without iterative filtering, or simple voting schemes) to isolate how much of the gain comes from the iterative/progressive aspect versus merely combining multiple strategies.",
         "Evaluation is restricted to frozen backbones with only a linear/classification head fine-tuned; it is unclear how findings would transfer to full model fine-tuning, which is common in many downstream AL applications."
       ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "The empirical evaluation is broad: 6 datasets with varying class counts (10-200), 3 foundation model backbones (DINOv2, DINOv3, CLIP), 8 individual AL baselines, and 3 recent ensemble AL methods, with 10 trials per configuration.",
+        "The paper provides thorough ablations isolating the effects of R, alpha, J, and demonstrates progressive filtering as a standalone preprocessing step that benefits a range of downstream strategies, including an external strategy (Coreset) not in the ensemble, in the audio use case.",
+        "The theoretical section attempts to formally characterize value preservation, uninformative-instance removal, and monotonic value concentration, going beyond a purely empirical contribution.",
+        "The method is simple, training-free, and modular, requiring no learned switching policy or dataset-specific tuning of which strategies to trust, in contrast to prior ensemble AL approaches such as TAILOR, TCM, or SelectAL.",
+        "Reporting of pairwise win-rate matrices across datasets/backbones/trials is a reasonable way to summarize consistency of improvement beyond simple average AULC numbers."
+      ],
+      "weaknesses": [
+        "Computational cost is a major, under-addressed concern: REFINE runs all M ensemble strategies for R rounds x J batches per round each AL cycle (and then a coverage-based selection on top), yet the paper provides no wall-clock/runtime comparison against single-strategy baselines, only an asymptotic complexity remark that assumes idealized parallelization across M processes, which is unlikely to be available in many practical annotation pipelines. Since the entire motivation of AL is reducing total cost, omitting a cost-accuracy tradeoff analysis (e.g., including expensive strategies like BAIT in the ensemble, multiplied by R*J) is a significant gap.",
+        "The theoretical results, while formally stated, are of limited insight: Theorem 1 is essentially a restatement of the union bound applied to independent Bernoulli-like selection events; Theorem 3 assumes that every strategy in the ensemble is monotonically aligned with the (unknown) true value function, which is a strong and essentially unverifiable assumption that makes the 'guarantee' close to circular (if the ensemble only contains strategies that correlate with true value, naturally the pool's average value cannot decrease). This weakens the claimed theoretical contribution.",
+        "Key hyperparameters (R=5, J=10, alpha=0.4) are tuned via grid search solely on CIFAR-10 and then frozen for all other datasets/backbones; no sensitivity analysis is shown for substantially different domains (e.g., higher-resolution, larger pools, or the audio use case), raising concern about overfitting to CIFAR-10-specific statistics even though the ablation table (Table 2) suggests some robustness on Snacks.",
+        "Standard errors/statistical significance are explicitly omitted from the main results ('for visibility'), making it difficult to judge whether the reported improvements, especially the narrower margins relative to strong baselines like UHerding/BAIT, are statistically meaningful rather than noise, particularly given the acknowledged failure case on Dopanim+CLIP.",
+        "The method's core mechanism (union across strategies, then iterative refinement, then coverage-based diverse final selection) is conceptually a natural combination of existing ideas (ensembling, iterative pool pruning, generalized coverage from MaxHerding/UHerding) rather than a fundamentally new concept; the incremental novelty is reasonable but not strongly differentiated from, e.g., iteratively applying AlfaMix/DropQuery-style filtering with more strategies.",
+        "All experiments use moderately sized pools (≤100k unlabeled instances); scalability of progressive filtering to the web-scale pools often targeted by real-world AL applications is not empirically demonstrated, despite claims about memory efficiency benefits.",
+        "The paper acknowledges performance degradation when most ensemble strategies underperform (Dopanim/CLIP) but offers no empirical mitigation or deeper analysis (e.g., weighting strategies), leaving an important limitation unresolved rather than just noted."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "The core idea (progressive filtering via iterative union of strategy-selected batches, followed by coverage-based selection) is simple, intuitive, and clearly motivated by the well-documented observation that no single AL strategy dominates across cycles/datasets/models.",
+        "The paper provides a genuine theoretical contribution: three theorems (value preservation, exponential decay of uninformative instances, monotonic non-decrease of expected pool value) with full proofs and illustrative numerical examples in the appendix, giving principled justification for the design choices (union over intersection, iterative rounds, sampling ratio).",
+        "Extensive empirical evaluation: 6 classification datasets spanning 10-200 classes, 3 foundation model backbones (DINOv2, DINOv3, CLIP), 8 individual AL baselines, and 3 recent ensemble AL methods (SelectAL, TCM, TAILOR), with pairwise win-rate matrices and both absolute/relative learning curves reported comprehensively in the appendix.",
+        "Thoughtful ablations isolate the contribution of progressive filtering as a standalone preprocessing step (independent of the final coverage-based selection), showing it improves virtually every downstream strategy, including \"rescuing\" failing strategies like BAIT and Coreset (shown in the ESC50 audio use case) that otherwise underperform random sampling.",
+        "Good generalizability demonstration beyond image classification via the ESC50 audio spectrogram use case, including a scenario where the externally applied strategy (Coreset) is not even part of the filtering ensemble, supporting the claim that filtering is workflow-agnostic.",
+        "Honest discussion of limitations (sensitivity to highly correlated or poorly performing strategies in the ensemble, and a concrete failure case on Dopanim/CLIP) rather than overselling the method."
+      ],
+      "weaknesses": [
+        "Computational cost is a real concern: progressive filtering requires running all M strategies for J batches across R rounds every AL cycle (default M·J·R = up to several dozen strategy invocations per cycle). While the paper argues this can be parallelized and cites algorithmic complexity, no actual wall-clock time or resource comparison against baselines (especially against cheaper ensemble methods like TAILOR/SelectAL) is reported, making it hard to assess the practical cost-benefit tradeoff.",
+        "Hyperparameters (α=0.4, R=5, J=10) are tuned solely on CIFAR-10 via grid search and then frozen for all other datasets/backbones; the sensitivity analysis in the ablations (Table 2) only reports two datasets (CIFAR-10, Snacks), leaving open how robust these choices are for very different domains (e.g., very large K, imbalanced classes, or the audio use case where different hyperparameters might have been more optimal).",
+        "Practical guidance on ensemble composition is somewhat inconsistent: the method section advocates including \"all individual batch AL strategies available\" without selection, whereas the conclusion's limitations section recommends a \"small set of well-established, complementary\" strategies to avoid degradation from poorly-designed or correlated strategies — leaving practitioners without concrete guidance on how to actually choose S in new settings.",
+        "Theorem 3's key assumption (that every strategy in the ensemble is monotonically more likely to select higher-value instances) is a fairly strong and untestable condition in practice; some baseline strategies shown in the experiments themselves underperform random sampling (e.g., BAIT, Coreset), which appears to directly contradict this assumption, somewhat undermining the applicability of the theorem to the actual ensembles used.",
+        "Standard errors/statistical significance are omitted from the main figures for visual clarity, and the primary reported metric (pairwise win-rate matrices) aggregates across many settings, which could mask cases of narrow or non-significant wins, particularly for closely competing top strategies (e.g., REFINE vs. BAIT/UHerding at 80-85%)."
+      ]
     }
   },
   "v2": {
@@ -41,6 +78,26 @@
         "Evaluation is restricted to image (and one audio) classification; no evidence is provided for other computer vision tasks such as detection or segmentation, so the generality of the approach beyond classification remains untested.",
         "The method builds on well-established components (existing AL strategies + coverage-based selection via UHerding), and the union-based iterative filtering, while a nice combination, is a relatively incremental algorithmic contribution whose novelty rests mainly on the specific iterative multi-round union procedure rather than a fundamentally new selection paradigm.",
         "The choice of UHerding as the fixed second-stage selector is only lightly justified/ablated (a brief FIR/ER comparison in the appendix), leaving open how sensitive final results are to this design choice versus other coverage-based alternatives (e.g., TypiClust, MaxHerding) mentioned as viable substitutes."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Extensive empirical evaluation across 6 datasets, 3 foundation models, 8 individual AL strategies, and 4 recent ensemble baselines, with pairwise win-rate comparisons and statistical significance testing (Friedman + Wilcoxon with Holm correction).",
+        "Thorough ablation studies covering the effect of filtering rounds R, sampling ratio α, batches per strategy J, batch size, and weak ensemble composition, which helps clarify the method's sensitivity to hyperparameters.",
+        "Additional robustness checks beyond the main benchmark: class-imbalanced/long-tailed settings, out-of-distribution datasets (MedMNIST), fine-tuning experiments, and an audio spectrogram use case, broadening the evidence for generalizability.",
+        "Clear practical discussion of computational/memory cost and a concrete parallelization strategy with measured runtimes compared against a competing ensemble method (AutoAL).",
+        "Honest acknowledgment of limitations (e.g., performance degradation when most ensemble members are weak, sensitivity to strategy-set composition) rather than overselling the method.",
+        "The two-stage design (progressive filtering + coverage-based selection) is intuitively motivated and the union-over-intersection design choice is well justified with practical reasoning."
+      ],
+      "weaknesses": [
+        "The theoretical analysis (Theorems 1-3) relies on an unobservable, undefined notion of 'true value' V(x) and an assumption that all strategies are monotonically aligned with it; this assumption is essentially unfalsifiable and the resulting guarantees largely restate algorithmic design choices in probabilistic notation rather than providing non-trivial insight into when/why the method should work.",
+        "Substantial computational overhead: progressive filtering requires M strategies × J batches × R rounds per AL cycle (e.g., up to several minutes of sequential acquisition time), and the claimed mitigation (parallelization across 8-80 processes) assumes computing resources not realistic for many practitioners, undermining practicality claims.",
+        "Core hyperparameters (R=5, J=10, α=0.4) are tuned once on CIFAR-10 and then fixed for all other datasets/models; while ablations show 'almost any value works,' Table 4 shows filtering aggressiveness varies substantially with batch size/dataset, raising concern about whether fixed hyperparameters truly generalize or were simply convenient for this benchmark suite.",
+        "The method's novelty is somewhat incremental/engineering-oriented: it combines an ensemble of existing AL strategies via iterative union filtering and applies an existing coverage-based strategy (UHerding) largely unmodified for final selection; the conceptual contribution over prior ensemble AL work (TAILOR, AutoAL, TCM) is a specific filtering heuristic rather than a fundamentally new principle.",
+        "Strategy-set construction is ad hoc ('use all available strategies'), and the paper's own limitations section admits that correlated or poorly-designed strategies in the ensemble can degrade performance, yet no principled mechanism (e.g., weighting, pruning, or diversity-aware selection) is proposed to address this beyond a qualitative recommendation.",
+        "Aggregate pairwise win-rate matrices (Fig. 2, 4) can mask per-dataset failure cases (e.g., Dopanim with CLIP, acknowledged in text) and do not report the magnitude of losses when REFINE underperforms, limiting insight into worst-case behavior.",
+        "The paper notes reproducibility difficulties with a baseline (SelectAL), which raises a minor concern about the fairness/consistency of baseline reproduction more broadly, though this is partially mitigated by citing prior work's similar findings."
       ]
     },
     "exp3_positive": {

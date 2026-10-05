@@ -20,6 +20,45 @@
         "The paper does not clearly report or compare GQR's latency against the tuned score-aggregation baselines (only against base models and rerankers), leaving open whether GQR's added optimization overhead is justified relative to the closest-performing simpler baselines.",
         "Only one reranker (MonoQwen2-VL) is used for comparison, and the reranker comparison uses GQR with a fixed configuration (K=10, Linq-Embed) rather than exploring whether other GQR configurations would fare better/worse, limiting the robustness of the reranker comparison conclusions."
       ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Addresses a practically relevant problem: the latency/memory costs of large multi-vector ColPali-style retrievers versus lightweight dense text retrievers, and proposes a concrete mechanism (GQR) to combine them.",
+        "The method is architecture-agnostic (applicable to single- and multi-vector retrievers) and is evaluated across a reasonably broad set of 9 vision-text retriever pairs on ViDoRe 1 and 2.",
+        "Extensive ablations are provided (extra search stage, candidate pool policy, loss function choice, primary/complementary role swapping), lending some robustness to the empirical claims.",
+        "Latency and memory analysis is detailed and the Pareto-frontier framing (Figures 2, 3, 5) is a clear and useful way to communicate the efficiency-quality tradeoff.",
+        "Comparison against both classical hybrid fusion baselines (RRF, score aggregation, tuned variants) and a cross-encoder reranker baseline situates the method well relative to existing alternatives."
+      ],
+      "weaknesses": [
+        "The reported gains over the primary retriever are modest overall (average +3.9% NDCG@5 on ViDoRe 2) and essentially negligible on ViDoRe 1 (near 0%, with the paper attributing this to benchmark saturation rather than demonstrating a genuine advantage).",
+        "The margin of GQR over the best tuned score-aggregation baseline is small (3.9% vs 3.4%/2.6% average gain in Table 2), raising the question of whether the added complexity of iterative gradient-based query optimization is justified relative to a much simpler tuned baseline.",
+        "GQR requires per-dataset hyperparameter tuning (learning rate, T) on an in-domain development set, which the authors acknowledge means the method is not zero-shot; this limits practical applicability and makes comparisons to the no-tuning baselines partly unfair.",
+        "Per-subset results in Table 1 show inconsistent behavior, including several negative deltas (e.g., Colnomic + Linq-Embed on ESG Full, Colnomic + Qwen3 on Biomed Lectures, Llama-Nemo + Jina(text) on Economics), suggesting the method's benefit is not robust across all settings.",
+        "The core technical idea (test-time query refinement via pseudo-relevance-feedback-style optimization) is a fairly direct extension of prior work (Sung et al. 2023; Gangi Reddy et al. 2025) replacing a cross-encoder with a bi-encoder signal and applying it cross-modally; the novelty is somewhat incremental given existing literature on hybrid fusion and test-time query optimization.",
+        "The ablation on loss function choice (Table 16) shows that KL(consensus), JS, and KL(target) perform similarly, which weakens the specific motivation given in the main text for the consensus-KL formulation and suggests the design choice is not particularly principled or impactful.",
+        "Only one multimodal reranker (MonoQwen2-VL) is used for the reranker comparison, limiting the generality of the latency/quality comparison against reranking pipelines.",
+        "No variance/confidence intervals or statistical significance tests are reported despite the fine-grained deltas being discussed (e.g., +0.3, -0.1), making it hard to assess whether reported differences are meaningful.",
+        "The method still requires maintaining and querying two full retrieval indexes (primary and complementary), which adds engineering/deployment complexity not fully reflected in the latency-only comparisons."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Introduces a novel test-time hybrid retrieval method (GQR) that operates at a finer granularity (gradient-based query refinement guided by a complementary retriever's score distribution) than standard rank- or score-level fusion, and is architecture-agnostic across single- and multi-vector retrievers.",
+        "Extensive empirical evaluation: 9 primary/complementary retriever pairs across two established visual document retrieval benchmarks (ViDoRe 1 and 2), 8 hybrid baselines (including tuned variants), and a reranker comparison, giving a fairly comprehensive picture of the method's behavior.",
+        "Clear and convincing efficiency story: GQR-augmented lightweight vision-centric retrievers approach or surpass a much larger SOTA model (Llama-Nemo-ColEmbed-3B) while being up to ~14x faster and ~54x more memory-efficient, and the paper explicitly frames results in terms of Pareto frontiers (latency, memory, quality).",
+        "Thorough set of ablations addressing natural design questions: effect of an extra index search pass, candidate pool construction policy, choice of divergence/loss, and swapping which retriever plays the primary vs. complementary role, which strengthens confidence in the robustness of the design choices.",
+        "Comparison against a cross-encoder-style multimodal reranker (MonoQwen2-VL) shows GQR sits on/near the Pareto front relative to a well-established alternative paradigm for test-time refinement, strengthening the practical relevance of the contribution."
+      ],
+      "weaknesses": [
+        "Absolute performance gains from GQR are fairly modest (roughly 1-4 NDCG@5 points on ViDoRe 2) and on ViDoRe 1 the method is essentially on par with the base model (attributed to benchmark saturation), raising questions about how much headroom and generalizable benefit the method provides beyond already-strong vision-centric retrievers.",
+        "The best tuned score-aggregation baseline (Score Aggregation Min-Max - Tuned) is already close to GQR in aggregate gain (3.4% vs 3.9% on ViDoRe 2), so the marginal benefit of the more complex, iterative, gradient-based GQR over a much simpler tuned scalar-weight fusion is relatively small, while GQR introduces non-trivial additional latency and implementation complexity.",
+        "GQR requires an in-domain development set to tune per-dataset hyperparameters (learning rate, number of iterations T), which the authors acknowledge as a limitation; the cost of this tuning procedure (e.g., number of dev queries needed, sensitivity to dev set size/domain shift) is not quantified, which limits understanding of real-world applicability compared to zero-shot hybrid baselines.",
+        "No statistical significance testing or variance estimates (e.g., across random seeds or bootstrap confidence intervals) are reported for the NDCG/Recall gains, making it hard to assess whether the reported improvements (especially the smaller per-subset deltas) are robust versus noise.",
+        "Evaluation is confined entirely to visual document retrieval (ViDoRe 1/2); no experiments on standard text-only IR benchmarks (e.g., BEIR) or other multimodal retrieval tasks are included to establish whether GQR generalizes beyond this specific benchmark family and model pool.",
+        "The theoretical motivation for the specific KL(consensus‖primary) objective is somewhat ad hoc; while the paper shows alternative divergences perform similarly (Table 16), this somewhat undercuts the claimed importance of the specific objective formulation as a core contribution, and no formal analysis is given for why/when GQR should converge to a beneficial refinement rather than drifting away from relevant documents."
+      ]
     }
   },
   "v2": {
@@ -42,6 +81,45 @@
         "The ablation on loss functions (KL vs JS vs KL-target) shows they perform similarly, which somewhat undercuts the specific motivation given for the chosen KL(pavg||p1) objective.",
         "Latency/memory numbers are reported from a single hardware setup (one A100 GPU), and the sequential latency breakdown likely overstates real-world costs if retrievers were parallelized, complicating direct comparison to the highlighted 14x/54x figures.",
         "Limited discussion of failure cases beyond aggregate subset deltas; some subsets and configurations show performance decreases (e.g., Colnomic + Qwen3 on Biomed Lectures) without deeper analysis of when/why GQR can hurt performance."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Addresses a practical and timely problem: the scalability/latency/memory costs of state-of-the-art ColPali-based multimodal retrievers, and whether cheap text retrievers can help close this gap via hybrid retrieval.",
+        "The proposed GQR method is a reasonably novel combination of test-time pseudo-relevance-feedback query optimization (previously used with cross-encoders) with cross-modal bi-encoder guidance, and is architecture-agnostic (works for single- and multi-vector queries).",
+        "Very extensive experimental protocol: 9 vision-text model pairs, three ViDoRe benchmarks (including a genuine zero-shot transfer setting on ViDoRe 3), multiple hybrid baselines (RRF, score aggregation, tuned variants), reranker comparisons, and latency/memory/storage Pareto analysis.",
+        "Thorough ablations in the appendix (loss function choice, candidate pool policy, extra search stage, primary/complementary role swap, hyperparameter sweeps, per-query rank dynamics) that go beyond the typical level of diligence.",
+        "Good practical framing around latency/memory Pareto fronts, with concrete numbers (e.g., 14x faster / 54x less memory to match a much larger model), which is relevant for deployment-oriented readers."
+      ],
+      "weaknesses": [
+        "The core novelty is incremental: GQR largely transplants existing test-time query refinement/pseudo-relevance-feedback ideas (Sung et al. 2023; Gangi Reddy et al. 2025) from cross-encoder guidance to bi-encoder guidance across modalities; the KL-divergence design is not strongly motivated or differentiated, and the paper's own ablation (Table 18) shows alternative loss formulations (JS, KL with fixed target) perform similarly, undercutting the claimed significance of the specific 'consensus distribution' design choice.",
+        "Absolute performance gains over the strongest tuned baseline (Score Aggregation Min-Max, Tuned) are small and sometimes within noise (e.g., average gain 3.9% vs 3.4% in Table 3; several per-pair deltas are +0.3 or smaller, occasionally negative), while GQR requires tuning two hyperparameters (learning rate and steps) against one for the tuned score-fusion baselines, making the comparison less favorable than it first appears.",
+        "Hyperparameters for GQR and baselines are tuned per-subset using an in-domain 10% dev split (Appendix D), which is a fairly generous setup that may not reflect realistic deployment and raises concerns about overfitting to each benchmark subset; the zero-shot ViDoRe 3 results rely on a single configuration chosen based on ViDoRe 2, which is a weaker but still somewhat benchmark-informed form of generalization.",
+        "The primary/complementary role-swap ablation (Table 19) shows that using the weaker text retriever as the primary encoder and the stronger vision encoder as the complementary guide often yields even larger absolute gains than the paper's default configuration (e.g., +8.82 vs +2.8 for Colnomic/Jina-text pair). This result is not adequately analyzed and arguably undermines the paper's central narrative that GQR is specifically valuable for refining a 'strong vision-centric primary retriever' with a 'weak complementary text retriever' — the mechanism driving gains seems less well understood than claimed.",
+        "No statistical significance testing or variance/error bars are reported despite many reported deltas being small, making it hard to assess whether some reported improvements (e.g., +0.3, +0.7 NDCG@5) are meaningful.",
+        "The efficiency comparisons rely on a sequential implementation of GQR's two-retriever + optimization pipeline, while the paper notes (but does not demonstrate) that parallelization could reduce latency further — meaning some reported efficiency numbers are not fully representative of an optimized deployment, and the main efficiency comparison is against the heaviest model (Llama-Nemo) rather than against the already-competitive tuned score-fusion baselines on a latency basis.",
+        "Model coverage is restricted to three vision and three text encoders (9 pairs), all from a similar family of recent proprietary-ish large embedding models; generalization to smaller-scale encoders, other retrieval tasks beyond visual document retrieval, or different training regimes is not explored."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Introduces a conceptually clean method (GQR) that sits between score-level and representation-level hybrid retrieval fusion, addressing a real gap: existing hybrid methods (RRF, score fusion) cannot exploit within-model query-document interaction structure.",
+        "Very extensive empirical evaluation: 3 benchmarks (ViDoRe 1/2/3), 9 retriever pairs, 8 hybrid baselines (including tuned variants), latency/memory/storage Pareto analyses, reranker comparisons, and multiple ablations (loss function choice, candidate pool policy, extra search stage, primary/complementary role swap).",
+        "Strong efficiency story with concrete, well-measured numbers: GQR pushes ColPali-style retrievers onto the latency and memory Pareto frontier, matching or beating much larger models (e.g., Llama-NemoRetriever-ColEmbed-3B) at a fraction of the cost (up to ~14x faster, ~54x less memory).",
+        "Good reproducibility support: detailed algorithm box, hyperparameter tables for all experiments, implementation details for indexing/ingestion, and stated intent to release code.",
+        "Zero-shot transfer experiment (tuning on ViDoRe 2, evaluating hyperparameters zero-shot on ViDoRe 3) strengthens practical credibility and shows the method is not merely overfit to a tuning set.",
+        "Method is architecture-agnostic (works with single- and multi-vector embeddings) and the per-query qualitative analysis (Figure 8) gives some insight into why GQR differs from naive score averaging."
+      ],
+      "weaknesses": [
+        "Absolute performance gains are often modest (roughly +1 to +4 NDCG@5 points on average), and some configurations show GQR hurting performance on individual subsets (e.g., Colnomic-7B + Qwen3 on Biomed Lectures: -2.4; ESG Full/Economics occasionally negative), which somewhat tempers the 'consistent gains' narrative.",
+        "No statistical significance testing or confidence intervals are reported for the (often small) performance deltas, making it hard to assess whether gains are robust versus noise, especially on smaller subsets.",
+        "The method requires per-subset/per-pair hyperparameter tuning (learning rate, T) via a held-out dev split for the main tuned results; while a zero-shot configuration is also tested, its gains are consistently smaller, raising questions about practical plug-and-play usability.",
+        "Theoretical motivation for why minimizing KL(p_avg || p1) in representation space should outperform explicit score fusion is largely intuitive/qualitative rather than formally justified or theoretically analyzed.",
+        "Efficiency comparisons focus on latency/memory of the primary+complementary retriever combination, but maintaining two separate indices and encoders adds systems complexity (engineering/maintenance overhead) that is not fully discussed beyond raw latency numbers.",
+        "The evaluation is confined to visual document retrieval benchmarks; no experiments test whether GQR generalizes to other retrieval settings (e.g., text-only hybrid retrieval with sparse+dense, or other multimodal tasks), limiting claims of general applicability despite the architecture-agnostic framing.",
+        "ViDoRe 1 results are noted to be saturated (scores often >90), reducing the informativeness of that benchmark's comparisons, yet it is still included as a primary result table."
       ]
     }
   }

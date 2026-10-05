@@ -20,6 +20,42 @@
         "The convex relaxation is proven optimal only for the *relaxed* (isotonic) objective; no formal bound is given on the gap between the relaxed solution and the true NP-hard discrete optimum, so 'near-optimal precision' claims rest on empirical validation (Figure 2a, single example) rather than theoretical guarantees.",
         "Method requires per-metric re-profiling (metric-universality claim), and although this is a reasonable design choice, the paper does not discuss how allocation profiles transfer (or fail to transfer) across metrics not explicitly profiled, limiting practical flexibility claims."
       ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a genuinely underexplored problem: principled cross-head/cross-layer KV budget allocation based on long-horizon utility rather than instantaneous heuristic magnitudes, and gives a clean theoretical decomposition of eviction loss into an 'oracle loss' term and an 'optimality gap' term (Eq. 7) that nicely motivates the method.",
+        "The convex-hull relaxation via PAVA plus greedy marginal-gain allocation is an elegant, efficient solution to an otherwise combinatorial allocation problem, and the paper empirically validates that the relaxed greedy solution matches an optimal DP solver (Fig. 2a).",
+        "The offline profiling idea (precomputing a lookup table from global compression ratio to per-head local ratios) is practically appealing, enabling near zero-overhead online deployment, which is demonstrated with memory/TTFT measurements comparable to the base heuristic (Fig. 5).",
+        "Extensive empirical evaluation across two heuristic metrics (SnapKV, KeyDiff, and EA in the appendix), three model scales (Mistral-7B, Llama-3.1-8B, Qwen2.5-32B), and two benchmark suites (LongBench, RULER at multiple context lengths), with consistently large improvements over Uniform/PyramidKV/AdaKV baselines, plus informative ablations (w/ vs w/o optimality gap) and diagnostic visualizations (layer-wise and per-head loss heatmaps) that support the core hypothesis."
+      ],
+      "weaknesses": [
+        "The paper's related-work section explicitly discusses several directly competing cross-head allocation methods (CAKE, HeadKV, KVzip, CriticalKV) but none of them are included as empirical baselines; only Uniform, PyramidKV, and AdaKV are compared, which weakens the claim of state-of-the-art superiority for a paper whose main contribution is budget allocation.",
+        "The central practical mechanism — offline calibration using a single ~4,000-token AI-generated synthetic narrative with 30 generated questions — is underspecified (no detail on the generation model/prompts, no sensitivity analysis to the choice of calibration corpus, no variance across different calibration sets) despite being the crux of the 'task-agnostic' and 'zero-overhead' deployment claims; this undermines reproducibility and the generality argument, especially since downstream evaluations go up to 128K tokens while calibration is done at ~4K.",
+        "The NP-hardness and non-convexity claims (Section 4.2, Appendix A.1) are asserted somewhat informally rather than rigorously proved (no formal hardness reduction is given, just an argument about lack of monotonicity).",
+        "Some reported gains are extremely large (e.g., RULER multikey-3 moving from ~1% to ~67%, or average RULER-16K accuracy nearly doubling over AdaKV), which is somewhat suspicious and would benefit from more scrutiny of baseline tuning/fairness, additional seeds, or variance reporting; all results appear to be single-run without error bars.",
+        "No code or data release is mentioned, and the paper lacks an explicit limitations discussion (e.g., calibration cost, risk of distribution mismatch between calibration domain and deployment domain, sensitivity to Kmax or calibration query diversity), which is a notable omission for a method whose core assumption (profile stability across tasks/lengths) is empirically only lightly verified on 6 LongBench task types for a single model/metric (Fig. 2b)."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Identifies a genuinely underexplored problem: cross-head KV budget allocation, distinguishing it from the heavily-studied intra-head scoring literature, and frames it with a clean theoretical decomposition (eviction loss = oracle loss + optimality gap) that is formally justified (Appendix A.1-A.2, including a non-convexity proof for the raw loss and an optimality proof for the greedy solver under the PAVA-relaxed objective).",
+        "The convex-hull relaxation (isotonic regression via PAVA) plus greedy marginal-gain allocation is an elegant, efficient near-exact solution to an otherwise NP-hard combinatorial problem, and the paper empirically validates it matches an optimal DP solver (Fig. 2a).",
+        "Extensive empirical evaluation: three model scales (Mistral-7B, Llama-3.1-8B, Qwen2.5-32B), two/three scoring metrics (SnapKV, KeyDiff, and EA in the appendix), two benchmark suites (LongBench, RULER-4K/16K), and multiple compression ratios (50%, 80%), with large, consistent gains over Uniform/PyramidKV/AdaKV baselines, especially dramatic on RULER's harder multikey/multivalue tasks.",
+        "Useful diagnostic visualizations (layer-wise loss curves, per-head loss heatmaps) that intuitively explain why PyramidKV and AdaKV fail (deep-layer loss spikes and localized head-level 'loss bursts', respectively) and how LU-KV suppresses both.",
+        "Clean ablation isolating the contribution of the optimality-gap correction term (Table 3), showing a non-trivial ~3.5 point average drop when it is removed, which supports the core claim that calibrated marginal utility (not raw proxy confidence) should drive allocation.",
+        "Efficiency results (Fig. 5) show the offline-profile lookup table imposes negligible runtime/memory overhead relative to a plain SnapKV baseline, which is important for practical deployment claims.",
+        "Very thorough supplementary material (per-task score tables, per-head allocation profile plots across all 32 layers, hyperparameter details for baselines) that aids reproducibility."
+      ],
+      "weaknesses": [
+        "The offline profiling calibration set is small and narrow (a single ~4,000-word AI-generated narrative with 30 queries); while Fig. 2b shows consistency across a handful of LongBench tasks, this is a fairly limited test of true task-agnostic generalization (e.g., no multilingual, no strongly out-of-domain code/structured data calibration check), and the paper does not report sensitivity of results to the choice/size of calibration context.",
+        "Cost of constructing the oracle importance signal (full-attention decoding over a future window for 30 queries across a dense grid of ratios, times L×H heads) is not quantified; although it is offline and amortized, details on wall-clock/compute cost of profile construction are missing, which affects reproducibility and practical adoption assessment.",
+        "The 'Oracle' importance in Eq. (4) (max over a future window of attention-weighted value-projection norm) is itself a heuristic choice/approximation of 'true' token utility, not a provably optimal ground truth; the strong terminology ('Oracle') somewhat overstates its epistemic status, and no ablation examines sensitivity to Kmax or the choice of this particular oracle definition.",
+        "No empirical comparison against other recent task-agnostic/dynamic allocation baselines explicitly discussed in Related Work (e.g., CAKE, HeadKV, KVzip, Expected Attention as a full allocation baseline rather than just a scoring metric), which somewhat limits the strength of the state-of-the-art claim despite thorough comparison to Uniform/PyramidKV/AdaKV.",
+        "Results are reported as single-run point estimates without variance/confidence intervals, making it hard to assess whether some of the narrower margins (e.g., some LongBench code-domain scores where LU-KV underperforms AdaKV) are statistically meaningful or noise.",
+        "No explicit discussion of limitations (e.g., sensitivity to domain shift between calibration and deployment context, applicability to multimodal or non-English settings) in the main text, which would strengthen the paper's scientific honesty despite otherwise strong empirical breadth."
+      ]
     }
   },
   "v2": {

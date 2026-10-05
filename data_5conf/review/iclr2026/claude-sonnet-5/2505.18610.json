@@ -20,6 +20,48 @@
         "The paper explicitly does not address Multi-head Latent Attention (MLA), which is used in the actual full DeepSeek-R1/V3 models (only distilled GQA-based models are tested), limiting the generality of the claims for the most relevant frontier reasoning models.",
         "No comparison to other mixed-precision or dynamic-bit-width KV cache methods beyond MiKV; the baseline set, while reasonable, is not exhaustive of recent related work in adaptive/progressive quantization."
       ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Addresses a practically relevant and timely problem: KV cache memory overhead specifically in long-CoT reasoning LLMs (32K+ token generations), which is distinct from the short-context setting most prior KV quantization work targets.",
+        "The two diagnosed failure modes (cumulative quantization error under autoregressive generation, and short-context calibration failing to capture low-frequency RoPE channel statistics) are reasonably well motivated and intuitive.",
+        "Progressive quantization with an 'Equivalent Right Shift' bit-shrinking scheme is a simple, low-overhead mechanism, and the ablation (Table 3) shows it clearly outperforms naive right-shift alternatives.",
+        "Block-wise memory allocation via a clean Integer Programming formulation driven by a first-order Taylor sensitivity estimate is a principled and efficient way to exploit slack memory budgets.",
+        "Experiments span a wide range of model sizes (7B to 70B) and include multiple competition-level math/coding benchmarks, plus sensitivity visualizations across many model families (Appendix B.1), giving a reasonably broad empirical picture.",
+        "Ablations on bit-shrinking strategy and positional-interpolation scaling factor are included, showing some care in isolating the contribution of each component."
+      ],
+      "weaknesses": [
+        "All reported results are based on 'fake quantization' (simulated in FP16/FP32 arithmetic) rather than real low-bit kernels; there is no actual memory-savings or latency/throughput measurement, so the practical system-level benefit (the core motivation of the paper) is never actually demonstrated.",
+        "The method does not support Multi-head Latent Attention (MLA), which is exactly the attention mechanism used by DeepSeek-R1/V2/V3, the very model family motivating this paper's introduction and Table 1; this significantly undercuts the claimed practical relevance to modern long-CoT LLMs.",
+        "Each individual component (progressive/mixed precision, Taylor-based sensitivity for bit allocation, positional interpolation for calibration) is a fairly direct combination/adaptation of existing ideas (KIVI-style sliding windows, LLM-MQ/MixDQ-style sensitivity-based mixed precision, RoPE positional interpolation from Chen et al.), so the overall novelty is incremental engineering rather than a fundamentally new idea.",
+        "Reported pass@1 numbers have large standard deviations (often 4-7 points), and many of the claimed improvements over KIVI/RotateKV/MiKV are within or close to one standard deviation, raising concerns about the statistical significance of several headline comparisons (e.g., several AIME/CMIMC gaps).",
+        "Ablation studies for key design choices (bit-shrinking strategy, positional interpolation) are conducted on only a single model (DeepSeek-LLaMA-8B) and a single/few benchmarks, which is insufficient to establish generality of these choices across the 7B-70B model range claimed in the main results.",
+        "The positional interpolation ablation (Table 4) shows that a larger scaling factor (s=16) actually hurts performance relative to no interpolation, suggesting the technique requires careful, possibly model/dataset-specific tuning, and the paper does not provide guidance or an automatic procedure for selecting s beyond the single value used in the main experiments.",
+        "The 'same memory budget' comparisons rely on specific, seemingly hand-picked batch sizes for each model to showcase when baselines underutilize memory; it is unclear how robust the gains are across a broader range of batch sizes/memory budgets, and no systematic sweep is shown.",
+        "Missing comparisons with several directly relevant baselines discussed in Related Work (e.g., SKVQ, IntactKV, WKVQuant) in the main quantitative results, despite these being closely related sliding-window/calibration-based approaches.",
+        "The IP-based block allocation and progressive shifting add non-trivial implementation complexity (solver calls, custom shift/dequant logic) whose real-world runtime overhead is not quantified, despite the paper claiming 'negligible latency' without supporting measurements on real hardware/kernels."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Addresses a timely and practically important problem: KV cache memory overhead specifically in long-CoT reasoning LLMs, which is under-explored relative to short-context KV quantization.",
+        "Clear diagnosis of two concrete failure modes (cumulative quantization error and short-context calibration mismatch under RoPE) that motivate the proposed techniques.",
+        "The progressive quantization scheme with an efficient 'Equivalent Right Shift' bit-shrinking operation is a practical, low-overhead mechanism to reduce memory waste, and the ablation convincingly shows it outperforms naive shifting alternatives.",
+        "Formulating block-wise bit-width allocation as an Integer Program solvable in seconds is a clean and efficient design choice, and the sensitivity analysis across many model families (7B-70B, LLaMA/Qwen) adds useful insight.",
+        "Extensive experiments spanning 7B to 70B models and multiple competition-level math/coding benchmarks, with reasonably strong and consistent gains over KIVI/MiKV/RotateKV baselines, including cases where baselines catastrophically fail.",
+        "Ablations on calibration length and positional interpolation scaling factor are informative and expose an interesting non-monotonic behavior of the scaling factor."
+      ],
+      "weaknesses": [
+        "All results are based on 'fake quantization' — there is no measurement of real memory savings, latency, or throughput, which is a significant gap for a paper whose central motivation is memory/efficiency for deployment.",
+        "The individual components (progressive/mixed precision, Taylor-based sensitivity for bit allocation, positional interpolation) are each adaptations of existing ideas from other domains (e.g., mixed-precision quantization literature, PI from context extension work); the novelty is primarily in combination and application to long-CoT KV cache, which is somewhat incremental.",
+        "Some baselines (RotateKV, MiKV) completely collapse to near-0% accuracy under 2-bit settings, which raises questions about whether these baselines were adequately tuned/adapted for the long-CoT setting, making some comparisons less informative.",
+        "The positional interpolation scaling factor s is sensitive and non-monotonic (degrades at s=16), yet the paper offers limited principled guidance on how to select s for a given target context length/model beyond a specific example.",
+        "The IP-based block allocation relies on gradient-based sensitivity estimated from a single calibration set; there is no analysis of how sensitivity/allocation generalizes across different task domains (e.g., calibrating on arXiv math text but evaluating on code generation).",
+        "The method explicitly does not support Multi-head Latent Attention (MLA), excluding it from being applicable to the native (non-distilled) DeepSeek-R1/V3 architectures, which somewhat limits its scope of applicability.",
+        "No wall-clock or GPU memory profiling of the progressive quantization/shifting overhead during actual inference, leaving unclear whether the approach is practical at serving time versus added computational overhead per decoding step."
+      ]
     }
   },
   "v2": {
@@ -63,6 +105,27 @@
         "The method is only validated on GQA-based distilled models (Qwen/LLaMA backbones), not on the actual DeepSeek-R1 model which uses Multi-head Latent Attention (MLA); this is explicitly noted as a limitation and significantly reduces the practical relevance of the results to the flagship long-CoT models the paper is motivated by.",
         "The comparison protocol allows PM-KVQ two batch-size configurations per model (to showcase both progressive quantization and block-wise allocation) while baselines are often shown under a single or truncated configuration (e.g., Table 7 truncates KIVI output when it exceeds memory), which complicates fair, apples-to-apples comparison and may bias reported gains upward.",
         "The quantization bit-width granularity is restricted to powers of two (16/8/4/2), limiting the flexibility and generality of the block-wise memory allocation approach in real deployment scenarios with arbitrary memory budgets."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Addresses a well-motivated and practically important problem: the substantial KV cache memory overhead in long-CoT reasoning LLMs, which is often larger than the model weights themselves (Table 1).",
+        "Technically sound design combining three complementary techniques: progressive bit-width quantization to reduce cumulative error, block-wise memory allocation formulated as an efficiently solvable Integer Programming problem, and calibration with positional interpolation to better capture long-context RoPE channel distributions using short calibration sequences.",
+        "Rigorous mathematical treatment, including a full formal proof (Appendix D) that the proposed 'Equivalent Right Shift' bit-shrinking operation is mathematically equivalent to dequantize-then-requantize, which is a nice touch for reproducibility and correctness.",
+        "Extensive empirical evaluation across a wide range of model scales (7B to 70B) and model families (DeepSeek-R1-Distill-Qwen/LLaMA, QwQ-32B), multiple challenging reasoning benchmarks (AIME-2024/2025, CMIMC-2024, LiveCodeBench), and an additional short-context benchmark (IFEval) to test generalizability.",
+        "Strong and consistent empirical improvements over multiple SOTA baselines (KIVI, RotateKV, MiKV, KVTuner) under matched memory budgets, with up to 8% accuracy gains and competitive throughput (2.73-5.18x over 16-bit).",
+        "Thorough ablation studies isolating the contribution of each component (bit-shrinking strategy variants, block sensitivity analysis, positional interpolation scaling factor sweep), which convincingly support the design choices.",
+        "Rich supplementary experiments (different hardware/batch-size configurations, integration with sparse attention such as QuestAttention, pre-inference latency analysis) that strengthen practical relevance and robustness of the claims.",
+        "Good reproducibility practices: public datasets/models, detailed hyperparameter/bit-width/batch-size specifications, and released code."
+      ],
+      "weaknesses": [
+        "Individual novelty of each component is somewhat incremental: progressive/mixed-precision quantization, Taylor-approximation-based sensitivity-guided bit allocation, and positional interpolation are all established techniques individually; the contribution is primarily in adapting and combining them for the long-CoT KV cache setting rather than introducing fundamentally new mechanisms.",
+        "All reported results use fake quantization rather than fully deployed low-bit kernels for accuracy evaluation, and throughput results show PM-KVQ is consistently somewhat slower than KIVI (2.45-16.18% degradation), which is a trade-off not deeply analyzed for when it might become prohibitive at larger scale/longer contexts.",
+        "The pre-inference calibration and block-wise allocation procedure incurs non-trivial overhead (13-120 minutes depending on model size), which, while claimed as reduced relative to QServe, could still be a practical bottleneck for rapid deployment/model updates.",
+        "The method is not evaluated on Multi-Head Latent Attention (MLA) architectures (e.g., DeepSeek-V3), which are increasingly prominent in reasoning LLMs, and this is only acknowledged as a limitation rather than addressed.",
+        "Batch-size settings differ between baseline and PM-KVQ configurations in the main comparison table (e.g., 32 vs 40, 12 vs 16) due to differing memory footprints during the progressive/uniform phases; although explained, this makes some head-to-head comparisons less directly interpretable and could benefit from a more explicit iso-memory-at-all-times comparison.",
+        "The block-wise sensitivity metric relies on a first-order Taylor approximation with gradients computed on a calibration set, whose fidelity to actual downstream long-CoT reasoning performance is not independently validated beyond the final task accuracy (e.g., no correlation analysis between predicted sensitivity and actual measured degradation per block)."
       ]
     }
   }

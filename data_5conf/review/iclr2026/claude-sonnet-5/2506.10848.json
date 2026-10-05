@@ -83,6 +83,46 @@
         "Experiments are run on a single consumer GPU (RTX 4090) apparently with batch size 1/single-run reporting; no variance across seeds/runs is reported, and there's no discussion of behavior under batched/production-scale inference, limiting confidence in the practical significance of the throughput numbers.",
         "The comparison to LLaMA3 8B throughput is somewhat cherry-picked (specific GPQA setting with tuned cache hyperparameters) and doesn't control for engineering optimizations (e.g., vLLM/paged attention, speculative decoding) that are standard for AR inference, making the 'dLLM beats AR in throughput' claim less rigorous than presented."
       ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper tackles a practically relevant problem (inference latency of diffusion LLMs) and reports large nominal speedups (up to 15.63x-34.22x) that, if real and robust, would be impactful.",
+        "Experiments span two different dLLM backbones (LLaDA, Dream) and eight benchmarks spanning math, general knowledge, and code, with both standalone and cache-integrated settings reported.",
+        "The paper includes several ablation studies on key hyperparameters (Kmax, Whist, sigma^2_stable, tau_min_conf, tau_high_conf) across multiple benchmarks and models, and provides a full pseudocode (Algorithm 1) which aids some degree of reproducibility.",
+        "The qualitative case studies (confidence maps, slow/fast phase visualizations) give an intuitive, illustrative account of how the method behaves on example prompts."
+      ],
+      "weaknesses": [
+        "Limited true novelty: the three 'golden principles' (certainty, convergence, positional clustering) are essentially restatements of well-known behaviors already exploited by prior confidence-based and caching methods (Fast-dLLM, dLLM-Cache, MaskGIT-style low-confidence remasking); no principle is rigorously new or theoretically grounded, and no quantitative statistics (beyond a couple of illustrative single-example figures) are given to substantiate how general or reliable these 'principles' are across prompts and tasks.",
+        "Inconsistent/mixed empirical gains undercut the headline claims: in several rows of Tables 1-2 (e.g., Dream on GPQA, MMLU-pro, BBH, MBPP), SlowFast is slower in TPS than Fast-dLLM while giving similar or worse accuracy, yet the abstract/conclusion emphasize only the best-case numbers (15.63x/34.22x on a single benchmark, GPQA), which is cherry-picking rather than representative reporting.",
+        "The headline comparison against LLaMA3-8B (Table 4) rests on a single benchmark (GPQA) where baseline LLaDA throughput is extremely low (1.6 tokens/sec) and accuracy is near chance level for a 4-way MCQ task (~28-31%), making the 'outperforms autoregressive LLMs' claim weakly supported and potentially an artifact of an unoptimized baseline implementation rather than a fundamental algorithmic advantage.",
+        "The method introduces a large number of additional hyperparameters (Kmax, Whist, sigma^2_stable, tau_min_conf, tau_high_conf, k_slow, k_fast) whose values are set once and claimed to 'generalize', but the robustness evidence is based on a narrow sweep over a handful of benchmarks/one or two models, not a systematic study, and some parameters (k_slow, k_fast) are never explicitly specified in the paper.",
+        "Qualitative case studies in the appendix (Figures 10, 11) supporting claims of robustness to non-contiguous/positional jumps are based on only 1-2 hand-picked examples (one of which is described as 'manually induced'), which is insufficient evidence for the strong generalization claims being made.",
+        "No direct empirical comparison to other recent caching/sampling acceleration baselines explicitly discussed in related work (Sparse-dLLM, dKV-Cache, GtR, first-hitting sampler) despite these being natural competitors; only Fast-dLLM is used as a sampling baseline.",
+        "All experiments are run on a single RTX 4090 GPU with no discussion of scalability to larger batch sizes, longer sequences, or production serving settings, nor any analysis of the computational/bookkeeping overhead (variance tracking, history windows, caching logic) that the dynamic two-stage procedure itself introduces.",
+        "The writing in Section 3.3/Algorithm 1 contains minor inconsistencies (e.g., the end-of-exploratory-stage convergence horizon is defined two different ways in the text — as the last candidate horizon vs. the mean of the history window), reducing clarity and reproducibility confidence."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Addresses a practically important problem (inference latency of diffusion LLMs) and proposes a training-free, plug-and-play sampling strategy that is easy to integrate with existing dLLM pipelines.",
+        "The three principles (certainty, convergence, positional) are clearly motivated with qualitative evidence (Figure 1) and translated into a concrete, well-specified two-phase (slow/fast) algorithm with an explicit stability-check criterion.",
+        "Broad empirical evaluation across 8 diverse benchmarks (math, science, general knowledge, code) and two different dLLM backbones (LLaDA 8B, Dream 7B), showing consistent speedups with generally small accuracy changes.",
+        "Demonstrates compatibility and compounding gains with an orthogonal acceleration technique (dLLM-Cache), and shows that a dLLM equipped with SlowFast+Cache can exceed the throughput of a comparably sized autoregressive model (LLaMA3 8B) while remaining competitive in accuracy.",
+        "Reasonably thorough ablations on the stability-check hyperparameters (Kmax, Whist, σstable, τmin_conf, τhigh_conf) across multiple benchmarks and both backbones, suggesting the method does not require heavy per-task tuning.",
+        "Code is released and implementation/hyperparameter details are documented in the appendix, aiding reproducibility."
+      ],
+      "weaknesses": [
+        "The headline speedup numbers (15.63x / 34.22x) come from a single cherry-picked setting (GPQA, 8-shot, length=1024) and are far higher than the typical gains reported in Table 1 (often 2-5x), which can mislead readers about typical performance; the abstract should better reflect the range of outcomes.",
+        "The three principles largely restate/rebrand ideas already implicit in existing confidence-based decoding (e.g., Fast-dLLM, MaskGIT-style low-confidence remasking); the positional/convergence framing is a reasonable but incremental extension rather than a fundamentally new insight.",
+        "Accuracy is not uniformly preserved: several entries in Tables 1-2 show non-trivial drops (e.g., Dream on BBH -1.28, MMLU-pro -1.23, GSM8K+Cache -4.92 on Dream), undercutting the 'lossless acceleration' framing used in the main results discussion.",
+        "When combined with caching, SlowFast does not always outperform Fast-dLLM+Cache (e.g., GPQA: Fast-dLLM+Cache reaches 9.13x vs. SlowFast+Cache 8.78x on LLaDA), so the claimed superiority over Fast-dLLM is not consistent across all settings/metrics.",
+        "There are inconsistencies between the main text and Algorithm 1 regarding how ecycle is finalized upon stability (text says 'last recorded candidate horizon' while the pseudocode sets it to the mean of the history window), which hampers precise reproducibility of the exact method.",
+        "The qualitative evidence for the positional principle relies on a very small number of hand-picked, simple arithmetic word-problem examples (Figures 1, 4, 10, 11); no quantitative, large-scale statistic (e.g., histogram of span contiguity across many generations) is provided to substantiate how general/reliable this phenomenon is.",
+        "Experiments are run only on a single GPU type (RTX 4090) seemingly with single-run results; no variance/standard deviation across seeds is reported, making it hard to assess the statistical significance of small accuracy differences.",
+        "The method introduces a fairly large number of hyperparameters (τmin_conf, τhigh_conf, Kmax, Whist, σstable, kslow, kfast), and while sensitivity studies are provided, the interactions between them and worst-case failure modes (e.g., when positional clustering does not hold, or for longer/more complex generations) are not analyzed."
+      ]
     }
   }
 }

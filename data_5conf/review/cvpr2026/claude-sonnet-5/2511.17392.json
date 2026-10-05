@@ -19,6 +19,26 @@
         "Method is only instantiated and tested with convolutional/transformer U-Net-style encoder-decoder backbones sharing a similar high-resolution bottleneck; the claim of being fully 'backbone-agnostic' is not stress-tested against architecturally more divergent designs (e.g., pure transformer, diffusion-based, or non-U-Net registration networks)."
       ]
     },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "Addresses a genuine bottleneck in applying RL to DIR: the dense displacement field is too high-dimensional for direct policy optimization, and the paper's idea of placing the stochastic policy at the encoder's latent bottleneck rather than on the raw deformation field is a reasonable and relatively novel direction compared to prior agent-based registration work (e.g., Krebs et al., SPAC) that compresses to very low-dimensional codes.",
+        "LDVN is a simple, clearly motivated normalization that addresses a real issue (variance blow-up of summed log-likelihoods over tens of thousands of latent dimensions), and the paper gives an informal justification (unbiasedness, O(1) variance scaling) rather than just an empirical fix.",
+        "The experimental protocol spans three datasets/modalities (OASIS, LiTS, Abdomen MR-CT) and three backbones (VoxelMorph-L, TransMorph, NICE-Trans), with component-wise ablations (Table 3) that isolate the contribution of the Gaussian head, Dice loss, multi-step refinement, and full GRPO, which is good experimental hygiene.",
+        "The label-efficiency and warm-up analyses (Figs. 4-5) are informative and support the paper's narrative that repeated reuse of scarce labels via multi-trajectory/multi-step sampling helps in low-label regimes.",
+        "Efficiency reporting (parameter and latency overhead, Table 4) is transparent and shows the overhead is modest, which is relevant for practical adoption."
+      ],
+      "weaknesses": [
+        "Conceptual inconsistency between the claimed 'fine-grained, spatially continuous' latent policy and the actual mechanism: stochasticity is injected only at the single top-level bottleneck feature fL, which in a U-Net is typically the coarsest-resolution representation, while all finer-resolution features reaching the decoder arrive deterministically via skip connections. The paper never clarifies the spatial resolution of fL relative to the full image or justifies why perturbing only this coarse code yields genuinely 'fine-grained' voxel-level exploration; this undercuts the central selling point of the method.",
+        "The inference-time procedure is never specified. Algorithm 1 and Eqs. 17-18 greedily select the trajectory with highest reward using ground-truth segmentation labels (Sm, Sf) to update the state at every step during GRPO fine-tuning, but at test time no labels are available, so it is unclear how the multi-trajectory/multi-step policy selects an action or how many samples/steps are used at deployment. This is a critical reproducibility and methodological gap that is not addressed anywhere in the main text.",
+        "Numerical claims in the text are inconsistent with the reported tables: the abstract/results section states 'Dice increases by 23%' and 'Dice improvements on the order of 24%,' whereas Table 1 shows absolute Dice gains of roughly 2-4 percentage points (e.g., OASIS VoxelMorph-L: 84.77->87.16). Stating a 23%/24% improvement is either a serious overstatement or an uncorrected typo, and as written it materially misrepresents the magnitude of the contribution.",
+        "When compared against a non-RL, architecturally strong baseline (CorrMLP), MorphSeek's gains largely evaporate: CorrMLP already reaches 88.35/89.22/86.82 Dice on OASIS/LiTS/Abdomen MR-CT, essentially matching or exceeding the best MorphSeek-augmented backbone (89.02/90.47/86.51 with NICE-Trans). This suggests that the elaborate RL pipeline mainly recovers performance that a well-designed coarse-to-fine architecture already achieves without stochastic policy optimization, weakening the practical case for the added training complexity.",
+        "Key theoretical claims (variance scaling O(N), choice of s ∝ √N) are asserted ('it can be proved') but the actual derivation is deferred entirely to an unseen appendix, leaving the main text's central stability argument unverifiable as presented.",
+        "Several architectural/hyperparameter details (e.g., λscale, σmin, σmax, exact warm-up loss formulations, hardware/training budgets) are deferred to supplementary material not included here, limiting the self-containedness and reproducibility of the main submission.",
+        "Test sets are small (19 OASIS pairs, 8 Abdomen MR-CT pairs), and while Wilcoxon signed-rank tests are reported, no correction for multiple comparisons across the many backbone/dataset combinations is mentioned, raising some concern about the robustness of the 'statistically significant' claims.",
+        "The multi-trajectory sampling is reported to hit out-of-memory errors beyond 8 trajectories (Table 2), indicating the method's scalability to larger group sizes (often needed for stable GRPO-style advantage estimation) is limited in practice, somewhat at odds with the paper's 'scalable' framing."
+      ]
+    },
     "exp3_positive": {
       "oa": 3,
       "strengths": [
@@ -77,6 +97,27 @@
         "Several baselines (CorrMLP, RIIR, SPAC, WarpDDF+RegCut) are reproduced under the authors' own protocols or the original published protocols rather than a fully unified training budget/pair list, which weakens the fairness of direct numeric comparison in Table 1.",
         "The abstract's claim of 'low step-level latency overhead' is only true per-step; Table 11 shows overall multi-step inference (T=3) increases latency by roughly 2.2–3.4× over the base backbone, which is a non-trivial deployment cost that is somewhat underplayed in the main text.",
         "No code/data release is mentioned, and despite the detailed supplementary hyperparameters, exact reproduction (especially of the warm-up/GRPO schedule interplay and the reward weight tuning wDice/wNJD) would likely require substantial additional trial and error."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Addresses a well-motivated and genuinely difficult problem: applying RL-style policy optimization to million-dimensional deformation fields, which prior work (e.g., SPAC, Krebs et al.) could only handle by drastically compressing the action space and sacrificing spatial fidelity.",
+        "LDVN is backed by a clear theoretical argument (Proposition 1 showing affine-invariance of the policy gradient direction under zero-mean advantages, plus a variance-growth analysis analogous to scaled dot-product attention) and is empirically validated via a Monte Carlo weak-dependence check and an ablation over the scaling exponent s.",
+        "Extensive empirical evaluation: three distinct 3D benchmarks (mono-modal brain, mono-modal liver, cross-modal abdomen), three backbones (VoxelMorph-L, TransMorph, NICE-Trans), and comparisons against multiple modern and classical baselines (CorrMLP, RIIR, SPAC, WarpDDF+RegCut, SyN, deedsBCV), with statistically significant Dice/NJD improvements reported via Wilcoxon tests.",
+        "Thorough ablation studies covering trajectory/step counts, component-wise contributions (Gaussian head, Dice loss, multi-step, full GRPO), label efficiency curves, warm-up necessity (including a careful posterior-collapse analysis with quantitative stable-training success rates), and hyperparameter sensitivity.",
+        "Methodologically honest treatment of a subtle evaluation pitfall: the paper explains in detail why NJD cannot be fairly computed for SPAC's non-grid-consistent inference scheme, and empirically demonstrates the numerical inconsistency this would introduce rather than reporting a possibly misleading number.",
+        "Practical efficiency is demonstrated (under 3% parameter overhead, near-linear latency scaling with refinement steps), supporting the claim of a lightweight, backbone-agnostic add-on.",
+        "Reasonably strong reproducibility support: detailed loss definitions, architecture specifics, dataset splitting protocol avoiding test leakage, and hardware/software environment are all specified in the supplement."
+      ],
+      "weaknesses": [
+        "The 'policy optimization' framing is somewhat loosely connected to standard RL practice: at each step only the single best-of-J trajectory is greedily kept to advance the state (Eqs. 16-17), which functions more like a best-of-N sampling/ranking-based refinement with a policy-gradient-style auxiliary loss than a conventional multi-step MDP rollout; the paper would benefit from directly contrasting this design against a simpler best-of-J hypothesis-selection baseline without the policy-gradient loss to isolate what GRPO specifically contributes beyond stochastic multi-sampling.",
+        "The claimed 'label efficiency' gain partly stems from reusing the same small labeled set across T steps and J trajectories per epoch; it is unclear how much of the improvement is attributable to genuinely richer supervision signal versus simply more gradient updates/effective epochs on the same labels. A controlled comparison (e.g., baseline trained with equally many effective passes over the same labeled pairs, or with proportionally increased Dice-loss weight/epochs) would strengthen this specific claim.",
+        "Some test sets are quite small (19 OASIS pairs, 8 Abdomen MR-CT pairs), which limits the statistical power of the significance testing despite the Wilcoxon tests reported.",
+        "Scalability is limited in practice: trajectories beyond 8 already trigger out-of-memory errors, and the ablation shows accuracy/NJD saturating or degrading beyond 3 refinement steps, suggesting the coarse-to-fine benefit is fairly narrow in its useful operating range.",
+        "The method's generality is demonstrated only on encoder-decoder U-Net/Transformer-style DIR backbones sharing a common architectural family; the 'backbone-agnostic' claim is not tested on structurally different registration paradigms (e.g., cascaded pyramid networks like LapIRN as a backbone, or diffeomorphic/flow-based architectures).",
+        "Baseline step counts differ substantially from MorphSeek's (RIIR uses 12 steps, SPAC uses 20 steps vs. MorphSeek's 3 steps/6 trajectories); although the paper reports comparable or better performance with fewer steps, a more explicit compute/FLOP-matched comparison would make the efficiency claim more convincing.",
+        "Table 2 (trajectory/step ablation) does not report variance/std, making it hard to judge whether the reported differences across configurations are meaningful versus noise, unlike the main results table."
       ]
     }
   }

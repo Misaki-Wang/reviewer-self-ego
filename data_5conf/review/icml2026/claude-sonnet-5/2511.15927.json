@@ -83,6 +83,50 @@
         "Limited comparison to alternative linear/hybrid mixers (e.g., gated linear attention, RWKV-style recurrences) or other SSM variants, so it is unclear whether Mamba-2 specifically is necessary or whether the gains generalize to other linear-time mixers claimed as future work.",
         "Scale remains modest (up to 1.3B) relative to current practical LLM/DLM deployments, and given that hybridization benefits appear to grow with scale, it is uncertain whether conclusions extrapolate to the multi-billion parameter regimes where these efficiency gains would matter most in practice."
       ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "First systematic exploration of (bidirectional) Mamba-2 backbones for masked discrete diffusion language modeling, filling a genuine gap between the SSM and DLM literatures.",
+        "Controlled, scale-matched comparison (240M/0.5B/1.3B) between DiffuTran, DiffuMamba, and a hybrid DiffuMamba-H under identical data, tokenizer, noise schedule, and compute budgets, which isolates the effect of the mixer architecture reasonably well.",
+        "Reasonably thorough throughput characterization combining an asymptotic complexity table with empirical latency/throughput measurements across several decoding strategies (full-sequence, Fast-dLLM, block-cache autoregressive) and sequence lengths up to ~260K tokens.",
+        "The latency-decomposition experiment (fitting aL^2+bL+c) is a nice diagnostic that helps explain the source of the throughput gap between attention- and Mamba-based denoisers.",
+        "Honest limitations section acknowledging that batch size is fixed at 1, that block-cache training is not jointly optimized, and that denoising-step scaling (p) choices affect quality/efficiency trade-offs."
+      ],
+      "weaknesses": [
+        "All throughput/latency results are measured at batch size B=1 only; this is the regime most favorable to memory-bandwidth-bound Mamba kernels and least representative of realistic serving conditions, where attention's higher arithmetic intensity and better hardware utilization under batching could close or reverse much of the claimed throughput gap. The paper does not even discuss how results might change with larger batch, despite this being central to the throughput claims in the title/abstract.",
+        "Downstream zero-shot accuracies (Table 4) are extremely low (33–38% average, near chance for several tasks) at the only scale evaluated (1.3B), undermining the significance of claims that Mamba/hybrid DLMs 'match or surpass' Transformer DLMs in modeling quality — differences of a few points at near-random performance are not strong evidence of a meaningful capability advantage.",
+        "The zero-shot perplexity results in Table 1 are inconsistent across scales (DiffuTran wins on 4/7 datasets at 240M, DiffuMamba is sometimes worse than DiffuTran at 0.5B), and the paper's narrative emphasizes favorable trends while downplaying these inconsistencies, suggesting some selective framing rather than a robust, monotonic scaling story.",
+        "Experiments are capped at 1.3B parameters and 120B tokens, far below the scale at which hybrid/SSM architecture trade-offs are typically validated in the broader literature (e.g., Jamba, Falcon-H1 at much larger scale); it remains unclear whether the reported advantages persist at scales relevant to state-of-the-art LLMs.",
+        "No comparison against other competitive linear-time/hybrid mixers (e.g., gated linear attention, RWKV, Griffin) that are extensively cited in Related Work, despite the paper positioning itself as a 'systematic analysis of inference efficiency across modern DLM variants'; the comparison set is narrow (only MHA vs. Mamba vs. one hybrid ratio).",
+        "No reported variance/seeds for perplexity or downstream numbers, making it hard to judge whether the (often small, 1-4%) reported gains are statistically meaningful versus noise from a single training run per configuration.",
+        "The asymptotic complexity table (Table 3) presents several non-trivial derivations (e.g., arithmetic intensity formulas) without proof or detailed justification in the main text, and some entries (e.g., identical FLOPs/Memory for DiffuTran and DiffuMamba-H) obscure the actual benefit of the 20% attention hybrid beyond the empirical curves.",
+        "The MLP-expansion-ratio adjustment used to match parameter counts between attention and Mamba variants is a potential confound, since this architectural change (half the MLP width) could itself affect model quality independent of the mixer type, and no ablation isolates this factor.",
+        "Block-cache experiments (Fig. 2c/2d) use training-free caching not trained end-to-end with the block structure, which the authors admit is suboptimal; as this is presented as the 'most efficient design' in the conclusion, the central practical claim is not actually validated with a properly trained model.",
+        "Generation quality is assessed only via perplexity-style metrics; no human/automatic evaluation of actual sample quality, coherence, or diversity under the fast decoding regimes being advocated (e.g., p=8/16) is provided, leaving open whether the efficiency gains come at a quality cost in practice."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "First systematic exploration of SSM (Mamba) backbones for masked diffusion language models, filling a clear gap since prior DLM work is Transformer-only while SSM-diffusion work is Transformer/vision only.",
+        "Controlled, architecture-isolated comparison (DiffuTran vs DiffuMamba vs DiffuMamba-H) across three parameter scales (240M, 0.5B, 1.3B) with matched data, tokenization, noise schedule, and training budget, which strengthens the causal attribution of observed differences to backbone choice.",
+        "Comprehensive throughput study spanning both compute-bound (full-sequence denoising) and memory-bound (block-cache/KV-cache) regimes, scaling sequence length out to 100K+ tokens, a regime rarely tested in prior DLM efficiency papers.",
+        "The latency decomposition (fitting t(L)=aL^2+bL+c) offers a useful mechanistic explanation of why Mamba-based denoisers scale better, going beyond simple wall-clock benchmarking.",
+        "Reasonably strong and consistent empirical speedups (up to 8.2x/4.3x/2.3x across decoding strategies) combined with matched or improved perplexity, suggesting the efficiency gains are not purely at the cost of quality.",
+        "Reproducibility is aided by fairly detailed appendix tables specifying model configurations and training/inference hyperparameters.",
+        "Honest limitations section acknowledging unexplored joint training with block-cache objectives, fixed denoising-step schedules, and batch-size=1 constraints."
+      ],
+      "weaknesses": [
+        "Downstream zero-shot task results (Table 4) are near-chance for a 1.3B base model on several benchmarks, making the reported ~4% average improvement of Mamba variants difficult to interpret as meaningful rather than noise; no variance/seed information is given to assess significance of these differences.",
+        "No error bars, multiple seeds, or statistical significance testing are reported anywhere (perplexity tables, downstream accuracy, throughput numbers), which is especially important given that many PPL differences between configurations are small (e.g., 240M scale results are mixed, with DiffuTran winning on 4/7 zero-shot datasets).",
+        "All throughput/latency measurements use batch size 1 only; this is acknowledged as a limitation but substantially limits the practical relevance of the efficiency claims, since production serving typically batches requests and the memory-bandwidth-bound advantage of Mamba may shift with larger batches.",
+        "Parameter-matching methodology (halving MLP expansion ratio for Mamba/hybrid variants to equalize parameter count) could introduce a confound, since this also changes the FFN capacity relative to the mixer capacity; it's unclear whether gains stem from the Mamba mixer itself or from the altered FFN/mixer capacity balance.",
+        "The asymptotic complexity table (Table 3) presents some non-standard/compressed expressions (e.g., arithmetic intensity O(dL/(d+L)) for DiffuMamba) without full derivation, making it hard to verify analytically; more rigorous proofs or clearer derivation in the appendix would strengthen confidence in the stated scaling laws.",
+        "The paper does not report or compare training-time throughput/cost for the three architectures, focusing exclusively on inference; given that Mamba kernels can have different training efficiency characteristics, this omission limits the completeness of the efficiency story.",
+        "No qualitative generation samples or human/automatic evaluation of text quality (e.g., coherence, diversity) accompany the perplexity/accuracy numbers, which would help validate that the efficiency gains do not come with subtle quality degradation not captured by PPL.",
+        "Related caching-based acceleration baselines (dKV-cache, dllm-cache, adaptive parallel decoding) are discussed in related work but not empirically benchmarked against DiffuMamba, despite being natural competing approaches to the same problem of DLM inference efficiency."
+      ]
     }
   }
 }

@@ -37,6 +37,26 @@
         "Scale of experiments is limited to relatively small resolutions (up to 256×256) and moderate model sizes; it remains unclear whether gains persist at larger-scale, more modern text-to-image or class-conditional generation settings.",
         "The batch-resampling component, while helpful, is adopted from prior work (Zhang et al., 2024) and its interaction with UCL, while ablated, is not deeply analyzed theoretically beyond an intuitive argument."
       ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Addresses a well-motivated and practically important problem: mode collapse/low diversity for tail classes in class-conditional diffusion models trained on long-tailed data.",
+        "The two proposed losses (Unsupervised Contrastive Loss and Alignment Loss) are simple, theoretically motivated (KL-divergence derivation for the alignment loss), and easy to integrate into both UNet-based DDPM/SBDM pipelines and Diffusion Transformer (SiT/DiT) architectures without extra models or inference-time cost.",
+        "Extensive empirical validation across many datasets and resolutions (CIFAR10/100-LT, TinyImageNet-LT, Places-LT, ImageNet-LT at 256x256), with multiple architectures (DDPM, SiT) and multiple training budgets (40-160 epochs), which strengthens generality claims.",
+        "Strong and relevant baselines are compared against, including recent long-tailed diffusion methods (CBDM, OCLT) and a concurrent contrastive regularization method (Dispersive Loss), with consistent improvements in FID/sFID/Recall while largely preserving Precision.",
+        "Thorough ablations (loss components individually and combined, batch resampling strategy) and additional analyses (head/body/tail category breakdown, statistical significance across seeds, DDIM sampling steps, unconditional generation) that support the causal claims of the paper.",
+        "Insightful qualitative/diagnostic visualizations (t-SNE and KDE of synthetic vs. training image distributions, nearest-neighbor analysis, low/high-frequency decomposition) that concretely illustrate the mode-collapse problem being addressed and support the motivation for the alignment loss.",
+        "Clear, honest discussion of the method's main limitation (added training-time compute of ~1.5-1.6x with no extra inference cost)."
+      ],
+      "weaknesses": [
+        "The core ideas are recombinations of existing techniques (standard contrastive loss with negatives, and conditional-unconditional alignment adapted from GAN literature, e.g., UTLO/Transitional-GAN), so novelty is more integrative than fundamentally new; the paper would benefit from a more precise disentanglement of what is genuinely novel versus adapted from prior work such as Dispersive Loss and DiffROP.",
+        "Quantitative gains over the strongest baselines are sometimes modest (e.g., CIFAR10-LT FID 5.57 vs. OCLT 5.69 vs. balanced-data reference 4.87 in Table 7), and in a few settings Precision is slightly lower than baseline SiT, suggesting the fidelity/diversity trade-off is not fully eliminated.",
+        "Training budgets are relatively small (e.g., 4 A6000 GPUs, batch size 48, up to 160 epochs on ImageNet-LT), leaving it unclear whether the reported benefits persist at larger scale or longer training typical of production-grade diffusion models.",
+        "Sensitivity of the method to the loss-weighting hyperparameters (α, γ) and to the specific linear-in-t weighting scheme for the alignment loss is not deeply analyzed; alternative schedules are not ablated.",
+        "The approach is only demonstrated for class-conditional (label-conditioned) generation; applicability to more practically relevant long-tailed settings such as text-to-image generation is not explored, limiting the demonstrated scope of impact.",
+        "Both losses rely on within-minibatch negative samples, and the effect of batch size / negative-sample availability on the method's effectiveness is not discussed, which could be a practical concern for small-batch training regimes."
+      ]
     }
   },
   "v3": {
@@ -58,6 +78,27 @@
         "The interaction between the proposed loss and the batch-resampling strategy is only partially disentangled; while Table 4 shows some decomposition, the main results largely report the combined recipe, making it harder to isolate the contribution of the alignment/contrastive losses alone in the primary tables.",
         "Presentation is dense in places (heavy notation, many appendix tables with inconsistent labeling, e.g., CCUA-N variants), which could hinder reproducibility for readers not carefully cross-referencing appendices; no explicit statement of code release for reproducibility.",
         "Limited discussion of failure modes, societal impact, or scenarios where the alignment loss might hurt controllability (the paper acknowledges this risk briefly but does not empirically probe controllability loss beyond precision/recall)."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper tackles a well-motivated and practically relevant problem: mode collapse/low diversity for tail classes in class-conditional diffusion training on long-tailed data.",
+        "Reasonably thorough theoretical derivation connecting the proposed alignment loss to KL-divergence minimization between conditional and unconditional reverse transitions (Eqs. 3-8), and a mutual-information argument (Eq. 2) motivating why contrastive regularization is applied to unconditional rather than conditional latents.",
+        "Extensive empirical evaluation across five datasets (ImageNet-LT, TinyImageNet-LT, Places-LT, CIFAR10-LT, CIFAR100-LT), two architectures (U-Net DDPM and DiT/SiT), multiple imbalance factors, and several sampling-step settings (DDIM 10/100 steps), with consistent improvements in FID, FID_tail, KID, IS over strong recent baselines (CBDM, REPA, Dispersive Loss, OCLT, DiffROP).",
+        "Good set of supporting qualitative analyses: low/high-frequency decomposition of the reverse process (Fig. 4, Fig. 11) motivating the large-timestep alignment choice, t-SNE/density visualization of tail-class samples (Fig. 7), and top-k nearest-neighbor visualizations illustrating mode-collapse mitigation (Fig. 10).",
+        "Fairly comprehensive ablations: hyper-parameter sweep for alpha/gamma, choice of latent encoder depth, time-scheduler for alignment weighting, and batch-resampling interaction, which help justify design choices.",
+        "Practical engineering contribution discussed (parallelized forward pass to reduce the 2x compute overhead of computing conditional+unconditional outputs), with reported training-time/memory overhead for transparency."
+      ],
+      "weaknesses": [
+        "The core theoretical justification has a gap: the paper argues that directly applying InfoNCE to conditional latents risks a trivial shortcut solution that only maximizes inter-class mutual information, but does not rigorously show that the proposed alignment-plus-unconditional-contrastive combination actually maximizes the desired intra-class conditional mutual information I(h^c;x|c); the connection remains largely qualitative/intuitive rather than proven.",
+        "Aligning conditional noise predictions toward unconditional ones at large timesteps could in principle reduce class-conditioning signal; the paper only mitigates this with a simple linear timestep weighting (Eq. 8) and a small ablation (Table 14) rather than a deeper analysis of the fidelity/diversity/controllability trade-off this alignment induces.",
+        "Novelty is incremental: the two components are fairly direct adaptations of existing ideas (InfoNCE-style negative-only contrastive loss, closely related to the concurrent Dispersive Loss; and conditional-unconditional alignment, directly inspired by the GAN-based UTLO/Transitional-GAN works). The main contribution is the combination and the diffusion-specific motivation (low-frequency similarity at large t), which, while reasonable, is a modest conceptual step.",
+        "Evaluation relies exclusively on automatic generative metrics (FID, sFID, KID, IS, Precision/Recall); no human evaluation of perceptual quality/diversity, and no variance/error bars across multiple seeds are reported, making it hard to assess the statistical significance of sometimes modest gains (e.g., Table 1 IS/FID differences at 250k steps, or CIFAR-LT results in Table 8/9 where CCUA is occasionally outperformed by OCLT).",
+        "Experimental scale is modest relative to current diffusion-generation literature: ImageNet-LT experiments use 256×256 resolution but only up to 900k steps on 4 GPUs with batch size 48, and most other datasets are evaluated at 32×32/64×64; it is unclear how the method behaves at larger scale, with bigger backbones, or on more realistic long-tailed/text-conditional settings.",
+        "The extremely-imbalanced ImageNet-LT setting (imbalance factor 0.001, tail classes with 1–2 images) is presented as a highlight, but with so few images per tail class, FID_tail estimates are likely to be very noisy, and this is not discussed as a limitation.",
+        "Minor clarity/writing issues (grammatical slips, some figure labels/captions with typos such as 'diversity unconditional generation' vs. 'diversify') slightly hinder readability, though this does not affect the scientific content.",
+        "The comparison table captions and some results (e.g., where CCUA FID is occasionally worse than the theoretical balanced-data upper bound DDPM*_bal by a smaller margin than other baselines, Table 7/9) are interesting but not deeply analyzed, leaving open questions about when/why the method approaches or exceeds this bound."
       ]
     },
     "exp3_positive": {

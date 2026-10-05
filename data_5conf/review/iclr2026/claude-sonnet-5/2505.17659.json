@@ -19,6 +19,47 @@
         "The slight degradation in comfort score (-0.16) after fine-tuning is noted but not analyzed further, leaving open whether the reward weighting systematically trades off comfort for other safety objectives.",
         "Details on how GRPO's group sampling and KL term are computed over a joint multi-agent, multi-step trajectory action space (rather than a token-level LLM sequence) are somewhat brief in the main text, relegating important implementation specifics to the appendix."
       ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Clear and well-motivated two-stage framework separating behavior cloning (autoregressive pretraining) from safety/rule alignment (GRPO fine-tuning), analogous to LLM pretrain+RLHF pipelines, applied to trajectory planning.",
+        "Avoids the need for costly human preference annotation by using interpretable, rule-based rewards (on-road, collision, speed limit, comfort), which is a reasonable practical design choice compared to concurrent preference-based RLHF planners (TrajHF, Gen-Drive).",
+        "Dual-model rollout design (frozen world model for surrounding agents + trainable ego policy) is a sensible mechanism to keep multi-agent simulation reactive and stable during RL fine-tuning.",
+        "Reasonably thorough ablations: fine-tuning vs. no fine-tuning, KL regularization weight sweep, and pass@k analysis provide some insight into the RL stage's behavior.",
+        "Qualitative case studies (speeding replication by IL-only baselines vs. avoidance by Plan-R1) are illustrative of the claimed benefit."
+      ],
+      "weaknesses": [
+        "Novelty is limited: the method is largely a combination of existing components (motion tokenization from Trajeglish/SMART/MotionLM, GRPO from DeepSeekMath, PDM-style rule-based rewards from nuPlan/TrajHF) with little new algorithmic insight beyond applying GRPO to a dual-model rollout; the differentiation from concurrent RL-based planners like CarPlanner is not deeply analyzed.",
+        "The headline SOTA claims are overstated: in the non-reactive setting, Plan-R1 (both with and without post-processing) is actually outperformed by Diffusion Planner on several splits (e.g., Val14 NR 87.99 vs 89.87, Test14-hard NR 75.31 vs 75.99, and with post-processing Test14-hard NR/R 77.79/80.97 vs 78.87/82.00), yet the text frames results as uniformly 'comparable' or 'SOTA' without adequately acknowledging these losses.",
+        "The core reward function (Eq. 4) is only sketched at a high level in the main text, with critical implementation details, specific cost terms, and their weights relegated to the appendix (not provided here), making it hard to judge the soundness and potential for reward hacking/gaming of the rule-based reward design.",
+        "No ablation isolating the contribution of individual reward components (e.g., which rewards drive the gains), nor an ablation on the dual-model rollout design versus a single shared model, despite both being claimed as important architectural choices.",
+        "The GRPO objective applies a single trajectory-level reward to an entire multi-step autoregressive rollout; credit assignment across the many motion tokens that constitute a trajectory is not discussed, raising concerns about training signal sparsity/noise that are not analyzed empirically (e.g., no learning curves, reward variance, or stability discussion).",
+        "Evaluation is confined entirely to nuPlan simulation; no real-world deployment, other datasets/simulators, or robustness/generalization checks (e.g., to unseen cities or adversarial scenarios) are provided, limiting evidence for the claimed real-world significance.",
+        "Comparison against the most relevant RL-based concurrent baseline (CarPlanner) is incomplete, appearing only for Test14-random and missing for Val14 and Test14-hard, weakening the strength of the SOTA claim.",
+        "Practical costs of the approach (e.g., compute/time required for closed-loop dual-model rollout during RL fine-tuning, inference-time cost of the fine-tuned model) are not reported, which is important for assessing real-world feasibility of the method.",
+        "The claimed 11.2% speeding statistic in expert data, used to motivate the entire approach, lacks methodological detail on how it was computed, undermining the strength of the stated motivation."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Novel and well-motivated reformulation of trajectory planning as a principle-aligned sequence generation task, adapting the LLM pretrain+RLHF paradigm to autonomous driving with interpretable rule-based rewards instead of costly preference data.",
+        "Clean two-stage architecture with a sensible dual-model rollout design (frozen world model for surrounding agents + trainable ego policy) that enables stable multi-agent closed-loop fine-tuning via GRPO.",
+        "Strong empirical improvement in the reactive closed-loop setting (R-CLS), which is arguably the more realistic and challenging evaluation, outperforming strong recent baselines (Diffusion Planner, PLUTO, CarPlanner) by notable margins across Val14, Test14-hard, and Test14-random.",
+        "Thorough ablations: importance of fine-tuning stage with per-metric breakdown (collision, TTC, drivable area, speed, comfort, progress), KL regularization weight sweep, and pass@k analysis showing improved reliability across sampling budgets.",
+        "Good qualitative case studies (Figures 2-3) that concretely illustrate the model correcting unsafe behaviors (speeding, off-road, collision) inherited from expert demonstrations.",
+        "Clear positioning against concurrent RLHF-based planners (TrajHF, Gen-Drive), highlighting the advantage of not depending on costly preference annotations."
+      ],
+      "weaknesses": [
+        "Non-reactive (NR-CLS) results are not consistently state-of-the-art; Plan-R1 underperforms Diffusion Planner on Val14 NR (87.99 vs 89.87) and Test14-hard NR (75.31 vs 75.99), and underperforms PLUTO* on Test14-hard NR in the post-processed category (77.79 vs 80.08), which somewhat undercuts the 'significantly improves... state-of-the-art performance' framing in the abstract.",
+        "Reward function details are deferred entirely to the appendix (not included here), making it difficult to fully assess the completeness, potential reward hacking risks, or sensitivity of the rule-based reward design.",
+        "The 'reactive' evaluation relies on a relatively simple IDM policy for surrounding agents, which may not capture the full complexity of real multi-agent interactions; improvements under this simplified reactivity may not fully generalize to real-world deployment.",
+        "No analysis of computational overhead (training time, rollout cost) introduced by the RL fine-tuning stage relative to pure imitation learning baselines, which is relevant for practical adoption.",
+        "Limited discussion of failure modes or scenarios where RL fine-tuning could over-optimize rule-based rewards at the expense of naturalness or unmodeled safety aspects (reward hacking is a known risk in RLHF-style pipelines but not discussed).",
+        "No reported variance across random seeds/training runs, making it hard to judge whether reported gains (e.g., +2-6 points) are statistically robust versus noise in closed-loop stochastic simulation.",
+        "The comfort metric slightly decreases after fine-tuning (-0.16) with only a brief comment, leaving open whether this reflects a genuine trade-off the reward design should address."
+      ]
     }
   },
   "v3": {
@@ -62,6 +103,27 @@
         "Reward design (multiplicative safety indicators + weighted soft costs) closely follows the existing nuPlan/PDM closed-loop scoring formulation, so part of the 'principle alignment' contribution is largely reusing an existing metric as a training signal rather than a novel reward formulation.",
         "No reported variance across multiple training seeds/runs, so it is unclear how robust the reported gains (some of which are modest, e.g., ~1-3 points in several ablation rows) are to training stochasticity, especially given the small model size (~5M params) and relatively small 100K fine-tuning scenario set.",
         "The claim that VD-GRPO 'ensures safety-critical objectives remain dominant throughout training' is somewhat overstated relative to evidence — the unsafe-group ratio only drops from 6.7% to 4.7%, a meaningful but not dramatic improvement, and collision metric gains are moderate (+3.45) rather than transformative."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Clear and well-motivated identification of a genuine limitation of standard GRPO when applied to multi-objective, safety-critical planning: group-wise normalization erases cross-group reward scale differences, causing rare but catastrophic safety-violation groups to be diluted relative to abundant safe groups. This is supported by both intuitive argument and empirical evidence (Figure 4 advantage distributions, Figure 5 unsafe-group ratio during training).",
+        "VD-GRPO is a simple, easily implementable fix (centering + fixed scaling instead of normalization) that is well ablated, with clear gains in collision avoidance and other safety metrics without harming secondary objectives (Table 2).",
+        "The two-stage decoupling of behavior learning (pretraining on expert data) from principle alignment (RL fine-tuning with rule-based rewards) is a sensible and well-motivated adaptation of the LLM pretrain+RLHF paradigm to trajectory planning, avoiding costly/biased preference data used in prior works like Gen-Drive and TrajHF.",
+        "The dual-model rollout design (trainable ego planner + frozen reactive world model) is a practical and well-justified solution to the reactive-simulation problem, and is properly ablated against GT replay and increased model capacity, isolating the source of gains.",
+        "Strong empirical results on nuPlan, achieving SOTA or near-SOTA performance, with particularly large improvements in the more realistic reactive setting across all three splits.",
+        "Extensive and thoughtful ablations, including reward component ablation, group size, KL weight, fixed scaling constant sensitivity, and pass@k analysis, which lend good support to design choices and reproducibility.",
+        "Compelling qualitative case studies (e.g., Figure 2, Figure 3) clearly illustrating how the method corrects undesirable expert-inherited behaviors such as speeding, off-road driving, and near-collisions."
+      ],
+      "weaknesses": [
+        "VD-GRPO introduces a new hard-coded hyperparameter, the fixed scaling constant c, whose stability is only demonstrated within a specific tested range (10^-4 to 10^-1); it is unclear how sensitive or transferable this constant is across different reward scales, datasets, or tasks beyond nuPlan.",
+        "The theoretical justification for why group normalization suppresses safety signals is largely empirical/illustrative (based on observed advantage distributions) rather than a rigorous formal analysis, leaving some open questions about generality of the phenomenon across other multi-objective RL settings.",
+        "In the non-reactive setting and without post-processing, Plan-R1 slightly underperforms Diffusion Planner and PLUTO on some metrics (e.g., Val14 NR-CLS 88.98 vs 89.87, Test14-hard NR-CLS 77.45 vs 80.08 for PLUTO*), which is not deeply discussed or analyzed.",
+        "The model capacity used in experiments is quite small (~10M parameters for the dual model), and it is unclear whether the identified GRPO limitation and VD-GRPO benefits would hold at larger model scales typical of more recent planning or driving foundation models.",
+        "Reward term weights (e.g., w=2 for comfort, w=5 for TTC) appear manually chosen without a systematic sensitivity study or justification, which could affect the generality/robustness of the rule-based reward design.",
+        "Evaluation is limited to the nuPlan closed-loop simulation benchmark; there is no real-world or cross-dataset validation of the safety and feasibility claims.",
+        "The dual-model rollout depends on the frozen pretrained model accurately predicting realistic agent reactions; no direct analysis of the reactive world model's own prediction quality or failure modes is provided, which could affect trust in the RL fine-tuning signal."
       ]
     }
   }

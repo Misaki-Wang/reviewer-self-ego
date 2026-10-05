@@ -17,6 +17,44 @@
         "The generality/scalability of the serialization scheme (re-encoding the full CNF plus growing KeyTrace prefix at every query) is not analyzed for larger instances, leaving open whether the approach remains tractable and beneficial as instance size and query budgets grow beyond the tested toy scale.",
         "The paper's title and framing ('Boolean Satisfiability via Imitation Learning') suggest broader scope than what is actually delivered — a focused branching-policy improvement validated only on small random and structured 3-SAT-scale benchmarks."
       ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The KeyTrace construction (collapsing backtracked search trails into the surviving decision sequence) is a clean and well-motivated idea, and the empirical diagnostics (Fig. 2/3, Table 6/7) convincingly show that propagation dominates CDCL runtime and that replaying the KeyTrace is nearly conflict-free.",
+        "The paper provides a reasonably complete and self-contained formalization of the method (trail/KeyTrace extraction rule, serialization scheme, AR factorization, online integration algorithm with fallback to VSIDS preserving completeness).",
+        "Useful engineering ablations are included (variable-permutation augmentation to mitigate overfitting, staged curriculum learning), with clear supporting evidence (Fig. 5, Tables 9-10).",
+        "The idea of applying imitation learning (rather than RL) to CDCL branching is a sensible adaptation of ideas from MILP branch-and-bound imitation learning (Gasse et al., 2019) to the SAT domain, and the writing/related-work positioning relative to SATformer and Graph-Q-SAT is clear."
+      ],
+      "weaknesses": [
+        "Experimental scale is very limited (5 to 100 variables); this is far from the scale at which CDCL branching matters in practice (industrial instances with thousands to millions of variables), so it is unclear whether the propagation/runtime gains reported would hold, or whether the approach is even computationally feasible, at realistic scale. No SAT Competition-style or industrial benchmarks are used.",
+        "The method fundamentally requires first running a full CDCL solve to extract the expert KeyTrace, which creates a chicken-and-egg bottleneck: training data can only be generated for instances that are already solvable (and were already solved) by the base solver, calling into question how this approach could generalize to genuinely hard instances where obtaining expert traces is itself the bottleneck. This limitation is not discussed or analyzed.",
+        "Baselines (SATformer, Graph-Q-SAT) are the only learned comparisons; more recent learned SAT/CDCL methods explicitly cited in related work (NeuroBack 2024, RDC-SAT 2025, NeuroSelect 2024) are omitted from experimental comparison despite being directly relevant architecturally/empirically.",
+        "The underlying CDCL solver used for all wall-clock experiments is a Python reimplementation of MiniSAT 2.2, which is almost certainly orders of magnitude slower than the original C++ MiniSAT or modern solvers (CaDiCaL, Kissat, Glucose); wall-clock curves showing tens to hundreds of seconds to solve instances with only 5-100 variables suggest the baseline itself is non-representative, undermining the practical significance of the reported wall-clock gains.",
+        "Generalization claims are overstated relative to evidence: the structured-family evaluation (Table 2) is still restricted to nv ≤ 100, so the claim of transfer 'beyond 3-SAT' is only mild extrapolation within a narrow, small-scale regime rather than evidence of scalability or robustness to harder, larger, or more diverse industrial-style formulas.",
+        "No variance/statistical significance reporting across multiple training seeds or repeated runs; single-run point estimates (MRPP, W1%) are reported throughout without confidence intervals, making it hard to assess robustness of the comparisons, especially given the small test-set sizes in some buckets (e.g., 100 instances for 61-100 and 50-variable sets).",
+        "The per-decision neural query introduces non-trivial inference overhead (as acknowledged in Section 5.4), and the budget-based fallback mechanism (3-5 calls) appears tuned specifically to the toy benchmark scale; it is unclear how this would scale or remain beneficial as problem size and the resulting CNF serialization length grow, especially given the stated O(N) per-query cost in input length."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Clear and reasonably novel idea: distilling CDCL execution traces into a compact, nearly conflict-free KeyTrace by collapsing backtracked decisions, and using it as dense behavior-cloning supervision for branching, contrasting nicely with prior RL-based (Graph-Q-SAT) or instance-level (SATformer) approaches.",
+        "The motivating analysis is solid: the paper empirically confirms that propagation dominates CDCL runtime (~89%) and shows that replaying the extracted KeyTrace reduces propagation to ~4% of the original trail, which directly justifies the design choice of targeting propagation reduction via better branching.",
+        "The architecture choice (Perceiver AR with O(N) query cost instead of O(N^2) transformer decoder) and the integration mechanism (small query budget with fallback to VSIDS, preserving completeness) are sensible engineering decisions.",
+        "Reasonably thorough ablation studies (variable permutation augmentation, curriculum learning, early- vs late-query scheduling) that are well-motivated and show consistent, interpretable trends.",
+        "Evaluation spans multiple metrics (MRPP, win rate, wall-clock) and several structured SAT families beyond the training distribution (SAT/UNSAT, k-SAT/non-k-SAT), showing some generalization without retraining.",
+        "Reproducibility materials (code, data generators, trained models) are promised, and the appendix provides substantial detail (algorithm box, dataset composition, worked KeyTrace example)."
+      ],
+      "weaknesses": [
+        "Scale of evaluation is very limited (5 to 100 variables for training/testing, with most buckets far below 100). Instances this small are typically solved by standard CDCL solvers like MiniSAT in milliseconds, making the practical significance of propagation/runtime gains on this scale questionable; it is unclear whether the approach would hold up or even be computationally feasible (full CNF is serialized into the sequence at every query) on realistic industrial-scale instances with thousands to millions of variables/clauses.",
+        "The experimental comparisons in Section 5.2-5.4 do not appear to include a native, budget-free MiniSAT/VSIDS-only wall-clock curve as a baseline in Figure 4, making it hard to assess whether the absolute overhead of model queries is actually justified by the propagation savings versus simply running the vanilla solver.",
+        "Tables report point estimates (median/average) without confidence intervals, variance, or statistical significance tests, which is important given the per-instance variability inherent in SAT solving and given the modest magnitude of some improvements (e.g., 0.80 vs 0.78 in some entries).",
+        "The inference-time cost of serializing and encoding the entire CNF formula (as DIMACS tokens) at every query is not analyzed in terms of scalability; this seems likely to become prohibitive for larger instances, which is a central limitation not discussed beyond generic 'budget constraints.'",
+        "Generalization claims are somewhat overstated given that all structured test families are also restricted to nv ≤ 100, so the central claim of transfer 'to unsatisfiable and non-k-SAT benchmarks' is only demonstrated at a toy scale and may not hold at the scale where propagation reduction would actually matter in practice.",
+        "No comparison against stronger/more modern CDCL solvers (e.g., Glucose, CaDiCaL) or more recent learned heuristics beyond Graph-Q-SAT/SATformer, and no discussion of how the approach would interact with modern restart policies, clause deletion, or phase-saving heuristics that are standard in competitive solvers.",
+        "The claim of being 'the first branching policy for CDCL based on imitation learning' is reasonable but somewhat incremental given the closely related prior work using imitation learning for branch-and-bound in MILP (Gasse et al., 2019); the conceptual novelty relative to that line of work could be discussed more explicitly."
+      ]
     }
   },
   "v2": {

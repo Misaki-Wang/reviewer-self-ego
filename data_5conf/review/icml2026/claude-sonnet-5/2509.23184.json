@@ -19,6 +19,44 @@
         "Limited mechanistic or interpretability analysis of what the continuous 'latent thought' actually represents or why it helps beyond aggregate performance metrics, making it harder to understand the source of improvement or its limits.",
         "Minor presentation issues (e.g., 'Ethinic Statement' typo, 'offical' typo, some redundant duplicate references) suggest the manuscript could benefit from another careful proofreading pass."
       ]
+    },
+    "exp3_negative": {
+      "oa": 2,
+      "strengths": [
+        "The core idea is intuitively appealing and distinct from most prior work: baking a 'latent thought' step into pretraining itself (horizontal scaling of generation steps per token) rather than only applying continuous thoughts post-hoc after a prompt (as in Coconut) or deepening the network recurrently (as in PonderLM/Looped Transformers).",
+        "The empirical scope is broad: multiple architectures (Pythia, LLaMA, GPT-2), a range of scales (410M to 2.8B), full 300B-token Pile pretraining, scaling-law curves, a wide battery of downstream tasks, instruction-tuning evaluation (MT-Bench), continual pretraining on an off-the-shelf LLaMA-3-3B checkpoint, and ablations on Jacobi iteration count, chain length, and position-embedding strategy.",
+        "The paper provides a clear taxonomy (Table 1) situating the method relative to CoT, Pause Tokens, Quiet-STaR, PonderLM, LoopedLM and Coconut, which helps clarify the conceptual contribution.",
+        "Figures explaining the inference process and the Jacobi-iteration-based parallel training scheme are clear and aid understanding of an otherwise non-trivial training procedure.",
+        "A reproducibility statement claims inclusion of source code and hyperparameters."
+      ],
+      "weaknesses": [
+        "The paper's central claim ('at identical inference cost, our model beats a model with double the parameters') is only substantiated with respect to inference FLOPs/throughput (Table 3); the large-scale pretraining comparisons that anchor the paper's main narrative (Figure 1, Table 2, Section 4.1) match models by *token count*, not by *training compute*. Because the proposed method requires multiple Jacobi iterations per training batch (randomly sampled K in {2,3,4}, each an extra forward pass over an input sequence that is also effectively lengthened by interleaving hidden states with token embeddings), the actual training FLOPs consumed by 'Ours' are several times higher than the vanilla Pythia baselines trained on the same number of tokens. This makes the headline claims of '55% fewer parameters' and '62% fewer training tokens' potentially misleading, since the comparison is not compute-matched during training. An iso-training-FLOPs ablation/control (e.g., train vanilla baselines with the same total training compute as the Jacobi-iterated model) is never reported, which would be the one experiment needed to validate the paper's central efficiency claim.",
+        "The method requires a sequential two (or more)-step generation process per real output token at inference, which cannot be parallelized across tokens; this likely increases wall-clock latency in low-batch/interactive decoding settings even if aggregate FLOPs/throughput appear matched to a larger dense model. This latency trade-off is not discussed or measured.",
+        "Interleaving latent-thought hidden states with token embeddings effectively increases sequence length during training (and potentially during Jacobi iterations), which interacts with the quadratic cost of self-attention; this additional compute/memory cost is not quantified or discussed.",
+        "Despite being described as one of the two most directly related works, Coconut is never empirically compared against the proposed method—only discussed qualitatively in Table 1 and the text.",
+        "Ablations (Jacobi iteration count, chain length of latent thoughts) are conducted only on a very small model (Pythia-70M, 30B tokens), leaving open whether these design choices (e.g., K sampled from {2,3,4}) remain optimal or even beneficial at the 1.4B–2.8B scales used for the paper's headline results.",
+        "Some individual downstream metrics (e.g., PIQA, where Ours-1.4B slightly trails Pythia-2.8B) are inconsistent with the 'consistently outperforms' framing, and such exceptions are not discussed.",
+        "The MT-Bench instruction-following results are reported without methodological detail (judge model, number of trials/seeds, variance), limiting confidence in the reported score differences.",
+        "The ethics statement is generic/boilerplate and does not engage with risks specific to this method, such as reduced interpretability/auditability of continuous latent 'thoughts' compared to discrete CoT tokens, which seems like the most relevant ethical consideration for this particular architecture."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "The core idea—using the model's own last hidden state as a continuous 'latent thought' fed back as the next input embedding before predicting each token—is simple, architecture-agnostic, and cleanly motivated by analogy to CoT test-time scaling.",
+        "The Jacobi-iteration training scheme is a sensible engineering solution to the sequential-dependency problem, and the paper empirically shows (Fig. 4) that the iteration converges quickly, supporting the approximation's validity.",
+        "Experimental breadth is substantial: large-scale 300B-token Pile pretraining on Pythia architecture compared against the official Pythia suite, generalization checks on GPT-2 and LLaMA architectures (Appendix E), continual pretraining on an off-the-shelf LLaMA-3-3B model, and instruction-tuning/MT-Bench evaluation.",
+        "Comparisons against directly relevant baselines (PonderLM, Looped Transformer, Pause Tokens) are conducted at both matched (2x) and higher (4x) inference FLOPs, and the proposed method outperforms all of them as well as an iso-FLOP doubled-parameter oracle model, which is a reasonably rigorous way to demonstrate the method is not simply benefiting from extra compute.",
+        "Ablations (number of Jacobi iterations, chain length of latent thoughts, position-embedding strategy) are included and the trends are intuitive and consistent with the main claims."
+      ],
+      "weaknesses": [
+        "The framing of 'identical inference cost' in the abstract is potentially misleading: generating a latent thought effectively doubles the forward-pass/FLOP cost per token relative to the vanilla model of the same size; the fair comparison is really an iso-FLOP comparison against a 2x-parameter model, which is stated later in the paper (Table 3) but not made clear upfront. This nuance could confuse readers about what 'cost' is being held constant.",
+        "The method doubles the effective sequence length processed per token (interleaving thoughts and tokens), which should also roughly double KV-cache memory and sequential latency at inference relative to the vanilla model of the same size—this practical deployment cost is not discussed despite FLOPs and throughput being reported.",
+        "Key ablations (Jacobi iteration count, chain-of-thought length, position embedding choice) are performed only on a tiny Pythia-70M/30B-token setup; it is unclear whether these trends (e.g., diminishing returns after 3 iterations, monotonic gains from longer thought chains) hold at the 1B+ scale where the main results are reported.",
+        "No interpretability or probing analysis is provided to clarify what the latent 'thought' actually encodes (e.g., whether it behaves like genuine intermediate reasoning vs. simply extra nonlinear computation/depth); the 'thought' terminology is evocative but not substantiated beyond performance numbers.",
+        "The core mechanism (recycling final hidden states as inputs for iterative refinement) is conceptually close to prior work (Coconut, PonderLM, Looped Transformers, Universal Transformers); the main novelty is the specific combination of per-token application during general-corpus pretraining plus the Jacobi-parallelization training trick, which is a reasonable but somewhat incremental advance over the cited baselines.",
+        "Minor presentation issues: some typos/duplicated punctuation (e.g., 'two key reasons..', 'offical'), and the ethics statement is generic boilerplate without specifics tailored to this method's risks."
+      ]
     }
   }
 }

@@ -19,6 +19,45 @@
         "The loss involves sampling a random reference vector u ~ Logistic(0,1) at each iteration, introducing stochastic noise into the loss/gradient that is not deeply analyzed for its effect on optimization stability or convergence guarantees.",
         "Significant computational overhead (up to ~250x slower forward pass at N=1,000,000) could limit practical adoption in large-scale 3D or high-resolution imaging applications, which is precisely where the method's benefits would be most valuable clinically."
       ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "The core idea—replacing pointwise data-fidelity with a distributional-calibration objective via the probability integral transform (PIT), a logit stabilization, and a Wasserstein-1 distance to the reference Logistic(0,1) distribution—is conceptually appealing and reasonably novel as a practical, differentiable, plug-in loss.",
+        "Substantial theoretical effort: proofs of the PIT/logit properties (Appendix A), formal analysis of when low DC loss implies/doesn't imply low signal error (Appendix B), and derivation of numerically stable tail approximations for Gaussian, clipped-Gaussian, and Poisson noise with full pseudocode (Appendix C, Algorithms 1-4).",
+        "Broad empirical validation across three different settings (1D deconvolution, DIP image denoising, PET reconstruction with and without TV regularization), with extensive ablations over noise level, number of measurements, and degree of over-parameterization.",
+        "Honest and nuanced discussion of limitations, including an explicit 'worst-case' analysis (Section 4.2, Eq. 7) showing DC loss does not guarantee lower error than MSE, and a dedicated appendix subsection (B.3) candidly explaining why small DC loss does not imply small error in general.",
+        "Practical considerations are well handled: discussion of discrete-noise approximations (randomized PIT), computational overhead benchmarking (Appendix G), and inclusion of code/pseudocode for reproducibility."
+      ],
+      "weaknesses": [
+        "Limited baseline breadth: the paper compares only against vanilla MSE/NLL (and MLEM for PET), but does not benchmark against other well-established overfitting-mitigation strategies such as SURE-based losses, robust/Huber losses, BM3D or plug-and-play denoising priors, ensembling, or learned/validated early-stopping criteria, making it hard to judge whether DC loss's benefits are competitive with simpler existing remedies.",
+        "The central motivating claim is undercut by the paper's own theory: Section 4.2 shows DC loss can yield up to 2x the L2 error of MSE in a worst case, and Appendix B.3 shows low DC loss does not imply low signal error in general; this tempers the 'statistically grounded, performance-enhancing' framing in the abstract.",
+        "In the flagship PET application (unregularized case, Fig. 7c), the clinically used MLEM baseline still achieves the lowest minimum NRMSE, undermining the practical advantage of DC loss in the most realistic scenario tested.",
+        "Significant computational overhead at scale (DC loss forward pass ~500ms vs ~1-2ms for NLL/MSE at N=1,000,000, per Appendix G), which could be prohibitive for large-scale imaging problems (e.g., full 3D PET/CT), and is only superficially addressed as future work.",
+        "The related-work section (6.1) is very thin (two sentences), with minimal positioning relative to the broader statistical literature on PIT-based calibration/goodness-of-fit testing (e.g., Kolmogorov-Smirnov, Anderson-Darling statistics) or relative to alternative generative/learned regularization approaches mentioned only as future work.",
+        "Experiments are largely conducted on a single phantom/image per setting without statistical testing across multiple independent trials or diverse real clinical datasets, limiting confidence in generalizability of the reported gains.",
+        "DC loss alone does not select among the manifold of data-consistent solutions (acknowledged by the authors), meaning its practical benefit is entangled with the choice of regularizer/architecture, and the paper does not systematically explore sensitivity to this choice beyond TV and DIP's implicit prior."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Conceptually novel reframing of data-fidelity in inverse problems: instead of pointwise matching, the paper evaluates whether a candidate reconstruction makes the measurements 'look like' draws from the assumed noise model collectively, via the probability integral transform (PIT) and a logit + Wasserstein-1 formulation.",
+        "Solid supporting theory: proofs of the PIT and logit-to-Logistic(0,1) transform, tail approximations for numerical stability (Gaussian, clipped Gaussian, Poisson via Poisson-Gamma duality), and a careful appendix analyzing when low DC loss does/does not imply low signal error, including an honest worst-case counterexample (Section 4.2, Appendix B).",
+        "Reasonably broad empirical validation: DIP denoising across several images and noise levels, 1D deconvolution, and PET reconstruction both unregularized and with an edge-preserving TV prior, plus ablations on over-parameterization (voxel count) and discrete-noise CDF approximation quality.",
+        "Practical, drop-in formulation that is compatible with autodiff and standard optimizers, with full pseudocode (Algorithms 1-4) and a believable narrative (matches pointwise losses far from solution, flattens near solution) supported by loss trajectory plots.",
+        "Transparent limitations section (discrete noise caveats, need for many independent measurements, computational overhead, lack of uniqueness within the DC-consistent solution manifold) and inclusion of a timing/overhead study (Appendix G).",
+        "Interesting and well-illustrated interaction with regularization (Figure 2, Figure 8): DC loss appears to reduce the tension between fidelity and prior strength, allowing much smaller regularization weights to achieve comparable or better detail preservation."
+      ],
+      "weaknesses": [
+        "Missing a crucial and directly relevant baseline: Stein's Unbiased Risk Estimate (SURE) and SURE-based losses are the classical statistically-grounded alternative to MSE/NLL that avoid noise overfitting under known noise models (especially Gaussian, as used in the DIP experiments), yet SURE is never discussed or compared against, which weakens the positioning and evidentiary strength of the main claims.",
+        "The theoretical guarantee is one-directional and weak in the relevant direction: Appendix B.3 shows explicitly that near-zero DC loss does not imply low estimation error (worst case ∥2n∥ vs ∥n∥ for MSE), so the paper's central claim of avoiding overfitting rests mainly on empirical demonstration and a qualitative 'regularization selects among the DC-consistent manifold' argument rather than a rigorous guarantee.",
+        "All experiments use synthetic noise injected into natural/simulated images (BrainWeb phantom, standard test images) rather than real acquired data (e.g., real PET scans with scatter/randoms/detector non-idealities, or real sensor noise), leaving open how well the method's known-noise-model assumption holds up under real-world model misspecification.",
+        "Non-trivial computational overhead (Appendix G): DC loss forward pass is ~500ms at N=1,000,000 vs ~1-2ms for MSE/NLL, which could be a serious bottleneck for the full-scale 3D clinical PET volumes that the paper motivates as a key target application, yet this is not tested (only 2D, up to 512x512).",
+        "The Wasserstein-1 loss as formulated requires sampling a fresh reference vector from Logistic(0,1) at every iteration, introducing stochasticity whose effect on convergence/optimization stability (beyond the shown empirical trajectories) is not analyzed theoretically.",
+        "The PET regularization study uses only one regularizer (edge-preserving TV) and one phantom, so generality of the improved fidelity-regularization trade-off claim across priors/datasets is not established.",
+        "For DIP, no comparison to a practical early-stopping baseline (e.g., methods of Wang et al. 2023, cited but not benchmarked) is provided, so it is unclear whether DC-DIP's peak PSNR gain is meaningfully better than what a good early-stopping heuristic could already achieve with standard MSE at a fraction of the compute cost."
+      ]
     }
   }
 }

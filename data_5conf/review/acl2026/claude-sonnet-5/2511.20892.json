@@ -19,6 +19,24 @@
         "The routing mechanism, while empirically shown to be accurate, is a discrete/hard selection process; there is no discussion of failure modes when routing errs (e.g., wrong-module activation on unrelated queries) beyond a coarse gating threshold, which is important for real-world deployment safety."
       ]
     },
+    "exp3_negative": {
+      "oa": 2.5,
+      "strengths": [
+        "Addresses a practically important problem: lifelong, interference-free editing of unstructured (free-form) knowledge in LLMs, going beyond the common triple-based editing setting.",
+        "The engineering is thorough: the paper supplies ablations on intervention layer, clustering threshold, routing accuracy at scale (up to 1500+ items), latency overhead, and extensive qualitative case studies comparing against several strong baselines (MEMIT, UnKE, AnyEdit, WISE, LoRA, FT-L).",
+        "The parameter/memory accounting (Table 2) and the shared-subspace clustering idea are a reasonable attempt to address the scalability bottleneck of per-edit modules, and the paper quantifies the precision/efficiency trade-off as the similarity threshold is varied.",
+        "Empirical results show RILKE avoids the catastrophic 'edit collapse' that other parametric methods exhibit after hundreds to a thousand sequential edits, supported by a dedicated case study (App. A.1, A.8)."
+      ],
+      "weaknesses": [
+        "The core design (per-edit/per-cluster adapter selected via nearest-neighbor lookup over stored representation keys) is conceptually very close to key-value/codebook lifelong-editing approaches such as GRACE (Hartvigsen et al., 2023), which is cited in Related Work but never used as an experimental baseline. Given the strong conceptual overlap, omitting this comparison undermines the paper's novelty claims and the fairness of the empirical comparison.",
+        "Because each edit (or cluster) gets its own dedicated, exactly-indexed intervention that is only applied when the incoming query's representation is nearest to that stored key, the system functions essentially as a retrieval-augmented lookup rather than an integrated model edit. This likely explains the near-perfect (1.000) BERTScore/RougeL scores throughout Table 1/5, which look more consistent with memorization via exact-match retrieval than with genuine generalized knowledge updating; the paper does not interrogate or discuss this possibility.",
+        "'Property 1' and 'Property 2' (paraphrases are closer in representation space than random pairs; similar inputs produce correlated learned ReFT subspaces) are largely expected consequences of using a smooth, pretrained semantic embedding space and of training a near-identity-like low-rank map; framing them as novel discovered 'geometric properties' overstates their originality and is not rigorously distinguished from well-known embedding-space regularities (linear representation hypothesis, already cited).",
+        "The utility-preservation claim relies only on MMLU accuracy; there is no systematic locality/hard-negative evaluation testing whether semantically close-but-distinct queries incorrectly trigger an unrelated edit module (false-positive routing), which is the central risk introduced by a similarity-threshold router and is not adequately probed despite being critical to the 'preserving general utility' claim.",
+        "Memory cost still scales with the number of edits/clusters (Table 2, Table 7), so the 'scalability' claim is a matter of degree (slower linear growth via clustering) rather than a qualitative solution to the long-run lifelong-editing storage problem; this is not clearly acknowledged as a limitation.",
+        "The method is only evaluated on two mid-size open LLMs (Llama-3.1-8B, Qwen2.5-7B) and two editing datasets; there is no test of robustness to adversarial paraphrases, multi-hop reasoning over edited facts, or interaction effects between a very large number of co-active, semantically overlapping edits beyond the single clustering experiment in Section 6.",
+        "The first-order Taylor expansion used to motivate the robustness loss (Section 4.1) is not actually used in the final training objective (which instead uses Monte Carlo sampling of full perturbed forward passes), making the derivation presented as a justification somewhat disconnected from the actual implemented method."
+      ]
+    },
     "exp3_positive": {
       "oa": 3.5,
       "strengths": [
@@ -57,6 +75,26 @@
         "Scalability experiments only go up to ~1,500 knowledge items, which is modest relative to real-world lifelong editing scale claims; storage and routing behavior at substantially larger scales (tens of thousands+) remains unverified.",
         "Router robustness is validated mainly against paraphrases and random MMLU queries as negatives; there is limited stress-testing against more adversarial or ambiguous queries that are semantically related to multiple stored edits, or against queries that should trigger no edit but are lexically/semantically close to an edited one beyond the single qualitative example.",
         "Some hyperparameters (e.g., similarity threshold τsim = 0.9, cluster size bound) appear tuned specifically to this dataset/model combination without broader stress-testing of transferability to new domains or knowledge distributions."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Addresses a well-motivated and timely problem: lifelong editing of unstructured, free-form knowledge in LLMs, where prior parametric methods are known to suffer edit collapse.",
+        "The two motivating geometric properties (semantic locality and shared intervention subspaces) are explicitly stated as testable claims and supported with quantitative evidence (Fig. 1a/1b, App. A.1), giving the method design some empirical grounding rather than being purely heuristic.",
+        "Broad and fairly rigorous experimental protocol: two base LLMs (LLaMA-3.1-8B, Qwen2.5-7B), multiple baselines spanning locate-then-edit and memory-based paradigms, multiple datasets (UnKE, EditEverything, ZsRE), and sequential-edit evaluation up to 1,000-3,000 edits with MMLU utility tracking.",
+        "Extensive ablations (intervention layer, robustness radius ε, cluster similarity threshold, training/inference cost, routing accuracy vs. dataset size) that support reproducibility and help readers understand sensitivity of the method to key hyperparameters.",
+        "Clear memory-efficiency analysis (storage cost comparison, shared-subspace compression) and qualitative case studies illustrating the practically significant failure mode (edit collapse / incoherent generation) that competing methods exhibit at scale, which strengthens the practical motivation for the work.",
+        "Reasonably detailed appendix (algorithm pseudocode for clustering, training configs) aiding reproducibility, even though no code release is mentioned."
+      ],
+      "weaknesses": [
+        "The near-perfect scores on 'original' queries (BertScore/RougeL = 1.000 at essentially all edit counts) are largely a mechanical consequence of the architecture: each training query is deterministically routed back to its own trained module whose representation key exactly matches the query, and the intervention is optimized to reproduce y given x. This is closer to a keyed memorization/lookup system than to generalizable knowledge editing, and the paper does not sufficiently discuss or control for this property; the 'Ori.' metric is not a strong test of the method's claimed representation-space expressiveness.",
+        "The core architecture (per-instance or per-cluster adapter selected via a similarity-based router) is conceptually very close to prior memory-based editors such as GRACE, differing mainly in using ReFT-style low-rank representation interventions instead of FFN/codebook adapters. The paper does not provide a controlled ablation isolating how much of the gain over GRACE stems from the representation-space parameterization versus the added robustness/consistency training and improved routing threshold, making the specific contribution of 'representation-space intervention' per se harder to disentangle from engineering improvements.",
+        "Property 2 (shared-subspace alignment) is only weakly supported quantitatively: the reported R^l-similarity range across representation-similarity bins is narrow (0.586 to 0.751), which is modest evidence for the strong claim that semantically related queries' intervention subspaces are 'highly similar.'",
+        "Routing accuracy degrades as the edited knowledge base grows (Fig. 6, dropping from ~1.0 toward ~0.90-0.95 by ~1,500 edits), and this degradation trend is not extrapolated or stress-tested at larger scales (e.g., 10k-100k edits), which undercuts the 'lifelong' and 'scalable' framing given that real-world knowledge bases are far larger than the 1,000-3,000 edits evaluated.",
+        "Several hyperparameters (e.g., τsim = 0.9) are reused for conceptually distinct purposes (routing relevance threshold vs. cluster merge threshold) without a clear justification or sensitivity analysis of this coupling, raising reproducibility/robustness concerns if the two roles require different optimal values in practice.",
+        "Storage cost still grows with the number of distinct knowledge clusters/items (bounded by smax per cluster), so despite the proposed memory savings, the method's memory footprint is not actually sublinear in knowledge size; the paper's efficiency claims should be more precisely scoped (reduced constant factor vs. true asymptotic scalability).",
+        "Some baseline results appear strikingly degenerate (e.g., AnyEdit/UnKE BertScore near 0 by T=100-1000), and while this is consistent with cited 'edit collapse' literature, the magnitude raises questions about whether baseline hyperparameters were adequately tuned for the lifelong/unstructured setting beyond default EasyEdit configurations, which could inflate the apparent margin of RILKE's superiority."
       ]
     },
     "exp3_positive": {

@@ -83,6 +83,46 @@
         "Efficiency comparisons, while favorable relative to S*, do not fully account for the added cost of generating high-resource reference implementations (especially for API-based models), which could be non-trivial in deployment settings with per-token billing.",
         "Pass@1 is computed with only n=10 samples, which, despite reported statistical significance, may still yield somewhat noisy per-language estimates on smaller benchmarks (e.g., 161 problems in MultiPL-HumanEval), and the method's benefit is inherently tied to how large the high-resource/low-resource performance gap is, limiting applicability when such gaps are small or reversed."
       ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "Extensive empirical evaluation across many model sizes/families (1.5B to DeepSeek-V3), three benchmarks, and three target languages, with numerous ablations (sampling strategy, oracle source language, clustering thresholds, token/time efficiency) that go beyond what many test-time-scaling papers report.",
+        "The uncertainty-aware routing between cheap in-language majority voting and expensive cross-lingual oracle construction is a sensible engineering idea that measurably reduces compute relative to a non-adaptive variant and relative to S*.",
+        "The paper includes a reasonably careful cross-language I/O serialization protocol and a failure analysis attributing many errors to incorrect Python references rather than mechanism failure, which is a useful diagnostic.",
+        "Training-free, model-agnostic framing is practically appealing for deployment, and results on complex-syntax languages (C++, Java) as well as Lua, Julia, and R show the approach is not narrowly tuned to one setting."
+      ],
+      "weaknesses": [
+        "The core mechanism (use a high-resource reference solution's I/O behavior as an oracle to re-rank low-resource candidates) is conceptually close to prior test-generation/selection work (CodeT, MBR-Exec, translate-and-test cross-lingual transfer, S*); the paper's main novelty is the combination with an uncertainty gate and multi-temperature sampling, which is an incremental assembly of known components rather than a fundamentally new idea.",
+        "Many of the reported gains over the strongest competing baseline (majority voting) are small, especially for larger/stronger models (e.g., Qwen-32B Lua: 81.4 vs 82.6; DeepSeek-V3 Lua MultiPL-HumanEval: 88.2 vs 88.2, a tie; C++ Qwen-32B: 85.7 vs 87.0). This undercuts the abstract's claim of 'significantly outperforms existing test-time scaling methods,' since much of the headline improvement comes from sampling/voting itself rather than the proposed cross-lingual transfer.",
+        "The method's benefit is fundamentally bounded by the quality of the high-resource (typically Python) solution pool; when Python generations are wrong, the oracle is wrong and misleads selection (confirmed in Appendix C, but only characterized for a single small model, Qwen-1.5B). This dependency is a structural limitation that is not thoroughly quantified across model scales and benchmarks.",
+        "No variance/standard deviation is reported in the main results tables despite small benchmark sizes (161 and 396 problems), which combined with Pass@1 point estimates makes many of the reported deltas of 1-3 points difficult to interpret as reliable; the statistical significance test in Appendix B.1 is limited to only four model settings and does not address multiple-comparison concerns across the many PL/benchmark/method combinations reported.",
+        "The comparison to the Ag-LiveCodeBench-X leaderboard (DeepSeek-V3 + CodeChemist reaching 50.5 vs a 43.0 'top entry') is not an apples-to-apples comparison, since the leaderboard entry's test-time compute budget and methodology are unknown/likely different, making this a potentially misleading promotional claim.",
+        "Computational overhead is substantial and inconsistent with the 'simple' framing: Table 7 shows CodeChemist uses roughly 10x more tokens than vanilla inference and requires separate high-resource reference generation, test input synthesis, AST clustering, and execution infrastructure for multiple languages — this operational complexity and cost is understated relative to the 'training-free, simple' framing in the abstract.",
+        "Potential data contamination is not discussed: HumanEval/MBPP (and their MultiPL-E translations) are widely used in pretraining corpora, so apparent 'functional knowledge transfer' from Python could partly reflect memorized Python solutions rather than genuine cross-lingual reasoning transfer, which the paper does not control for.",
+        "Key hyperparameters (δ_ext=1, δ_ast=2, temperature schedule, number of samples) appear to be tuned primarily on Qwen models and then applied uniformly across very different model families (Llama, GPT-4o-mini, DeepSeek-V3) without per-model validation, raising concerns about overfitting of the adaptive-selection thresholds to the primary experimental setup."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 4,
+      "strengths": [
+        "Addresses a clear and practically important problem: the performance gap between CodeLLMs on high-resource vs. low-resource/complex-syntax programming languages, with a training-free solution that is appealing for deployment.",
+        "The core idea—using execution-based and AST-based clustering to estimate uncertainty, and only invoking expensive cross-lingual oracle construction when needed—is a sensible and reasonably novel way to control cost while improving accuracy, and the ablation in Table 5 and Figure 3 supports its value.",
+        "Extensive empirical evaluation spanning 7 models (1.5B to DeepSeek-V3), 3 benchmarks (MultiPL-HumanEval, MultiPL-MBPP, Ag-LiveCodeBench-X), and multiple target languages (Lua, C++, Java, with additional experiments on Julia, R, and Rust), consistently showing gains over strong test-time scaling baselines (Majority Voting, LLM Judge, Self-Debugging, S*).",
+        "Thorough ablation studies covering sampling temperature strategy, source-language choice for oracle construction, number of samples/test cases, and clustering thresholds, which aids understanding of the method's design choices.",
+        "Reports statistical significance (paired t-tests across 5 seeds) and analyzes computational efficiency (tokens/time) against baselines, showing favorable trade-offs versus S*.",
+        "Additional robustness checks: compatibility with reasoning/thinking-mode models, combination with other test-time scaling methods (S*), impact on code style, and a preliminary case study on repository-level generation, which strengthen the paper's generality claims.",
+        "Honest and specific limitations section, including an explicit failure analysis (Appendix C) showing the method's effectiveness is bounded by correctness in the source high-resource language."
+      ],
+      "weaknesses": [
+        "The method's gains are fundamentally capped by the correctness of generated high-resource (e.g., Python) reference programs; when these are wrong, cross-lingual oracles are misleading, and Appendix C shows >90% conditional failure correlation—this is a structural limitation that is somewhat downplayed relative to the strength of the main claims in the abstract/intro.",
+        "No direct empirical comparison against training-based cross-lingual transfer baselines (e.g., MultiPL-T, Bridge-Code, TransCoder-ST) that are extensively discussed in Related Work, making it hard to judge how this training-free approach compares in absolute terms to the fine-tuning alternatives it positions itself against.",
+        "The serialization/normalization protocol for cross-lingual I/O comparison (Appendix A.2) appears somewhat ad hoc (manual type tagging, container unfolding, tolerance thresholds) and its robustness to more complex data types, custom objects, or languages with very different I/O semantics is not rigorously evaluated.",
+        "Pass@1 is computed with only n=10 samples, which may yield noisy single-run estimates for some comparisons, and it is not entirely clear whether all baselines (LLM Judge, Self-Debugging, S*) are given equal sampling/compute budgets for fair comparison.",
+        "Key hyperparameters (δext=1, δast=2, temperature schedule, number of test cases) are chosen somewhat heuristically; while some sensitivity analysis is provided in the appendix, it is limited mostly to one or two models and may not generalize across the full model/language matrix.",
+        "The method still requires maintaining multi-language execution sandboxes/toolchains (for both the low-resource and high-resource reference languages), which adds nontrivial engineering/infrastructure overhead not fully acknowledged as a practical limitation despite the paper's 'training-free, simple' framing.",
+        "The informal claim that DeepSeek-V3 + CodeChemist surpasses the official Ag-LiveCodeBench-X leaderboard entry is anecdotal and not controlled for differences in evaluation protocol, raising concerns about apples-to-apples comparison."
+      ]
     }
   }
 }

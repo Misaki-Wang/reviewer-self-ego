@@ -79,6 +79,43 @@
         "Model diversity is somewhat narrow (essentially Qwen-VL family plus one LLaVA-Video model); it is unclear how well the approach generalizes to other MLLM architectures or non-Qwen backbones with different attention/KV-cache implementations.",
         "The comparison with trainable sparse attention baselines (MOBA, sharpness loss) is done at a fixed 25% budget while Sparsity Forcing lands at ~26.4%, which is close enough to be fair, but a more systematic sweep of baseline budgets to match various operating points would strengthen the comparison."
       ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Addresses a practically important limitation of existing sparse-attention methods for MLLMs, which plateau around 50% token reduction; the paper pushes reduction to the 75-80% range while largely preserving accuracy.",
+        "Reformulating efficiency (token reduction ratio) and correctness as a joint, end-to-end RL reward (rather than a proxy objective like attention sharpness or a fixed architectural budget) is a reasonable and relatively clean idea, and ties training-time objective to actual inference-time behavior.",
+        "Broad empirical coverage: 13 image and video benchmarks, multiple backbone families (Qwen2-VL, Qwen2.5-VL at two sizes, LLaVA-Video), and comparisons against several relevant training-free (FastV, VisionZip, ZipVL, Minference) and post-training (MOBA, attention-sharpness regularization) baselines.",
+        "Reports concrete systems-level benefits (up to 3x memory reduction, 3.3x decoding speedup) in addition to accuracy numbers, and includes ablations on sparse-attention variants, p-range/group-size, and a hallucination/robustness check on HallusionBench."
+      ],
+      "weaknesses": [
+        "A critical ablation is missing: since inference always fixes p at the upper bound (0.975) of the training range, it is unclear how much of the gain comes from the RL/multi-budget exploration versus simply fine-tuning the ZipVL-augmented policy (e.g., with standard SFT/distillation against the reference model's outputs) at a fixed high-p operating point that matches inference. Without this baseline, the paper's central claim that RL and multi-budget rollouts are necessary (as opposed to a much simpler training recipe) is not well substantiated.",
+        "The reward design (Eq. 8-9) gates the efficiency term on whether at least one rollout in the group is correct, but the paper provides no empirical analysis of how often this indicator is active during training or how sensitive results are to this design choice, despite claiming it is crucial to avoid efficiency-biased collapse.",
+        "Method novelty is incremental: it largely combines GRPO-style group-relative RL (already standard for reasoning tasks) with an existing sparse-attention mechanism (ZipVL's top-p pruning), and the 'any sparse attention mechanism' generality claim is only tested with closely related variants (top-k, threshold, top-p) of the same underlying scheme rather than structurally different mechanisms (e.g., block-sparse MOBA/NSA-style or merging-based VisionZip-style attention).",
+        "Training uses only 8 video frames while inference is evaluated with 110-120 frames (16k-20k tokens), a substantial train-test context-length mismatch; the paper does not analyze why/whether the learned sparsity policy generalizes reliably across this large gap beyond a single scaling plot.",
+        "Reported accuracy differences between Sparsity Forcing and strong baselines like ZipVL/Full are often within 0.1-0.5 points on several benchmarks, with no reported variance, multiple seeds, or significance testing, making it hard to assess whether the improvements are reliable rather than noise.",
+        "The additional training cost of multi-budget sequential rollouts (acknowledged as a limitation) is not quantified (e.g., wall-clock/GPU-hours) relative to baselines, making it difficult to judge the practical cost-benefit trade-off of the proposed post-training procedure.",
+        "Some baseline comparisons (e.g., MOBA with a fixed block size of 256 and untuned budget, sharpness-loss regularizer) may not be fully optimized for the MLLM setting, raising fairness concerns about whether the comparison fully reflects the best achievable performance of competing approaches."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Novel formulation that reframes the efficiency-accuracy tradeoff for MLLM token sparsity as an explicit, on-policy RL objective (GRPO with multi-budget rollouts) rather than a proxy loss (attention sharpness) or a rigid architecture (MOBA/NSA), directly addressing a real mismatch between training and inference-time sparsity.",
+        "Extensive empirical evaluation across 13 image/video benchmarks and multiple backbones (Qwen2-VL, Qwen2.5-VL at two scales, LLaVA-Video), showing consistent large token-ratio reductions (e.g., ZipVL's ~80% down to ~25%) with minimal accuracy loss.",
+        "Good set of ablations: comparison of sparse-attention mechanisms (top-k, threshold, top-p) used within the framework, sensitivity to p-range and group size, and a well-justified design choice for gating the efficiency reward on group-level correctness to avoid degenerate efficiency-only optimization.",
+        "Practical, deployment-oriented evaluation including wall-clock decoding speedups (up to 3.3x) and memory savings (up to 3x) against FlashAttention-2, plus a hallucination robustness check (HallusionBench) under low budgets.",
+        "Reasonably thorough related-work positioning distinguishing the method from trainable sparse attention (MOBA, NSA) and sharpness-regularization approaches, with a clear articulation of why grouped-rollout RL is preferred over DPO-style preference pairs given the non-stationary optimal-budget target."
+      ],
+      "weaknesses": [
+        "The underlying sparse-attention mechanism (top-p pruning) is adopted wholesale from ZipVL; the paper's novelty is largely the RL training recipe layered on top of an existing sparsification method, which somewhat limits the technical contribution.",
+        "The paper acknowledges (in Limitations) that multi-budget rollouts must be executed sequentially per threshold p, which likely incurs substantial training overhead versus SFT or standard GRPO training, but no quantitative training cost/GPU-hour comparison is given against baselines, making practicality assessment difficult.",
+        "The reward design (gating the efficiency term on whether at least one rollout in the group is correct) is a reasonable heuristic but is only lightly justified/ablated; potential failure modes (e.g., when no correct rollout exists across many consecutive steps, or over-optimistic reward hacking toward specific p ranges) are not deeply analyzed.",
+        "Baselines for the 'post-training' comparison (MOBA, sharpness-loss) are adapted in a possibly non-ideal way (MOBA is originally designed to be trained from scratch), and this comparison (Table 3) is conducted on a narrower set of benchmarks (4) than the main results (13), raising some concern about cherry-picking or incomplete validation.",
+        "Generalization evidence is somewhat narrow: nearly all experiments use Qwen-family models, with only one LLaVA-Video data point; broader architecture diversity (e.g., other MLLM families or LLM-only long-context settings) would strengthen claims of general applicability.",
+        "No variance/repeated-run statistics are reported for benchmark scores, and given some deltas between methods are small (e.g., <1 point), it's hard to assess statistical significance of reported improvements.",
+        "The method fixes p=0.975 at inference regardless of training-time multi-budget exploration, which raises the question of whether the RL training's dynamic budget exploration is fully leveraged at deployment or if a simpler fixed-threshold policy could achieve similar results with less training complexity."
+      ]
     }
   }
 }

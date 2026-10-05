@@ -83,6 +83,45 @@
         "Some numerical inconsistencies across tables reduce confidence in careful bookkeeping (e.g., Table 1 lists Re-Schedule_linear AMC23=72.4/avg=47.1, while Table 3's 'k=4,d=4 default' row reports different AMC23/Minerva/avg values for what appears to be the same configuration), which should be clarified or corrected.",
         "The dynamic weighting formulation (Eqs. 9-10) and its hyperparameters (ωmin, ωmax, γ(t) choice) appear largely heuristic, and the sensitivity analysis, while present, does not offer principled guidance for selecting these values on new datasets/models."
       ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper frames RLVR training through an intuitive 'reasoning-tree editing' lens and backs this intuition with a motivating analysis (Figure 2, MCN metric in Section 6.1) showing that accuracy-based difficulty measures can be misleading for curriculum construction.",
+        "The empirical evaluation is fairly extensive: results on two base models (Qwen2.5-Math-7B, Qwen2.5-7B) across six math benchmarks, seven competitive baselines, and numerous ablations (branching factor k, depth d, token interval l, modification budget M, weighting hyperparameters, static vs dynamic r-score, variance analysis).",
+        "Additional generalization experiments to a different model family (Qwen3-4B-Base) and to code generation (LiveCodeBench) provide some evidence that the approach is not narrowly tied to one setting.",
+        "The 'easy-to-hard' ordering ablation (Table 6, Reverse Schedule) is a useful sanity check validating the curriculum direction."
+      ],
+      "weaknesses": [
+        "The core scheduling mechanism (Eqs. 9-10) is structurally identical to the pre-existing ACC-based curriculum formula (Eqs. 4-5); the only change is substituting R(q) for ACC(q). The paper's main contribution is therefore essentially a new scalar difficulty score plugged into an existing scheduling template, which is a comparatively incremental contribution relative to the strong framing/claims in the introduction.",
+        "The 'approximated reasoning tree' is constructed by a crude heuristic: branching k-ways every l=200 tokens up to depth d, rather than at semantically meaningful reasoning steps. There is no justification that this periodic token-interval branching corresponds to actual decision points in the model's reasoning, undermining the claimed structural fidelity of the tree.",
+        "Computing the tree requires k^d rollouts per query (256 generations at the default k=4, d=4), incurring up to +48.5% (and up to +170% in Fig. 5) additional training-time cost for gains of only ~3-4 points; the cost-benefit trade-off is not favorable or clearly justified, and the relationship between tree size/cost and performance gain is non-monotonic and inconsistently explained (Table 5/Fig. 5 shows 3^3 trees achieve similar gains to 4^4 at a fraction of the cost).",
+        "The optimization in Eq. 8 (selecting M non-conflicting nodes maximizing summed r-score) is underspecified: no algorithm, complexity analysis, or pseudocode is given for how this combinatorial selection is actually solved, despite being central to the proposed metric.",
+        "Despite the rhetorical emphasis on 'tree-based vs path-based' metrics, the tree itself is still built entirely from sampled rollouts (paths), making the conceptual distinction from prior accuracy/path-based methods less sharp than claimed.",
+        "Reported improvements over the strongest existing scheduling baseline (ACC_sigmoid) are modest (46.6→48.5 on one model, 41.3→44.5 on another), and no statistical significance testing beyond a single variance table (Table 8, only for one setting) is provided to support that gains are robust and not noise given the many hyperparameters tuned (k, d, l, M, ωmin, ωmax, schedule shape).",
+        "Minor issues reduce confidence in rigor: the footnote 'code available at [blank]' suggests incomplete anonymization/preparation, and Appendix C states 'maximum input length is 1024 and minimum input length is 3072,' which is internally inconsistent/likely an error.",
+        "The paper does not compare against other tree-structured RL approaches mentioned in related work (e.g., TreeRPO), leaving it unclear how the proposed r-score-based curriculum compares to methods that use tree structures more directly in the policy optimization itself rather than just for data scheduling."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Proposes an intuitively appealing reframing of RLVR data scheduling via reasoning-tree structure rather than path-based accuracy alone, with a clear motivating example (Fig. 1) and a supporting empirical study (Fig. 2, 'potential' vs 'stagnant' samples) that nicely illustrates the limitation of accuracy-based difficulty measures.",
+        "Extensive experimental evaluation: main results on six math benchmarks across two base models (Qwen2.5-Math-7B, Qwen2.5-7B), comparison against 7 relevant baselines (classical RLVR and scheduling methods), and consistent, non-trivial improvements.",
+        "Thorough ablation studies covering tree construction hyperparameters (branching factor k, depth d, token interval l), modification budget M, weighting range (ωmin/ωmax), node- vs branch-level edit definitions, static vs dynamic r-score updates, and curriculum ordering (easy-to-hard vs reverse), which strengthens confidence in the robustness of the method.",
+        "Additional generalization experiments to a different model family (Qwen3-4B-Base) and a different task domain (code generation on LiveCodeBench), as well as a variance analysis across seeds, which is good practice and increases confidence that gains are not due to noise.",
+        "The MCN (Minimum Corrective Nodes) analysis in Section 6.1 provides some independent evidence that RL training does behave like a node-editing process over the tree structure, supporting the core conceptual premise."
+      ],
+      "weaknesses": [
+        "The computational cost of constructing the reasoning tree (offline multi-branch sampling) is substantial (up to +48.5% of total training time for the default k=4,d=4 setting, and +170% for k=5,d=4), and it is unclear whether this extra offline compute budget is matched when comparing against baselines like ACC, LPPO, or Seed-GRPO; a compute-matched comparison would be needed to fairly attribute gains to the r-score itself rather than to extra inference compute spent on data characterization.",
+        "The formalization of the r-score (Eqs. 7-8) models learning as a greedy 'select best child, prune the rest' process under a node budget, which is a stylized abstraction that may not faithfully reflect gradient-based policy optimization dynamics; the connection between this idealized combinatorial objective and actual GRPO training is asserted rather than rigorously derived, and the correlational MCN experiment (Section 6.1) only loosely validates the underlying node-editing analogy.",
+        "The optimization in Eq. 8 (selecting M non-conflicting nodes maximizing the sum of per-node r-scores) is combinatorial over tree branches; the paper does not clearly specify the algorithm or computational complexity used to solve this in practice, which hurts reproducibility and clarity of the core metric computation.",
+        "The approximated reasoning tree is fairly coarse (fixed branching factor and periodic branching every l=200 tokens, limited depth 4), which may not capture fine-grained token-level branching relevant to long chain-of-thought math solutions (especially for AIME-level problems with very long reasoning traces); the fidelity-cost tradeoff of this approximation is only partially explored.",
+        "Table 7 (Fix vs Pruning ablation) shows mixed/close results (e.g., 47.1 vs 46.9 for linear mapping) that weaken the claim that the proposed node-level 'Fix' metric 'consistently' outperforms the alternative, especially given no variance information for this particular ablation.",
+        "No statistical significance testing (e.g., multiple seeds) is reported for comparisons against baselines in the main tables; variance is only reported for the proposed method itself, making it hard to assess whether the margin over strong baselines like ACC_sigmoid (0.3-1.9 points on some benchmarks) is statistically meaningful.",
+        "Some of the appendix citations (e.g., multimodal captioning, hardware/EDA papers) appear tangential to the paper's core contribution and read as citation padding rather than substantively related work, which is a minor but noticeable weakness in presentation rigor.",
+        "The reproducibility footnote for the code repository appears to be empty/broken ('Our code is available at .'), undermining the stated reproducibility claims."
+      ]
     }
   }
 }

@@ -19,6 +19,46 @@
         "The method's implementation complexity (six interacting components, calibration matrices, transposed Khatri-Rao products) may hinder reproducibility and adoption relative to simpler baselines like LoRA, despite pseudocode being provided in the appendix.",
         "The controlled experiment in Section 2.5 is a simple quadratic (Frobenius-norm) regression problem; while illustrative, it may not fully capture the dynamics of nonlinear transformer losses, so the mechanistic story motivating each building block is only directly validated in a toy setting."
       ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Identifies a genuinely underexplored source of the LoRA/full fine-tuning gap: misalignment of optimizer state (first/second moments) under the low-rank constraint, going beyond prior work that focuses only on gradient approximation.",
+        "Careful derivation of the method's building blocks (alternating updates, gradient scaling via projection, momentum/second-moment calibration via Khatri-Rao identities, projected clipping), with closed-form justification for each design choice.",
+        "Provides a theoretical guarantee that LoFT-AdamW exactly recovers full fine-tuning/AdamW in the full-rank limit, and proves exact recovery (and connection to Alternating Least Squares) for the matrix-factorization setting, supported by a clean synthetic experiment.",
+        "Broad empirical coverage: three LLaMA model scales on 8 commonsense reasoning tasks, 4 vision classification datasets (including long-tailed/medical and DomainNet), quantized LoFT (QLoFT) vs QLoRA, GPT-2/GPT-2-Large perplexity comparisons against several additional baselines (rsLoRA, AdaLoRA, LoRA-GA, LoRA+), plus ablations and memory-footprint analysis.",
+        "Removes the need to tune the LoRA scaling factor α, a practically useful simplification.",
+        "Memory overhead, although quadratic in rank for the second-moment calibration, is explicitly acknowledged and empirically shown to be modest at the small ranks used in experiments."
+      ],
+      "weaknesses": [
+        "Several baseline numbers look unstable/implausible and raise concerns about fair tuning: e.g., LoRA on LLaMA2-7B BoolQ scores 50.09 (near chance level for a binary task) while DoRA and LoFT do not show this collapse, and the rank-wise LoRA/DoRA curves in Fig. 3 are non-monotonic U-shapes that look more like failed runs than a genuine trend; this casts doubt on whether LoRA/DoRA were given comparable hyperparameter tuning effort (e.g., α=2r is fixed rather than tuned, unlike in the original LoRA/DoRA papers).",
+        "No variance/seed information is reported for the main LLM commonsense-reasoning results (Table 2) or the rank-wise comparisons, unlike the vision experiments which do report std over 3 runs; given how close some margins are, single-run numbers are not very convincing.",
+        "Wall-clock/runtime overhead of LoFT (extra projections, calibration matrices, O(r^3) and O((m+n)r^2) operations per step) is never benchmarked—only memory is discussed—leaving the practical training-time cost of the method unclear.",
+        "LoRA-Pro, explicitly discussed in related work as the most directly comparable method (closed-form gradient alignment for LoRA), is never empirically compared against in any of the main experiments, which is a significant omission given its conceptual closeness to LoFT.",
+        "The additional baselines (rsLoRA, AdaLoRA, LoRA-GA, LoRA+) are only evaluated on small-scale GPT-2/GPT-2-Large WikiText2 perplexity in the appendix, not on the headline LLaMA commonsense reasoning or vision benchmarks, making the comparison set inconsistent across experiments.",
+        "Some claims are over-stated relative to evidence, e.g. attributing LoFT outperforming full fine-tuning to 'implicit regularization' is asserted without rigorous analysis or controlled experiments isolating this effect.",
+        "The headline theoretical result (exact recovery of full fine-tuning when r=min(m,n)) is somewhat unsurprising, since at full rank the low-rank parameterization is simply a reparameterization of the full matrix; the practically relevant low-rank regime is less rigorously characterized theoretically (results there are mostly empirical).",
+        "Dense and sometimes inconsistent notation (e.g., alternating indices i/k, mixed use of W_i vs W_k) makes the method harder to verify/reproduce purely from the text; full correctness relies on the appendix algorithm box and identities that are not independently validated against a reference full fine-tuning implementation at scale."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "The paper identifies a genuinely under-explored source of the LoRA vs. full fine-tuning gap: misalignment of AdamW's first and second moment estimates under the low-rank constraint, complementing prior work that focused only on gradient approximation (e.g., LoRA-Pro, Riemannian preconditioning).",
+        "The method is derived with careful mathematical rigor: Eq. (3) clearly isolates the quadratic cross term that differentiates simultaneous LoRA updates from full fine-tuning, and each of the six 'building blocks' is motivated by a specific, well-explained discrepancy.",
+        "Solid theoretical grounding: LoFT is shown to reduce exactly to AdamW in the full-rank limit, and Lemmas 1-2 connect LoFT to alternating least squares and show exact recovery of full fine-tuning dynamics in a matrix-factorization setting.",
+        "Very extensive empirical validation spanning multiple modalities and scales: commonsense reasoning across three LLaMA generations and eight benchmarks, image classification on four diverse (including medical) datasets, a quantized variant (QLoFT) for math reasoning, and GPT-2/GPT-2-Large language modeling with numerous strong recent baselines (rsLoRA, AdaLoRA, LoRA-GA, LoRA+).",
+        "Strong and consistent gains at very low ranks (r=1,2,4), which is practically significant for resource-constrained deployment, and the method removes the need to tune the LoRA scaling factor α, simplifying the practitioner workflow.",
+        "Good ablation studies (matrix-factorization simulation and GPT-2/WikiText2) that isolate the contribution of alternating updates vs. state calibration, and a memory-footprint comparison against LoRA/DoRA."
+      ],
+      "weaknesses": [
+        "No wall-clock/training-time comparison is reported anywhere in the paper; the method introduces alternating updates (halving the effective per-step update frequency per matrix) and additional matrix products (Khatri-Rao/Kronecker calibration) whose real-world throughput cost relative to plain LoRA is never quantified, which is a significant omission given that training efficiency is the central selling point of PEFT methods.",
+        "The second-moment calibration incurs O((m+n)r^2) memory overhead, restricting practical rank to r ≤ sqrt(min(m,n)); the paper only demonstrates modest ranks (≤16) and does not empirically probe how this constraint behaves as r grows toward the regime where LoRA is typically used in practice for larger tasks.",
+        "Some reported DoRA numbers look anomalously poor and unstable (e.g., near-zero accuracy on WinoGrande at low ranks, and overall averages sometimes below LoRA even at r=16 for LLaMA-7B), raising concerns about whether the DoRA baseline was properly tuned/reproduced, which could bias the low-rank comparisons in LoFT's favor.",
+        "The ablation on GPT-2/WikiText2 shows that removing the alternating-update mechanism actually slightly improves performance over full LoFT, which somewhat undercuts the claimed necessity of a core design component and is not fully reconciled with the matrix-factorization ablation where alternation is shown to matter.",
+        "The explanation for LoFT occasionally outperforming full fine-tuning ('implicit regularization from low-rank structure') is asserted rather than rigorously investigated, weakening the strength of an otherwise notable empirical finding.",
+        "Building Block 2 (scaled gradients via (V^T V)^{-1}) is explicitly acknowledged to overlap with prior work (Zhang and Pilanci, 2024), somewhat reducing the incremental novelty of one of the six core components."
+      ]
     }
   },
   "v2": {
@@ -62,6 +102,27 @@
         "Most language-domain results (Table 2 and most appendix tables) are reported as single-run point estimates without variance/seeds, unlike the vision experiments, making it hard to assess statistical significance of the reported gains.",
         "Comparisons to closely related concurrent work (AltLoRA, LoRA-Pro) are somewhat qualitative; in some settings (e.g., GPT-2 WikiText2 perplexity) LoRA-Pro is quite competitive with LoFT, so the incremental empirical advantage over the strongest existing gradient-alignment baselines is less dramatic than the headline comparisons against plain LoRA/DoRA suggest.",
         "The claim that LoFT's implicit regularization lets it 'surpass' full fine-tuning (e.g., on DomainNet real domain, GPT-2 Large) is interesting but only lightly substantiated and somewhat speculative, resting on a small number of examples rather than a systematic study."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 8,
+      "strengths": [
+        "Identifies and formally addresses a previously underexplored source of LoRA/full-FT discrepancy: misalignment of Adam's first- and second-moment optimizer states, not just gradient approximation error, complementing prior work (LoRA-Pro, AltLoRA) that focused solely on gradients.",
+        "Strong theoretical grounding: derives the extra cross-term from simultaneous U/V updates, proves LoFT-GD with momentum exactly recovers full fine-tuning momentum under correct subspace initialization, connects rank-1 step-size LoFT to Alternating Least Squares, and shows the method provably reduces to standard AdamW in the full-rank limit.",
+        "Very extensive empirical validation spanning multiple modalities and scales: commonsense reasoning on LLaMA-7B/2-7B/3-8B/3.1-70B, image classification on ViT-Base across 4 diverse (including medical, imbalanced) datasets, math reasoning with quantized LoFT (QLoFT), GPT-2/GPT-2-Large language modeling, and HumanEval/HumanEval+ code generation.",
+        "Comprehensive ablations that isolate the contribution of each of the six building blocks (alternating updates, gradient scaling, state calibration, projected update reconstruction, clipping), including a synthetic matrix-factorization experiment that cleanly demonstrates each component's necessity.",
+        "Particularly strong and consistent gains in the extreme low-rank regime (r=1,2,4), which is practically valuable for parameter/memory-constrained deployment, and the method eliminates the need to tune the LoRA scaling hyperparameter α.",
+        "Thorough efficiency analysis (memory footprint, training latency) with a pragmatic 'LoFT (simple)' variant that removes the costly second-moment calibration for near-LoRA memory/latency overhead with minimal accuracy loss.",
+        "Extension of the method to the Muon optimizer with a custom efficient low-rank Newton-Schulz algorithm, showing generality of the core idea beyond AdamW.",
+        "Broad baseline coverage (LoRA, DoRA, rsLoRA, AdaLoRA, LoRA-Pro, LoRA-GA, LoRA+, VPT, ViT-Adapter, Full FT) and honest discussion of concurrent work (AltLoRA) with a clear articulation of differences."
+      ],
+      "weaknesses": [
+        "LoFT incurs non-trivial memory (up to ~25.65%) and, more notably, training latency overhead (up to 3.23x LoRA) in its full form; while the 'simple' variant mitigates this, the paper's headline results mostly use the full (costlier) version.",
+        "Some baseline results, especially DoRA and LoRA at very low ranks (e.g., near-zero WinoGrande scores, large fluctuations across ranks in Table 2/16), look unstable/possibly under-tuned, since learning rates appear fixed across ranks; this raises fairness concerns about whether the dramatic (+25-40%) gains over baselines at low rank partly reflect baseline hyperparameter mismatch rather than purely the proposed method's advantage.",
+        "Main LLM and math-reasoning results report single-run numbers without variance/seeds (only the vision experiments report mean±std over 3 runs), making it harder to assess statistical significance of the reported gains, some of which are small (e.g., LLaMA3-8B results).",
+        "The additional O((m+n)r^2) memory cost for second-moment cross-terms is only practical for small r (paper suggests r ≤ sqrt(min(m,n))), so scalability to larger-rank regimes where full FT gains might still matter is less clear.",
+        "Some strong claims (e.g., 'first low-rank adaptation method that provably recovers full fine-tuning' and 'first to establish transformation invariance under full AdamW dynamics') are stated confidently despite concurrent, closely related work (AltLoRA) sharing the core alternating-update idea, and the novelty framing could be tempered further given this overlap.",
+        "The extensive experimental section, while thorough, is spread very densely across a long appendix, making it harder for readers to verify how consistently hyperparameters (especially learning rate) were tuned per method/rank combination across all these many settings."
       ]
     }
   }

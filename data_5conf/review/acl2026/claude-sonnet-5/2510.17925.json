@@ -18,6 +18,46 @@
         "The method is not compared against other recent repository-context methods discussed in Related Work (e.g., RepoFuse, R2C2-Coder, Repoformer, hierarchical context pruning), leaving open whether the reported gains would hold against stronger baselines than sparse/dense retrieval and RepoMap alone.",
         "Reproducibility is constrained by reliance on proprietary agent backbones (Claude 3.7 Sonnet) for both the method and the benchmark construction pipeline, and it is unclear whether the constructed benchmark and code will be publicly released."
       ]
+    },
+    "exp3_negative": {
+      "oa": 2.5,
+      "strengths": [
+        "Identifies a genuine and underappreciated methodological problem in repository-level code completion benchmarks (future context leakage via call sites, imports, __all__ declarations, etc.), supported by a concrete, well-illustrated example (Figure 2, Appendix C).",
+        "The indexing-time vs. inference-time reframing of retrieval is a sensible and practically motivated contribution for latency-sensitive inline completion, and the paper clearly articulates why this shift matters for user experience.",
+        "Reasonably thorough ablations: component ablation (retriever vs. forecaster vs. combined), composition sweep over number of prediction blocks, combination with traditional retrievers, and an inference-time (leaky) ablation that explicitly quantifies the inflation caused by leakage.",
+        "Results are reported for two different completion-model backbones (Qwen3-8B, Qwen3-30B-A3B) and, in the appendix, two different agent backbones (Claude 3.7 Sonnet and Qwen3-Coder), showing qualitatively consistent trends, which supports some robustness of the core finding.",
+        "Honest limitations section acknowledging the synthetic nature of the benchmark and lack of validation against real repository histories."
+      ],
+      "weaknesses": [
+        "The benchmark construction and validation pipeline is circular and lacks independent verification: an LLM agent removes the target function, and a second LLM agent (same family) scores whether removal is adequate, with no human annotation, inter-annotator agreement, or spot-check accuracy numbers reported. This is a serious soundness gap given that the entire main-result benchmark depends on this pipeline being correct.",
+        "The function-removal agent introduces synthetic replacement code (e.g., new helper functions like `_process_palette`) into caller files. This could leave agent-characteristic artifacts that are more easily recognized/exploited by the same family of LLM-based retriever/forecaster agents than by classical IR baselines (BM25/dense/RepoMap), constituting a potential confound that is not discussed or controlled for.",
+        "No statistical significance testing or variance reporting across runs/seeds; pass@1 numbers (16-28%) are close together in absolute terms for several methods, and single-run LLM-agent pipelines are known to be stochastic, making point-estimate comparisons fragile.",
+        "Reproducibility is weakened by heavy reliance on a closed, API-only model (Claude 3.7 Sonnet) as the primary agent backbone, with no released code, prompts, or benchmark data mentioned; the Qwen3-Coder appendix results also show one clearly anomalous latency outlier (39.99s) with no explanation.",
+        "The abstract and results emphasize relative gains (48-58%) prominently, while absolute gains are modest (9-11 points) on an already low-performing task (16-28% pass@1); this framing risks overstating practical impact.",
+        "Benchmark scope is narrow: 980 problems from 11 repositories, apparently Python-only based on all shown examples (seaborn), limiting claims of generality to other languages/ecosystems, which is only partially acknowledged in Limitations.",
+        "Details on how pass@1 is computed (test harness, environment setup) are not given in the main text, hindering reproducibility of the core evaluation metric.",
+        "The oracle agent's upper bound (40%) is far above SpecAgent (27-28%), suggesting substantial headroom remains unexplained/unaddressed, and the gap's sources (e.g., retrieval depth vs. agent reasoning limits) are not analyzed."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3.5,
+      "strengths": [
+        "Identifies and clearly illustrates a real, under-addressed problem in repository-level code completion benchmarks: future-context leakage via caller sites, imports, and __all__ declarations, with a concrete worked example (Fig. 2, Appendix C) that convincingly shows AST-based cleaning is insufficient.",
+        "The indexing-time vs. inference-time reframing of retrieval-augmented code completion is a practical and conceptually clean contribution for the latency-sensitive inline-completion setting, directly targeting a real product constraint (sub-second completion latency).",
+        "Reasonably comprehensive empirical evaluation: two completion models (Qwen3-8B, Qwen3-30B-A3B), multiple classical baselines (BM25, RepoMap, two dense retrievers, combinations), an oracle upper bound, and several informative ablations (component ablation, context composition, combined-retrieval, inference- vs indexing-time settings), plus a robustness check with an alternative agent backbone (Qwen3-Coder) in the appendix.",
+        "Reports both accuracy and latency/pre-processing time together, directly supporting the paper's central claim that speculative indexing-time computation can improve quality without inference-time cost.",
+        "Good transparency: the appendix shows actual retrieved/predicted context blocks per method, letting readers qualitatively judge context quality and failure cases (e.g., SpecAgent and Forecaster mispredicting the wrong target function in Appendix E)."
+      ],
+      "weaknesses": [
+        "The headline comparison in Table 1 pits SpecAgent (evaluated on a leakage-free, synthetically modified indexing-time repository state) against classical retrieval baselines (evaluated on the original, leaky inference-time REPOCOD state). This conflates two variables — retrieval algorithm vs. evaluation setting — and no ablation runs BM25/dense retrieval on the same cleaned indexing-time state to isolate how much of the gain is due to the agentic approach itself versus the different (and arguably harder for baselines too) evaluation condition.",
+        "The synthetic benchmark's correctness/realism is validated only by another LLM agent (\"function removal scoring agent\") with no independent human verification or automated functional testing (e.g., running the repository's test suite before/after editing) to confirm that semantic/functional integrity is preserved, which is a reproducibility and soundness concern for a benchmark contribution.",
+        "The function removal agent sometimes introduces new synthetic helper functions (e.g., _process_palette) not present in the original codebase, which may alter the code's realism/stylistic distribution in ways that could subtly help or hurt downstream retrieval methods, and this potential artifact is not analyzed.",
+        "Table 5 (Appendix A) reports an apparently anomalous latency value (39.99s for Qwen3-8B + SpecAgent using Qwen3-Coder as agent) that is inconsistent with all neighboring rows (~4-6s) and is not discussed, raising concern about the care taken in results reporting.",
+        "The core novel contribution (speculative/forecaster component vs. pure retrieval) yields a more modest improvement (Retriever Agent → SpecAgent) than the headline framing suggests, since much of the reported \"48-58% relative gain over best baselines\" reflects the general advantage of LLM agentic exploration over classical BM25/dense/RepoMap retrieval rather than the speculative-forecasting idea specifically.",
+        "No variance/multiple-run reporting given the inherent stochasticity of LLM agents and LLM-based completion; single-run pass@1 numbers are reported without confidence intervals, limiting certainty about the significance of small differences (e.g., component ablation, composition ablation).",
+        "Generalization is limited: all main experiments use a single high-capability proprietary backbone (Claude 3.7 Sonnet) for the agent, one dataset (REPOCOD, Python, 11 repos), and function-level completion only; multilingual, smaller-model, and other-task generalization is acknowledged but untested.",
+        "Indexing-time cost (~45-50s per target function via a costly proprietary model) could be substantial at repository scale, and the paper does not analyze how well this amortizes in realistic, frequently-changing repositories beyond a brief mention in limitations."
+      ]
     }
   },
   "v2": {

@@ -45,6 +45,27 @@
         "No statistical significance testing or multiple-seed reporting is provided, despite the relatively small differences between many methods in the tables.",
         "The additional ~10-20% training/inference overhead introduced by sequential revision is non-trivial and is somewhat downplayed relative to the modest accuracy/efficiency trade-offs demonstrated."
       ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Addresses a well-motivated and practically important problem: overthinking/inefficiency in large reasoning models, with a clear analysis of why prior offline (static, slow data generation) and online (naive length-reward) RL approaches are suboptimal.",
+        "The combination of a lightweight trained reflection model for online sequential revision (enabling both parallel sampling and sequential revision) with a reflection-density-based reward is a reasonably novel and practical mechanism for balancing efficiency and reflective reasoning capability.",
+        "Extensive empirical evaluation across six math benchmarks of varying difficulty, multiple token budgets (8k/16k), and several baselines (SFT, RPO, GRPO, GRPO+length reward), together with thorough ablations on reward components and quantile hyperparameters.",
+        "Insightful analysis of reflection density/frequency before and after training, convincingly showing the method preserves reflection on harder problems while reducing it on easier ones, which supports the paper's core narrative.",
+        "Reasonable efficiency-performance trade-off demonstrated (35% average token reduction with no performance loss, more on easier datasets), and comparisons showing the approach outperforms naive parallel-sampling scaling (Gen8) and fixed truncation baselines.",
+        "Detailed appendix with prompts, case studies, and additional overthinking analysis after training, aiding reproducibility and understanding of the method's mechanics."
+      ],
+      "weaknesses": [
+        "Evaluation is limited to a single base model (DeepSeek-R1-Distill-Qwen-7B) and a single domain (math reasoning); no evidence the method generalizes to other model scales, model families, or non-math reasoning tasks (e.g., code, commonsense, science QA), which the authors acknowledge as a limitation.",
+        "The reflection reward relies on a heuristic surface-level proxy (density of keywords like 'wait', 'alternatively', 'check', 'but') for genuine reflective quality, which may not robustly capture meaningful reflection versus superficial keyword insertion, and could be susceptible to reward hacking with more training or different models/languages.",
+        "The reflection-model training and detection pipeline itself depends on a large LLM (Qwen2.5-32B-Instruct) for labeling training data, and the paper concedes this detection is imperfect and cannot guarantee full removal of overthinking, introducing noise into the supervision signal for the reflection model.",
+        "The added computational/training cost of sequential revision (roughly 10-50% more than pure parallel sampling depending on the comparison) partially offsets the claimed efficiency benefits, and the extra ~40 hours of training time (120 vs 80 hours) is a nontrivial practical cost that is somewhat downplayed.",
+        "Key hyperparameters (e.g., 0.2 quantile for the reflection reward, truncation strength thresholds) appear to require dataset-specific tuning, raising questions about robustness and ease of transfer to new datasets/domains.",
+        "Training uses LoRA rather than full fine-tuning, which could affect the strength and generality of conclusions relative to full-parameter RL training used in most competing baselines cited (e.g., Kimi K1.5, L1, DAST).",
+        "Results across datasets in Table 2/3 show somewhat inconsistent trends (e.g., accuracy sometimes increasing after truncation, TR reduction magnitude varying considerably by dataset), making it harder to extract a single clean, generalizable takeaway about the mechanism's reliability.",
+        "Comparisons are relatively limited to length-reward-based online RL and simple offline SFT/RPO baselines; other more sophisticated efficiency-oriented RL methods discussed in related work (e.g., O1-Pruner, DAST, GRPO-LEAD) are not directly benchmarked against, making relative positioning in the literature less conclusive."
+      ]
     }
   },
   "v2": {
@@ -66,6 +87,47 @@
         "Reflection model is trained/used with a maximum generation budget of 8k tokens for SFT data construction, and its accuracy in identifying the correct truncation point is not perfect (only ~74% of questions yield at least one correct sample within 8k), raising concerns about revision quality and potential noise injected into RL training.",
         "The core method is a combination of largely existing ideas (parallel+sequential test-time scaling à la Snell et al., length rewards à la Kimi K1.5/GRPO-LEAD, keyword-based reflection signals), so novelty is more in the specific combination and engineering than in fundamentally new techniques.",
         "Main results are restricted to math reasoning benchmarks with distilled 7B models; broader domain and model-scale generalization is relegated to the appendix with less thorough baseline coverage, leaving open questions about scalability to larger/native (non-distilled) reasoning models."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Addresses a practically important and well-motivated problem (overthinking in LRMs) with a reasonably novel combination of an online-generated reflection/revision model and a reflection-aware reward, rather than relying solely on static offline data or naive length rewards.",
+        "Extensive empirical evaluation across five math benchmarks of varying difficulty, two token budgets, multiple competitive baselines (DAST, Light-R1, ShorterBetter, L1-style methods, NoThink, RPO, SFT), and several ablations (quantile choice, length-reward refinement, fixed-truncation vs learned truncation, Gen8 scaling comparison).",
+        "Good supporting analysis: training dynamics plots, reflection-density tracking before/after training, and a case study illustrating how parallel sampling + sequential revision produce training signal equivalent to a partial overthinking penalty.",
+        "Reasonable reproducibility effort: prompts, hyperparameters, training/inference costs, and additional generalization experiments (smaller 1.5B model, general-QA domains: MMLU, MMLU-Pro, SuperGPQA) are included in the appendix, partially addressing the single-domain/single-model-size limitation.",
+        "Honest reporting of limitations, including the finding that combining the reflection model and reflection reward yields a trade-off rather than a synergistic gain, and that the method incurs ~10% extra inference-time cost versus parallel-only scaling."
+      ],
+      "weaknesses": [
+        "The core 'reflection' signal is operationalized as a shallow lexical heuristic (density of words like 'wait', 'but', 'alternatively', 'check'), which is a crude and gameable proxy for genuine reflective reasoning quality; the paper does not verify that higher keyword density corresponds to more useful/correct reflection versus superficial filler.",
+        "The overthinking-detection pipeline itself depends on a 32B LLM's binary judgments of 'does this chunk contain the correct answer,' which is a noisy, unverified annotation process (no human validation of label quality is reported), yet all downstream training data and evaluation of the reflection model is built on top of these labels.",
+        "The combination of the two proposed components (reflection model + reflection reward) does not produce a synergistic improvement — the paper explicitly states it is 'a trade-off... rather than a synergistic gain,' which weakens the central narrative that the two contributions complement each other.",
+        "Efficiency gains are inconsistent across settings: under the 8k budget the combined method's improvement is explicitly described as 'limited,' undercutting the headline 36% efficiency claim, which appears to be most pronounced only in specific (16k) settings.",
+        "No statistical significance testing or variance reporting is provided despite several evaluation sets being small (e.g., AIME24 has only 30 problems), making many reported accuracy deltas (often <1-2 points) difficult to interpret as meaningful.",
+        "Added system complexity (separate reflection-model SFT stage, two-stage online revision, multiple interacting reward terms with hand-tuned quantile hyperparameters) increases implementation burden and 20-50% extra training time/cost relative to simpler length-reward-only baselines, for gains that are often modest.",
+        "Primary evaluation remains concentrated on math reasoning; while general-QA and smaller-model results are added in the appendix, the main paper's claims and analysis (e.g., Figure 1, Table 1-4, Figure 3) are all math-centric, leaving generalization claims comparatively under-explored in the main text.",
+        "Novelty is somewhat incremental relative to the cited prior art (GRPO-LEAD, Kimi K1.5 length reward, DAST, RPO revision-based training) — the contribution is largely a recombination/refinement of existing length-reward and revision-based ideas with an added keyword-based reward, rather than a fundamentally new mechanism."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Addresses a well-motivated and practically important problem: naive length-reward RL for efficient reasoning causes catastrophic loss of reflection ability, which the paper clearly demonstrates with a concrete qualitative example (Figure 1) and quantitative reflection-density measurements (Table 4).",
+        "The proposed two-pronged solution (a distilled small reflection model for online sequential revision + a reflection-density-based reward) is well-motivated and each component is separately ablated, showing they target complementary axes (efficiency vs. accuracy).",
+        "Extensive empirical evaluation across five math benchmarks of increasing difficulty, two token budgets (8k/16k), and comparisons against a wide range of strong, recently published baselines (DAST, Light-R1, ShorterBetter, Arora & Zanette, NoThink, RPO, SFT), with the method achieving competitive or best accuracy-efficiency trade-offs in most settings.",
+        "Useful theoretical insight connecting the sequential-revision training scheme to a partial-advantage decomposition, clarifying why and how the method penalizes overthinking tokens specifically rather than the whole response.",
+        "Strong reproducibility and transparency: detailed training configurations, prompts, hyperparameter ablations (reflection reward quantile, length reward refinement), and cost/latency analysis (Appendix B.5) are provided.",
+        "Additional generalization experiments (Appendix B.3) extending results to a smaller 1.5B model and to general QA domains (MMLU, MMLU-Pro, SuperGPQA) meaningfully strengthen the claim that the approach is not narrowly restricted to math with a single model scale.",
+        "Thoughtful analysis of training dynamics (Figure 3) and per-difficulty reflection frequency changes, providing a coherent narrative for why the method works (preserving reflection on hard problems, reducing it on easy ones)."
+      ],
+      "weaknesses": [
+        "The reflection reward relies on a small, hand-picked list of English reflective keywords (\"wait\", \"alternatively\", \"check\", \"but\"), which is a fairly coarse and potentially gameable proxy for genuine reflective reasoning, and its generalization to other languages, reasoning styles, or domains beyond math/QA is untested.",
+        "The paper explicitly acknowledges that combining the reflection model and reflection reward does not yield synergistic gains but rather a trade-off, somewhat undercutting the motivation for presenting them as a unified \"REA-RL\" framework rather than two independent techniques.",
+        "Improvements under the tighter 8k token budget are limited (as the authors themselves note), suggesting the method's benefits may be budget-dependent and less impactful in more constrained inference settings.",
+        "The overthinking/reflection detection pipeline depends on a 32B teacher LLM's judgment of \"answer restatement,\" which is itself a heuristic that may not transfer cleanly to tasks without a clearly extractable final answer (e.g., open-ended reasoning, code, or proof-based tasks).",
+        "The pipeline is fairly complex, involving multiple auxiliary models (32B detector, distilled 7B reflection model) and multi-stage training (SFT for the reflection model, then online RL), adding non-trivial engineering overhead and an estimated 10-50% extra training/inference cost, which may hinder adoption despite the reported efficiency gains.",
+        "Baseline comparisons partly rely on publicly released checkpoints trained under different data/setups rather than fully controlled re-implementations, which could confound some head-to-head comparisons in Table 2/3.",
+        "The reflection-density quantile threshold (D0.2) is a dataset-dependent hyperparameter that must be recalibrated per training distribution, and its robustness across substantially different reasoning distributions is only lightly explored."
       ]
     }
   }

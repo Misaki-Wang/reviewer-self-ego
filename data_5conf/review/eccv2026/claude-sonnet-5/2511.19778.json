@@ -19,6 +19,44 @@
         "No human preference/user study is included despite generation quality being central to the claims; reliance solely on automated metrics (FID, CLIP-IQA, MUSIQ, VBench, DOVER) which can be imperfect proxies for perceptual quality, especially for subtle boundary artifacts the paper aims to fix.",
         "The saliency-based region selection pipeline (DeepGazeIIE plus tiny VAE decoding) adds complexity and extra hyperparameters (thresholds, band widths) whose sensitivity is not thoroughly analyzed beyond a single ablation table for npad."
       ]
+    },
+    "exp3_negative": {
+      "oa": 4,
+      "strengths": [
+        "Clear and well-motivated problem identification: the paper carefully diagnoses why naive linear RoPE interpolation fails in mixed-resolution DiT denoising, backed by both empirical probing (head-wise phase-response curves across axes/timesteps) and an analytic kernel decomposition (Eq. 6) that gives a mechanistic account of the failure as cross-rate phase aliasing.",
+        "The proposed fix (CRPA) is simple, training-free, architecture-agnostic, and conceptually elegant ('one attention, one scale'), making it easy to adopt as a drop-in replacement for existing RoPE interpolation schemes in pretrained DiTs.",
+        "Fairly comprehensive experimental validation spanning both image (FLUX) and video (Wan2.1) DiTs, multiple RoPE-interpolation baselines (PI, NTK, YaRN, PI+NTK), and mixed-resolution-specific baselines (RALU, Bottleneck Sampling, ToCa), including two- and three-stage schedules and varying acceleration ratios.",
+        "Thorough ablations and supplementary analyses: boundary-band size ablation, per-component latency/overhead breakdown, compatibility with orthogonal caching-based accelerators (TeaCache, MagCache), quality-vs-cost curves, and detailed per-metric VBench tables.",
+        "Reasonably good reproducibility support: explicit formulas for CRPA, NTK, and YaRN baselines, implementation hyperparameters (step counts, token ratios, resizer architectures), and prompt lists are provided in the supplementary material.",
+        "Honest limitations section acknowledging instability at ultra-high resolutions due to lack of training data at those resolutions."
+      ],
+      "weaknesses": [
+        "The core technical contribution (re-indexing K/V RoPE positions onto the query's stride before the dot product) is a relatively simple re-parameterization; while well-justified and effective in this specific mixed-resolution DiT setting, the conceptual novelty relative to the broader RoPE-interpolation literature is incremental, and the Fourier/kernel decomposition in Eq. 6 is a fairly standard trigonometric expansion rather than a new theoretical result.",
+        "The overall pipeline is advertised as 'training-free', but the full practical system also relies on a trained Boundary Expand-and-Replace resizer network (~6-25M parameters) and a pretrained saliency detector; this partially undercuts the 'training-free, drop-in' framing used throughout the abstract/intro, and the paper does not clearly delineate which quantitative gains come from CRPA alone versus the auxiliary learned components.",
+        "Quantitative improvements over the strongest, most relevant baselines (RALU, YaRN) are sometimes modest (e.g., DOVER/VBench deltas in Table 1, or FID/CLIP-IQA differences at 4x acceleration in Table 7), raising questions about how much of the benefit is attributable to the method versus to schedule/hyperparameter choices that may not be equally tuned across baselines.",
+        "No human/user study is reported for perceptual quality, which is particularly important for diffusion image/video generation claims of 'high-fidelity' output, given that automated metrics like FID/CLIP-IQA/VBench can be unreliable or insensitive to the specific artifact types (blur, boundary seams) the paper targets.",
+        "Quantitative evaluation of the more ambitious 'ultra-high-resolution region' use case (Fig. 13, Wan2.1-14B) is entirely qualitative; no metrics are reported for this setting despite it being highlighted as a key practical capability.",
+        "Evaluation relies on a limited set of base models (Wan2.1-1.3B and FLUX.1-dev); it is unclear how well the method's gains hold for other architectures/RoPE axis conventions, larger-scale video DiTs, or irregular/non-rectangular saliency masks, which are only demonstrated qualitatively rather than quantitatively.",
+        "No mention of code or checkpoint release, which combined with several implementation-level details (exact handling of non-integer scale ratios, interaction with optimized attention kernels) being only partially specified, leaves some reproducibility risk."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 5,
+      "strengths": [
+        "Identifies a concrete, previously underexplored failure mode: linear RoPE interpolation breaks attention in mixed-resolution DiT denoising due to cross-rate phase mismatch, and provides an intuitive plus quantitative diagnosis (head-wise kappa(Delta) probing, RoPE-dominance score analysis, and a kernel decomposition of the attention score in Eq. 6) that convincingly explains why the failure occurs.",
+        "The proposed fix (CRPA) is elegant, training-free, architecture-agnostic, and easy to reason about: simply re-expressing key/value RoPE indices on the query's stride restores a single consistent sampling rate for relative offsets, directly targeting the diagnosed root cause rather than a symptomatic patch.",
+        "Broad and fairly rigorous experimental validation across both image (FLUX.1-dev) and video (Wan2.1) DiTs, with multiple relevant baselines (PI-LR, PI-HR, NTK, PI+NTK, YaRN, RALU, Bottleneck Sampling, ToCa) and consistent improvements in both quantitative metrics (VBench, DOVER, FID, CLIP-IQA, MUSIQ, CLIP) and qualitative comparisons.",
+        "Thorough supplementary analysis: overhead breakdown per component, ablation of the Boundary Expand-and-Replace band size, compatibility with orthogonal acceleration methods (TeaCache, MagCache), matched-compute-budget comparisons, and an extension to extreme multi-scale (480p+1920p) generation, which strengthens reproducibility and practical relevance.",
+        "Clear writing and figures that effectively communicate the phase-aliasing intuition (toy 1D examples, Fig. 2-4) before generalizing to the full method."
+      ],
+      "weaknesses": [
+        "The core technical contribution—re-indexing keys/values onto the query's coordinate frame before applying RoPE—is a relatively simple remapping; the paper's strength lies more in the diagnostic analysis than in algorithmic novelty, and this framing/contribution type should be made more explicit.",
+        "The pipeline still involves multiple hand-tuned hyperparameters (coarse/mixed/fine schedule, high-resolution token ratio, boundary band size npad, saliency thresholding) whose sensitivity is only partially explored (e.g., only two npad settings ablated), raising reproducibility and generalization concerns across different models/resolutions.",
+        "Evaluation relies on two backbone families (FLUX.1-dev and Wan2.1-1.3B); the larger Wan2.1-14B model is only shown in a small qualitative appendix figure without quantitative metrics, leaving open how well CRPA scales to larger, more capable DiTs.",
+        "No comparison to training-based or fine-tuned approaches to multi-resolution/variable-resolution attention (e.g., NaViT-style or resolution-robust positional schemes), which would help contextualize how much headroom remains between this training-free fix and a fully retrained solution.",
+        "The saliency-guided region selection (DeepGazeIIE) introduces an external, potentially domain-mismatched dependency for identifying 'important' regions in generated content, and its own failure modes (e.g., missing salient regions) are not analyzed.",
+        "As acknowledged by the authors, FID is noted to behave erratically under low step counts, and other perceptual metrics (CLIP-IQA, MUSIQ) are automated proxies without any human/user study to validate perceived quality improvements, which slightly weakens the strength of the quantitative claims."
+      ]
     }
   },
   "v2": {
@@ -38,6 +76,41 @@
         "Evaluation relies entirely on automatic metrics (DOVER, VBench, ImageReward, CLIP-IQA, MUSIQ, CLIP score) without any human/user study, which is a notable gap given the paper's central claims about visual fidelity and artifact reduction that are often best judged perceptually.",
         "The saliency-guided region-selection use case, while shown to be robust to detector choice, is a fairly simple heuristic (off-the-shelf saliency models or fixed center masks); no analysis of failure modes when saliency prediction misallocates the HR budget in more complex/cluttered scenes beyond the single failure-case figure.",
         "Experiments are restricted to two moderately sized backbones (FLUX.1-dev, Wan2.1-1.3B, with only limited qualitative results on Wan2.1-14B); it remains unclear how well the phase-alignment analysis and fix transfer to substantially larger or architecturally different DiTs (e.g., different RoPE parameterizations, non-axis-separable schemes)."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Clear and well-supported diagnosis of why RoPE position interpolation fails for mixed-resolution attention in DiTs, combining empirical measurement of the κ(Δ) attention-score curve (Fig. 3) with a clean theoretical derivation (Eq. 6, fully derived in supplementary Sec. B) showing attention score as a content-weighted mixture of sinusoids in relative distance.",
+        "The proposed Phase-Aligned Mixed-Resolution Attention (PMA) follows directly and intuitively from the diagnosis: it is training-free, architecture-agnostic, and requires only a local re-indexing of key positions into the query's native scale, which is an elegant and lightweight fix.",
+        "Extensive empirical validation across two different DiT backbones (Wan2.1-1.3B for video, FLUX.1-dev for image), a wide set of baselines (linear position interpolation to LR/HR grids, NTK-aware scaling, YaRN, RALU, Bottleneck Sampling), and acceleration methods (TeaCache, MagCache, UniPC, DPM++, ToMe, ToCa, DMD/step-distillation), with consistent improvements in quality metrics at comparable or better speed.",
+        "Thorough ablation studies (Boundary Expand-and-Replace, HR-key downsampling strategy, saliency-model robustness/overhead, overlapping boundary band size) and extensions to 3-/4-way multi-resolution and ultra-high-resolution (2048x2048, up to 3840p video) generation combined with orthogonal resolution-extrapolation techniques (CineScale, DyPE), indicating the idea generalizes beyond the core two-resolution setting.",
+        "Good reproducibility: detailed implementation/hyperparameter settings, prompts used for qualitative figures, and an honest limitations/failure-case discussion (Fig. 17) are provided in the appendix."
+      ],
+      "weaknesses": [
+        "The core technical novelty is somewhat narrow: PMA is essentially a careful, locally-consistent re-parameterization of RoPE offsets, conceptually related to existing position-interpolation/rescaling techniques (NTK, YaRN) but applied to a new (mixed-resolution) setting; the paper would benefit from more explicit discussion of what is fundamentally new in the mechanism itself versus the application context.",
+        "Despite being framed as enabling 'efficient' mixed-resolution generation, the method still falls noticeably short of full high-resolution (HR) quality in several tables (e.g., Table 1 Overall 75.54 vs. HR 79.19), and this accuracy-efficiency trade-off is not always clearly foregrounded against the stated quality claims.",
+        "The full pipeline relies on an off-the-shelf saliency predictor (DeepGaze) to decide which regions get high resolution; this is a reasonable and modular design choice, but it introduces a dependency whose failure modes (e.g., missing semantically important but visually non-salient regions) are not analyzed in depth, beyond showing robustness across saliency-model choices.",
+        "The Boundary Expand-and-Replace (BER) module requires training small latent up/downsampler networks on external datasets (Pexels, Aesthetic-Train-V2), which slightly muddies the 'training-free' framing of the overall approach, even though the central PMA contribution itself is training-free; this distinction could be stated more precisely in the contributions.",
+        "Evaluation relies entirely on automated metrics (DOVER, VBench, ImageReward, CLIP-IQA, MUSIQ, CLIP score) without a human preference study, which is a notable gap given that the central motivation (blur, artifacts, texture-transition quality near boundaries) is inherently a perceptual phenomenon that automated metrics may not fully capture.",
+        "Results are reported as single-run point estimates without variance/confidence intervals, and generalization is only demonstrated on two specific DiT backbones (Wan2.1-1.3B and FLUX.1-dev), leaving open how well the phase-alignment analysis transfers to other RoPE variants or architectures (e.g., different axial/3D RoPE parameterizations) not tested here."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Clear and well-motivated theoretical analysis: the paper identifies and formally derives (Eq. 6, with full derivation in Appendix B) why RoPE induces a sinusoidal, position-dependent scale bias on attention scores, and empirically validates this via the κ(Δ) measurement across multiple axes, timesteps, and both image (FLUX) and video (Wan) DiTs. This diagnosis is convincing and non-trivial.",
+        "The proposed fix (Phase-Aligned Mixed-Resolution Attention) is simple, training-free, and directly motivated by the theoretical analysis—expressing every query-key pair's relative offset in a single consistent positional scale rather than forcing all tokens into one global coordinate grid. This is an elegant, low-overhead solution (Table 16 shows PMA adds only 0.3% latency overhead).",
+        "Extensive and convincing experimental validation: comparisons against RoPE interpolation baselines (PI-LR/HR, NTK, YaRN) and numerous diffusion acceleration methods (TeaCache, MagCache, UniPC, DPM++, ToMe, RALU, Bottleneck Sampling, ToCa) on both image (FLUX) and video (Wan) models, with consistent, often substantial improvements in DOVER/VBench/ImageReward/MUSIQ/CLIP-IQA metrics at comparable or better speed.",
+        "Strong ablations and robustness checks: BER module ablation, boundary padding size ablation, saliency model robustness (Table 6), HR-key downsampling ablation, overhead breakdown, and multi-resolution (3- and 4-way mixed resolution) extensions, plus integration with orthogonal acceleration methods (feature caching, step-distillation) and higher-resolution (2K) extensions with DyPE/CineScale — demonstrating broad applicability and thorough validation of design choices.",
+        "Good transparency: extensive supplementary material with additional qualitative results, prompts used, failure case discussion, and detailed derivations, supporting reproducibility."
+      ],
+      "weaknesses": [
+        "The saliency-guided pipeline (coarse-to-fine with off-the-shelf saliency detection) that determines HR/LR regions is somewhat orthogonal to the core PMA contribution but is tightly coupled in the experiments; it would help to more clearly separate how much of the reported gains stem from PMA itself vs. the overall pipeline design (region selection, BER, multi-stage schedule).",
+        "The method is evaluated primarily on two backbones (Wan2.1-1.3B and FLUX.1-dev); while a 14B Wan variant appears briefly in the appendix (Fig. 14), broader validation across more diverse DiT architectures (e.g., different RoPE parameterizations, non-Wan/FLUX video/image models) would strengthen claims of generality.",
+        "The boundary refinement module (BER) requires training a small latent up/downsampler network per model, which is a departure from the fully training-free claim of the core PMA mechanism; the paper could better delineate which components are training-free versus not.",
+        "Failure cases (Fig. 17) show that complex LR-HR texture transitions still produce visible artifacts, and the paper acknowledges this is only partially alleviated by better saliency/segmentation, leaving a real limitation not fully resolved.",
+        "The closest related work (RALU) is discussed but head-to-head comparison is somewhat indirect (compared mainly under acceleration settings in Tables 3/4/Figs 8/9 rather than as a direct ablation isolating the RoPE-handling difference)."
       ]
     }
   }

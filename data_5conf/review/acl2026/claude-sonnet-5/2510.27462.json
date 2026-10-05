@@ -20,6 +20,28 @@
         "The theoretical justification rests on a single-step, first-order (Taylor) approximation of SGD descent, but the method is applied repeatedly across many training steps in a non-convex, multi-step SFT regime; the paper does not discuss how well this local approximation holds over the course of training or interacts with optimizers like AdamW that are actually used."
       ]
     },
+    "exp3_negative": {
+      "oa": 2.5,
+      "strengths": [
+        "The paper tackles a genuinely interesting and underexplored question: how to allocate supervision non-uniformly across tokens in long-CoT SFT.",
+        "The derivation of the Gibbs-form optimal reweighting distribution under a KL-constrained first-order descent objective is clean and interpretable, connecting token reweighting to an explicit optimization criterion rather than ad hoc heuristics (entropy, confidence, etc.).",
+        "The one-backward probing trick for estimating token-wise gradient utility is a reasonably efficient idea that avoids the naive O(|y|) backward-pass cost.",
+        "The experimental protocol spans multiple model families/sizes (LLaMA-3.1-8B, Qwen3-4B/8B/32B) and both math and code domains, with in-domain and out-of-domain benchmarks, RL-initialization experiments, and a difficulty-stratified analysis (GSM8K vs MATH500), which shows an attempt at broad empirical coverage.",
+        "Appendices provide fairly detailed hyperparameters, prompts, and dataset curation steps, which aids reproducibility of the described pipeline."
+      ],
+      "weaknesses": [
+        "The central claim that \"VCORE consistently outperforms\" is not well supported by the paper's own Table 1: at Qwen3-8B, VCORE ties or loses to DFT on both ID and OOD averages, and at Qwen3-32B, DFT substantially outperforms VCORE on OOD (49.57 vs 45.93) and is comparable on ID. The pattern of gains being large for weaker/smaller models but disappearing or reversing at larger scale undercuts the paper's scaling narrative and the \"consistent improvement\" framing used throughout.",
+        "No statistical significance testing, multiple seeds, or variance estimates are reported anywhere, despite several benchmarks being extremely small (AIME has only 60 problems), making single-run point differences of a few percentage points largely uninterpretable as real effects versus noise.",
+        "The per-model hyperparameters (ϵ, τ·ϵ in Table 5) appear to have been selected via a grid search evaluated directly against the same test benchmarks reported in Table 1, raising a serious concern about test-set hyperparameter tuning / selection bias that inflates the apparent advantage of VCORE over baselines, which were not tuned with comparable care.",
+        "The theoretical derivation is built around a single vanilla SGD step, yet all actual training uses AdamW with LoRA; the paper does not address how the first-order Taylor/closed-form Gibbs argument, or the variance-matching rationale for α, transfers to an adaptive, low-rank, multi-step optimization regime actually used in experiments.",
+        "The variance-control scaling coefficient α is derived under a strong simplifying assumption (token utilities uncorrelated with constant variance) that is unlikely to hold in practice, and the paper provides no empirical validation that the derived α actually achieves the intended variance-matching property during real training; it is justified mainly through a single qualitative loss-curve illustration (Figure 3) rather than systematic evidence.",
+        "The one-backward utility estimator relies on a finite-difference approximation of a directional derivative using the gradient from a single independent mini-batch B' as a proxy for the full population gradient ∇θL(θ); this introduces sampling variance that is neither quantified nor ablated (e.g., sensitivity to |B'| or to the number of probing perturbations), weakening confidence in the fidelity of the estimated token utilities.",
+        "Comparisons are limited to only two reweighting baselines (DFT, iw-SFT) and a naive random-dropout baseline, despite the paper itself citing several other entropy- or influence-based token-selection methods in Section 4.1/Related Work that are never empirically compared against.",
+        "Fine-tuning uses LoRA (rank 8 for Qwen3) rather than full fine-tuning for the main SFT experiments, which is a lower-capacity regime that may exaggerate the effect of token reweighting relative to standard full-parameter long-CoT SFT practice used by most cited production systems.",
+        "The RL-initialization experiment (Table 2) is conducted only on two benchmarks for two small models, with gains for VCORE after RL often marginal (e.g., ~1 point), which is a thin evidentiary basis for the claimed broader benefit of VCORE as an RL initializer.",
+        "The abstract/intro rhetoric (\"substantial performance gains,\" \"consistently outperforms\") overstates the actual mixed empirical pattern revealed in the full results table, which could mislead readers who do not scrutinize per-model breakdowns."
+      ]
+    },
     "exp3_positive": {
       "oa": 3.5,
       "strengths": [
@@ -62,6 +84,26 @@
         "The RL follow-up experiments supporting the 'better initialization for RL' claim are based on only 200 GRPO steps on a subset of BigMath for two model sizes, which is a fairly limited basis for the claim of a 'stronger foundation' for RL.",
         "Code is not yet released and several data curation/filtering details (e.g., exact CoT correctness filtering, dataset composition) could affect exact reproducibility of the reported numbers.",
         "The theoretical contribution (Theorem 1) is a direct consequence of standard exponential-family/KL-constrained optimization results and does not by itself constitute strong novelty; the paper's main value is empirical/algorithmic rather than theoretical."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2.5,
+      "strengths": [
+        "The paper provides a clean, principled optimization-theoretic derivation (constrained maximization of first-order loss descent under a KL constraint) that yields an interpretable closed-form Gibbs weighting over tokens, distinguishing it conceptually from purely heuristic or RL-motivated reweighting baselines (DFT, iw-SFT).",
+        "The one-backward probing trick for estimating token-level gradient utility is a reasonably elegant and potentially practical engineering contribution that avoids per-token backward passes.",
+        "The variance-control scaling mechanism is a sensible and empirically validated addition (Fig. 3) that addresses a real instability problem introduced by sharply peaked reweighting.",
+        "The experimental scope is broad: multiple model families and sizes (Qwen3-4B/8B/32B, LLaMA-3.1-8B, plus extra weak models), in-domain and out-of-domain benchmarks, ablations on hyperparameters/dataset size/optimizer choice, and downstream RL fine-tuning experiments.",
+        "Appendices include a theoretical optimality result, an extension of the SGD-based derivation to Adam/AdamW, and a computational overhead analysis, showing an attempt at thoroughness and transparency."
+      ],
+      "weaknesses": [
+        "The central empirical claim (\"VCORE achieves the strongest overall average performance\") is driven by averaging across models/benchmarks and does not hold consistently at the per-model level: e.g., on Qwen3-8B, DFT outperforms VCORE on OOD average (37.29 vs 35.26) and is comparable or better on several individual benchmarks, and Table 4 shows VCORE starts from a lower pre-RL baseline than DFT on Qwen3-8B. The paper's narrative downplays these inconsistencies.",
+        "No variance/repeated-run statistics are reported anywhere (main table, ablations, or RL experiments) despite many benchmarks being very small (AIME n=60, OJBench n=232) and differences between methods often being only 1-3 points, which is within plausible noise for a single greedy-decoded run. This substantially weakens confidence in the comparative conclusions.",
+        "The LLaMA-3.1-8B-Instruct results are highly erratic: nearly all SFT-based methods (including plain SFT) catastrophically degrade OOD performance relative to the untuned Original model (e.g., RBench 21.76→~4-8, OOD average 20.18→6-9.6), suggesting an unstable or poorly tuned training recipe (LoRA rank 64, lr 2e-4, 1000 steps) rather than a property of the reweighting method itself; this calls into question whether the comparisons on this model are informative.",
+        "Training uses LoRA fine-tuning only, with very small datasets (3.2k examples/one epoch for Qwen models) and short training budgets, which is a narrow and somewhat atypical regime for \"long CoT SFT\"; it is unclear whether the reported gains would persist under full-parameter fine-tuning or larger/more diverse datasets, which is explicitly acknowledged as unexplored in the Limitations section.",
+        "Appendix G reveals that VCORE incurs substantial wall-clock overhead (44%-215% depending on parallelization and probing batch size) despite the main text describing the method as requiring \"only one backward pass\" and being \"lightweight\"/\"efficient\"; this characterization in the abstract/method section is misleading relative to the actual measured cost.",
+        "Theorem 1 (strict improvement over uniform weighting) is a standard exponential-tilting/KL-projection result and does not provide substantive new theoretical insight beyond restating that any non-degenerate Gibbs tilting improves a linearized first-order objective; it does not establish anything about actual training dynamics beyond a single greedy step, which the paper itself must later patch with ad hoc variance control.",
+        "The comparison with RL methods (GRPO, DAPo) in Appendix F is a questionable framing, since VCORE is an SFT-stage method; presenting it as outperforming full RL training conflates different compute budgets and training paradigms and overstates the contribution's significance.",
+        "The paper trains with LoRA and compares to baselines under identical but narrow hyperparameters tuned per-method via small grid search (Appendix C.2); given the sensitivity reasoning methods often show to hyperparameters, it's unclear whether baseline methods were tuned as thoroughly as VCORE, raising concerns about fairness of comparison."
       ]
     },
     "exp3_positive": {

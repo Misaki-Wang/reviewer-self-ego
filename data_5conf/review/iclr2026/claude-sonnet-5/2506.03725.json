@@ -37,6 +37,28 @@
         "The technical contribution is largely a re-application of existing parameter-free optimization machinery (Carmon-Hinder bisection, D-Adaptation/Prodigy-style local Lipschitz estimation) to the sign-SGD update rule, rather than a fundamentally new algorithmic idea, limiting novelty.",
         "Only a single (130M-parameter) LLM scale and single benchmark image classification task are tested; given the paper's framing around large-scale LLM training as the primary motivation, this is a fairly narrow and small-scale empirical validation."
       ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Addresses a practically important and underexplored problem: parameter-free stepsize selection for Sign-SGD, which is relevant both as a memory-efficient single-node optimizer and as a distributed gradient-compression method.",
+        "Presents two complementary algorithmic approaches (SOS Sign-SGD with a bisection-based search, and ALIAS Sign-SGD with per-iteration adaptive stepsize) that are theoretically grounded and target the O(sqrt(Delta*L_inf/T)) optimal rate for Sign-SGD without requiring knowledge of Delta* or L_inf.",
+        "Provides a fairly comprehensive theoretical treatment across multiple regimes: exact gradients, stochastic gradients, distributed (majority-vote) learning, and a momentum/Adam-style variant, with convergence proofs supplied in detail in the appendix.",
+        "The stochastic analysis explicitly handles the correlation structure between iterates and stochastic realizations (using independent next-iteration stochastic gradients) to enable smoothness constant estimation, which the authors claim goes beyond related parameter-free works (Defazio & Mishchenko, Mishkin et al.) that lack such stochastic guarantees.",
+        "Empirical evaluation is reasonably broad: toy convex/non-convex LIBSVM problems, LLaMA-130M pretraining on C4, and Swin Transformer fine-tuning on Tiny ImageNet, with comparisons against tuned Sign-SGD, Steepest Descent, Normalized SGD, AdamW, and Prodigy.",
+        "The ALIAS Adam-version method shows competitive or superior empirical performance to tuned AdamW and Prodigy without needing learning-rate tuning, which is a practically appealing result, and memory/time consumption comparisons are provided.",
+        "The paper is transparent about limitations of its own methods (e.g., SOS Sign-SGD being impractical for large-scale training due to repeated launches; convex convergence being no better than non-convex due to Sign-SGD's near-stationary-point-only guarantee)."
+      ],
+      "weaknesses": [
+        "The theoretical convergence rates carry additional dependence on ratios like L_infinity/L^0_infinity and involve double-logarithmic or logarithmic overhead factors that are asymptotically negligible in theory but whose practical impact is only partially validated (limited robustness check in Table 4 with a narrow ad hoc set of L_infinity values).",
+        "SOS Sign-SGD, despite being a main theoretical contribution, is explicitly acknowledged as impractical and not evaluated on large-scale tasks (LLM/ViT), reducing the paper's contribution largely to the ALIAS variant for practical purposes.",
+        "Experimental comparisons, while broad, rely on a single model size (130M LLaMA) and single seeds/runs apparently without reported variance or multiple seeds, making it hard to assess the statistical significance of the reported improvements, several of which are numerically small (e.g., validation loss differences of ~0.01-0.05).",
+        "The paper reports that Steepest Descent and Normalized SGD underperform Sign-SGD-based methods and thus excludes deeper analysis of these baselines, which somewhat narrows the comparison scope and could be seen as selectively focusing on favorable baselines.",
+        "The convex theoretical results for Sign-SGD are noted by the authors themselves to not be better than the non-convex near-stationary-point rate, which tempers the significance of the convex analysis contribution.",
+        "Implementation efficiency concerns: ALIAS Adam version and Prodigy show notably higher per-iteration time in Table 3, attributed to suboptimal implementation, but this caveats the practical wall-clock benefits of the proposed adaptive method.",
+        "The distributed learning theoretical results (Appendix D.3, E.3) are relegated entirely to the appendix with no corresponding distributed empirical validation in the main experiments, leaving that contribution largely unverified empirically.",
+        "Related work coverage of parameter-free methods is thorough, but the delta improvement over closest baselines (Prodigy, Mishkin et al.) in the exact/stochastic non-distributed setting could be more sharply delineated with direct head-to-head ablations isolating which specific design choice drives improvements."
+      ]
     }
   },
   "v4": {
@@ -60,6 +82,51 @@
         "The memory-efficient variant's practical norm approximation deviates from the exact value by roughly 50% on average, which, while acknowledged, raises questions about the robustness/tightness of the underlying approximation strategy.",
         "The distributed setting is only analyzed theoretically; no distributed multi-node experiments are provided to validate the compression/majority-vote claims empirically.",
         "Manuscript is very dense with heavy notation and many algorithm variants/options (Option I/II, memory-efficient, momentum, SOS), which could hurt clarity and reproducibility for readers not deeply familiar with the parameter-free optimization literature."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 5,
+      "strengths": [
+        "Addresses a genuinely useful practical problem: removing the need for stepsize grid search in SIGN-SGD, which matters for both single-node memory-efficient training and distributed gradient compression.",
+        "Comprehensive theoretical treatment spanning deterministic, stochastic, and distributed settings, plus a memory-efficient variant and a momentum (Adam-style) extension, with convergence guarantees provided for each.",
+        "Extensive empirical validation across multiple modalities and scales: LLaMA 130M/350M pre-training, Swin Transformer fine-tuning on Tiny ImageNet, and two AlgoPerf benchmark tasks (MRI reconstruction, molecular property prediction).",
+        "Strong set of baselines including tuned SIGN-SGD, AdamW, Prodigy, DoG, D-Adaptation, and MoMo, providing a reasonably thorough competitive landscape.",
+        "Useful diagnostic ablations: robustness to initial d^0, robustness to an injected L∞ offset, performance under varying batch size/noise, and memory/runtime profiling of all methods.",
+        "The paper acknowledges its own theoretical limitations honestly (e.g., that the SOS SIGN-SGD near-optimal-rate algorithm is practically unusable, and that the convex analysis doesn't dominate the non-convex case), which is a positive for scientific transparency.",
+        "Code is reported as open-sourced, aiding reproducibility."
+      ],
+      "weaknesses": [
+        "Empirical gains over simply tuned SIGN-SGD/AdamW with a cosine schedule are frequently marginal (e.g., Table 1: ALIAS 3.017 vs. tuned cosine SIGN-SGD 2.992; Table 3: memory-efficient ALIAS 3.015/3.019 vs. tuned cosine SIGN-SGD 2.980), undermining the core selling point that the parameter-free method is competitive with tuned baselines.",
+        "No error bars, variance, or multiple seeds are reported anywhere in the 100+ comparisons across tables, making it impossible to assess whether reported differences (often in the third decimal place) are statistically meaningful.",
+        "The convexity assumption used throughout the theory is a substantial mismatch with the non-convex deep learning applications being targeted; while the paper gestures at convex-like regions in DNN losses, no real justification or empirical connection to the convex rates is given beyond generic citations.",
+        "The headline convergence rate in Theorem 3.5 is not the optimal rate achievable with known L∞ (Remark 3.6) — it carries an extra (L∞/L⁰∞)² multiplicative penalty, and the only evidence that this penalty is benign in practice is a single small ablation (Table 5).",
+        "The stochastic convergence result (Theorem 3.9) only guarantees convergence to a noise-dependent neighborhood, matching vanilla SIGN-SGD; the fix (increasing mini-batches, Remark 3.10) is explicitly not used in the real experiments, so the practical algorithm's stochastic guarantees are weaker than advertised.",
+        "The claimed memory-efficient variant's practical approximation of the ℓ∞-norm differs from the exact value by ~50% on average (Figure 3), and the theoretical guarantees (Theorem 3.12) are only proven for the non-approximated λ^t, leaving the deployed method without formal backing.",
+        "The \"parameter-free\" claim is partially undercut by the momentum/Adam variant (Algorithm 3), which still requires a fixed external stepsize γ^t (set to 1e-3 across all experiments) — this is a hand-tuned global constant, which is a meaningful departure from a true parameter-free method, though not extensively discussed as a limitation.",
+        "The near-optimal SOS SIGN-SGD algorithm (Appendix B), which is the only method achieving the theoretically tight rate, is explicitly stated by the authors to be impractical for large-scale training, reducing the practical value of the main theoretical contribution.",
+        "The paper is extremely dense (60 pages with proofs), combining many loosely related contributions (two different parameter-free SIGN-SGD variants, momentum version, memory-efficient version, distributed version, SOS alternative), which dilutes the focus and makes it hard to identify the single strongest contribution.",
+        "The reported \"~1.5× end-to-end speedup\" claim in the abstract is not clearly substantiated with a detailed, controlled wall-clock comparison methodology in the main text (only a coarse per-iteration time table in the appendix, and ALIAS Adam version is actually slower per-iteration than AdamW)."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Addresses a well-motivated and practical problem: eliminating costly manual stepsize tuning for SIGN-SGD, which is increasingly popular for both memory-efficient single-node training and gradient compression in distributed settings.",
+        "Comprehensive theoretical treatment spanning exact-gradient, stochastic, and distributed settings, with convergence guarantees under convexity and (L1/L∞) smoothness assumptions, plus a memory-efficient variant that only stores gradient signs.",
+        "The paper also derives a near-optimal (though impractical) SOS SIGN-SGD variant via a bisection search, providing useful theoretical context/upper bound for what parameter-free SIGN-SGD can achieve, and clearly discusses the gap between it and the practical ALIAS algorithm.",
+        "Strong and broad empirical validation: LLaMA pre-training at two scales (130M, 350M), Swin Transformer fine-tuning on Tiny ImageNet, and additional AlgoPerf tasks (MRI reconstruction, molecular property prediction), compared against tuned SIGN-SGD/AdamW baselines as well as several other parameter-free optimizers (DoG, D-Adaptation, MoMo, Prodigy).",
+        "Thoughtful ablations: robustness of ALIAS to the L∞ term and to initial d0, dependence on gradient noise/batch size, and empirical comparison of the exact vs. approximated l∞-norm used in the memory-efficient variant.",
+        "The Adam-style momentum extension (Algorithm 3) is shown to be competitive with or better than tuned AdamW/Prodigy across benchmarks, which is a nice practical contribution beyond the pure-theory sign-descent variants.",
+        "Code is stated to be open-sourced, aiding reproducibility, and detailed experimental configurations are provided in the appendix."
+      ],
+      "weaknesses": [
+        "The core ALIAS convergence rate (Theorem 3.5) is not optimal and includes an extra (L∞/L0∞)^2 factor relative to Remark 3.6, which itself is not parameter-free; the truly optimal method (SOS SIGN-SGD) is explicitly acknowledged by the authors to be impractical for large-scale training, weakening the theory-practice link for the headline algorithm.",
+        "The Adam-style momentum variant (Algorithm 3), which produces the strongest empirical results, has no accompanying convergence analysis — it is validated purely empirically, leaving a gap between the theoretical contributions and the best-performing practical method.",
+        "Reported per-iteration time consumption for ALIAS Adam version (0.03s) and the base ALIAS (0.01s) is 3–8x higher than SIGN-SGD (0.004s) and higher than AdamW (0.007s); although attributed to suboptimal implementation, this undercuts the abstract's claim of an unqualified '1.5x end-to-end speedup' and that claim is not clearly substantiated with a dedicated wall-clock comparison in the main text.",
+        "Empirical improvements over strong baselines (tuned AdamW, tuned SIGN-SGD with cosine schedule, Prodigy) are often quite small in absolute terms (e.g., validation loss 2.918 vs 2.929 for AdamW), making it hard to assess practical significance beyond eliminating tuning.",
+        "The convexity assumption used throughout the theory is a substantial simplification relative to the non-convex LLM/ViT training settings studied empirically; while the authors offer justification (regions of convexity-like behavior), the disconnect between theory (convex, exact/stochastic gradient oracle assumptions) and the highly non-convex, momentum-based practical algorithm is notable.",
+        "The memory-efficient variant requires an additional, stronger L1-smoothness assumption and its stepsize relies on a heuristic approximation of the ∞-norm difference that is shown empirically to deviate by ~50% from the true value (always as an overestimate), leading to a systematic bias and slightly degraded performance.",
+        "The paper is very dense with heavy notation and many algorithmic variants (ALIAS, ALIAS Adam, memory-efficient ALIAS, SOS SIGN-SGD, SOS Steepest Descent), which, combined with the large appendix, makes the overall contribution somewhat harder to parse and evaluate holistically."
       ]
     }
   }

@@ -1,25 +1,5 @@
 {
   "v1": {
-    "exp3_positive": {
-      "oa": 6,
-      "strengths": [
-        "Novel and elegant core insight: instead of relying on auxiliary mechanisms to identify task-specific important/irrelevant tokens (as in PASTA, AutoPASTA, ACT), the paper shows that simply tuning attention to the semantically-empty initial/BOS token is sufficient to improve performance, removing the need for potentially biased token identification.",
-        "Reasonably clear theoretical motivation (Section 2.1) showing how rescaling the initial token's attention weight sharpens or flattens the relative attention distribution over other tokens while preserving their relative ranking, connecting this to the known 'value-state drain' and attention-sink literature.",
-        "Broad empirical validation: 15 datasets spanning text classification, multiple-choice QA, and multi-turn conversation, across 4 different LLM families/attention implementations (eager, SDPA, Flash), showing fairly consistent and sometimes large improvements over vanilla and over the AutoPASTA/ACT baselines.",
-        "Systematic ablations characterizing where the effect is strongest: layer-wise analysis (shallow/middle vs. deep), head-wise heterogeneity (up- vs. down-effective heads), and head-subset-size sensitivity, which lend interpretability to the method design choices.",
-        "Extensive robustness/appendix experiments (resource-constrained variants, long-context robustness, few-shot settings, decoding strategies, quantization, prompt perturbations) that go beyond what is typical for a purely empirical paper and strengthen practical credibility of the method.",
-        "The method is simple to implement (single scalar scaling + renormalization, or key/query scaling for optimized attention kernels) and computationally cheap relative to fine-tuning or LLM-guided token identification approaches."
-      ],
-      "weaknesses": [
-        "The 'training-free' and 'task-agnostic' framing is somewhat overstated: ZeroTuning still requires a per-task/per-model calibration set to profile head behavior (up- vs down-effective) and to search for the scaling factor γ and dominant head group, meaning it is not truly zero-shot deployable without labeled validation data for each new task — this is a meaningful caveat that is under-emphasized relative to the framing in the abstract/introduction.",
-        "Several vanilla baseline numbers appear unusually low for a strong instruction-tuned 8B model (e.g., TREC vanilla accuracy of 14.00%, SST-2 vanilla of 73.20%, MMLU zero-shot vanilla around 58-67% across models), which raises concerns about whether the prompt formats/answer parsing used for the vanilla baseline are suboptimal, potentially inflating the apparent relative gains of ZeroTuning; a sanity check or stronger baseline prompting protocol would help validate the reported improvements.",
-        "The theoretical analysis in Section 2.1 is restricted to a single-layer, single-head toy setting and does not rigorously extend to the multi-layer, multi-head, autoregressive setting actually used in practice; the paper mostly relies on qualitative/informal arguments (e.g., 'value-state drain') to bridge this gap rather than formal analysis.",
-        "No variance/statistical significance reporting across multiple runs or random seeds — results appear to be single-run point estimates, which is a concern given some improvements (e.g., large SST-2/SUBJ gains) could be sensitive to specific validation-set draws or decoding noise.",
-        "ACT baseline is only evaluated on one model/attention implementation (eager), limiting the fairness and completeness of cross-model baseline comparisons in Tables 1-2.",
-        "The method introduces multiple additional design choices/hyperparameters (calibration set size, percentage of heads tuned, choice of up vs down scaling direction, γ range) that require search per task; while ablations are provided for some of these individually, their joint interaction and overall sensitivity are not fully characterized, and this adds nontrivial tuning overhead compared to a truly parameter-free baseline.",
-        "The paper compares mainly against token-attention-tuning baselines (ACT, AutoPASTA) but does not compare against simpler general-purpose training-free baselines (e.g., global temperature scaling of the full softmax, or other lightweight decoding-time calibration methods) that could serve as an ablation to show the specific value of targeting the initial token versus simply globally reshaping the whole attention distribution."
-      ]
-    },
     "exp1_quality": {
       "oa": 5,
       "strengths": [
@@ -39,6 +19,46 @@
         "The theoretical analysis (Section 2.1, Appendix A) is a fairly elementary rescaling/renormalization argument; while useful for intuition, it does not deeply explain why heads differ in up- vs down-effectiveness or predict which heads/tasks will benefit from which direction of scaling in advance, limiting its predictive/interpretability value.",
         "The improvement on MT-Bench, while consistent, is relatively small in absolute terms (7.804→7.966), raising questions about practical significance in generative/open-ended settings.",
         "The paper does not evaluate on longer-form generation or complex multi-step reasoning tasks (acknowledged as a limitation), so it remains unclear whether benefits transfer beyond classification/QA-style evaluation with short expected outputs."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The paper identifies an interesting and simple control point (the initial/BOS token) for inference-time attention tuning, and provides a clean algebraic analysis of how rescaling its attention weight affects the relative differences among other tokens' weights.",
+        "The empirical investigation is broad: layer-wise and head-wise analyses, four different LLMs/attention implementations (eager/SDPA/Flash), and many robustness studies in the appendix (quantization, context length, few-shot, decoding strategies, prompt variation, resource budget).",
+        "The idea of avoiding explicit identification of task-relevant tokens (which can introduce bias) is conceptually appealing and is contrasted reasonably against PASTA/AutoPASTA/ACT baselines.",
+        "Reported numbers show consistent, sometimes large, improvements over vanilla and the two baselines across most of the 15 datasets and 4 models."
+      ],
+      "weaknesses": [
+        "The central 'task-agnostic, training-free' narrative is undercut by the actual method: ZeroTuning still requires a labelled calibration/validation set (500 examples) per dataset/model to classify heads as up/down-effective and to search for the optimal scaling factor γ and head-subset proportion. This is effectively supervised, per-task hyperparameter tuning, which is conceptually similar in spirit to the 'task-specific token identification' the paper criticizes in PASTA/AutoPASTA—just moved from the token level to the (head, scale) level. The paper does not clearly justify why this form of task-specific calibration is less biased or more broadly applicable than prior auxiliary-token methods.",
+        "The headline classification gains (e.g., SST-2 vanilla 73.2% → ZeroTuning 91.6%) are suspiciously large for a binary sentiment task with an 8B instruct model. The paper's own Appendix L examples show the vanilla model failing due to output-format issues (answering 'neutral' or 'The' instead of 'positive'/'negative') rather than genuine sentiment misunderstanding, suggesting that a non-trivial portion of the reported gain may reflect fixing output formatting/instruction-following rather than improved reasoning or attention quality. This confound is not analyzed or controlled for.",
+        "The theoretical contribution (Section 2.1) is largely elementary algebra (softmax renormalization after rescaling one weight) and does not provide deep new insight beyond what is intuitively expected; it mainly formalizes an obvious sharpening/flattening trade-off.",
+        "No statistical rigor: all results appear to be single runs with a fixed seed (42) and no variance/confidence intervals, despite many small-sample experiments (e.g., 500-sample calibration, 100-sample CB dataset), making it hard to assess whether reported differences (sometimes <2%) are meaningful.",
+        "Resource-constrained results (Appendix B) show that without head classification and per-dataset parameter search, gains shrink drastically (e.g., 11.71% average classification gain at 'Level 2' collapses to ~0.37–4.86 points at Levels 0–1), indicating that most of the advertised improvement actually comes from expensive per-task calibration rather than the core 'initial token' insight itself.",
+        "The direction of tuning (up-scaling vs down-scaling) and which head group to tune differs by task (e.g., SST-2 prefers up-scaling, BoolQ/LogiQA prefer down-scaling), meaning a practitioner cannot apply a single consistent rule—this somewhat weakens the claimed simplicity/generality of the method.",
+        "The UP+DOWN hybrid strategy underperforming individual UP or DOWN strategies is only superficially explained ('possibly due to...'), without deeper investigation, leaving an important design question unresolved.",
+        "Head behavior profiling and scaling factor selection are described as per-head/per-task procedures without clear algorithmic/computational cost analysis (e.g., how large is the search space, how expensive is the calibration relative to simple baselines), limiting reproducibility and practical applicability assessment.",
+        "Some baseline comparisons are incomplete: ACT could only be run with eager attention (fair limitation), but this means for Qwen/DeepSeek only a partial comparison against AutoPASTA is possible, weakening the strength of cross-model claims of superiority over all baselines."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "Novel and elegant core insight: instead of relying on auxiliary mechanisms to identify task-specific important/irrelevant tokens (as in PASTA, AutoPASTA, ACT), the paper shows that simply tuning attention to the semantically-empty initial/BOS token is sufficient to improve performance, removing the need for potentially biased token identification.",
+        "Reasonably clear theoretical motivation (Section 2.1) showing how rescaling the initial token's attention weight sharpens or flattens the relative attention distribution over other tokens while preserving their relative ranking, connecting this to the known 'value-state drain' and attention-sink literature.",
+        "Broad empirical validation: 15 datasets spanning text classification, multiple-choice QA, and multi-turn conversation, across 4 different LLM families/attention implementations (eager, SDPA, Flash), showing fairly consistent and sometimes large improvements over vanilla and over the AutoPASTA/ACT baselines.",
+        "Systematic ablations characterizing where the effect is strongest: layer-wise analysis (shallow/middle vs. deep), head-wise heterogeneity (up- vs. down-effective heads), and head-subset-size sensitivity, which lend interpretability to the method design choices.",
+        "Extensive robustness/appendix experiments (resource-constrained variants, long-context robustness, few-shot settings, decoding strategies, quantization, prompt perturbations) that go beyond what is typical for a purely empirical paper and strengthen practical credibility of the method.",
+        "The method is simple to implement (single scalar scaling + renormalization, or key/query scaling for optimized attention kernels) and computationally cheap relative to fine-tuning or LLM-guided token identification approaches."
+      ],
+      "weaknesses": [
+        "The 'training-free' and 'task-agnostic' framing is somewhat overstated: ZeroTuning still requires a per-task/per-model calibration set to profile head behavior (up- vs down-effective) and to search for the scaling factor γ and dominant head group, meaning it is not truly zero-shot deployable without labeled validation data for each new task — this is a meaningful caveat that is under-emphasized relative to the framing in the abstract/introduction.",
+        "Several vanilla baseline numbers appear unusually low for a strong instruction-tuned 8B model (e.g., TREC vanilla accuracy of 14.00%, SST-2 vanilla of 73.20%, MMLU zero-shot vanilla around 58-67% across models), which raises concerns about whether the prompt formats/answer parsing used for the vanilla baseline are suboptimal, potentially inflating the apparent relative gains of ZeroTuning; a sanity check or stronger baseline prompting protocol would help validate the reported improvements.",
+        "The theoretical analysis in Section 2.1 is restricted to a single-layer, single-head toy setting and does not rigorously extend to the multi-layer, multi-head, autoregressive setting actually used in practice; the paper mostly relies on qualitative/informal arguments (e.g., 'value-state drain') to bridge this gap rather than formal analysis.",
+        "No variance/statistical significance reporting across multiple runs or random seeds — results appear to be single-run point estimates, which is a concern given some improvements (e.g., large SST-2/SUBJ gains) could be sensitive to specific validation-set draws or decoding noise.",
+        "ACT baseline is only evaluated on one model/attention implementation (eager), limiting the fairness and completeness of cross-model baseline comparisons in Tables 1-2.",
+        "The method introduces multiple additional design choices/hyperparameters (calibration set size, percentage of heads tuned, choice of up vs down scaling direction, γ range) that require search per task; while ablations are provided for some of these individually, their joint interaction and overall sensitivity are not fully characterized, and this adds nontrivial tuning overhead compared to a truly parameter-free baseline.",
+        "The paper compares mainly against token-attention-tuning baselines (ACT, AutoPASTA) but does not compare against simpler general-purpose training-free baselines (e.g., global temperature scaling of the full softmax, or other lightweight decoding-time calibration methods) that could serve as an ablation to show the specific value of targeting the initial token versus simply globally reshaping the whole attention distribution."
       ]
     }
   },
@@ -62,6 +82,47 @@
         "Search/calibration cost (head classification across all heads/layers plus γ search) is not quantified in terms of wall-clock or forward-pass overhead, especially relevant since Llama-2-13B and DeepSeek-R1-14B have larger numbers of heads/layers; Level 0/1/2 ablations exist but concrete cost numbers (e.g., time, number of forward passes) are missing.",
         "Results are reported as single-run point estimates without variance/confidence intervals or multiple seeds, which is a concern given some fairly large swings in accuracy (e.g., BoolQ dropping to near-0 or SST-2 collapsing under extreme γ, as shown in Figure 7), making it hard to assess robustness of the reported gains.",
         "Theoretical contribution (Proposition 1) is a fairly straightforward calculus derivation and mostly formalizes an intuitive rescaling/renormalization effect; the more novel/insightful claims (head heterogeneity, layer heterogeneity, entropy-accuracy correlation) are empirical rather than theoretically derived, so overall theoretical novelty is modest."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 3,
+      "strengths": [
+        "The core idea—tuning attention on the task-agnostic initial/BOS token rather than relying on heuristic task-specific token identification—is conceptually simple and elegant, and plausibly extends known 'attention sink' observations into an actionable intervention.",
+        "The empirical investigation is broad in scope: 15 datasets, 4 models with different attention backends (eager, SDPA, Flash), and numerous robustness studies (context length, few-shot, quantization, decoding strategies, prompt perturbation).",
+        "The paper provides both a supervised and an unsupervised (entropy-minimization) calibration variant, which is a nice practical contribution for label-scarce settings.",
+        "Mechanistic analyses (layer-wise, head-wise) and the key-state vs attention-score tuning comparison for kernel-agnostic deployment add some interpretability value.",
+        "Extensive appendices with qualitative error analysis attempt to explain when and why the method helps or fails (uncertain vs. certain errors)."
+      ],
+      "weaknesses": [
+        "Reported gains are suspiciously large for a single global/per-head scalar intervention (e.g., SST-2 jumping from 73.2% to 91.6% on Llama-3.1-8B-Instruct); the qualitative examples in Appendix F suggest much of the 'improvement' is actually the model being coerced out of degenerate/invalid output formats (e.g., answering 'neutral' instead of the required binary label) rather than genuine reasoning or knowledge unlocking, which undermines the core narrative about 'unlocking pretrained knowledge' and reducing entropy.",
+        "The claim of being 'task-agnostic' and avoiding task-specific tuning is overstated: the supervised variant still requires per-dataset calibration (head profiling + grid search for γ) using labeled validation data, which is conceptually similar in spirit (task-specific hyperparameter search) to the baselines it criticizes for relying on task-specific heuristics—just applied to a different target (head/scale) instead of token identification.",
+        "No variance, confidence intervals, or multiple-seed/multiple-split results are reported anywhere in the main paper or appendices; given single-run accuracy point estimates on datasets of moderate size, many of the claimed gains (e.g., 1-2 point improvements on MMLU/BoolQ) could be within noise.",
+        "Head behavior profiling and γ grid search (Level 2 in Appendix H) is computationally nontrivial, requiring per-head, per-dataset evaluation over a validation set—this contradicts the 'four lines of code'/'zero-cost' framing presented in the abstract and introduction; a proper wall-clock or FLOPs comparison against baselines (ACT, Auto-PASTA) is missing.",
+        "The theoretical contribution (Section 3.1, Appendix C) is essentially a straightforward algebraic derivative computation showing monotonicity of a simple rescale-renormalize operation; it offers limited new insight beyond the already-intuitive statement that scaling a token's attention and renormalizing compresses/expands other attention differences.",
+        "Baseline coverage is inconsistent: ACT is only evaluated on Llama-3.1-8B-Instruct and marked unavailable ('—') for Qwen-2-7B and DeepSeek-R1-14B without a clear technical justification beyond 'requires explicit attention maps,' weakening the completeness of the comparison.",
+        "The explanations for why certain tasks prefer up- vs. down-scaling (e.g., 'holistic context integration' vs. 'sharp focus') and for head specialization are largely post-hoc narrative interpretations fit to observed curves rather than independently validated hypotheses.",
+        "Novelty is incremental relative to prior attention-sink literature (Xiao et al., Barbero et al., Gu et al.) and prior attention-steering methods (PASTA, ACT): the contribution largely combines an already well-documented phenomenon (BOS attention sink) with an already-established technique (attention reweighting), narrowing its target to one token and adding head-specific profiling.",
+        "Calibration relies on a small, fixed 500-example validation set per dataset with a single seed; there is no analysis of sensitivity to validation set size or composition, raising concerns about overfitting of the calibrated γ and head selection to this particular split.",
+        "The entropy-based unsupervised variant's own appendix (Section E.1) documents multiple cases where the global entropy minimum is a misleading 'trap' tied to invalid-format or biased outputs rather than the correct answer, which undercuts confidence in entropy minimization as a reliable unsupervised signal despite the paper's claims of its robustness."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 6,
+      "strengths": [
+        "The core idea—tuning attention only at the task-agnostic initial/BOS token rather than heuristically identified 'important' tokens—is simple, elegant, and practically appealing, removing dependence on fragile token-importance heuristics used by PASTA/ACT.",
+        "Extensive empirical investigation across layers (shallow/middle/deep), attention heads (up-effective vs down-effective), and token positions provides a coherent narrative that motivates the final method design (Sections 3.2-3.5).",
+        "Broad evaluation: 15 datasets spanning classification, multiple-choice QA, and multi-round dialogue, across four LLMs with different attention implementations (eager, SDPA, Flash), showing consistent gains over vanilla, ACT, and Auto-PASTA baselines.",
+        "The unsupervised entropy-minimization variant is a nice practical contribution, removing the need for labeled calibration data while remaining competitive with the supervised version.",
+        "Very thorough robustness/ablation studies in the appendix (quantization, context length, few-shot, prompt variations, decoding strategies, head-count ablation, key/query-state tuning as a kernel-agnostic alternative) that substantially strengthen confidence in the method's practical utility.",
+        "Good discussion of failure modes and operational boundaries (Section 5/Appendix D), including the distinction between correcting uncertain errors vs. confidently wrong predictions, which adds honesty and interpretability value."
+      ],
+      "weaknesses": [
+        "The 'theoretical' analysis (Section 3.1, Appendix C) is essentially elementary algebra/calculus showing a monotonic relationship between a0 and attention-difference amplification; it is presented with heavier formalism (propositions, proofs) than its actual novelty or depth warrants.",
+        "Some baseline numbers look unusually low or volatile (e.g., vanilla TREC accuracy of only 14% for Llama-3.1-8B, SST-2 vanilla at 73% despite being a simple binary sentiment task), raising concern that gains may partly reflect fixing prompt/format-following issues rather than purely 'unlocking pretrained knowledge'; this is acknowledged in Appendix J/M but not fully separated from the core numeric claims.",
+        "ACT is only evaluated on Llama-3.1-8B-Instruct due to its explicit attention-map requirement, so head-to-head comparisons with ACT are less complete than with Auto-PASTA, weakening the baseline comparison for 3 of 4 models.",
+        "The supervised ZeroTuning variant still requires per-model, per-dataset calibration (head profiling + γ search) on a labeled validation set, which is conceptually similar in cost to what competing methods require; the framing as effectively 'training-free' and simpler could be somewhat overstated relative to the actual calibration effort needed for best results (Level 2 in Appendix H).",
+        "The head-effectiveness categorization (up-effective/down-effective) is determined empirically per dataset/model and could be sensitive to the specific validation set, raising potential overfitting/generalization concerns that are not deeply analyzed (e.g., stability of head classification across different validation subsets or random seeds).",
+        "No comparison against other recent inference-time steering or decoding-based baselines beyond PASTA/ACT (e.g., contrastive decoding, other sink-token approaches), and no significance/variance reporting (single-run numbers) across the many benchmark tables."
       ]
     }
   }

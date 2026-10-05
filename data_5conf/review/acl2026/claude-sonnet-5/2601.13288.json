@@ -18,6 +18,26 @@
         "No significance testing or confidence intervals are provided for comparisons against baseline numbers taken from other papers, making it hard to assess whether reported gains (e.g., MHA vs. WildGuard 88.55 vs 88.9) are meaningful or within noise."
       ]
     },
+    "exp3_negative": {
+      "oa": 2.5,
+      "strengths": [
+        "Addresses a practically relevant problem: reusing a serving LLM's forward pass for auxiliary classification tasks (safety moderation, sentiment) to avoid the latency/VRAM cost of separate guard models.",
+        "Reasonably broad empirical evaluation across five datasets spanning two task families (safety and sentiment/emotion), with three probe variants of increasing expressiveness (pooling, scoring-attention, MHA).",
+        "Useful systems-oriented contribution: an end-to-end latency/throughput/peak-memory comparison (Table 5) against a realistic guard-then-serve pipeline, which quantifies the practical benefit of single-pass reuse.",
+        "Reasonably thorough hyperparameter sensitivity analysis (Appendix A) and a downcasting ablation (Appendix B), which aid reproducibility and understanding of design trade-offs.",
+        "The qualitative layer-attention visualization (Section 5, Figure 2/4) provides some interpretability insight consistent with the paper's stated motivation that task-relevant signal is distributed across depth."
+      ],
+      "weaknesses": [
+        "Evaluated on a single backbone (Llama-3.2-3B-Instruct) only; the central 'BERTology' claim that depth-distributed information matters is not tested for robustness across architectures or scales, which is acknowledged but substantially undercuts the generality of the claims given the paper's framing.",
+        "The core architectural idea (learned attention-weighted aggregation over layers and tokens) is a fairly direct extension of long-standing techniques (e.g., ELMo-style scalar/attention mixing of layers, attention pooling over tokens) adapted to decoder-only LLM probing; the novelty over this combined body of prior work is incremental rather than conceptually new.",
+        "Many headline comparisons (Tables 1, 2, 4) pit the proposed probes against baselines trained on different data, with different backbones/sizes, and reported from other papers without consistent variance estimates; the authors acknowledge these are not controlled comparisons, which weakens claims of 'matching' or 'approaching' strong guard baselines.",
+        "A key ablation needed to directly support the paper's central thesis—comparing against a single best fixed layer (not just first-token/final-layer, but the empirically best middle layer) at matched parameter count—is missing; without this, the claim that joint token×layer selection is necessary (rather than simply picking a good single layer) is not rigorously isolated from the pooling-only baseline.",
+        "No code or artifact link is provided (the footnote for code availability is empty), limiting reproducibility verification despite otherwise detailed hyperparameter reporting.",
+        "The manuscript's writing has considerable redundancy (near-identical sentences repeated across the Introduction and Related Work sections describing the same motivation/contribution), suggesting the paper would benefit from an editing pass.",
+        "Latency experiments use batch size 1 on a single consumer GPU without discussion of batched/production serving conditions (e.g., KV-cache reuse, concurrent requests), limiting the practical generality of the efficiency claims.",
+        "Cross-dataset generalization results (Table 2) show substantial performance drops for pooling and only moderate transfer for the more expressive probes, suggesting the method's robustness under distribution shift is still limited, a point not fully reconciled with the paper's efficiency narrative."
+      ]
+    },
     "exp3_positive": {
       "oa": 3.5,
       "strengths": [
@@ -58,6 +78,46 @@
         "Sentiment/emotion generalization is only validated on a single backbone (Llama-3.2-3B), limiting the breadth of the multi-backbone claim to safety tasks only.",
         "The layer-attention analysis (Section 5) is interesting but purely descriptive/correlational; no causal or ablation evidence (e.g., masking specific layers) is provided to confirm that the identified layers are actually responsible for the classification decisions.",
         "Reproducibility of the multi-backbone results depends on pre-extracted hidden states from A100 GPUs and specific downcast factors tuned per backbone, and while code is mentioned as available, the exact release status/link is not verifiable in the given text."
+      ]
+    },
+    "exp3_negative": {
+      "oa": 2.5,
+      "strengths": [
+        "Clear and practically motivated problem: reusing a frozen serving LLM's hidden states for safety/sentiment classification to avoid a second model invocation, with a concrete systems-level payoff (latency/VRAM) that is directly measured (Table 5).",
+        "Reasonably broad empirical coverage: three aggregation mechanisms (pooling, scoring-attention, MHA), five datasets (ToxicChat, WildGuardMix, IMDB, SST-2, Emotion), and three backbones spanning dense and MoE architectures.",
+        "Good transparency practices: ~100-configuration hyperparameter search with reported sensitivity analysis (Appendix A), an ablation on attention downcasting (Appendix B), multiple seeds with std reported for many results, and an explicit, fairly honest Limitations section.",
+        "The layer-attention visualization (Fig. 2, Fig. 4) is a nice qualitative addition that is consistent with prior BERTology findings and gives some intuition for why multi-layer/multi-token readout helps.",
+        "Latency/throughput/VRAM comparison against realistic guard-then-serve pipelines (ToxicChat-T5, WildGuard-7B, Llama-Guard-3-8B) makes the deployment argument concrete rather than purely accuracy-based."
+      ],
+      "weaknesses": [
+        "Limited methodological novelty: the core idea (combine information across layers/tokens rather than a fixed readout) is already well established in BERTology/probing literature (de Vries et al. 2020; Rogers et al. 2020) and multi-layer fusion (EAGLE-3). The paper's two-stage pooling/attention aggregator is a fairly direct instantiation of these ideas rather than a new mechanism, which limits the conceptual contribution beyond an engineering application.",
+        "No ablation decomposing the contribution of token-selection versus layer-selection (e.g., fixed-token-all-layers vs. all-tokens-fixed-layer vs. full token×layer). Without this, the central claim that joint token×layer selection is necessary (rather than, say, layer selection alone, which many cited works already do) is not directly substantiated.",
+        "Many cross-method comparisons (standalone guard models/APIs, SentriLlama, ShieldHead, prompting baselines) are explicitly acknowledged by the authors as uncontrolled (different training data, architectures, or backbones), yet they are still presented in headline tables and the abstract/conclusion framed as 'competitive with' or 'approaching' these baselines, which risks overstating the strength of the comparison.",
+        "Robustness under distribution shift is weak: the OOD ToxicChat result (Table 2) shows a substantial drop relative to in-distribution performance (84.5→72.9 F1 for MHA), which undercuts confidence in deployment-readiness for a safety-critical application, though this is disclosed in Limitations.",
+        "Generalization claims are broader in the abstract/intro ('these findings generalize beyond a single model family') than what is actually demonstrated: multi-backbone validation is restricted to ToxicChat only, while sentiment/emotion tasks are evaluated solely on Llama-3.2-3B, a discrepancy acknowledged only in the Limitations section.",
+        "The latency benchmark (Table 5) uses batch size 1 and max_new_tokens=1, which does not reflect realistic batched production serving; conclusions about throughput/latency advantages may not hold under more realistic serving conditions (continuous batching, longer generations), limiting the practical validity of the efficiency claims.",
+        "The layer-attention analysis (Section 5) is purely descriptive/correlational with no causal or ablation-based verification (e.g., masking the high-weight layers to show performance drops), so its value as evidence for the method's claimed mechanism is limited to illustrative/interpretive rather than confirmatory.",
+        "No statistical significance testing between method variants (pooling vs scoring vs MHA) or between the method and baselines, despite several close results (e.g., MHA vs. WildGuard, 88.55 vs 88.9 F1) where the practical equivalence is asserted without formal testing."
+      ]
+    },
+    "exp3_positive": {
+      "oa": 3.5,
+      "strengths": [
+        "Well-motivated, practically important problem: reducing orchestration latency/VRAM by reusing the serving LLM's own forward pass for safety/NLU classification instead of deploying separate guard models.",
+        "Broad and careful empirical evaluation: 5 datasets (ToxicChat, WildGuardMix, IMDB, SST-2, Emotion), 3 backbones spanning dense and MoE architectures, and multiple baseline families (standalone classifiers, logit-reuse, prompting, guard APIs), which lends good external validity to the central claim that learned token/layer aggregation beats fixed readouts.",
+        "Concrete systems contribution: the latency/throughput/peak-GPU-memory benchmark (Table 5) directly substantiates the deployment claims and shows a clear, well-quantified advantage over guard-then-serve pipelines.",
+        "Layer-attention analysis (Figures 2 and 4) provides an interpretable, class-conditional view of where information is read from, connecting back to BERTology literature and adding qualitative support beyond aggregate metrics.",
+        "Thorough hyperparameter search (~100 configs/dataset) and sensitivity/ablation analysis (Appendix A, B) improves transparency and reproducibility, and the code-availability footnote supports reproducibility.",
+        "Cross-dataset (OOD) generalization test (train on WildGuardMix, evaluate on ToxicChat) is a useful robustness check that is often missing in similar probing papers."
+      ],
+      "weaknesses": [
+        "The core methodological idea—learned pooling/attention over tokens and layers rather than a fixed readout—is an incremental extension of established techniques (ELMo-style layer mixing, prior BERTology probing, attention pooling) rather than a fundamentally new mechanism; novelty is moderate.",
+        "Several headline comparisons are not fully controlled: guard models in Tables 2–3 differ in training data, architecture, and task scope from the proposed probes, so claims of 'outperforming' or being 'competitive with' these baselines should be read as indicative rather than head-to-head, a caveat the paper itself only partially flags.",
+        "It is unclear how many random seeds underlie the main results tables (1–4); only the downcasting ablation explicitly states 3 runs, making it hard to judge whether reported gains over MULI/pooling are statistically robust.",
+        "The 'near-serving latency' framing in the abstract is somewhat optimistic given that the best-performing MHA probe adds ~52% average latency overhead (26.43ms to 40.27ms) relative to the base model, even though this remains far better than guard-then-serve pipelines.",
+        "The MHA probe (35M parameters) is not really 'lightweight' in absolute terms compared to the 100K-parameter scoring-attention gate that already captures most of the gain in several settings; the paper's headline results center on the largest, most expensive probe variant, which weakens the 'lightweight' framing.",
+        "Sentiment/emotion experiments and the layer-attention interpretability analysis are conducted only on the single Llama-3.2-3B backbone, so generalization of these specific findings (as opposed to safety results) across architectures is untested, a limitation the authors acknowledge but that meaningfully narrows the generality claims.",
+        "No statistical significance testing is reported despite fairly small differences between some methods (e.g., MHA vs. scoring-attention on several datasets), making some rankings less certain than the narrative implies."
       ]
     }
   }
